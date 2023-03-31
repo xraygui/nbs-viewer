@@ -13,14 +13,16 @@ plt.ion()
 plt.rcParams["figure.raise_window"] = False
 c = from_profile("ucal")
 
+
 def label_maker(run, y):
     return f"Scan {run.metadata['start'].get('scan_id', '?')}"
+
 
 class RunPlotter:
     def __init__(self, autoclose=True):
         self.autoclose = autoclose
         self.reset()
-        
+
     def reset(self):
         if self.autoclose:
             plt.close('all')
@@ -30,20 +32,20 @@ class RunPlotter:
         self.models = None
         self.streams = None
         self.ax_list = None
-        
+
     def get_data_keys(self, start):
         plot_hints = start.get('plot_hints', {})
         xdefault = start.get('motors', ['time'])
         xkey = plot_hints.get('x', xdefault)[0]
         ykeys = sorted(plot_hints.get('y', ['ucal_sc']))
+        imkeys = sorted(plot_hints.get('image', []))
         normkey = plot_hints.get('norm', ['ucal_i0up'])[0]
-        return xkey, ykeys, normkey
-
+        return xkey, ykeys, imkeys, normkey
 
     def plot_average(self, doc):
         run = c[doc['run_start']]
         scanid = run.start['scan_id']
-        xkey, ykeys, normkey = self.get_data_keys(run.start)
+        xkey, ykeys, imkeys, normkey = self.get_data_keys(run.start)
         data = run.primary.read()
         if self.ax_list is None:
             self.new_run(run.start)
@@ -52,11 +54,12 @@ class RunPlotter:
         axs = self.ax_list
         if len(axs[0]) == 1:
             return
-        
+
         repeat_md = run.start['repeat']
         if repeat_md['index'] == 0:
             self.xdata = {}
             self.ydata = {}
+            self.imdata = {}
             self.normdata = []
             self.scanids = []
 
@@ -66,12 +69,17 @@ class RunPlotter:
                 self.ydata[ykey] = [data[ykey].data]
             else:
                 self.ydata[ykey].append(data[ykey].data)
+        for imkey in imkeys:
+            if imkey not in self.imdata:
+                self.imdata[imkey] = [data[imkey].data]
+            else:
+                self.imdata[imkey].append(data[imkey].data)
 
         if normkey is not None:
             self.normdata.append(data[normkey].data/np.mean(data[normkey].data))
         else:
             self.normdata.append(1)
-            
+
         self.xdata[scanid] = data[xkey].data
 
         for ykey, ax_list in zip(ykeys, axs):
@@ -79,34 +87,44 @@ class RunPlotter:
             ax.clear()
             ynormlist = [y/norm for y, norm in zip(self.ydata[ykey], self.normdata)]
             ax.plot(self.xdata[scanid], np.mean(ynormlist, axis=0), color='k', label=f"{ykey} normalized by {normkey}")
+
+        if len(imkeys) > 0:
+            for imkey, ax_list in zip(imkeys, axs[len(ykeys):]):
+                yy = run.start['plot_hints']['image_y'][imkey]
+                ax = ax_list[1]
+                ax.clear()
+                ax.contourf(self.xdata[scanid], yy, np.mean(self.imdata[imkey], axis=0), 50)
+
         axs[0][1].set_title("Averages")
         ax.set_xlabel(xkey)
 
-    
     def stream_documents_into_runs(self, name, doc):
         if self.streams is None:
             pass
         else:
             for stream in self.streams:
                 stream(name, doc)
-    
+
     def new_run(self, start):
-        xkey, ykeys, normkey = self.get_data_keys(start)
+        xkey, ykeys, imkeys, normkey = self.get_data_keys(start)
         if 'repeat' in start:
             repeat_md = start['repeat']
             max_runs = repeat_md['len']
-            cols=2
+            cols = 2
             if repeat_md['index'] != 0:
                 if self.models is not None:
                     return
         else:
             max_runs = 1
-            cols=1
+            cols = 1
         if normkey is not None:
-            self.models = [Lines(xkey, [f"mean({normkey})*{ykey}/{normkey}"], max_runs=max_runs, label_maker=label_maker) for ykey in ykeys]
+            self.models = [Lines(xkey, [f"mean({normkey})*{ykey}/{normkey}"],
+                                 max_runs=max_runs, label_maker=label_maker)
+                           for ykey in ykeys]
         else:
-            self.models = [Lines(xkey, [ykey], max_runs=max_runs, label_maker=label_maker) for ykey in ykeys]
-        fig, axs = plt.subplots(len(ykeys), cols, squeeze=False, sharex=True)
+            self.models = [Lines(xkey, [ykey], max_runs=max_runs,
+                                 label_maker=label_maker) for ykey in ykeys]
+        fig, axs = plt.subplots(len(ykeys) + len(imkeys), cols, squeeze=False, sharex=True)
         self.ax_list = axs
         self.mpl_ax = []
         for model, ax in zip(self.models, axs):
@@ -116,7 +134,6 @@ class RunPlotter:
         model.axes.x_label = xkey
         self.streams = [stream_docs(model.add_run) for model in self.models]
 
-
     def new_document(self, name, doc):
         if name == 'start':
             print("received start doc!")
@@ -125,10 +142,11 @@ class RunPlotter:
             print("received stop doc!")
             self.plot_average(doc)
         self.stream_documents_into_runs(name, doc)
-            
+
+
 def plot_kafka(beamline_acronym):
     plotter = RunPlotter(autoclose=False)
-                
+
     kafka_config = nslsii.kafka_utils._read_bluesky_kafka_config_file(config_file_path="/etc/bluesky/kafka.yml")
 
     # this consumer should not be in a group with other consumers
@@ -143,7 +161,8 @@ def plot_kafka(beamline_acronym):
     )
 
     kafka_dispatcher.subscribe(plotter.new_document)
-    kafka_dispatcher.start(work_during_wait=lambda : plt.pause(.1))
+    kafka_dispatcher.start(work_during_wait=lambda: plt.pause(.1))
+
 
 if __name__ == "__main__":
     plot_kafka('ucal')
