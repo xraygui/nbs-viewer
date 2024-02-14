@@ -16,17 +16,19 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Signal
 from tiled.client import from_uri, from_profile
-from catalogTree import CatalogPicker
-from catalogTable import CatalogTableModel
-from listTableModel import RunListTableModel
 from tiled_wrapper.databroker.catalog import WrappedDatabroker
 from tiled_wrapper.processed.catalog import WrappedAnalysis
-from search import DateSearchWidget, ScantypeSearch
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 from bluesky_widgets.utils.streaming import stream_documents_into_runs
 from databroker import temp as temporaryDB
 import uuid
+
+from catalogTree import CatalogPicker
+from catalogTable import CatalogTableModel
+from listTableModel import RunListTableModel
+from runDisplay import PlotItem
+from search import DateSearchWidget, ScantypeSearch
 
 
 def wrap_catalog(catalog):
@@ -250,7 +252,9 @@ class KafkaView(QWidget):
         for index in selected_rows:
             if index.column() == 0:  # Check if the column is 0
                 key = index.data()  # Get the key from the cell data
-                data = self.catalog.v2[key]  # Fetch the data using the key
+                data = PlotItem(
+                    self.catalog.v2[key], dynamic=True
+                )  # Fetch the data using the key
                 selected_data.append(data)
         self.add_rows_current_plot.emit(selected_data)
 
@@ -298,7 +302,7 @@ class CatalogTableView(QWidget):
             if index.column() == 0:  # Check if the column is 0
                 key = index.data()  # Get the key from the cell data
                 data = self.parent_catalog[key]  # Fetch the data using the key
-                selected_data.append(data)
+                selected_data.append(PlotItem(data))
         self.add_rows_current_plot.emit(selected_data)
 
     def refresh_filters(self):
@@ -344,8 +348,8 @@ class DataSelection(QWidget):
             self.dropdown.addItem(label)
             self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
 
-    def emit_rows_selected(self, data):
-        self.add_rows_current_plot.emit(data)
+    def emit_rows_selected(self, plotItem):
+        self.add_rows_current_plot.emit(plotItem)
 
     def switch_table(self):
         self.stacked_widget.setCurrentIndex(self.dropdown.currentIndex())
