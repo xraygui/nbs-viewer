@@ -31,77 +31,29 @@ from matplotlib.figure import Figure
 # show_logs()
 
 
-class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = fig.add_subplot(111)
-        super(MplCanvas, self).__init__(fig)
-
-    def plot(self, *args, **kwargs):
-        lines = self.axes.plot(*args, **kwargs)
-        self.draw()
-        return lines
-
-    def clear(self):
-        print("Clearing Axes")
-        self.axes.cla()
-        self.draw()
-
-    def autoscale(self):
-        """
-        Adjusts the y scale of the plot based on the maximum and minimum of the y data in lines
-        """
-        lines = self.axes.get_lines()
-        y_min = min([line.get_ydata().min() for line in lines])
-        y_max = max([line.get_ydata().max() for line in lines])
-        span = y_max - y_min
-        self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
-
-        x_min = min([line.get_xdata().min() for line in lines])
-        x_max = max([line.get_xdata().max() for line in lines])
-        xspan = x_max - x_min
-        self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
-
-
-def blueskyrun_to_string(blueskyrun):
-    # Replace this with your actual function
-    start = blueskyrun.metadata["start"]
-    scan_id = str(start["scan_id"])
-    scan_desc = ["Scan", scan_id]
-    if hasattr(start, "edge"):
-        scan_desc.append(start.get("edge"))
-        scan_desc.append("edge")
-    if hasattr(start, "scantype"):
-        scan_desc.append(start.get("scantype"))
-    else:
-        scan_desc.append(start.get("plan_name"))
-    if hasattr(start, "sample_md"):
-        scan_desc.append("of")
-        scan_desc.append(start["sample_md"].get("name", "Unknown"))
-    elif hasattr(start, "sample_name"):
-        scan_desc.append("of")
-        scan_desc.append(start["sample_name"])
-    str_desc = " ".join(scan_desc)
-    return str_desc
-
-
 class PlotItem(QObject):
     update_plot_signal = Signal()
 
-    def __init__(self, run, dynamic=False):
+    def __init__(self, run, catalog=None, dynamic=False):
         super(PlotItem, self).__init__()
         self._run = run
+        self._catalog = catalog
         self._dynamic = dynamic
-        self._rows = get1dKeys(self._run)
+        allkeys = get1dKeys(self._run)
+        xkey, ykeys, hints = getPlotHints(self._run, allkeys)
+        self._rows = [xkey]
+        for y in ykeys:
+            if y in allkeys:
+                self._rows.append(y)
         if not self._dynamic:
             self._data = get1dData(self._run["primary", "data"])
         else:
             self._data = None
         self._description = blueskyrun_to_string(self._run)
         self._uid = self._run.metadata["start"]["scan_id"]
-        self._checked_x = None
-        self._checked_y = None
-        self._checked_norm = None
+        self._checked_x = xkey
+        self._checked_y = hints.get("primary", None)
+        self._checked_norm = hints.get("normalization", [None])[0]
         self._plot = None
         self._lines = {}
         if self._dynamic:
@@ -137,7 +89,7 @@ class PlotItem(QObject):
 
     def _dynamic_update(self):
         if self._expected_points is None:
-            self._expected_points = self._run.start["num_points"]
+            self._expected_points = self._run.start.get("num_points", -1)
 
         if self._run.metadata.get("stop", None) is not None:
             print("Converting from dynamic to static")
@@ -147,6 +99,8 @@ class PlotItem(QObject):
             if self.timer is not None:
                 self.timer.stop()
                 self.timer = None
+        elif self._catalog is not None:
+            self._run = self._catalog[self.uid]
 
         self.update_plot_signal.emit()
         print(self._run.metadata["stop"])
@@ -385,6 +339,10 @@ class PlotControls(QWidget):
         y_group = QButtonGroup(self)
         y_group.setExclusive(False)
 
+        checked_norm = self.plotItem._checked_norm
+        checked_x = self.plotItem._checked_x
+        checked_y = self.plotItem._checked_y
+
         for i, key in enumerate(self.plotItem.rows):
             key_label = QLabel(key)
             self.grid.addWidget(key_label, i + 1, 0)
@@ -400,6 +358,13 @@ class PlotControls(QWidget):
             normbox = QCheckBox()
             self.grid.addWidget(normbox, i + 1, 4)
             norm_group.addButton(normbox, i)
+
+            if key == checked_norm:
+                normbox.setChecked(True)
+            if key == checked_x:
+                xbox.setChecked(True)
+            if checked_y is not None and key in checked_y:
+                ybox.setChecked(True)
 
         self.norm_group = norm_group
         self.y_group = y_group
@@ -475,6 +440,38 @@ def get1dKeys(run):
         if len(allData[key]) == 1:
             keys1d.append(key)
     return keys1d
+
+
+def separateKeys(run):
+    allData = {key: arr.shape for key, arr in run["primary", "data"].items()}
+    keys1d = []
+    keysnd = []
+    for key in list(allData.keys()):
+        if len(allData[key]) == 1:
+            keys1d.append(key)
+        elif len(allData[key]) > 1:
+            keysnd.append(key)
+    return keys1d, keysnd
+
+
+def getPlotKey(key_or_dict):
+    if isinstance(key_or_dict, dict):
+        return key_or_dict["signal"]
+    else:
+        return key_or_dict
+
+
+def getPlotHints(run, all1dkeys):
+    """
+    So far only works for 1-d scans
+    """
+    xkey = run.start["hints"]["dimensions"][0][0][0]
+    yhints = run.start["plot_hints"]
+    ykeys_tmp = []
+    for keys in yhints.values():
+        ykeys_tmp += keys
+    ykeys = [y for y in ykeys_tmp if y in all1dkeys]
+    return xkey, ykeys, yhints
 
 
 if __name__ == "__main__":
