@@ -19,19 +19,13 @@ from tiled.client import show_logs
 
 import matplotlib
 import numpy as np
-
-matplotlib.use("Qt5Agg")
-
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg,
-    NavigationToolbar2QT as NavigationToolbar,
-)
-from matplotlib.figure import Figure
+from plotItem import PlotItem
+from plotCanvas import PlotWidget
 
 # show_logs()
 
 
-class PlotItem(QObject):
+class OldPlotItem(QObject):
     update_plot_signal = Signal()
 
     def __init__(self, run, catalog=None, dynamic=False):
@@ -244,16 +238,11 @@ class DataDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.layout = QHBoxLayout(self)
-        self.plot_layout = QVBoxLayout()
-        # self.plot = PlotWidget()
-        self.plot = MplCanvas(self, 5, 4, 100)
-        self.toolbar = NavigationToolbar(self.plot, self)
-        self.plot_layout.addWidget(self.toolbar)
-        self.plot_layout.addWidget(self.plot)
-        self.controls = PlotControls(self.plot)
+        self.plot_widget = PlotWidget()
+        self.controls = PlotControls(self.plot_widget.plot)
         self.runlist = BlueskyListWidget()
         self.runlist.selectedDataChanged.connect(self.controls.update_display)
-        self.layout.addLayout(self.plot_layout)
+        self.layout.addWidget(self.plot_widget)
         self.layout.addWidget(self.runlist)
         self.layout.addWidget(self.controls)
 
@@ -289,11 +278,11 @@ class PlotControls(QWidget):
         self.layout.addLayout(self.grid)
 
         self.add_data_button = QPushButton("Plot Data")
-        self.add_data_button.clicked.connect(self.addData)
+        # self.add_data_button.clicked.connect(self.addData)
         self.add_data_button.setEnabled(False)
 
         self.clear_data_button = QPushButton("Clear Plot")
-        self.clear_data_button.clicked.connect(self.plot.clear)
+        # self.clear_data_button.clicked.connect(self.plot.clear)
         self.layout.addWidget(self.add_data_button)
         self.layout.addWidget(self.clear_data_button)
 
@@ -310,7 +299,7 @@ class PlotControls(QWidget):
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
         self.plotItem = plotItem
-        self.plotItem.attach_plot(self.plot)
+        # self.plotItem.attach_plot(self.plot)
         header = self.plotItem.description
         # Clear the current display
         for i in reversed(range(self.grid.count())):
@@ -405,18 +394,6 @@ class PlotControls(QWidget):
     def emit_checked_changed(self):
         checked_x, checked_y, checked_norm = self.checkedButtons()
         self.plotItem.update_checkboxes(checked_x, checked_y, checked_norm)
-
-    def addData(self):
-        checked_x, checked_y, checked_norm = self.checkedButtons()
-
-        x = self.plotItem.get_data(checked_x)
-        if checked_norm is not None:
-            norm = self.plotItem.get_data(checked_norm)
-        else:
-            norm = 1
-        # y_dict = {k: self.data[k].read() for k in checked_y}
-        for k in checked_y:
-            self.plot.plot(x, self.plotItem.get_data(k) / norm, label=k)
 
 
 def get1dDataFromRun(blueskyrun):

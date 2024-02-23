@@ -30,14 +30,32 @@ class PlotItem:
         self._catalog = catalog
         self._dynamic = dynamic
         self._plot_hints = getPlotHints(self._run)
+        print(self._plot_hints)
         xkeys, ykeys = getRunKeys(self._run)
         yfiltered = filterHintedKeys(self._plot_hints, ykeys)
         self.xkeyDict = xkeys
         self.ykeyDict = yfiltered
         self.all_ykeyDict = ykeys
+        self._rows = []
+        for xlist in xkeys.values():
+            self._rows += xlist
+        for ylist in self.ykeyDict.values():
+            self._rows += ylist
         self.setDefaultChecked()
         self._description = blueskyrun_to_string(self._run)
         self._uid = self._run.metadata["start"]["scan_id"]
+
+    @property
+    def description(self):
+        return self._description
+
+    @property
+    def rows(self):
+        return self._rows
+
+    @property
+    def uid(self):
+        return self._uid
 
     def setDefaultChecked(self):
         self._checked_x = []
@@ -48,8 +66,10 @@ class PlotItem:
         elif 0 in self.xkeyDict:
             self._checked_x = [self.xkeyDict[0][0]]
 
-        self._checked_y = getFlattenedFields(self._plot_hints.get("primary"))
-        self._checked_norm = getFlattenedFields(self._plot_hints.get("normalization"))
+        self._checked_y = getFlattenedFields(self._plot_hints.get("primary", []))
+        self._checked_norm = getFlattenedFields(
+            self._plot_hints.get("normalization", [])
+        )
 
     def update_checkboxes(self, checked_x, checked_y, checked_norm):
         self._checked_x = checked_x
@@ -137,6 +157,8 @@ def getRunKeys(run):
             if ax in keys1d:
                 keys1d.pop(keys1d.index(ax))
                 xkeys[i + 1].append(ax)
+        if len(xkeys[i + 1]) == 0:
+            xkeys.pop(i + 1)
     ykeys[1] = keys1d
     ykeys[2] = keysnd
     return xkeys, ykeys
@@ -148,7 +170,8 @@ def getPlotHints(run):
 
 
 def filterHintedKeys(plotHints, ykeys):
-
+    if plotHints == {}:
+        return ykeys
     hintedKeys = flattenPlotHints(plotHints)
     yfiltered = {}
     for key, dlist in ykeys.items():
