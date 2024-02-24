@@ -24,6 +24,7 @@ from matplotlib.lines import Line2D
 
 class DataPlotterControl(QWidget):
     """
+    Must be updated to be able to hold a list of DataPlotters! Most Key thing.
     A class to create control widgets for DataPlotter based on the dimensions of the y data.
 
     Attributes
@@ -36,7 +37,7 @@ class DataPlotterControl(QWidget):
 
     indicesUpdated = Signal(tuple)
 
-    def __init__(self, data_plotter):
+    def __init__(self, data_plotter=None, parent=None):
         """
         Initializes the DataPlotterControl with a DataPlotter instance and creates sliders.
 
@@ -45,12 +46,21 @@ class DataPlotterControl(QWidget):
         data_plotter : DataPlotter
             The DataPlotter instance to control.
         """
-        super().__init__()
-        self.data_plotter = data_plotter
-        # self.indicesUpdated.connect(print)
-        self.indicesUpdated.connect(self.data_plotter.update_data)
-
+        super().__init__(parent)
+        self.data_list = []
+        if data_plotter is not None:
+            self.add_data(data_plotter)
         self.init_ui()
+
+    def add_data(self, data_plotter):
+        self.data_list.append(data_plotter)
+        self.indicesUpdated.connect(data_plotter.update_indices)
+
+    def remove_data(self, data_plotter):
+        if data_plotter in self.data_list:
+            idx = self.data_list.index(data_plotter)
+            self.data_list.pop(idx)
+        data_plotter.clear()
 
     def init_ui(self):
         """
@@ -61,7 +71,7 @@ class DataPlotterControl(QWidget):
         self.dimension_spinbox = QSpinBox()
         self.dimension_spinbox.setMinimum(1)
         self.dimension_spinbox.setMaximum(2)
-        self.dimension_spinbox.setValue(self.data_plotter.dimension)
+        self.dimension_spinbox.setValue(1)
         self.dimension_spinbox.valueChanged.connect(self.dimension_changed)
         self.layout.addWidget(self.dimension_spinbox)
         self.create_sliders()
@@ -78,7 +88,11 @@ class DataPlotterControl(QWidget):
         self.labels = []
 
         # Assuming _y is accessible and is a numpy array
-        y_shape = self.data_plotter._y.shape
+        # Need to have the data_plotter report the shape itself!!
+        if len(self.data_list) == 0:
+            return
+
+        y_shape = self.data_list[0]._y.shape
 
         def create_slider_callback(slider, label, dim):
             def callback(value):
@@ -88,7 +102,7 @@ class DataPlotterControl(QWidget):
             return callback
 
         # Create a slider for each dimension of y, except the last one
-        for dim in range(len(y_shape) - self.data_plotter.dimension):
+        for dim in range(len(y_shape) - self.dimension_spinbox.value()):
             slider = QSlider(Qt.Horizontal)
             slider.setMinimum(0)
             slider.setMaximum(y_shape[dim] - 1)
@@ -102,7 +116,8 @@ class DataPlotterControl(QWidget):
 
     def dimension_changed(self):
         # Update the dimension in DataPlotter
-        self.data_plotter.dimension = self.dimension_spinbox.value()
+        for data_plotter in self.data_list:
+            data_plotter.dimension = self.dimension_spinbox.value()
         # Recreate the sliders
         self.create_sliders()
         self.sliders_changed()
@@ -143,7 +158,7 @@ class DataPlotter(QWidget):
         A list of Line2D objects representing the plotted data.
     """
 
-    def __init__(self, canvas, x, y, dimension=1):
+    def __init__(self, parent, canvas, x, y, dimension=1):
         """
         Initializes the DataPlotter with data and a canvas, and plots the data.
 
@@ -153,10 +168,10 @@ class DataPlotter(QWidget):
             The MplCanvas instance where the data will be plotted.
         x : list of array_like
             The x data to plot.
-        y : list of array_like
+        y : array_like
             The y data to plot.
         """
-        super().__init__()
+        super().__init__(parent)
         self.canvas = canvas
         self._x = x
         self._y = y
@@ -171,7 +186,7 @@ class DataPlotter(QWidget):
 
         Parameters
         ----------
-        x : array_like
+        x : list of array_like
             The x data to plot. If x is multidimensional, only the last axis is plotted.
         y : array_like
             The y data to plot. If y is multidimensional, only the last axis is plotted.
@@ -182,19 +197,32 @@ class DataPlotter(QWidget):
             A list of Line2D objects representing the plotted data.
         """
         xlistmod = []
+        # self.dimension needs to be set better?
+        # indices need to account for extra axes from detector
         if indices is None:
             indices = tuple([0 for n in range(len(self._x) - self.dimension)])
         for x in self._x:
+            print(f"Original x shape: {x.shape}")
             if len(x.shape) > 1:
                 xlistmod.append(x[indices])
             else:
                 xlistmod.append(x)
         y = self._y[indices]
-        artist = self.canvas.plot(xlistmod[-self.dimension :], y, self.artist)
+        for x in xlistmod:
+            print(f"xlistmod shape: {x.shape}")
+        x = xlistmod[-self.dimension :]
+        print(len(x))
+        print(y.shape)
+        artist = self.canvas.plot(x, y, self.artist)
         return artist
 
+    def update_data(self, x, y):
+        self._x = x
+        self._y = y
+        self.plot_data()
+
     @Slot(tuple)
-    def update_data(self, indices):
+    def update_indices(self, indices):
         """
         Updates the plotted data based on the provided indices into the first N-1 dimensions of the data.
 
@@ -207,27 +235,48 @@ class DataPlotter(QWidget):
         # Index into the first N-1 dimensions of the data arrays
         self.artist = self.plot_data(indices)
 
-        # Redraw the canvas to reflect the updated data
-        self.canvas.draw()
+    def clear(self):
+        if self.artist is not None:
+            if hasattr(self.artist, "remove"):
+                self.artist.remove()
+            else:
+                self.canvas.clear()
+            self.canvas.draw()
+        self.artist = None
+
+    def remove(self):
+        self.parent().remove_data(self)
 
 
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = fig.add_subplot(111)
-        super(MplCanvas, self).__init__(fig)
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = self.fig.add_subplot(111)
+        self.currentDim = 1
+        super(MplCanvas, self).__init__(self.fig)
 
     def plot(self, xlist, y, artist=None, **kwargs):
-        if len(xlist) == 1:
+        print(f"plot x list {len(xlist)}")
+        print(f"plot y shape {y.shape}")
+        if len(y.shape) == 1:
+            print(f"plot x shape {xlist[0].shape}")
+            if self.currentDim != 1:
+                self.axes.cla()
+                self.axes.remove()
+                self.axes = self.fig.add_subplot(111)
             if not isinstance(artist, Line2D):
-                self.axes.clear()
                 artist = self.axes.plot(xlist[0], y, **kwargs)[0]
             else:
                 artist.set_data(xlist[0], y)
-        elif len(xlist) == 2:
-            self.axes.clear()
-            # artist = self.axes.contourf(xlist[-1], xlist[-2], y)
-            artist = self.axes.imshow(y)
+            self.currentDim = 1
+            self.autoscale()
+        elif len(y.shape) == 2:
+            self.axes.cla()
+            artist = self.axes.contourf(xlist[-1], xlist[-2], y)
+            # artist = self.axes.imshow(y)
+            self.currentDim = 2
+        else:
+            print(f"Unsupported dimensionality! {y.shape}")
         self.draw()
         return artist
 
@@ -270,15 +319,19 @@ class PlotWidget(QWidget):
         # self.plot = PlotWidget()
         self.plot = MplCanvas(self, 5, 4, 100)
         self.toolbar = NavigationToolbar(self.plot, self)
+        self.dataControls = DataPlotterControl()
+
         self.plot_layout.addWidget(self.toolbar)
         self.plot_layout.addWidget(self.plot)
+        self.plot_layout.addWidget(self.dataControls)
+
         self.layout.addLayout(self.plot_layout)
 
-    def addPlotItem(self, x, y, dimension=1):
-        self.dataWidget = DataPlotter(self.plot, x, y, dimension)
-        self.dataControls = DataPlotterControl(self.dataWidget)
-
-        self.plot_layout.addWidget(self.dataControls)
+    def addPlotData(self, x, y, dimension=1):
+        # Needs to just create and return a DataPlotter
+        data_plotter = DataPlotter(self.dataControls, self.plot, x, y, dimension)
+        self.dataControls.add_data(data_plotter)
+        return data_plotter
 
 
 if __name__ == "__main__":
@@ -301,5 +354,5 @@ if __name__ == "__main__":
             phase[m, n, :] = n * 2 * np.pi / (2 * d2)
             phase2[m, n, :] = m * 2 * np.pi / d3
     y = np.sin(x + phase + phase2)
-    widget.addPlotItem([phase2, phase, x], y, dimension=1)
+    widget.addPlotData([phase2, phase, x], y, dimension=1)
     app.exec_()

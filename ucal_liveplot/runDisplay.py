@@ -239,7 +239,7 @@ class DataDisplayWidget(QWidget):
         super().__init__(parent)
         self.layout = QHBoxLayout(self)
         self.plot_widget = PlotWidget()
-        self.controls = PlotControls(self.plot_widget.plot)
+        self.controls = PlotControls(self.plot_widget)
         self.runlist = BlueskyListWidget()
         self.runlist.selectedDataChanged.connect(self.controls.update_display)
         self.layout.addWidget(self.plot_widget)
@@ -299,7 +299,7 @@ class PlotControls(QWidget):
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
         self.plotItem = plotItem
-        # self.plotItem.attach_plot(self.plot)
+        self.plotItem.attach_plot(self.plot)
         header = self.plotItem.description
         # Clear the current display
         for i in reversed(range(self.grid.count())):
@@ -324,9 +324,11 @@ class PlotControls(QWidget):
 
         # Add the data
         norm_group = ExclusiveCheckBoxGroup(self)
-        x_group = ExclusiveCheckBoxGroup(self)
+        # x_group = ExclusiveCheckBoxGroup(self)
+        x_group = QButtonGroup(self)
         y_group = QButtonGroup(self)
         y_group.setExclusive(False)
+        x_group.setExclusive(False)
 
         checked_norm = self.plotItem._checked_norm
         checked_x = self.plotItem._checked_x
@@ -348,9 +350,9 @@ class PlotControls(QWidget):
             self.grid.addWidget(normbox, i + 1, 4)
             norm_group.addButton(normbox, i)
 
-            if key == checked_norm:
+            if checked_norm is not None and key in checked_norm:
                 normbox.setChecked(True)
-            if key == checked_x:
+            if checked_x is not None and key in checked_x:
                 xbox.setChecked(True)
             if checked_y is not None and key in checked_y:
                 ybox.setChecked(True)
@@ -379,17 +381,13 @@ class PlotControls(QWidget):
             for button in self.norm_group.buttons()
             if button.isChecked()
         ]
-        if len(norm_checked_ids) > 0:
-            norm = norm_checked_ids[0]
-        else:
-            norm = None
-        if len(x_checked_ids) > 0:
-            x = x_checked_ids[0]
-        else:
-            x = None
+        if len(norm_checked_ids) == 0:
+            norm_checked_ids = None
+        if len(x_checked_ids) == 0:
+            x_checked_ids = None
         if len(y_checked_ids) == 0:
             y_checked_ids = None
-        return x, y_checked_ids, norm
+        return x_checked_ids, y_checked_ids, norm_checked_ids
 
     def emit_checked_changed(self):
         checked_x, checked_y, checked_norm = self.checkedButtons()
@@ -454,10 +452,11 @@ def getPlotHints(run, all1dkeys):
 if __name__ == "__main__":
     from tiled.client import from_uri
 
-    c = from_uri("https://tiled.nsls2.bnl.gov")["ucal", "raw"]
+    # c = from_uri("https://tiled.nsls2.bnl.gov")["ucal", "raw"]
+    c = from_uri("http://localhost:8000")
     # run = c["ucal"]["raw"].items_indexer[-10][-1]
     app = QApplication([])
     widget = DataDisplayWidget()
     widget.show()
-    widget.addPlotItem([PlotItem(run) for run in c.values()[len(c) - 5 :]])
+    widget.addPlotItem([PlotItem(run) for run in c.values()])
     app.exec_()

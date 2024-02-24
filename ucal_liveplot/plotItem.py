@@ -1,4 +1,5 @@
 import numpy as np
+from qtpy.QtWidgets import QWidget
 
 
 def blueskyrun_to_string(blueskyrun):
@@ -23,18 +24,23 @@ def blueskyrun_to_string(blueskyrun):
     return str_desc
 
 
-class PlotItem:
-    def __init__(self, run, catalog=None, dynamic=False):
-        # super(PlotItem, self).__init__()
+class PlotItem(QWidget):
+    def __init__(self, run, catalog=None, dynamic=False, parent=None):
+        super().__init__(parent)
         self._run = run
         self._catalog = catalog
         self._dynamic = dynamic
+        self.dataPlotters = {}
         self._plot_hints = getPlotHints(self._run)
-        print(self._plot_hints)
+        self._axhints = getAxisHints(self._plot_hints)
+        print("Axhints")
+        print(self._axhints)
         xkeys, ykeys = getRunKeys(self._run)
         yfiltered = filterHintedKeys(self._plot_hints, ykeys)
         self.xkeyDict = xkeys
         self.ykeyDict = yfiltered
+        print(self.xkeyDict)
+        print(self.ykeyDict)
         self.all_ykeyDict = ykeys
         self._rows = []
         for xlist in xkeys.values():
@@ -57,6 +63,9 @@ class PlotItem:
     def uid(self):
         return self._uid
 
+    def attach_plot(self, plot):
+        self._plot = plot
+
     def setDefaultChecked(self):
         self._checked_x = []
         if 1 in self.xkeyDict:
@@ -70,19 +79,25 @@ class PlotItem:
         self._checked_norm = getFlattenedFields(
             self._plot_hints.get("normalization", [])
         )
+        print("Default Checked")
+        print(self._checked_x)
+        print(self._checked_y)
+        print(self._checked_norm)
 
     def update_checkboxes(self, checked_x, checked_y, checked_norm):
         self._checked_x = checked_x
         self._checked_y = checked_y
         self._checked_norm = checked_norm
         if checked_x is not None and checked_y is not None:
-            self.update_plot_signal.emit()
+            self.plotCheckedData()
 
     def transformData(self, xlist, ylist, normlist):
 
         # Assumption time! Assume that we are just dividing by all norms
-        norm = np.prod(normlist, axis=0)
-
+        if len(normlist) > 0:
+            norm = np.prod(normlist, axis=0)
+        else:
+            norm = 1
         # Just divide y by norm for now! In the future, we will grab input from a variety of sources
         # and make a more complex transform using Asteval
         yfinal = [y / norm for y in ylist]
@@ -90,28 +105,59 @@ class PlotItem:
 
     def plotCheckedData(self):
         xlist, ylist, normlist = self.getCheckedData()
+        print(self._checked_x, self._checked_y)
+        print(len(xlist), len(ylist))
+        ykeys = self._checked_y
         xdim = len(xlist)
         max_ydim = max([len(y.shape) for y in ylist])
         plot_dim = max_ydim
 
         xlist, ylist = self.transformData(xlist, ylist, normlist)
-        if plot_dim == 1:
-            for n, k in enumerate(self._checked_y):
-                line_id = f"{self._checked_x};{k}"
-                self._lines[line_id] = self._plot.plot(xlist[0], ylist[n], label=k)[0]
+
+        remove_keys = [key for key in self.dataPlotters.keys() if key not in ykeys]
+        for key in remove_keys:
+            data_plotter = self.dataPlotters.pop(key)
+            data_plotter.remove()
+
+        for key, y in zip(ykeys, ylist):
+            if key in self._axhints:
+                xadditions = [self.getAxis(self._axhints[key])]
+            else:
+                xadditions = []
+            if key in self.dataPlotters:
+                print(f"Update: {y.shape}")
+                self.dataPlotters[key].update_data(xlist + xadditions, y)
+            else:
+                print(f"New Data: {y.shape}")
+                self.dataPlotters[key] = self._plot.addPlotData(xlist + xadditions, y)
 
     def getCheckedData(self):
+        """
+        Gets properly shaped x, y, norm data
+
+        Need to return dictionaries with keys so that I can store/update DataPlotters
+        """
+
         xlist = [self.getData(key) for key in self._checked_x]
         ylist = [self.getData(key) for key in self._checked_y]
-        normlist = [self.getData(key) for key in self._checked_norm]
+        if self._checked_norm is not None:
+            normlist = [self.getData(key) for key in self._checked_norm]
+        else:
+            normlist = []
 
-        xshape = self._run.start["shape"]
+        if "shape" in self._run.start:
+            xshape = self._run.start["shape"]
+        else:
+            xshape = [self._run.start["num_points"]]
 
         if self._dynamic:
             # Lengths may be off due to uneven data updates
             xmin = min([x.shape[0] for x in xlist])
             ymin = min([y.shape[0] for y in ylist])
-            normmin = min([norm.shape[0] for norm in normlist])
+            if len(normlist) == 0:
+                normmin = ymin
+            else:
+                normmin = min([norm.shape[0] for norm in normlist])
 
             minidx = min(xmin, ymin, normmin)
             minslice = slice(None, minidx)
@@ -128,10 +174,17 @@ class PlotItem:
         return xlist_reshape, ylist_reshape, nlist_reshape
 
     def getData(self, key):
-        if not self._dynamic:
-            return self._data[key]
-        else:
-            return self._run["primary", "data", key].read()
+        # re-optimize for performance later
+        # if not self._dynamic:
+        #    return self._data[key]
+        # else:
+        return self._run["primary", "data", key].read()
+
+    def getAxis(self, keys):
+        data = self._run["primary"]
+        for key in keys:
+            data = data[key]
+        return data.read().squeeze()
 
 
 def getRunKeys(run):
@@ -164,6 +217,19 @@ def getRunKeys(run):
     return xkeys, ykeys
 
 
+def getAxisHints(plotHints):
+    axhints = {}
+    for dlist in plotHints.values():
+        for d in dlist:
+            if isinstance(d, dict) and "axes" in d:
+                signal = d["signal"]
+                # Kludge because I am too lazy to update container
+                if isinstance(signal, list):
+                    signal = signal[-1]
+                axhints[signal] = d["axes"]
+    return axhints
+
+
 def getPlotHints(run):
     plotHints = run.start.get("plot_hints", {})
     return plotHints
@@ -193,7 +259,10 @@ def getFlattenedFields(fieldList):
     flatKeys = []
     for f in fieldList:
         if isinstance(f, dict):
-            flatKeys.append(f["signal"])
+            if isinstance(f["signal"], list):
+                flatKeys.append(f["signal"][-1])
+            else:
+                flatKeys.append(f["signal"])
         else:
             flatKeys.append(f)
     return flatKeys
@@ -251,5 +320,6 @@ def reshape_truncated_array(arr, original_shape):
 
     # Ensure the array is truncated to fit the new shape exactly
     final_shape = new_shape + list(arr.shape[1:])
+    print(f"Original shape: {original_shape}, Final shape: {final_shape}")
     reshaped_arr = arr[: np.prod(new_shape), ...].reshape(final_shape)
     return reshaped_arr
