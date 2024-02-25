@@ -1,5 +1,6 @@
 import numpy as np
 from qtpy.QtWidgets import QWidget
+from qtpy.QtCore import QTimer, Signal
 
 
 def blueskyrun_to_string(blueskyrun):
@@ -25,6 +26,8 @@ def blueskyrun_to_string(blueskyrun):
 
 
 class PlotItem(QWidget):
+    update_plot_signal = Signal()
+
     def __init__(self, run, catalog=None, dynamic=False, parent=None):
         super().__init__(parent)
         self._run = run
@@ -42,14 +45,28 @@ class PlotItem(QWidget):
         print(self.xkeyDict)
         print(self.ykeyDict)
         self.all_ykeyDict = ykeys
-        self._rows = []
+        self._show_all = False
+        self._hintedrows = []
+        self._allrows = []
         for xlist in xkeys.values():
-            self._rows += xlist
+            self._hintedrows += xlist
+            self._allrows += xlist
         for ylist in self.ykeyDict.values():
-            self._rows += ylist
+            self._hintedrows += ylist
+        for ylist in self.all_ykeyDict.values():
+            self._allrows += ylist
         self.setDefaultChecked()
         self._description = blueskyrun_to_string(self._run)
         self._uid = self._run.metadata["start"]["scan_id"]
+        self._expected_points = self._run.start.get("num_points", -1)
+        self.update_plot_signal.connect(self.plotCheckedData)
+        if self._dynamic:
+            self.timer = QTimer(self)
+            self.timer.timeout.connect(self._dynamic_update)
+            self.timer.start(1000)
+            self._expected_points = None
+        else:
+            self.timer = None
 
     @property
     def description(self):
@@ -57,11 +74,35 @@ class PlotItem(QWidget):
 
     @property
     def rows(self):
-        return self._rows
+        if self._show_all:
+            return self._allrows
+        else:
+            return self._hintedrows
 
     @property
     def uid(self):
         return self._uid
+
+    def _dynamic_update(self):
+        if self._expected_points is None:
+            self._expected_points = self._run.start.get("num_points", -1)
+        print("dynamic")
+        if self._run.metadata.get("stop", None) is not None:
+            print("Converting from dynamic to static")
+            print(self._run.metadata["stop"])
+            self._dynamic = False
+            if self.timer is not None:
+                self.timer.stop()
+                self.timer = None
+        elif self._catalog is not None:
+            print("Updating Run from Catalog")
+            self._run = self._catalog[self.uid]
+        else:
+            print("Catalog is None")
+        self.update_plot_signal.emit()
+
+    def set_row_visibility(self, show_all_rows):
+        self._show_all = show_all_rows
 
     def attach_plot(self, plot):
         self._plot = plot
@@ -79,15 +120,13 @@ class PlotItem(QWidget):
         self._checked_norm = getFlattenedFields(
             self._plot_hints.get("normalization", [])
         )
-        print("Default Checked")
-        print(self._checked_x)
-        print(self._checked_y)
-        print(self._checked_norm)
 
     def update_checkboxes(self, checked_x, checked_y, checked_norm):
         self._checked_x = checked_x
         self._checked_y = checked_y
         self._checked_norm = checked_norm
+        print("Update Checkboxes")
+        self.removeData()
         if checked_x is not None and checked_y is not None:
             self.plotCheckedData()
 
@@ -100,13 +139,36 @@ class PlotItem(QWidget):
             norm = 1
         # Just divide y by norm for now! In the future, we will grab input from a variety of sources
         # and make a more complex transform using Asteval
-        yfinal = [y / norm for y in ylist]
+        yfinal = []
+        for y in ylist:
+            # Check if norm is not a scalar before adjusting dimensions
+            if np.isscalar(norm):
+                yfinal.append(y / norm)
+            else:
+                # Create a temporary variable for norm to avoid modifying the original norm
+                temp_norm = norm
+                # Check if y has more dimensions than temp_norm and adjust temp_norm accordingly
+                while temp_norm.ndim < y.ndim:
+                    temp_norm = np.expand_dims(temp_norm, axis=-1)
+                yfinal.append(y / temp_norm)
         return xlist, yfinal
 
+    def removeData(self):
+        if self._checked_y is not None:
+            remove_keys = [
+                key for key in self.dataPlotters.keys() if key not in self._checked_y
+            ]
+        else:
+            remove_keys = list(self.dataPlotters.keys())
+
+        for key in remove_keys:
+            data_plotter = self.dataPlotters.pop(key)
+            data_plotter.remove()
+            data_plotter.deleteLater()
+
     def plotCheckedData(self):
+        # print("plotCheckedData")
         xlist, ylist, normlist = self.getCheckedData()
-        print(self._checked_x, self._checked_y)
-        print(len(xlist), len(ylist))
         ykeys = self._checked_y
         xdim = len(xlist)
         max_ydim = max([len(y.shape) for y in ylist])
@@ -114,22 +176,37 @@ class PlotItem(QWidget):
 
         xlist, ylist = self.transformData(xlist, ylist, normlist)
 
-        remove_keys = [key for key in self.dataPlotters.keys() if key not in ykeys]
-        for key in remove_keys:
-            data_plotter = self.dataPlotters.pop(key)
-            data_plotter.remove()
-
         for key, y in zip(ykeys, ylist):
             if key in self._axhints:
-                xadditions = [self.getAxis(self._axhints[key])]
+                xadditions = [self.getAxis(axkey) for axkey in self._axhints[key]]
+                xadditional_keys = [axkey[-1] for axkey in self._axhints[key]]
             else:
                 xadditions = []
-            if key in self.dataPlotters:
-                print(f"Update: {y.shape}")
-                self.dataPlotters[key].update_data(xlist + xadditions, y)
+                xadditional_keys = []
+            current_dim = xdim + len(xadditions)
+            if current_dim < len(y.shape):
+                for n in range(current_dim, len(y.shape)):
+                    xadditions.append(np.arange(y.shape[n]))
+                    xadditional_keys.append(f"Dimension {n}")
+
+            xlist_reordered = []
+
+            if len(xadditions) == 1:
+                xlist_reordered = xlist[:-1] + xadditions + [xlist[-1]]
+                xkeys = self._checked_x[:-1] + xadditional_keys + [self._checked_x[-1]]
+                y_reordered = np.swapaxes(y, -2, -1)
             else:
-                print(f"New Data: {y.shape}")
-                self.dataPlotters[key] = self._plot.addPlotData(xlist + xadditions, y)
+                xlist_reordered = xlist + xadditions
+                xkeys = self._checked_x + xadditional_keys
+                y_reordered = y
+            if key in self.dataPlotters:
+                # print(f"Update {key}: {y_reordered.shape}")
+                self.dataPlotters[key].update_data(xlist_reordered, y_reordered)
+            else:
+                # print(f"New Data {key}: {y.shape}")
+                self.dataPlotters[key] = self._plot.addPlotData(
+                    xlist_reordered, y_reordered, xkeys, key
+                )
 
     def getCheckedData(self):
         """
@@ -167,6 +244,9 @@ class PlotItem(QWidget):
 
             if minidx == self._expected_points:
                 self._dynamic = False
+                if self.timer is not None:
+                    self.timer.stop()
+                    self.timer = None
 
         xlist_reshape = [reshape_truncated_array(x, xshape) for x in xlist]
         ylist_reshape = [reshape_truncated_array(y, xshape) for y in ylist]
@@ -320,6 +400,6 @@ def reshape_truncated_array(arr, original_shape):
 
     # Ensure the array is truncated to fit the new shape exactly
     final_shape = new_shape + list(arr.shape[1:])
-    print(f"Original shape: {original_shape}, Final shape: {final_shape}")
+    # print(f"Original shape: {original_shape}, Final shape: {final_shape}")
     reshaped_arr = arr[: np.prod(new_shape), ...].reshape(final_shape)
     return reshaped_arr

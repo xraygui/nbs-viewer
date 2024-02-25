@@ -241,7 +241,7 @@ class DataDisplayWidget(QWidget):
         self.plot_widget = PlotWidget()
         self.controls = PlotControls(self.plot_widget)
         self.runlist = BlueskyListWidget()
-        self.runlist.selectedDataChanged.connect(self.controls.update_display)
+        self.runlist.selectedDataChanged.connect(self.controls.addPlotItem)
         self.layout.addWidget(self.plot_widget)
         self.layout.addWidget(self.runlist)
         self.layout.addWidget(self.controls)
@@ -274,6 +274,15 @@ class PlotControls(QWidget):
         self.plot = plot
         self.data = None
         self.layout = QVBoxLayout(self)
+
+        checkboxlayout = QHBoxLayout()
+        checkboxlayout.addWidget(QLabel("Show all rows"))
+        self.show_all = QCheckBox()
+        self.show_all.setChecked(False)
+        self.show_all.clicked.connect(self.update_display)
+        checkboxlayout.addWidget(self.show_all)
+        self.layout.addLayout(checkboxlayout)
+
         self.grid = QGridLayout()
         self.layout.addLayout(self.grid)
 
@@ -295,12 +304,16 @@ class PlotControls(QWidget):
 
     # def update_display(self, data_list):
     #    header, data_dict = data_list[0]
-    def update_display(self, plotItem):
+    def addPlotItem(self, plotItem):
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
         self.plotItem = plotItem
         self.plotItem.attach_plot(self.plot)
+        self.update_display()
+
+    def update_display(self):
         header = self.plotItem.description
+        self.plotItem.set_row_visibility(self.show_all.isChecked())
         # Clear the current display
         for i in reversed(range(self.grid.count())):
             self.grid.itemAt(i).widget().setParent(None)

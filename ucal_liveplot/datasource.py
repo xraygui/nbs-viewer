@@ -27,7 +27,7 @@ import uuid
 from catalogTree import CatalogPicker
 from catalogTable import CatalogTableModel
 from listTableModel import RunListTableModel
-from runDisplay import PlotItem
+from plotItem import PlotItem
 from search import DateSearchWidget, ScantypeSearch
 
 
