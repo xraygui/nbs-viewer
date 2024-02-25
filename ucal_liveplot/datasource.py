@@ -150,7 +150,7 @@ class KafkaSource(QWidget):
         # this consumer should not be in a group with other consumers
         #   so generate a unique consumer group id for it
         unique_group_id = f"echo-{beamline_acronym}-{str(uuid.uuid4())[:8]}"
-        topics = [f"{beamline_acronym}.bluesky.documents"]
+        topics = [f"{beamline_acronym}.bluesky.runengine.documents"]
         kafka_dispatcher = QtRemoteDispatcher(
             topics,
             ",".join(kafka_config["bootstrap_servers"]),
