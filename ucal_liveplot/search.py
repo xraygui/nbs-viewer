@@ -49,8 +49,17 @@ class DateSearchWidget(QWidget):
         self.layout.addWidget(self.until_date_edit)
 
     def get_date_range(self):
+        """
+        Get the date range from the date edit widgets.
+
+        Returns
+        -------
+        tuple
+            A tuple containing the from_date and until_date in "yyyy-MM-dd" format.
+            The until_date is incremented by one day to include the end date in the range.
+        """
         from_date = self.from_date_edit.date().toString("yyyy-MM-dd")
-        until_date = self.until_date_edit.date().toString("yyyy-MM-dd")
+        until_date = self.until_date_edit.date().addDays(1).toString("yyyy-MM-dd")
         return from_date, until_date
 
     def filter_catalog(self, catalog):

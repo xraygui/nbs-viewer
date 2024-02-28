@@ -121,14 +121,18 @@ class PlotItem(QWidget):
             self._plot_hints.get("normalization", [])
         )
 
+    def clear(self):
+        self.update_checkboxes(None, None, None)
+        self.removeData()
+
     def update_checkboxes(self, checked_x, checked_y, checked_norm):
         self._checked_x = checked_x
         self._checked_y = checked_y
         self._checked_norm = checked_norm
-        print("Update Checkboxes")
+
+    def updatePlot(self):
         self.removeData()
-        if checked_x is not None and checked_y is not None:
-            self.plotCheckedData()
+        self.plotCheckedData()
 
     def transformData(self, xlist, ylist, normlist):
 
@@ -168,6 +172,9 @@ class PlotItem(QWidget):
 
     def plotCheckedData(self):
         # print("plotCheckedData")
+        if self._checked_x is None or self._checked_y is None:
+            return
+
         xlist, ylist, normlist = self.getCheckedData()
         ykeys = self._checked_y
         xdim = len(xlist)

@@ -53,6 +53,7 @@ class DataPlotterControl(QWidget):
         self.init_ui()
 
     def add_data(self, data_plotter):
+        print(f"Adding data {data_plotter._label}")
         self.data_list.append(data_plotter)
         old_dim = self.dimension_spinbox.value()
         new_dim = data_plotter.x_dim
@@ -63,13 +64,18 @@ class DataPlotterControl(QWidget):
         self.indicesUpdated.connect(data_plotter.update_indices)
 
     def remove_data(self, data_plotter):
-        print("Trying to remove")
         if data_plotter in self.data_list:
             idx = self.data_list.index(data_plotter)
             self.data_list.pop(idx)
             print(f"Removed {idx}, data list len: {len(self.data_list)}")
+            self.indicesUpdated.disconnect(data_plotter.update_indices)
         data_plotter.clear()
-        self.indicesUpdated.disconnect(data_plotter.update_indices)
+
+    def clear_data(self):
+        while self.data_list:
+            data_plotter = self.data_list.pop()
+            self.indicesUpdated.disconnect(data_plotter.update_indices)
+            data_plotter.clear()
 
     def init_ui(self):
         """
@@ -231,7 +237,7 @@ class DataPlotter(QWidget):
             self._indices = indices
         else:
             indices = self._indices
-        # print(f"DataPlotter {self._label}, plot data {indices}")
+        print(f"DataPlotter {self._label}")
         xlistmod = []
         # self.dimension needs to be set better?
         # indices need to account for extra axes from detector
@@ -291,6 +297,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
         self.currentDim = 1
+        self._autoscale = True
         super(MplCanvas, self).__init__(self.fig)
 
     def plot(self, xlist, y, artist=None, **kwargs):
@@ -329,17 +336,20 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Adjusts the y scale of the plot based on the maximum and minimum of the y data in lines
         """
-        print("Autoscaling")
-        lines = self.axes.get_lines()
-        y_min = min([line.get_ydata().min() for line in lines])
-        y_max = max([line.get_ydata().max() for line in lines])
-        span = y_max - y_min
-        self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+        if self._autoscale:
+            print("Autoscaling")
+            lines = self.axes.get_lines()
+            y_min = min([line.get_ydata().min() for line in lines])
+            y_max = max([line.get_ydata().max() for line in lines])
+            span = y_max - y_min
+            self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
 
-        x_min = min([line.get_xdata().min() for line in lines])
-        x_max = max([line.get_xdata().max() for line in lines])
-        xspan = x_max - x_min
-        self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+            x_min = min([line.get_xdata().min() for line in lines])
+            x_max = max([line.get_xdata().max() for line in lines])
+            xspan = x_max - x_min
+            self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+        else:
+            print("Autoscale disabled")
 
 
 class PlotWidget(QWidget):
@@ -375,6 +385,10 @@ class PlotWidget(QWidget):
         )
         self.dataControls.add_data(data_plotter)
         return data_plotter
+
+    def clearPlot(self):
+        self.dataControls.clear_data()
+        self.plot.clear()
 
 
 if __name__ == "__main__":

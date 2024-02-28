@@ -195,6 +195,28 @@ class BlueskyListWidget(QListWidget):
             self._plotItems[plotItem.uid] = plotItem
             self.addItem(item)
 
+    def removePlotItem(self, plotItem):
+        """
+        Remove a plot item from the list widget based on its UID.
+
+        Parameters
+        ----------
+        plotItem : PlotItem
+            The plot item to be removed from the list widget.
+        """
+        plotItem.clear()
+        # Iterate over all items in the list
+        for i in range(self.count()):
+            item = self.item(i)
+            # Check if the item's UID matches the plotItem's UID
+            if item.data(Qt.UserRole) == plotItem.uid:
+                # Remove the item from the list
+                self.takeItem(i)
+                # Optionally, delete the plotItem from the internal dictionary if it's being tracked
+                if plotItem.uid in self._plotItems:
+                    del self._plotItems[plotItem.uid]
+                break  # Exit the loop once the item is found and removed
+
     def selectedData(self):
         print("Selecting Data")
         selected_items = self.selectedItems()
@@ -202,6 +224,11 @@ class BlueskyListWidget(QListWidget):
             self._plotItems[item.data(Qt.UserRole)] for item in selected_items
         ]
         return items_for_emission
+
+    def removeSelectedItems(self):
+        items = self.selectedData()
+        for plotItem in items:
+            self.removePlotItem(plotItem)
 
     def emit_selected_data(self):
         self.selectedDataChanged.emit(self.selectedData())
@@ -240,10 +267,23 @@ class DataDisplayWidget(QWidget):
         self.layout = QHBoxLayout(self)
         self.plot_widget = PlotWidget()
         self.controls = PlotControls(self.plot_widget)
+        vlayout = QVBoxLayout()
+
         self.runlist = BlueskyListWidget()
         self.runlist.selectedDataChanged.connect(self.controls.addPlotItem)
+
+        self.remove_plot_items = QPushButton("Remove Items")
+        self.clear_plot_button = QPushButton("Clear Plot")
+
+        self.remove_plot_items.clicked.connect(self.runlist.removeSelectedItems)
+        self.clear_plot_button.clicked.connect(self.plot_widget.clearPlot)
+
+        vlayout.addWidget(self.runlist)
+        vlayout.addWidget(self.remove_plot_items)
+        vlayout.addWidget(self.clear_plot_button)
+
         self.layout.addWidget(self.plot_widget)
-        self.layout.addWidget(self.runlist)
+        self.layout.addLayout(vlayout)
         self.layout.addWidget(self.controls)
 
     # def addRun(self, blueskyruns):
@@ -267,43 +307,48 @@ class PlotControls(QWidget):
         The parent widget, by default None.
     """
 
-    checked_changed = Signal(list)
-
     def __init__(self, plot, parent=None):
         super().__init__(parent)
         self.plot = plot
         self.data = None
+        self.plotItem = None
         self.layout = QVBoxLayout(self)
 
-        checkboxlayout = QHBoxLayout()
-        checkboxlayout.addWidget(QLabel("Show all rows"))
+        auto_add_layout = QHBoxLayout()
+        auto_add_layout.addWidget(QLabel("Auto Add"))
+        self.auto_add_box = QCheckBox()
+        self.auto_add_box.setChecked(True)
+        self.auto_add_box.clicked.connect(self.checked_changed)
+        auto_add_layout.addWidget(self.auto_add_box)
+        self.layout.addLayout(auto_add_layout)
+
+        show_all_layout = QHBoxLayout()
+        show_all_layout.addWidget(QLabel("Show all rows"))
         self.show_all = QCheckBox()
         self.show_all.setChecked(False)
         self.show_all.clicked.connect(self.update_display)
-        checkboxlayout.addWidget(self.show_all)
-        self.layout.addLayout(checkboxlayout)
+        show_all_layout.addWidget(self.show_all)
+        self.layout.addLayout(show_all_layout)
 
         self.grid = QGridLayout()
         self.layout.addLayout(self.grid)
 
-        self.add_data_button = QPushButton("Plot Data")
-        # self.add_data_button.clicked.connect(self.addData)
+        self.add_data_button = QPushButton("Add to Plot")
+        self.add_data_button.clicked.connect(self.add_data_to_plot)
         self.add_data_button.setEnabled(False)
 
-        self.clear_data_button = QPushButton("Clear Plot")
-        # self.clear_data_button.clicked.connect(self.plot.clear)
+        self.clear_data_button = QPushButton("Uncheck All")
+        self.clear_data_button.clicked.connect(self.uncheck_all)
+        self.clear_data_button.setEnabled(False)
         self.layout.addWidget(self.add_data_button)
         self.layout.addWidget(self.clear_data_button)
 
-    def test_update(self, data_list):
-        print("Updating controls")
-        data = data_list[0]
-        header = str(data.metadata["start"]["scan_id"])
-        data_dict = get1dData(data["primary", "data"])
-        self.update_display(header, data_dict)
+    @property
+    def auto_add(self):
+        t = self.auto_add_box.isChecked()
+        print(f"Auto add {t}")
+        return t
 
-    # def update_display(self, data_list):
-    #    header, data_dict = data_list[0]
     def addPlotItem(self, plotItem):
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
@@ -375,8 +420,9 @@ class PlotControls(QWidget):
         self.x_group = x_group
         for group in [self.norm_group, self.x_group, self.y_group]:
             for button in group.buttons():
-                button.clicked.connect(self.emit_checked_changed)
+                button.clicked.connect(self.checked_changed)
         self.add_data_button.setEnabled(True)
+        self.clear_data_button.setEnabled(True)
 
     def checkedButtons(self):
         x_checked_ids = [
@@ -402,9 +448,20 @@ class PlotControls(QWidget):
             y_checked_ids = None
         return x_checked_ids, y_checked_ids, norm_checked_ids
 
-    def emit_checked_changed(self):
+    def uncheck_all(self):
+        self.plotItem.update_checkboxes(None, None, None)
+        self.update_display()
+
+    def checked_changed(self):
+        if self.plotItem is None:
+            return
         checked_x, checked_y, checked_norm = self.checkedButtons()
         self.plotItem.update_checkboxes(checked_x, checked_y, checked_norm)
+        if self.auto_add:
+            self.add_data_to_plot()
+
+    def add_data_to_plot(self):
+        self.plotItem.updatePlot()
 
 
 def get1dDataFromRun(blueskyrun):
