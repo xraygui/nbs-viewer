@@ -285,7 +285,7 @@ class PlotItem(QWidget):
 
 def getRunKeys(run):
     allData = {key: arr.shape for key, arr in run["primary", "data"].items()}
-    xkeyhints = run.start["hints"]["dimensions"]
+    xkeyhints = run.start["hints"].get("dimensions", [])
     keys1d = []
     keysnd = []
 
