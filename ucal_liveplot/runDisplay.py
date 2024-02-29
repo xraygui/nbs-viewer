@@ -224,7 +224,7 @@ class BlueskyListWidget(QListWidget):
                 break  # Exit the loop once the item is found and removed
 
     def selectedData(self):
-        print("Selecting Data")
+        # print("Selecting Data")
         selected_items = self.selectedItems()
         items_for_emission = [
             self._plotItems[item.data(Qt.UserRole)] for item in selected_items
@@ -377,11 +377,11 @@ class PlotControls(QWidget):
     @property
     def auto_add(self):
         t = self.auto_add_box.isChecked()
-        print(f"Auto add {t}")
+        # print(f"Auto add {t}")
         return t
 
     def addPlotItem(self, plotItem):
-        print("Add Plot Item")
+        # print("Add Plot Item")
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
         self.plotItem = plotItem
@@ -540,8 +540,8 @@ class PlotControls(QWidget):
         if self.plotItem is None:
             return
         checked_x, checked_y, checked_norm = self.checkedButtons()
-        print("Checked Changed")
-        print(checked_x, checked_y, checked_norm)
+        # print("Checked Changed")
+        # print(checked_x, checked_y, checked_norm)
         self.plotItem.update_checkboxes(checked_x, checked_y, checked_norm)
         if self.auto_add:
             self.add_data_to_plot()

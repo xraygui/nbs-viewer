@@ -54,7 +54,7 @@ class DataPlotterControl(QWidget):
         self.init_ui()
 
     def add_data(self, data_plotter):
-        print(f"Adding data {data_plotter._label}")
+        # print(f"Adding data {data_plotter._label}")
         self.data_list.append(data_plotter)
         old_dim = self.dimension_spinbox.value()
         new_dim = data_plotter.x_dim
@@ -68,7 +68,7 @@ class DataPlotterControl(QWidget):
         if data_plotter in self.data_list:
             idx = self.data_list.index(data_plotter)
             self.data_list.pop(idx)
-            print(f"Removed {idx}, data list len: {len(self.data_list)}")
+            # print(f"Removed {idx}, data list len: {len(self.data_list)}")
             self.indicesUpdated.disconnect(data_plotter.update_indices)
         data_plotter.clear()
 
@@ -140,8 +140,8 @@ class DataPlotterControl(QWidget):
 
     def dimension_changed(self):
         # Update the dimension in DataPlotter
-        print(f"New dimension {self.dimension_spinbox.value()}")
-        print(f"Data list len: {len(self.data_list)}")
+        # print(f"New dimension {self.dimension_spinbox.value()}")
+        # print(f"Data list len: {len(self.data_list)}")
         for data_plotter in self.data_list:
             data_plotter.x_dim = self.dimension_spinbox.value()
         # Recreate the sliders
@@ -163,7 +163,7 @@ class DataPlotterControl(QWidget):
         function
             A callback function to be connected to the slider's valueChanged signal.
         """
-        print("Sliders changed")
+        # print("Sliders changed")
         indices = []
         for s in self.sliders:
             value = s.value()
@@ -314,8 +314,8 @@ class MplCanvas(FigureCanvasQTAgg):
         return int(width / self.aspect_ratio)
 
     def plot(self, xlist, y, artist=None, **kwargs):
-        print(f"plot x list {len(xlist)}")
-        print(f"plot y shape {y.shape}")
+        # print(f"plot x list {len(xlist)}")
+        # print(f"plot y shape {y.shape}")
         if len(y.shape) == 1:
             # print(f"plot x shape {xlist[0].shape}")
             if self.currentDim != 1:

@@ -36,14 +36,14 @@ class PlotItem(QWidget):
         self.dataPlotters = {}
         self._plot_hints = getPlotHints(self._run)
         self._axhints = getAxisHints(self._plot_hints)
-        print("Axhints")
-        print(self._axhints)
+        # print("Axhints")
+        # print(self._axhints)
         xkeys, ykeys = getRunKeys(self._run)
         yfiltered = filterHintedKeys(self._plot_hints, ykeys)
         self.xkeyDict = xkeys
         self.ykeyDict = yfiltered
-        print(self.xkeyDict)
-        print(self.ykeyDict)
+        # print(self.xkeyDict)
+        # print(self.ykeyDict)
         self.all_ykeyDict = ykeys
         self._show_all = False
         self._hintedrows = []
@@ -88,8 +88,8 @@ class PlotItem(QWidget):
             self._expected_points = self._run.start.get("num_points", -1)
         # print("dynamic")
         if self._run.metadata.get("stop", None) is not None:
-            print("Converting from dynamic to static")
-            print(self._run.metadata["stop"])
+            # print("Converting from dynamic to static")
+            # print(self._run.metadata["stop"])
             self._dynamic = False
             if self.timer is not None:
                 self.timer.stop()
@@ -213,13 +213,13 @@ class PlotItem(QWidget):
                 xlist_reordered = xlist + xadditions
                 xkeys = self._checked_x + xadditional_keys
                 y_reordered = y
-            if len(y_reordered.shape) != len(xlist_reordered):
-                print(xkeys, ykeys, xadditional_keys)
+            # if len(y_reordered.shape) != len(xlist_reordered):
+            # print(xkeys, ykeys, xadditional_keys)
             if key in self.dataPlotters:
-                print(f"Update {key}: {y_reordered.shape}")
+                # print(f"Update {key}: {y_reordered.shape}")
                 self.dataPlotters[key].update_data(xlist_reordered, y_reordered)
             else:
-                print(f"New Data {key}: {y_reordered.shape}")
+                # print(f"New Data {key}: {y_reordered.shape}")
                 self.dataPlotters[key] = self._plot.addPlotData(
                     xlist_reordered, y_reordered, xkeys, key
                 )
