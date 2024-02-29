@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QTableView,
     QFileDialog,
 )
-from qtpy.QtCore import Signal
+from qtpy.QtCore import Signal, QSortFilterProxyModel
 from tiled.client import from_uri, from_profile
 from tiled_wrapper.databroker.catalog import WrappedDatabroker
 from tiled_wrapper.processed.catalog import WrappedAnalysis
@@ -29,6 +29,7 @@ from catalogTable import CatalogTableModel
 from listTableModel import RunListTableModel
 from plotItem import PlotItem
 from search import DateSearchWidget, ScantypeSearch
+from os.path import exists
 
 
 def wrap_catalog(catalog):
@@ -121,7 +122,13 @@ class ProfileSource(QWidget):
 class KafkaSource(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        default_file = "/etc/bluesky/kafka.yml"
         self.config = QPushButton("Pick Kafka Config File")
+        if exists(default_file):
+            self.selected_file = default_file
+        else:
+            self.selected_file = None
+        self.file_label = QLabel(f"Current file: {self.selected_file}")
         self.bl_label = QLabel("Beamline Acronym")
         self.bl_input = QLineEdit()
         self.selected_file = None
@@ -130,6 +137,7 @@ class KafkaSource(QWidget):
         bl_layout.addWidget(self.bl_label)
         bl_layout.addWidget(self.bl_input)
         layout.addWidget(self.config)
+        layout.addWidget(self.file_label)
         layout.addLayout(bl_layout)
         self.setLayout(layout)
         self.config.clicked.connect(self.makeFilePicker)
@@ -138,6 +146,7 @@ class KafkaSource(QWidget):
         file_dialog = QFileDialog()
         if file_dialog.exec_():
             self.selected_file = file_dialog.selectedFiles()[0]
+            self.file_label.setText(f"Current file: {self.selected_file}")
 
     def getSource(self):
         config_file = self.selected_file
@@ -235,15 +244,21 @@ class KafkaView(QWidget):
         self.data_view = QTableView(self)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
         self.table_model = CatalogTableModel(self.catalog.v2, chunk_size=1)
-        self.data_view.setModel(self.table_model)
+        self.proxyModel = QSortFilterProxyModel()
+        self.proxyModel.setSourceModel(self.table_model)
+        self.data_view.setModel(self.proxyModel)
 
+        self.filterLineEdit = QLineEdit()
+        self.filterLineEdit.textChanged.connect(self.filterChanged)
+
+        layout.addWidget(self.filterLineEdit)
         layout.addWidget(self.data_view)
         layout.addWidget(self.plot_button1)
 
         self.setLayout(layout)
 
         self.dispatcher.subscribe(self.catalog.v1.insert)
-        self.dispatcher.subscribe(stream_documents_into_runs(self.add_run))
+        self.dispatcher.subscribe(self.add_run, name="start")
         self.dispatcher.start()
 
     def emit_add_rows(self):
@@ -253,14 +268,22 @@ class KafkaView(QWidget):
             if index.column() == 0:  # Check if the column is 0
                 key = index.data()  # Get the key from the cell data
                 data = PlotItem(
-                    self.catalog.v2[key], dynamic=True
+                    self.catalog.v2[key], self.catalog.v2, dynamic=True
                 )  # Fetch the data using the key
                 selected_data.append(data)
         self.add_rows_current_plot.emit(selected_data)
 
-    def add_run(self, run):
+    def add_run(self, name, doc):
         # self.runs.append(run)
         self.table_model.updateCatalog()
+
+    def filterChanged(self, text):
+        # Set the filter regexp based on the text input
+        self.proxyModel.setFilterRegExp(text)
+        # Assuming we're filtering based on the first column
+        self.proxyModel.setFilterKeyColumn(
+            2
+        )  # Change to the column you want to filter by
 
 
 class CatalogTableView(QWidget):

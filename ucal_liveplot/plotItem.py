@@ -86,7 +86,7 @@ class PlotItem(QWidget):
     def _dynamic_update(self):
         if self._expected_points is None:
             self._expected_points = self._run.start.get("num_points", -1)
-        print("dynamic")
+        # print("dynamic")
         if self._run.metadata.get("stop", None) is not None:
             print("Converting from dynamic to static")
             print(self._run.metadata["stop"])
@@ -95,10 +95,10 @@ class PlotItem(QWidget):
                 self.timer.stop()
                 self.timer = None
         elif self._catalog is not None:
-            print("Updating Run from Catalog")
+            # print("Updating Run from Catalog")
             self._run = self._catalog[self.uid]
-        else:
-            print("Catalog is None")
+        # else:
+        # print("Catalog is None")
         self.update_plot_signal.emit()
 
     def set_row_visibility(self, show_all_rows):
@@ -171,19 +171,26 @@ class PlotItem(QWidget):
             data_plotter.deleteLater()
 
     def plotCheckedData(self):
-        # print("plotCheckedData")
+        print("plotCheckedData")
         if self._checked_x is None or self._checked_y is None:
             return
 
+        if getattr(self, "_plot", None) is None:
+            return
+
+        # print(self._checked_x, self._checked_y)
         xlist, ylist, normlist = self.getCheckedData()
         ykeys = self._checked_y
         xdim = len(xlist)
-        max_ydim = max([len(y.shape) for y in ylist])
-        plot_dim = max_ydim
+        min_ydim = min([len(y.shape) for y in ylist])
 
         xlist, ylist = self.transformData(xlist, ylist, normlist)
 
         for key, y in zip(ykeys, ylist):
+            if len(y.shape) > min_ydim:
+                print(
+                    f"{key} with dimension {y.shape} higher dimensionality than other data"
+                )
             if key in self._axhints:
                 xadditions = [self.getAxis(axkey) for axkey in self._axhints[key]]
                 xadditional_keys = [axkey[-1] for axkey in self._axhints[key]]
@@ -206,11 +213,13 @@ class PlotItem(QWidget):
                 xlist_reordered = xlist + xadditions
                 xkeys = self._checked_x + xadditional_keys
                 y_reordered = y
+            if len(y_reordered.shape) != len(xlist_reordered):
+                print(xkeys, ykeys, xadditional_keys)
             if key in self.dataPlotters:
-                # print(f"Update {key}: {y_reordered.shape}")
+                print(f"Update {key}: {y_reordered.shape}")
                 self.dataPlotters[key].update_data(xlist_reordered, y_reordered)
             else:
-                # print(f"New Data {key}: {y.shape}")
+                print(f"New Data {key}: {y_reordered.shape}")
                 self.dataPlotters[key] = self._plot.addPlotData(
                     xlist_reordered, y_reordered, xkeys, key
                 )

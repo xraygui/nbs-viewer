@@ -6,8 +6,9 @@ from qtpy.QtWidgets import (
     QSlider,
     QLabel,
     QSpinBox,
+    QSizePolicy,
 )
-from qtpy.QtCore import Qt, Signal, QObject, QTimer, Slot
+from qtpy.QtCore import Qt, Signal, QObject, QTimer, Slot, QSize
 
 import matplotlib
 import numpy as np
@@ -237,7 +238,7 @@ class DataPlotter(QWidget):
             self._indices = indices
         else:
             indices = self._indices
-        print(f"DataPlotter {self._label}")
+        # print(f"DataPlotter {self._label}")
         xlistmod = []
         # self.dimension needs to be set better?
         # indices need to account for extra axes from detector
@@ -262,7 +263,7 @@ class DataPlotter(QWidget):
         # print("update data")
         self._x = x
         self._y = y
-        self.plot_data()
+        self.artist = self.plot_data()
 
     @Slot(tuple)
     def update_indices(self, indices):
@@ -285,7 +286,7 @@ class DataPlotter(QWidget):
                 self.artist.remove()
             else:
                 self.canvas.clear()
-            self.canvas.draw()
+        self.canvas.draw()
         self.artist = None
 
     def remove(self):
@@ -298,11 +299,23 @@ class MplCanvas(FigureCanvasQTAgg):
         self.axes = self.fig.add_subplot(111)
         self.currentDim = 1
         self._autoscale = True
-        super(MplCanvas, self).__init__(self.fig)
+        super().__init__(self.fig)
+        self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+        self.aspect_ratio = width / height
+
+    def sizeHint(self):
+        # Provide a size hint that respects the aspect ratio
+        width = self.width()
+        height = int(width / self.aspect_ratio)
+        return QSize(width, height)
+
+    def heightForWidth(self, width):
+        # Calculate the height for a given width to maintain the aspect ratio
+        return int(width / self.aspect_ratio)
 
     def plot(self, xlist, y, artist=None, **kwargs):
-        # print(f"plot x list {len(xlist)}")
-        # print(f"plot y shape {y.shape}")
+        print(f"plot x list {len(xlist)}")
+        print(f"plot y shape {y.shape}")
         if len(y.shape) == 1:
             # print(f"plot x shape {xlist[0].shape}")
             if self.currentDim != 1:
@@ -316,13 +329,13 @@ class MplCanvas(FigureCanvasQTAgg):
                 artist.set_data(xlist[0], y)
             self.currentDim = 1
             self.autoscale()
-        elif len(y.shape) == 2:
+        elif len(y.shape) == 2 and len(xlist) > 1:
             self.axes.cla()
             artist = self.axes.contourf(xlist[-1], xlist[-2], y)
             # artist = self.axes.imshow(y)
             self.currentDim = 2
         else:
-            print(f"Unsupported dimensionality! {y.shape}")
+            print(f"Unsupported dimensionality! {y.shape}, {len(xlist)}")
             artist = None
         self.draw()
         return artist
@@ -337,7 +350,7 @@ class MplCanvas(FigureCanvasQTAgg):
         Adjusts the y scale of the plot based on the maximum and minimum of the y data in lines
         """
         if self._autoscale:
-            print("Autoscaling")
+            # print("Autoscaling")
             lines = self.axes.get_lines()
             y_min = min([line.get_ydata().min() for line in lines])
             y_max = max([line.get_ydata().max() for line in lines])
@@ -348,8 +361,8 @@ class MplCanvas(FigureCanvasQTAgg):
             x_max = max([line.get_xdata().max() for line in lines])
             xspan = x_max - x_min
             self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
-        else:
-            print("Autoscale disabled")
+        # else:
+        # print("Autoscale disabled")
 
 
 class PlotWidget(QWidget):

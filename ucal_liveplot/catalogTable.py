@@ -1,4 +1,4 @@
-from qtpy.QtCore import QTimer, Qt, QVariant, QAbstractTableModel
+from qtpy.QtCore import QTimer, Qt, QVariant, QAbstractTableModel, QModelIndex
 from bluesky_widgets.qt.threading import create_worker
 from datetime import datetime
 
@@ -143,15 +143,16 @@ class CatalogTableModel(QAbstractTableModel):
         else:
             return QVariant()
 
-    def canFetchMore(self, parent=None):
+    def canFetchMore(self, parent=QModelIndex()):
         if parent.isValid():
             return False
         return self._current_num_rows < self._catalog_length
 
-    def fetchMore(self, parent=None):
+    def fetchMore(self, parent=QModelIndex()):
         if parent.isValid():
             return
         remainder = self._catalog_length - self._current_num_rows
+        print(f"remainder to fetch: {remainder}")
         rows_to_add = min(remainder, self._chunk_size)
         if rows_to_add <= 0:
             return
@@ -175,3 +176,5 @@ class CatalogTableModel(QAbstractTableModel):
 
     def updateCatalog(self):
         self._catalog_length = len(self.catalog)
+        if self.canFetchMore():
+            self.fetchMore()

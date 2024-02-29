@@ -11,6 +11,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QListWidget,
     QListWidgetItem,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt, Signal, QObject, QTimer
 
@@ -173,6 +174,11 @@ class BlueskyListWidget(QListWidget):
             Parent widget, by default None
         """
         super().__init__(parent)
+
+        sizePolicy = self.sizePolicy()
+        sizePolicy.setHorizontalPolicy(QSizePolicy.Minimum)
+        # sizePolicy.setVerticalPolicy(QSizePolicy.Minimum)
+        self.setSizePolicy(sizePolicy)
         self.itemSelectionChanged.connect(self.emit_selected_data)
         self._plotItems = {}
 
@@ -251,6 +257,30 @@ class ExclusiveCheckBoxGroup(QButtonGroup):
                     checkbox.setChecked(False)
 
 
+class MutuallyExclusiveCheckBoxGroups(QWidget):
+    buttonsChanged = Signal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(**kwargs)
+        self.buttonGroups = args
+        for group in self.buttonGroups:
+            group.buttonClicked.connect(self.uncheckOtherGroups)
+
+    def addGroup(self, buttonGroup):
+        self.buttonGroups.append(buttonGroup)
+        buttonGroup.buttonClicked.connect(self.uncheckOtherGroups)
+
+    def uncheckOtherGroups(self, clickedButton):
+        for group in self.buttonGroups:
+            if clickedButton not in group.buttons():
+                defaultExclusivity = group.exclusive()
+                group.setExclusive(False)
+                for button in group.buttons():
+                    button.setChecked(False)
+                group.setExclusive(defaultExclusivity)
+        self.buttonsChanged.emit()
+
+
 class DataDisplayWidget(QWidget):
     """
     The main organizing widget that combines a plot, a list of Bluesky runs,
@@ -311,6 +341,7 @@ class PlotControls(QWidget):
         super().__init__(parent)
         self.plot = plot
         self.data = None
+        self.allkeylist = []
         self.plotItem = None
         self.layout = QVBoxLayout(self)
 
@@ -350,6 +381,7 @@ class PlotControls(QWidget):
         return t
 
     def addPlotItem(self, plotItem):
+        print("Add Plot Item")
         if isinstance(plotItem, (list, tuple)):
             plotItem = plotItem[0]
         self.plotItem = plotItem
@@ -382,61 +414,113 @@ class PlotControls(QWidget):
 
         # Add the data
         norm_group = ExclusiveCheckBoxGroup(self)
-        # x_group = ExclusiveCheckBoxGroup(self)
-        x_group = QButtonGroup(self)
-        y_group = QButtonGroup(self)
-        y_group.setExclusive(False)
-        x_group.setExclusive(False)
+        silly_x_group = ExclusiveCheckBoxGroup(self)
+        y_group1d = QButtonGroup(self)
+        y_group2d = ExclusiveCheckBoxGroup(self)
+        y_group1d.setExclusive(False)
 
         checked_norm = self.plotItem._checked_norm
         checked_x = self.plotItem._checked_x
         checked_y = self.plotItem._checked_y
 
-        for i, key in enumerate(self.plotItem.rows):
+        any_y_checked = False
+
+        def add_xyn_buttons(key, i):
+
             key_label = QLabel(key)
             self.grid.addWidget(key_label, i + 1, 0)
             xbox = QCheckBox()
             self.grid.addWidget(xbox, i + 1, 1)
-            x_group.addButton(xbox, i)
             ybox = QCheckBox()
-            y_group.addButton(ybox, i)
             self.grid.addWidget(ybox, i + 1, 2)
             vertical_line = QFrame()
             vertical_line.setFrameShape(QFrame.VLine)
             self.grid.addWidget(vertical_line, i + 1, 3)
             normbox = QCheckBox()
             self.grid.addWidget(normbox, i + 1, 4)
-            norm_group.addButton(normbox, i)
 
             if checked_norm is not None and key in checked_norm:
                 normbox.setChecked(True)
             if checked_x is not None and key in checked_x:
                 xbox.setChecked(True)
-            if checked_y is not None and key in checked_y:
-                ybox.setChecked(True)
+
+            return xbox, ybox, normbox
+
+        i = 0
+        xgroups = {}
+        allkeylist = []
+        for xdim, xlist in self.plotItem.xkeyDict.items():
+            if not any([x in self.plotItem.rows for x in xlist]):
+                continue
+            else:
+                xgroups[xdim] = ExclusiveCheckBoxGroup()
+                for x in xlist:
+                    if x in self.plotItem.rows:
+                        allkeylist.append(x)
+                        xbox, ybox, nbox = add_xyn_buttons(x, i)
+                        xgroups[xdim].addButton(xbox, i)
+                        y_group1d.addButton(ybox, i)
+                        norm_group.addButton(nbox, i)
+                        i += 1
+
+        for ydim, ylist in self.plotItem.all_ykeyDict.items():
+            for y in ylist:
+                if y in self.plotItem.rows:
+                    allkeylist.append(y)
+                    xbox, ybox, nbox = add_xyn_buttons(y, i)
+                    silly_x_group.addButton(xbox, i)
+                    if ydim == 1:
+                        if checked_y is not None and y in checked_y:
+                            ybox.setChecked(True)
+                            any_y_checked = True
+                        y_group1d.addButton(ybox, i)
+                    else:
+                        y_group2d.addButton(ybox, i)
+                        if (
+                            checked_y is not None
+                            and y in checked_y
+                            and not any_y_checked
+                        ):
+                            ybox.setChecked(True)
+                            any_y_checked = True
+                    norm_group.addButton(nbox, i)
+                    i += 1
 
         self.norm_group = norm_group
-        self.y_group = y_group
-        self.x_group = x_group
-        for group in [self.norm_group, self.x_group, self.y_group]:
+        self.y_group1d = y_group1d
+        self.y_group2d = y_group2d
+        self.extra_x_group = silly_x_group
+        self.x_groups = xgroups
+        self.allkeylist = allkeylist
+        for group in [
+            self.norm_group,
+            self.extra_x_group,
+        ]:
             for button in group.buttons():
                 button.clicked.connect(self.checked_changed)
+        for group in self.x_groups.values():
+            for button in group.buttons():
+                button.clicked.connect(self.checked_changed)
+        self._exclusionary_y_group = MutuallyExclusiveCheckBoxGroups(
+            self.y_group1d, self.y_group2d
+        )
+        self._exclusionary_y_group.buttonsChanged.connect(self.checked_changed)
         self.add_data_button.setEnabled(True)
         self.clear_data_button.setEnabled(True)
 
     def checkedButtons(self):
-        x_checked_ids = [
-            self.plotItem.rows[self.x_group.id(button)]
-            for button in self.x_group.buttons()
-            if button.isChecked()
-        ]
-        y_checked_ids = [
-            self.plotItem.rows[self.y_group.id(button)]
-            for button in self.y_group.buttons()
-            if button.isChecked()
-        ]
+        x_checked_ids = []
+        y_checked_ids = []
+        for group in list(self.x_groups.values()) + [self.extra_x_group]:
+            for button in group.buttons():
+                if button.isChecked():
+                    x_checked_ids.append(self.allkeylist[group.id(button)])
+        for group in [self.y_group1d, self.y_group2d]:
+            for button in group.buttons():
+                if button.isChecked():
+                    y_checked_ids.append(self.allkeylist[group.id(button)])
         norm_checked_ids = [
-            self.plotItem.rows[self.norm_group.id(button)]
+            self.allkeylist[self.norm_group.id(button)]
             for button in self.norm_group.buttons()
             if button.isChecked()
         ]
@@ -456,6 +540,8 @@ class PlotControls(QWidget):
         if self.plotItem is None:
             return
         checked_x, checked_y, checked_norm = self.checkedButtons()
+        print("Checked Changed")
+        print(checked_x, checked_y, checked_norm)
         self.plotItem.update_checkboxes(checked_x, checked_y, checked_norm)
         if self.auto_add:
             self.add_data_to_plot()
