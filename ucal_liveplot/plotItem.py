@@ -65,7 +65,11 @@ class PlotItem(QWidget):
             self.timer.timeout.connect(self._dynamic_update)
             self.timer.start(1000)
             self._expected_points = None
+            self._num_points = None
         else:
+            self._num_points = self._run.start.get("num_points", -1)
+            if self._num_points == -1:
+                self._num_points = self._run.metadata.get("stop", {}).get("num_events", {}).get("primary", -1)
             self.timer = None
 
     @property
@@ -94,6 +98,10 @@ class PlotItem(QWidget):
             if self.timer is not None:
                 self.timer.stop()
                 self.timer = None
+            self._num_points = self._run.start.get("num_points", -1)
+            if self._num_points == -1:
+                self._num_points = self._run.metadata.get("stop", {}).get("num_events", {}).get("primary", -1)
+
         elif self._catalog is not None:
             # print("Updating Run from Catalog")
             self._run = self._catalog[self.uid]
@@ -241,7 +249,7 @@ class PlotItem(QWidget):
         if "shape" in self._run.start:
             xshape = self._run.start["shape"]
         else:
-            xshape = [self._run.start["num_points"]]
+            xshape = [self._num_points]
 
         if self._dynamic:
             # Lengths may be off due to uneven data updates
