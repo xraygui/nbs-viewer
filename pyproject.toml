@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sst_viewer"
+version = "0.1.0"
+description = "A simple SST Tiled viewer application."
+authors = [{ name = "Charles Titus", email = "ctitus@bnl.gov" }]
+readme = "README.md"
+keywords = ["SST", "viewer"]
+dependencies = [
+"numpy",
+"qtpy",
+"matplotlib",
+"tiled >= 0.1.0a105",
+"bluesky-widgets >= 0.0.15",
+"nslsii",
+"databroker >= 2.0.0a105",
+]
+
+[project.scripts]
+sst-viewer = "sst_viewer.viewer:main"
+
+[tool.setuptools]
+packages = ["sst_viewer"]
