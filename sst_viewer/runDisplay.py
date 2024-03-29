@@ -20,8 +20,8 @@ from tiled.client import show_logs
 
 import matplotlib
 import numpy as np
-from plotItem import PlotItem
-from plotCanvas import PlotWidget
+from .plotItem import PlotItem
+from .plotCanvas import PlotWidget
 
 # show_logs()
 

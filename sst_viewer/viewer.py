@@ -1,7 +1,7 @@
 from qtpy.QtWidgets import QApplication, QHBoxLayout, QWidget, QSplitter
 from qtpy.QtCore import Qt
-from datasource import DataSelection
-from runDisplay import DataDisplayWidget
+from .datasource import DataSelection
+from .runDisplay import DataDisplayWidget
 
 
 class Viewer(QWidget):
@@ -23,8 +23,12 @@ class Viewer(QWidget):
         self.setLayout(self.layout)
 
 
-if __name__ == "__main__":
+def main():
     app = QApplication([])
     viewer = Viewer()
     viewer.show()
     app.exec_()
+
+
+if __name__ == "__main__":
+    main()

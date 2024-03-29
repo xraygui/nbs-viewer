@@ -13,9 +13,16 @@ def _run_to_row(run):
     uid = start["uid"]
     date = datetime.fromtimestamp(start.get("time", 0)).isoformat()
     scan_id = start["scan_id"]
-    scantype = start.get("scantype", start.get("plan_name", "None"))
+    plan_name = start.get("plan_name", "None")
+    scantype = start.get("scantype", plan_name)
+    sample_name = start.get("sample_name", "None")
+    sample_id = start.get("sample_id", "None")
     num_points = start.get("num_points", -1)
-    return (uid, scan_id, scantype, date, num_points)
+    if num_points == -1:
+        num_points = (
+            run.metadata.get("stop", {}).get("num_events", {}).get("primary", -1)
+        )
+    return (uid, date, scan_id, scantype, plan_name, sample_name, sample_id, num_points)
 
 
 def _load_data(get_data, indexes):
@@ -61,7 +68,17 @@ class CatalogTableModel(QAbstractTableModel):
         self._data = {}
         self._uids = []
         self._fetched_rows = 0
-        self.columns = ["uid", "scan_id", "scantype", "date", "points"]
+        self.columns = [
+            "uid",
+            "date",
+            "scan_id",
+            "scantype",
+            "plan_name",
+            "sample_name",
+            "sample_id",
+            "num_points",
+        ]
+        # self.columns = ["uid", "scan_id", "scantype", "date", "points"]
 
         self._work_queue = collections.deque()
         # Set of active workers

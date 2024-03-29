@@ -20,16 +20,14 @@ from tiled_wrapper.databroker.catalog import WrappedDatabroker
 from tiled_wrapper.processed.catalog import WrappedAnalysis
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
-from bluesky_widgets.utils.streaming import stream_documents_into_runs
 from databroker import temp as temporaryDB
 import uuid
 
-from catalogTree import CatalogPicker
-from catalogTable import CatalogTableModel
-from listTableModel import RunListTableModel
-from plotItem import PlotItem
-from search import DateSearchWidget, ScantypeSearch
+from .catalogTree import CatalogPicker
+from .catalogTable import CatalogTableModel
+from .plotItem import PlotItem
 from os.path import exists
+from .catalogView import CatalogTableView
 
 
 def wrap_catalog(catalog):
@@ -183,13 +181,6 @@ class DataSourcePicker(QDialog):
         for k, s in self.data_sources.items():
             self.source_type.addItem(k)
             self.layout_switcher.addWidget(s)
-        # self.profile_widget = ProfileSource()
-        # self.uri_widget = URISource()
-        # self.kafka_widget = KafkaSource()
-
-        # self.layout_switcher.addWidget(self.uri_widget)
-        # self.layout_switcher.addWidget(self.profile_widget)
-        # self.layout_switcher.addWidget(self.kafka_widget)
 
         self.source_type.currentIndexChanged.connect(self.switch_widget)
 
@@ -212,19 +203,6 @@ class DataSourcePicker(QDialog):
     def getSource(self):
         # catalog, label = self.layout_switcher.currentWidget().getSource()
         return self.layout_switcher.currentWidget().getSource()
-
-        # test_uid = catalog.items_indexer[0][0]
-        # # Awful dirty hack
-        # typical_uid4_len = 36
-        # if len(test_uid) < typical_uid4_len:
-        #     # Probably not really a UID, and we have a nested catalog
-        #     picker = CatalogPicker(catalog, self)
-        #     if picker.exec_():
-        #         selected_keys = picker.selected_entry
-        #         for key in selected_keys:
-        #             catalog = catalog[key]
-        #             label += ":" + key
-        # return wrap_catalog(catalog), label
 
 
 class KafkaView(QWidget):
@@ -284,58 +262,6 @@ class KafkaView(QWidget):
         self.proxyModel.setFilterKeyColumn(
             2
         )  # Change to the column you want to filter by
-
-
-class CatalogTableView(QWidget):
-    add_rows_current_plot = Signal(object)
-    add_rows_new_plot = Signal(object)
-
-    def __init__(self, catalog, parent=None):
-        super().__init__(parent)
-        self.parent_catalog = catalog
-        self.filter_list = []
-        self.filter_list.append(DateSearchWidget(self))
-        self.filter_list.append(ScantypeSearch(self))
-        self.display_button = QPushButton("Display Selection", self)
-        self.display_button.clicked.connect(self.refresh_filters)
-        self.plot_button1 = QPushButton("Add Data to Current Plot", self)
-        self.plot_button1.clicked.connect(self.emit_add_rows)
-        self.data_view = QTableView(self)
-        self.data_view.setSelectionBehavior(QTableView.SelectRows)
-
-        layout = QVBoxLayout()
-        for widget in self.filter_list:
-            layout.addWidget(widget)
-        layout.addWidget(self.display_button)
-        layout.addWidget(self.data_view)
-        layout.addWidget(self.plot_button1)
-        self.setLayout(layout)
-
-    def rows_selected(self, selected, deselected):
-        selected_rows = selected.indexes()
-        if len(selected_rows) > 0:
-            self.plot_button1.setEnabled(True)
-        else:
-            self.plot_button1.setEnabled(False)
-
-    def emit_add_rows(self):
-        selected_rows = self.data_view.selectionModel().selectedRows()
-        selected_data = []
-        for index in selected_rows:
-            if index.column() == 0:  # Check if the column is 0
-                key = index.data()  # Get the key from the cell data
-                data = self.parent_catalog[key]  # Fetch the data using the key
-                selected_data.append(PlotItem(data))
-        self.add_rows_current_plot.emit(selected_data)
-
-    def refresh_filters(self):
-        catalog = self.parent_catalog
-        for f in self.filter_list:
-            catalog = f.filter_catalog(catalog)
-        # add some intelligent cache via UIDs?
-        table_model = CatalogTableModel(catalog)
-        self.data_view.setModel(table_model)
-        self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)
 
 
 class DataSelection(QWidget):
