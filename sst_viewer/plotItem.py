@@ -179,7 +179,7 @@ class PlotItem(QWidget):
             data_plotter.deleteLater()
 
     def plotCheckedData(self):
-        print("plotCheckedData")
+        # print("plotCheckedData")
         if self._checked_x is None or self._checked_y is None:
             return
 
@@ -261,6 +261,7 @@ class PlotItem(QWidget):
                 normmin = min([norm.shape[0] for norm in normlist])
 
             minidx = min(xmin, ymin, normmin)
+            self._num_points = minidx
             minslice = slice(None, minidx)
             xlist = [x[minslice] for n, x in enumerate(xlist)]
             ylist = [y[minslice] for y in ylist]
