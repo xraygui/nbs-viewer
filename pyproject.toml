@@ -17,6 +17,7 @@ dependencies = [
 "bluesky-widgets >= 0.0.15",
 "nslsii",
 "databroker >= 2.0.0a105",
+"tiled_wrapper"
 ]
 
 [project.scripts]
