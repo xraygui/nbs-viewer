@@ -3,9 +3,9 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sst_viewer"
+name = "nbs-viewer"
 version = "0.1.0"
-description = "A simple SST Tiled viewer application."
+description = "A simple Tiled viewer application."
 authors = [{ name = "Charles Titus", email = "ctitus@bnl.gov" }]
 readme = "README.md"
 keywords = ["SST", "viewer"]
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sst-viewer = "sst_viewer.viewer:main"
+nbs-viewer = "nbs_viewer.viewer:main"
 
 [tool.setuptools]
-packages = ["sst_viewer"]
+packages = ["nbs_viewer"]
