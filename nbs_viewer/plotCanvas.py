@@ -15,10 +15,7 @@ import numpy as np
 
 matplotlib.use("Qt5Agg")
 
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg,
-    NavigationToolbar2QT as NavigationToolbar,
-)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
@@ -256,7 +253,7 @@ class DataPlotter(QWidget):
         x = xlistmod[-self.x_dim :]
         # print(len(x))
         # print(y.shape)
-        artist = self.canvas.plot(x, y, self.artist)
+        artist = self.canvas.plot(x, y, self.artist, label=self._label)
         return artist
 
     def update_data(self, x, y):
@@ -291,6 +288,17 @@ class DataPlotter(QWidget):
 
     def remove(self):
         self.parent().remove_data(self)
+
+
+class NavigationToolbar(NavigationToolbar2QT):
+
+    def __init__(self, *args, **kwargs):
+        self.toolitems.append(("Autoscale", "Autoscale", "help", "autoscale"))
+        super().__init__(*args, **kwargs)
+
+    def autoscale(self):
+        self.canvas.autoscale()
+        self.canvas.draw()
 
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -328,7 +336,8 @@ class MplCanvas(FigureCanvasQTAgg):
                 # print(f"Updating artist {artist}")
                 artist.set_data(xlist[0], y)
             self.currentDim = 1
-            self.autoscale()
+            if self._autoscale:
+                self.autoscale()
         elif len(y.shape) == 2 and len(xlist) > 1:
             self.axes.cla()
             artist = self.axes.contourf(xlist[-1], xlist[-2], y)
@@ -349,20 +358,18 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Adjusts the y scale of the plot based on the maximum and minimum of the y data in lines
         """
-        if self._autoscale:
-            # print("Autoscaling")
-            lines = self.axes.get_lines()
-            y_min = min([line.get_ydata().min() for line in lines])
-            y_max = max([line.get_ydata().max() for line in lines])
-            span = y_max - y_min
-            self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
 
-            x_min = min([line.get_xdata().min() for line in lines])
-            x_max = max([line.get_xdata().max() for line in lines])
-            xspan = x_max - x_min
-            self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
-        # else:
-        # print("Autoscale disabled")
+        # print("Autoscaling")
+        lines = self.axes.get_lines()
+        y_min = min([line.get_ydata().min() for line in lines])
+        y_max = max([line.get_ydata().max() for line in lines])
+        span = y_max - y_min
+        self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+
+        x_min = min([line.get_xdata().min() for line in lines])
+        x_max = max([line.get_xdata().max() for line in lines])
+        xspan = x_max - x_min
+        self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
 
 
 class PlotWidget(QWidget):

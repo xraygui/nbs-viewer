@@ -353,6 +353,14 @@ class PlotControls(QWidget):
         auto_add_layout.addWidget(self.auto_add_box)
         self.layout.addLayout(auto_add_layout)
 
+        dynamic_update_layout = QHBoxLayout()
+        dynamic_update_layout.addWidget(QLabel("Dynamic Update"))
+        self.dynamic_update_box = QCheckBox()
+        self.dynamic_update_box.setChecked(False)
+
+        dynamic_update_layout.addWidget(self.dynamic_update_box)
+        self.layout.addLayout(dynamic_update_layout)
+
         show_all_layout = QHBoxLayout()
         show_all_layout.addWidget(QLabel("Show all rows"))
         self.show_all = QCheckBox()
@@ -386,6 +394,7 @@ class PlotControls(QWidget):
             plotItem = plotItem[0]
         self.plotItem = plotItem
         self.plotItem.attach_plot(self.plot)
+        self.dynamic_update_box.clicked.connect(self.plotItem.setDynamic)
         self.update_display()
 
     def update_display(self):

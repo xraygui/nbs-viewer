@@ -57,19 +57,35 @@ class PlotItem(QWidget):
             self._allrows += ylist
         self.setDefaultChecked()
         self._description = blueskyrun_to_string(self._run)
-        self._uid = self._run.metadata["start"]["scan_id"]
+        self._uid = self._run.metadata["start"]["uid"]
+        self._scanid = self._run.metadata["start"]["scan_id"]
         self._expected_points = self._run.start.get("num_points", -1)
         self.update_plot_signal.connect(self.plotCheckedData)
         if self._dynamic:
-            self.timer = QTimer(self)
-            self.timer.timeout.connect(self._dynamic_update)
-            self.timer.start(1000)
-            self._expected_points = None
-            self._num_points = None
+            self.startDynamicUpdates()
         else:
             self._num_points = self._run.start.get("num_points", -1)
             if self._num_points == -1:
-                self._num_points = self._run.metadata.get("stop", {}).get("num_events", {}).get("primary", -1)
+                self._num_points = (
+                    self._run.metadata.get("stop", {})
+                    .get("num_events", {})
+                    .get("primary", -1)
+                )
+            self.timer = None
+
+    def startDynamicUpdates(self):
+        self.stopDynamicUpdates()
+        self._dynamic = True
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._dynamic_update)
+        self.timer.start(2000)
+        self._num_points = None
+
+    def stopDynamicUpdates(self):
+        self._dynamic = False
+        print("Stopping Dynamic Updates")
+        if self.timer is not None:
+            self.timer.stop()
             self.timer = None
 
     @property
@@ -90,23 +106,22 @@ class PlotItem(QWidget):
     def _dynamic_update(self):
         if self._expected_points is None:
             self._expected_points = self._run.start.get("num_points", -1)
-        # print("dynamic")
+        print("dynamic update triggered")
         if self._run.metadata.get("stop", None) is not None:
             # print("Converting from dynamic to static")
             # print(self._run.metadata["stop"])
-            self._dynamic = False
-            if self.timer is not None:
-                self.timer.stop()
-                self.timer = None
+            self.stopDynamicUpdates()
             self._num_points = self._run.start.get("num_points", -1)
             if self._num_points == -1:
-                self._num_points = self._run.metadata.get("stop", {}).get("num_events", {}).get("primary", -1)
-
+                self._num_points = (
+                    self._run.metadata.get("stop", {})
+                    .get("num_events", {})
+                    .get("primary", -1)
+                )
         elif self._catalog is not None:
-            # print("Updating Run from Catalog")
+            print("No Stop Doc, Updating Run from Catalog")
             self._run = self._catalog[self.uid]
-        # else:
-        # print("Catalog is None")
+
         self.update_plot_signal.emit()
 
     def set_row_visibility(self, show_all_rows):
@@ -114,6 +129,13 @@ class PlotItem(QWidget):
 
     def attach_plot(self, plot):
         self._plot = plot
+
+    def setDynamic(self, enabled):
+        if enabled:
+            self.startDynamicUpdates()
+        else:
+            self.stopDynamicUpdates()
+        print(f"Dynamic set to {enabled}")
 
     def setDefaultChecked(self):
         self._checked_x = []
@@ -246,11 +268,6 @@ class PlotItem(QWidget):
         else:
             normlist = []
 
-        if "shape" in self._run.start:
-            xshape = self._run.start["shape"]
-        else:
-            xshape = [self._num_points]
-
         if self._dynamic:
             # Lengths may be off due to uneven data updates
             xmin = min([x.shape[0] for x in xlist])
@@ -268,10 +285,12 @@ class PlotItem(QWidget):
             normlist = [norm[minslice] for norm in normlist]
 
             if minidx == self._expected_points:
-                self._dynamic = False
-                if self.timer is not None:
-                    self.timer.stop()
-                    self.timer = None
+                self.stopDynamicUpdates()
+
+        if "shape" in self._run.start:
+            xshape = self._run.start["shape"]
+        else:
+            xshape = [self._num_points]
 
         xlist_reshape = [reshape_truncated_array(x, xshape) for x in xlist]
         ylist_reshape = [reshape_truncated_array(y, xshape) for y in ylist]
