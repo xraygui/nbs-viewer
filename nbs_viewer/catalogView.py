@@ -108,26 +108,41 @@ class CustomHeaderView(QHeaderView):
 
 class ReverseModel(QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
-        self.invert = True
+        self.invert = False
         super().__init__(*args, **kwargs)
+        self.setDynamicSortFilter(True)
 
     def mapFromSource(self, index):
+        model = self.sourceModel()
         if self.invert:
-            model = self.sourceModel()
-            newRow = model.rowCount() - index.row()
-            newIndex = model.createIndex(newRow, index.column())
-            return newIndex
+            newRow = model._catalog_length - index.row() - 1
+            newIndex = model.index(newRow, index.column())
+            # print(
+            #     f"RowCount: {model._catalog_length} Original index - row: {index.row()}, column: {index.column()}; New index - row: {newIndex.row()}, column: {newIndex.column()}"
+            # )
         else:
-            return index
+            newIndex = model.index(index.row(), index.column())
+        return newIndex
 
     def mapToSource(self, index):
+        model = self.sourceModel()
         if self.invert:
-            model = self.sourceModel()
-            newRow = model.rowCount() - index.row()
-            newIndex = model.createIndex(newRow, index.column())
-            return newIndex
+            newRow = model._catalog_length - index.row() - 1
+            newIndex = model.index(newRow, index.column())
+            # print(
+            #     f"RowCount: {model._catalog_length} Original index - row: {index.row()}, column: {index.column()}; New index - row: {newIndex.row()}, column: {newIndex.column()}"
+            # )
         else:
-            return index
+            newIndex = model.index(index.row(), index.column())
+        return newIndex
+
+    def toggleInvert(self):
+        """
+        Toggle the inversion of row order and refresh the view.
+        """
+        self.invert = not self.invert
+        self.sourceModel()._invert = self.invert
+        self.invalidate()  # This will refresh the view
 
 
 class CatalogTableView(QWidget):
@@ -137,23 +152,35 @@ class CatalogTableView(QWidget):
     def __init__(self, catalog, parent=None):
         super().__init__(parent)
         self.parent_catalog = catalog
-        self.filter_list = []
-        self.filter_list.append(DateSearchWidget(self))
-        self.filter_list.append(ScantypeSearch(self))
-        self.display_button = QPushButton("Display Selection", self)
-        self.display_button.clicked.connect(self.refresh_filters)
-        self.plot_button1 = QPushButton("Add Data to Current Plot", self)
-        self.plot_button1.clicked.connect(self.emit_add_rows)
 
         self.data_view = QTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
 
+        self.filter_list = []
+        self.filter_list.append(DateSearchWidget(self))
+        self.filter_list.append(ScantypeSearch(self))
+        self.display_button = QPushButton("Display Selection", self)
+        self.display_button.clicked.connect(self.refresh_filters)
+        self.invertButton = QPushButton("Reverse Data", self)
+        self.invertButton.setEnabled(False)  # Enable the invertButton
+        self.plot_button1 = QPushButton("Add Data to Current Plot", self)
+        self.plot_button1.clicked.connect(self.emit_add_rows)
+
+        self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
+        self.scrollToBottomButton.clicked.connect(self.data_view.scrollToBottom)
+
+        self.scrollToTopButton = QPushButton("Scroll to Top", self)
+        self.scrollToTopButton.clicked.connect(self.data_view.scrollToTop)
+
         layout = QVBoxLayout()
         for widget in self.filter_list:
             layout.addWidget(widget)
         layout.addWidget(self.display_button)
+        layout.addWidget(self.scrollToTopButton)
+        layout.addWidget(self.scrollToBottomButton)
+        layout.addWidget(self.invertButton)
         layout.addWidget(self.data_view)
         layout.addWidget(self.plot_button1)
         self.setLayout(layout)
@@ -181,8 +208,11 @@ class CatalogTableView(QWidget):
             catalog = f.filter_catalog(catalog)
         # add some intelligent cache via UIDs?
         table_model = CatalogTableModel(catalog)
-        self.data_view.setModel(table_model)
+        # self.data_view.setModel(table_model)
         # reverse = ReverseModel()
-        # reverse.setSourceModel(table_model)
-        # self.data_view.setModel(reverse)
+        reverse = ReverseModel()
+        reverse.setSourceModel(table_model)
+        self.invertButton.clicked.connect(reverse.toggleInvert)
+        self.invertButton.setEnabled(True)  # Enable the invertButton
+        self.data_view.setModel(reverse)
         self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)

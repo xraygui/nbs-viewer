@@ -39,13 +39,18 @@ def _load_data(get_data, indexes):
 
 
 def _load_chunk(get_chunk, indexes):
+    fetched_ranges = []
     for index in indexes:
         print(index)
+        # Check if index[0] is within any previously fetched range
+        if any(start <= index[0] <= end for start, end in fetched_ranges):
+            continue
         try:
             rows = get_chunk(index[0], index[1])
         except Exception as ex:
             print("Something went wrong", ex)
             continue
+        fetched_ranges.append((index[0], index[1]))
         for row, i in zip(rows, range(index[0], index[1] + 1)):
             yield i, row
 
@@ -59,11 +64,14 @@ class CatalogTableModel(QAbstractTableModel):
         ----------
         catalog : Tiled catalog
             A Tiled catalog containing Bluesky runs to be displayed in the table.
+        chunk_size : int, optional
+            The number of rows to fetch per chunk, by default 50.
         """
         super().__init__()
-        self._current_num_rows = 0
         self.catalog = catalog
         self._catalog_length = len(self.catalog)
+        self._invert = False
+        self._current_num_rows = 0
         self._chunk_size = chunk_size
         self._data = {}
         self._uids = []
@@ -118,10 +126,11 @@ class CatalogTableModel(QAbstractTableModel):
 
     def on_row_loaded(self, payload):
         rowNum, row = payload
+        # print(f"loading {rowNum} into data")
         for i, item in enumerate(row):
             self._data[self.createIndex(rowNum, i)] = item
         self.dataChanged.emit(
-            self.createIndex(rowNum, 0), self.createIndex(rowNum, self.columnCount())
+            self.createIndex(rowNum, 0), self.createIndex(rowNum, len(row) - 1), []
         )
 
     def headerData(self, section, orientation, role):
@@ -129,37 +138,38 @@ class CatalogTableModel(QAbstractTableModel):
             return self.columns[section]
 
     def get_chunk(self, start, stop):
+        print(f"Fetching chunk for {start} to {stop}")
         return [_run_to_row(run) for run in self.catalog.values()[start : stop + 1]]
-
-    def get_data(self, row, column):
-        # Outdated, use chunk loading! Never use items_indexer
-        # needs to re-implement caching mechanism
-        print("Fetching item")
-        uid, item = self.catalog.items_indexer[row]
-        print(f"Found UID {uid}")
-        if column == 0:
-            return uid
-        elif self.columns[column] == "date":
-            d = datetime.fromtimestamp(item.metadata["start"].get("time", 0))
-            return d.isoformat()
-        else:
-            return item.metadata["start"].get(self.columns[column], "None")
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():  # does > 0 bounds check
+            # print(f"Invalid index row: {index.row()}, column: {index.column()}")
             return QVariant()
         if index.column() >= self.columnCount() or index.row() >= self.rowCount():
+            # print(f"Out of bounds index row: {index.row()}, column: {index.column()}")
             return QVariant()
         if role == Qt.DisplayRole:
+            # print(f"Data requested for row: {index.row()}, column: {index.column()}")
             if index in self._data:
                 return self._data[index]
             else:
+                # print("Data not found")
                 self._data[index] = LOADING_PLACEHOLDER
-                # self._work_queue.append(index)
+
+                if self._invert:
+                    minrow = max(0, index.row() - self._chunk_size - 1)
+                    self._work_queue.append((minrow, index.row()))
+                else:
+                    maxrow = min(
+                        index.row() + self._chunk_size - 1, self._catalog_length - 1
+                    )
+                    self._work_queue.append((index.row(), maxrow))
                 return LOADING_PLACEHOLDER
         else:
+            # Return QVariant() for unsupported roles
             return QVariant()
 
+    """
     def canFetchMore(self, parent=QModelIndex()):
         if parent.isValid():
             return False
@@ -173,20 +183,21 @@ class CatalogTableModel(QAbstractTableModel):
         rows_to_add = min(remainder, self._chunk_size)
         if rows_to_add <= 0:
             return
-        self.beginInsertRows(
-            parent, self._current_num_rows, self._current_num_rows + rows_to_add - 1
-        )
-        print(
-            f"Fetching {self._current_num_rows} to {self._current_num_rows + rows_to_add - 1}"
-        )
+        # self.beginInsertRows(
+        #     parent, self._current_num_rows, self._current_num_rows + rows_to_add - 1
+        # )
+        # print(
+        #     f"Fetching {self._current_num_rows} to {self._current_num_rows + rows_to_add - 1}"
+        # )
         self._work_queue.append(
             (self._current_num_rows, self._current_num_rows + rows_to_add - 1)
         )
         self._current_num_rows += rows_to_add
-        self.endInsertRows()
+        # self.endInsertRows()
+    """
 
     def rowCount(self, index=None):
-        return self._current_num_rows
+        return self._catalog_length
 
     def columnCount(self, index=None):
         return len(self.columns)
