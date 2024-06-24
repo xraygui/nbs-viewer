@@ -6,8 +6,13 @@ from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QPushButton,
+    QLineEdit,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
 )
 from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel
+
 from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from .search import DateSearchWidget, ScantypeSearch
@@ -112,29 +117,50 @@ class ReverseModel(QSortFilterProxyModel):
         super().__init__(*args, **kwargs)
         self.setDynamicSortFilter(True)
 
-    def mapFromSource(self, index):
+    def filterAcceptsRow(self, source_row, source_parent):
         model = self.sourceModel()
-        if self.invert:
+        index = model.index(source_row, self.filterKeyColumn(), source_parent)
+        data = model.data(index, Qt.DisplayRole)
+        if data is None:
+            print(f"Row {source_row} has None data, skipping.")
+            return False  # Optionally, decide how to handle None data
+
+        # Convert data to string if it's not already one
+        data_str = str(data)
+        regex = self.filterRegExp()
+        match = regex.indexIn(data_str) != -1
+        # print(f"Row {source_row}, Data: {data_str}, Match: {match}")
+        return match
+
+    def mapFromSource(self, index):
+        if not self.invert:
+            filteredIndex = super().mapFromSource(index)
+            if index.column() == 0:
+                print(f"Mapping {index.row()}")
+                print(f"From {filteredIndex.row()}")
+            return filteredIndex
+        else:
+            print("Calling mapFromSource inverted... not sure why")
+            model = self.sourceModel()
             newRow = model._catalog_length - index.row() - 1
             newIndex = model.index(newRow, index.column())
-            # print(
-            #     f"RowCount: {model._catalog_length} Original index - row: {index.row()}, column: {index.column()}; New index - row: {newIndex.row()}, column: {newIndex.column()}"
-            # )
-        else:
-            newIndex = model.index(index.row(), index.column())
-        return newIndex
+            return newIndex
 
     def mapToSource(self, index):
-        model = self.sourceModel()
-        if self.invert:
-            newRow = model._catalog_length - index.row() - 1
-            newIndex = model.index(newRow, index.column())
-            # print(
-            #     f"RowCount: {model._catalog_length} Original index - row: {index.row()}, column: {index.column()}; New index - row: {newIndex.row()}, column: {newIndex.column()}"
-            # )
+        if not self.invert:
+            filteredIndex = super().mapToSource(index)
+            if index.column() == 0:
+                print(f"Mapping {index.row()}")
+                print(f"To {filteredIndex.row()}")
+                print(f"Total rows: {self.rowCount()}")
+            return filteredIndex
         else:
-            newIndex = model.index(index.row(), index.column())
-        return newIndex
+            if index.row() == -1:
+                return super().mapToSource(index)
+            newRow = self.rowCount() - index.row() - 1
+            newIndex = self.index(newRow, index.column())
+            filteredIndex = super().mapToSource(newIndex)
+            return filteredIndex
 
     def toggleInvert(self):
         """
@@ -160,7 +186,7 @@ class CatalogTableView(QWidget):
 
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
-        self.filter_list.append(ScantypeSearch(self))
+        # self.filter_list.append(ScantypeSearch(self))
         self.display_button = QPushButton("Display Selection", self)
         self.display_button.clicked.connect(self.refresh_filters)
         self.invertButton = QPushButton("Reverse Data", self)
@@ -174,16 +200,52 @@ class CatalogTableView(QWidget):
         self.scrollToTopButton = QPushButton("Scroll to Top", self)
         self.scrollToTopButton.clicked.connect(self.data_view.scrollToTop)
 
+        # Add filter text box and drop-down
+        self.filterLineEdit = QLineEdit(self)
+        self.filterComboBox = QComboBox(self)
+
+        # Create a horizontal layout for the filter widgets
+        filterLayout = QHBoxLayout()
+        filterLayout.addWidget(QLabel("RegEx Filter"))
+        filterLayout.addWidget(self.filterLineEdit)
+        filterLayout.addWidget(self.filterComboBox)
+
+        scrollLayout = QHBoxLayout()
+        scrollLayout.addWidget(self.scrollToTopButton)
+        scrollLayout.addWidget(self.scrollToBottomButton)
+
         layout = QVBoxLayout()
         for widget in self.filter_list:
             layout.addWidget(widget)
         layout.addWidget(self.display_button)
-        layout.addWidget(self.scrollToTopButton)
-        layout.addWidget(self.scrollToBottomButton)
+        layout.addLayout(filterLayout)
+        layout.addLayout(scrollLayout)
         layout.addWidget(self.invertButton)
         layout.addWidget(self.data_view)
         layout.addWidget(self.plot_button1)
         self.setLayout(layout)
+
+        # Setup the model and filtering
+        self.refresh_filters()
+
+    def setupModelAndView(self, catalog):
+        table_model = CatalogTableModel(catalog)
+        reverse = ReverseModel()
+        reverse.setSourceModel(table_model)
+        self.data_view.setModel(reverse)
+
+        # Connect filter line edit to set filter regexp
+        self.filterLineEdit.textChanged.connect(reverse.setFilterRegExp)
+
+        # Populate and connect the combo box for selecting filter column
+        self.filterComboBox.addItems([col for col in table_model.columns])
+        self.filterComboBox.currentIndexChanged.connect(
+            lambda index: reverse.setFilterKeyColumn(index)
+        )
+
+        self.invertButton.clicked.connect(reverse.toggleInvert)
+        self.invertButton.setEnabled(True)
+        self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)
 
     def rows_selected(self, selected, deselected):
         selected_rows = selected.indexes()
@@ -206,13 +268,4 @@ class CatalogTableView(QWidget):
         catalog = self.parent_catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
-        # add some intelligent cache via UIDs?
-        table_model = CatalogTableModel(catalog)
-        # self.data_view.setModel(table_model)
-        # reverse = ReverseModel()
-        reverse = ReverseModel()
-        reverse.setSourceModel(table_model)
-        self.invertButton.clicked.connect(reverse.toggleInvert)
-        self.invertButton.setEnabled(True)  # Enable the invertButton
-        self.data_view.setModel(reverse)
-        self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)
+        self.setupModelAndView(catalog)
