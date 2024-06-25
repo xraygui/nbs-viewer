@@ -149,10 +149,10 @@ class ReverseModel(QSortFilterProxyModel):
     def mapToSource(self, index):
         if not self.invert:
             filteredIndex = super().mapToSource(index)
-            if index.column() == 0:
-                print(f"Mapping {index.row()}")
-                print(f"To {filteredIndex.row()}")
-                print(f"Total rows: {self.rowCount()}")
+            # if index.column() == 0:
+            #     print(f"Mapping {index.row()}")
+            #     print(f"To {filteredIndex.row()}")
+            #     print(f"Total rows: {self.rowCount()}")
             return filteredIndex
         else:
             if index.row() == -1:
@@ -238,11 +238,11 @@ class CatalogTableView(QWidget):
         self.filterLineEdit.textChanged.connect(reverse.setFilterRegExp)
 
         # Populate and connect the combo box for selecting filter column
+        self.filterComboBox.clear()  # Clear the filterComboBox of any items
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(
             lambda index: reverse.setFilterKeyColumn(index)
         )
-
         self.invertButton.clicked.connect(reverse.toggleInvert)
         self.invertButton.setEnabled(True)
         self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)

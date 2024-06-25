@@ -12,143 +12,14 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QSizePolicy,
+    QLineEdit,
 )
 from qtpy.QtCore import Qt, Signal, QObject, QTimer
 
 # from pyqtgraph import PlotWidget
-from tiled.client import show_logs
 
-import matplotlib
-import numpy as np
 from .plotItem import PlotItem
 from .plotCanvas import PlotWidget
-
-# show_logs()
-
-
-class OldPlotItem(QObject):
-    update_plot_signal = Signal()
-
-    def __init__(self, run, catalog=None, dynamic=False):
-        super(PlotItem, self).__init__()
-        self._run = run
-        self._catalog = catalog
-        self._dynamic = dynamic
-        allkeys = get1dKeys(self._run)
-        xkey, ykeys, hints = getPlotHints(self._run, allkeys)
-        self._rows = [xkey]
-        for y in ykeys:
-            if y in allkeys:
-                self._rows.append(y)
-        if not self._dynamic:
-            self._data = get1dData(self._run["primary", "data"])
-        else:
-            self._data = None
-        self._description = blueskyrun_to_string(self._run)
-        self._uid = self._run.metadata["start"]["scan_id"]
-        self._checked_x = xkey
-        self._checked_y = hints.get("primary", None)
-        self._checked_norm = hints.get("normalization", [None])[0]
-        self._plot = None
-        self._lines = {}
-        if self._dynamic:
-            self.timer = QTimer(self)
-            self.timer.timeout.connect(self._dynamic_update)
-            self.timer.start(1000)
-            self._expected_points = None
-        else:
-            self.timer = None
-        # self._description = str(self._run.metadata["start"]["scan_id"])
-
-    @property
-    def description(self):
-        return self._description
-
-    @property
-    def rows(self):
-        return self._rows
-
-    @property
-    def uid(self):
-        return self._uid
-
-    def attach_plot(self, plot):
-        self._plot = plot
-        self.update_plot_signal.connect(self.plot_checked)
-
-    def get_data(self, key):
-        if not self._dynamic:
-            return self._data[key]
-        else:
-            return self._run["primary", "data", key].read()
-
-    def _dynamic_update(self):
-        if self._expected_points is None:
-            self._expected_points = self._run.start.get("num_points", -1)
-
-        if self._run.metadata.get("stop", None) is not None:
-            print("Converting from dynamic to static")
-            print(self._run.metadata["stop"])
-            self._dynamic = False
-            self._data = get1dData(self._run["primary", "data"])
-            if self.timer is not None:
-                self.timer.stop()
-                self.timer = None
-        elif self._catalog is not None:
-            self._run = self._catalog[self.uid]
-
-        self.update_plot_signal.emit()
-        print(self._run.metadata["stop"])
-
-    def update_checkboxes(self, checked_x, checked_y, checked_norm):
-        self._checked_x = checked_x
-        self._checked_y = checked_y
-        self._checked_norm = checked_norm
-        if checked_x is not None and checked_y is not None:
-            self.update_plot_signal.emit()
-
-    def plot_checked(self):
-        if self._checked_x is None or self._checked_y is None:
-            for line in self._lines.values():
-                line.remove()
-            self._lines = {}
-            return
-
-        x = self.get_data(self._checked_x)
-        if self._checked_norm is not None:
-            norm = self.get_data(self._checked_norm)
-        else:
-            norm = np.ones_like(x)
-        # y_dict = {k: self.data[k].read() for k in checked_y}
-        all_line_ids = list(self._lines.keys())
-        plotted_line_ids = []
-        for k in self._checked_y:
-            line_id = f"{self._checked_x};{k};{str(self._checked_norm)}"
-            plotted_line_ids.append(line_id)
-            if line_id not in self._lines:
-                y = self.get_data(k)
-                minlen = min(len(y), len(x), len(norm))
-                self._lines[line_id] = self._plot.plot(
-                    x[:minlen], y[:minlen] / norm[:minlen], label=k
-                )[0]
-            elif self._dynamic:
-                y = self.get_data(k)
-                minlen = min(len(y), len(x), len(norm))
-                self._lines[line_id].set_data(x[:minlen], y[:minlen] / norm[:minlen])
-                if minlen == self._expected_points:
-                    print("Converting from dynamic to static")
-                    print(self._run.metadata["stop"])
-                    self._dynamic = False
-                    self._data = get1dData(self._run["primary", "data"])
-                    if self.timer is not None:
-                        self.timer.stop()
-                        self.timer = None
-        for line_id in all_line_ids:
-            if line_id not in plotted_line_ids:
-                line = self._lines.pop(line_id)
-                line.remove()
-        self._plot.autoscale()
-        self._plot.draw()
 
 
 class BlueskyListWidget(QListWidget):
@@ -369,17 +240,28 @@ class PlotControls(QWidget):
         show_all_layout.addWidget(self.show_all)
         self.layout.addLayout(show_all_layout)
 
+        transform_layout = QHBoxLayout()
+        transform_layout.addWidget(QLabel("Transform"))
+        self.transform_box = QCheckBox()
+        self.transform_box.setChecked(False)
+        self.transform_box.clicked.connect(self.checked_changed)
+        transform_layout.addWidget(self.transform_box)
+        self.layout.addLayout(transform_layout)
+
+        self.transform_text_edit = QLineEdit()
+        self.layout.addWidget(self.transform_text_edit)
+
         self.grid = QGridLayout()
         self.layout.addLayout(self.grid)
 
-        self.add_data_button = QPushButton("Add to Plot")
-        self.add_data_button.clicked.connect(self.add_data_to_plot)
-        self.add_data_button.setEnabled(False)
+        self.update_plot_button = QPushButton("Update Plot")
+        self.update_plot_button.clicked.connect(self.update_plot)
+        self.update_plot_button.setEnabled(False)
 
         self.clear_data_button = QPushButton("Uncheck All")
         self.clear_data_button.clicked.connect(self.uncheck_all)
         self.clear_data_button.setEnabled(False)
-        self.layout.addWidget(self.add_data_button)
+        self.layout.addWidget(self.update_plot_button)
         self.layout.addWidget(self.clear_data_button)
 
     @property
@@ -514,7 +396,7 @@ class PlotControls(QWidget):
             self.y_group1d, self.y_group2d
         )
         self._exclusionary_y_group.buttonsChanged.connect(self.checked_changed)
-        self.add_data_button.setEnabled(True)
+        self.update_plot_button.setEnabled(True)
         self.clear_data_button.setEnabled(True)
 
     def checkedButtons(self):
@@ -542,21 +424,28 @@ class PlotControls(QWidget):
         return x_checked_ids, y_checked_ids, norm_checked_ids
 
     def uncheck_all(self):
-        self.plotItem.update_checkboxes(None, None, None)
+        self.plotItem.update_plot_settings(None, None, None, "")
         self.update_display()
 
     def checked_changed(self):
         if self.plotItem is None:
             return
         checked_x, checked_y, checked_norm = self.checkedButtons()
-        # print("Checked Changed")
+        transform_text = (
+            self.transform_text_edit.text() if self.transform_box.isChecked() else ""
+        )
+        print(f"Checked Changed, transform_text: {transform_text}")
         # print(checked_x, checked_y, checked_norm)
-        self.plotItem.update_checkboxes(checked_x, checked_y, checked_norm)
+        self.plotItem.update_plot_settings(
+            checked_x, checked_y, checked_norm, transform_text
+        )
         if self.auto_add:
-            self.add_data_to_plot()
+            self.plotItem.updatePlot()
 
-    def add_data_to_plot(self):
-        self.plotItem.updatePlot()
+    def update_plot(self):
+        self.checked_changed()
+        if not self.auto_add:
+            self.plotItem.updatePlot()
 
 
 def get1dDataFromRun(blueskyrun):

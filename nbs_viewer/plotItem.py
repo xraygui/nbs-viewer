@@ -1,6 +1,7 @@
 import numpy as np
 from qtpy.QtWidgets import QWidget
 from qtpy.QtCore import QTimer, Signal
+from asteval import Interpreter
 
 
 def blueskyrun_to_string(blueskyrun):
@@ -60,6 +61,7 @@ class PlotItem(QWidget):
         self._uid = self._run.metadata["start"]["uid"]
         self._scanid = self._run.metadata["start"]["scan_id"]
         self._expected_points = self._run.start.get("num_points", -1)
+        self._transform_text = ""
         self.update_plot_signal.connect(self.plotCheckedData)
         if self._dynamic:
             self.startDynamicUpdates()
@@ -72,6 +74,7 @@ class PlotItem(QWidget):
                     .get("primary", -1)
                 )
             self.timer = None
+        self.aeval = Interpreter()  # Create an Asteval interpreter once
 
     def startDynamicUpdates(self):
         self.stopDynamicUpdates()
@@ -152,20 +155,41 @@ class PlotItem(QWidget):
         )
 
     def clear(self):
-        self.update_checkboxes(None, None, None)
+        self.update_plot_settings(None, None, None, "")
         self.removeData()
 
-    def update_checkboxes(self, checked_x, checked_y, checked_norm):
+    def update_plot_settings(
+        self, checked_x, checked_y, checked_norm, transformText=""
+    ):
         self._checked_x = checked_x
         self._checked_y = checked_y
         self._checked_norm = checked_norm
+        self._transform_text = transformText
 
     def updatePlot(self):
         self.removeData()
         self.plotCheckedData()
 
-    def transformData(self, xlist, ylist, normlist):
+    def transformData(self, xlist, ylist, normlist, transformText=""):
+        """
+        Transform the data based on normalization and optional transformation text.
 
+        Parameters
+        ----------
+        xlist : list of np.ndarray
+            List of x data arrays.
+        ylist : list of np.ndarray
+            List of y data arrays.
+        normlist : list of np.ndarray
+            List of normalization arrays.
+        transformText : str, optional
+            Transformation expression to be evaluated, by default "".
+
+        Returns
+        -------
+        tuple
+            Transformed x and y data arrays.
+        """
         # Assumption time! Assume that we are just dividing by all norms
         if len(normlist) > 0:
             norm = np.prod(normlist, axis=0)
@@ -174,17 +198,27 @@ class PlotItem(QWidget):
         # Just divide y by norm for now! In the future, we will grab input from a variety of sources
         # and make a more complex transform using Asteval
         yfinal = []
-        for y in ylist:
+        for y_temp in ylist:
             # Check if norm is not a scalar before adjusting dimensions
             if np.isscalar(norm):
-                yfinal.append(y / norm)
+                y = y_temp / norm
             else:
                 # Create a temporary variable for norm to avoid modifying the original norm
                 temp_norm = norm
-                # Check if y has more dimensions than temp_norm and adjust temp_norm accordingly
-                while temp_norm.ndim < y.ndim:
+                # Check if y_temp has more dimensions than temp_norm and adjust temp_norm accordingly
+                while temp_norm.ndim < y_temp.ndim:
                     temp_norm = np.expand_dims(temp_norm, axis=-1)
-                yfinal.append(y / temp_norm)
+                y = y_temp / temp_norm
+
+            if transformText:
+                # Update the symtable and evaluate the transformText using Asteval
+                self.aeval.symtable["y"] = y
+                self.aeval.symtable["x"] = xlist
+                self.aeval.symtable["norm"] = norm
+                y_transformed = self.aeval(transformText)
+                yfinal.append(y_transformed)
+            else:
+                yfinal.append(y)
         return xlist, yfinal
 
     def removeData(self):
@@ -214,7 +248,7 @@ class PlotItem(QWidget):
         xdim = len(xlist)
         min_ydim = min([len(y.shape) for y in ylist])
 
-        xlist, ylist = self.transformData(xlist, ylist, normlist)
+        xlist, ylist = self.transformData(xlist, ylist, normlist, self._transform_text)
 
         for key, y in zip(ykeys, ylist):
             if len(y.shape) > min_ydim:
@@ -309,6 +343,34 @@ class PlotItem(QWidget):
         for key in keys:
             data = data[key]
         return data.read().squeeze()
+
+
+class PlotControls(QWidget):
+    ...
+
+    def __init__(self, plot, parent=None):
+        ...
+        self.transform_box.clicked.connect(self.checked_changed)
+        ...
+
+    ...
+
+    def checked_changed(self):
+        if self.plotItem is None:
+            return
+        checked_x, checked_y, checked_norm = self.checkedButtons()
+        transform_text = (
+            self.transform_text_edit.text() if self.transform_box.isChecked() else ""
+        )
+        # print("Checked Changed")
+        # print(checked_x, checked_y, checked_norm)
+        self.plotItem.update_plot_settings(
+            checked_x, checked_y, checked_norm, transform_text
+        )
+        if self.auto_add:
+            self.add_data_to_plot()
+
+    ...
 
 
 def getRunKeys(run):
