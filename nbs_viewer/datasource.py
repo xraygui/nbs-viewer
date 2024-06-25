@@ -16,8 +16,8 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Signal, QSortFilterProxyModel
 from tiled.client import from_uri, from_profile
-from tiled_wrapper.databroker.catalog import WrappedDatabroker
-from tiled_wrapper.processed.catalog import WrappedAnalysis
+
+
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 from databroker import temp as temporaryDB
@@ -28,13 +28,6 @@ from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from os.path import exists
 from .catalogView import CatalogTableView
-
-
-def wrap_catalog(catalog):
-    for s in catalog.specs:
-        if s.name == "CatalogOfBlueskyRuns":
-            return WrappedDatabroker(catalog)
-    return WrappedAnalysis(catalog)
 
 
 class URISource(QWidget):
@@ -78,7 +71,7 @@ class URISource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        catalog = wrap_catalog(catalog)
+        # catalog = wrap_catalog(catalog)
         catalogView = CatalogTableView(catalog)
         return catalogView, label
 
@@ -112,7 +105,7 @@ class ProfileSource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        catalog = wrap_catalog(catalog)
+        # catalog = wrap_catalog(catalog)
         catalogView = CatalogTableView(catalog)
         return catalogView, label
 

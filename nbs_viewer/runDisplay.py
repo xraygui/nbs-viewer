@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QLineEdit,
 )
-from qtpy.QtCore import Qt, Signal, QObject, QTimer
+from qtpy.QtCore import Qt, Signal
 
 # from pyqtgraph import PlotWidget
 

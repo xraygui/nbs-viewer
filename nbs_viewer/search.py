@@ -7,6 +7,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
 )
 from qtpy.QtCore import QDate
+from databroker.queries import TimeRange
 
 
 class ScantypeSearch(QWidget):
@@ -64,7 +65,8 @@ class DateSearchWidget(QWidget):
 
     def filter_catalog(self, catalog):
         from_date, until_date = self.get_date_range()
-        return catalog.filter_by_time(since=from_date, until=until_date)
+        return catalog.search(TimeRange(since=from_date, until=until_date))
+        # return catalog.filter_by_time(since=from_date, until=until_date)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from qtpy.QtCore import QTimer, Qt, QVariant, QAbstractTableModel, QModelIndex
+from qtpy.QtCore import QTimer, Qt, QVariant, QAbstractTableModel
 from bluesky_widgets.qt.threading import create_worker
 from datetime import datetime
 

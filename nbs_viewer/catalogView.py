@@ -15,7 +15,7 @@ from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel
 
 from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
-from .search import DateSearchWidget, ScantypeSearch
+from .search import DateSearchWidget
 
 
 class CustomHeaderView(QHeaderView):
