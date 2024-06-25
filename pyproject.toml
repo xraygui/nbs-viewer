@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=42", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbs-viewer"
-version = "0.1.0"
 description = "A simple Tiled viewer application."
+dynamic = ["version"]
 authors = [{ name = "Charles Titus", email = "ctitus@bnl.gov" }]
 readme = "README.md"
 keywords = ["SST", "viewer"]
@@ -17,7 +17,8 @@ dependencies = [
 "bluesky-widgets >= 0.0.15",
 "nslsii",
 "databroker >= 2.0.0a105",
-"tiled_wrapper"
+"uuid",
+"asteval",
 ]
 
 [project.scripts]
@@ -25,3 +26,5 @@ nbs-viewer = "nbs_viewer.viewer:main"
 
 [tool.setuptools]
 packages = ["nbs_viewer"]
+
+[tool.setuptools_scm]
