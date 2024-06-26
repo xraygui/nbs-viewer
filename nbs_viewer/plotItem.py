@@ -283,9 +283,10 @@ class PlotItem(QWidget):
                 # print(f"Update {key}: {y_reordered.shape}")
                 self.dataPlotters[key].update_data(xlist_reordered, y_reordered)
             else:
+                label = f"{key}.{self._scanid}"
                 # print(f"New Data {key}: {y_reordered.shape}")
                 self.dataPlotters[key] = self._plot.addPlotData(
-                    xlist_reordered, y_reordered, xkeys, key
+                    xlist_reordered, y_reordered, xkeys, label
                 )
 
     def getCheckedData(self):

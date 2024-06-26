@@ -1,6 +1,6 @@
 # NBS Viewer
 
-NBS Viewer is a simple Tiled viewer application designed to visualize and interact with data stored in a Tiled database with Databroker formatted runs. It is optimized for the viewing of 1-d or 2-d data.
+NBS Viewer is a simple viewer application designed to visualize and interact with data stored in a Tiled database with Databroker formatted runs. It is optimized for the viewing of 1-d or 2-d data.
 
 # Usage
 

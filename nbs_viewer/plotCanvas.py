@@ -294,11 +294,25 @@ class NavigationToolbar(NavigationToolbar2QT):
 
     def __init__(self, *args, **kwargs):
         self.toolitems.append(("Autoscale", "Autoscale", "help", "autoscale"))
+        self.toolitems.append(("Autolegend", "Autolegend", "help", "autolegend"))
+
         super().__init__(*args, **kwargs)
 
     def autoscale(self):
         self.canvas.autoscale()
         self.canvas.draw()
+
+    def autolegend(self):
+        legend = self.canvas.axes.get_legend()
+        if legend is None:
+            self.canvas.axes.legend()
+            self.canvas.draw()
+        elif not legend.get_visible():
+            legend.set_visible(True)
+            self.canvas.draw()
+        else:
+            legend.set_visible(False)
+            self.canvas.draw()
 
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -338,6 +352,7 @@ class MplCanvas(FigureCanvasQTAgg):
             self.currentDim = 1
             if self._autoscale:
                 self.autoscale()
+            self.updateLegend()
         elif len(y.shape) == 2 and len(xlist) > 1:
             self.axes.cla()
             artist = self.axes.contourf(xlist[-1], xlist[-2], y)
@@ -370,6 +385,15 @@ class MplCanvas(FigureCanvasQTAgg):
         x_max = max([line.get_xdata().max() for line in lines])
         xspan = x_max - x_min
         self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+
+    def updateLegend(self):
+        legend = self.axes.get_legend()
+        if legend is not None:
+            visibility = legend.get_visible()
+            # Update the legend
+            self.axes.legend()
+            # Restore the legend visibility state
+            self.axes.get_legend().set_visible(visibility)
 
 
 class PlotWidget(QWidget):
