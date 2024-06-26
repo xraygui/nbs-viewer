@@ -34,6 +34,7 @@ class PlotItem(QWidget):
         self._run = run
         self._catalog = catalog
         self._dynamic = dynamic
+        self._connected = False
         self.dataPlotters = {}
         self._plot_hints = getPlotHints(self._run)
         self._axhints = getAxisHints(self._plot_hints)
@@ -135,10 +136,11 @@ class PlotItem(QWidget):
 
     def setDynamic(self, enabled):
         if enabled:
-            self.startDynamicUpdates()
-        else:
+            if not self._dynamic and self._run.metadata.get("stop", None) is None:
+                self.startDynamicUpdates()
+        elif self._dynamic:
             self.stopDynamicUpdates()
-        print(f"Dynamic set to {enabled}")
+        print(f"Dynamic set to {self._dynamic} for {self._scanid}")
 
     def setDefaultChecked(self):
         self._checked_x = []
@@ -156,6 +158,7 @@ class PlotItem(QWidget):
 
     def clear(self):
         self.update_plot_settings(None, None, None, "")
+        self.setDynamic(False)
         self.removeData()
 
     def update_plot_settings(
@@ -344,34 +347,6 @@ class PlotItem(QWidget):
         for key in keys:
             data = data[key]
         return data.read().squeeze()
-
-
-class PlotControls(QWidget):
-    ...
-
-    def __init__(self, plot, parent=None):
-        ...
-        self.transform_box.clicked.connect(self.checked_changed)
-        ...
-
-    ...
-
-    def checked_changed(self):
-        if self.plotItem is None:
-            return
-        checked_x, checked_y, checked_norm = self.checkedButtons()
-        transform_text = (
-            self.transform_text_edit.text() if self.transform_box.isChecked() else ""
-        )
-        # print("Checked Changed")
-        # print(checked_x, checked_y, checked_norm)
-        self.plotItem.update_plot_settings(
-            checked_x, checked_y, checked_norm, transform_text
-        )
-        if self.auto_add:
-            self.add_data_to_plot()
-
-    ...
 
 
 def getRunKeys(run):

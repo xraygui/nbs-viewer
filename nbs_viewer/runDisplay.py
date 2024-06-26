@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QSizePolicy,
     QLineEdit,
+    QAbstractItemView,
 )
 from qtpy.QtCore import Qt, Signal
 
@@ -33,7 +34,8 @@ class BlueskyListWidget(QListWidget):
         (text, BlueskyRun) tuples based on the selected list items.
     """
 
-    selectedDataChanged = Signal(list)
+    itemsSelected = Signal(list)
+    itemsDeselected = Signal(list)
 
     def __init__(self, parent=None):
         """
@@ -50,7 +52,12 @@ class BlueskyListWidget(QListWidget):
         sizePolicy.setHorizontalPolicy(QSizePolicy.Minimum)
         # sizePolicy.setVerticalPolicy(QSizePolicy.Minimum)
         self.setSizePolicy(sizePolicy)
-        self.itemSelectionChanged.connect(self.emit_selected_data)
+        self.selectionModel().selectionChanged.connect(self.handle_selection_change)
+        self.setSelectionMode(
+            QAbstractItemView.ExtendedSelection
+        )  # Enable multiple item selection
+
+        # self.itemSelectionChanged.connect(self.emit_selected_data)
         self._plotItems = {}
 
     def addPlotItem(self, plotItem):
@@ -94,6 +101,17 @@ class BlueskyListWidget(QListWidget):
                     del self._plotItems[plotItem.uid]
                 break  # Exit the loop once the item is found and removed
 
+    def handle_selection_change(self, selected, deselected):
+        items_for_selection = self.selectedData()
+
+        items_for_deselection = []
+        for index in deselected.indexes():
+            item = self.itemFromIndex(index)
+            plotItem = self._plotItems[item.data(Qt.UserRole)]
+            items_for_deselection.append(plotItem)
+        self.itemsSelected.emit(items_for_selection)
+        self.itemsDeselected.emit(items_for_deselection)
+
     def selectedData(self):
         # print("Selecting Data")
         selected_items = self.selectedItems()
@@ -106,9 +124,6 @@ class BlueskyListWidget(QListWidget):
         items = self.selectedData()
         for plotItem in items:
             self.removePlotItem(plotItem)
-
-    def emit_selected_data(self):
-        self.selectedDataChanged.emit(self.selectedData())
 
 
 class ExclusiveCheckBoxGroup(QButtonGroup):
@@ -171,7 +186,7 @@ class DataDisplayWidget(QWidget):
         vlayout = QVBoxLayout()
 
         self.runlist = BlueskyListWidget()
-        self.runlist.selectedDataChanged.connect(self.controls.addPlotItem)
+        self.runlist.itemsSelected.connect(self.controls.addPlotItems)
 
         self.remove_plot_items = QPushButton("Remove Items")
         self.clear_plot_button = QPushButton("Clear Plot")
@@ -270,19 +285,22 @@ class PlotControls(QWidget):
         # print(f"Auto add {t}")
         return t
 
-    def addPlotItem(self, plotItem):
+    def addPlotItems(self, plotItemList):
         # print("Add Plot Item")
-        if isinstance(plotItem, (list, tuple)):
-            plotItem = plotItem[0]
-        self.plotItem = plotItem
-        self.plotItem.attach_plot(self.plot)
-        self.dynamic_update_box.clicked.connect(self.plotItem.setDynamic)
+        print(f"Adding {len(plotItemList)} items")
+        for plotItem in plotItemList:
+            if not plotItem._connected:
+                plotItem.attach_plot(self.plot)
+                self.dynamic_update_box.clicked.connect(plotItem.setDynamic)
+                plotItem._connected = True
+        if len(plotItemList) > 0:
+            self.plotItem = plotItemList[0]
+        else:
+            self.plotItem = None
+        self.plotItemList = plotItemList
         self.update_display()
 
-    def update_display(self):
-        header = self.plotItem.description
-        self.plotItem.set_row_visibility(self.show_all.isChecked())
-        # Clear the current display
+    def clear_display(self):
         for i in reversed(range(self.grid.count())):
             self.grid.itemAt(i).widget().setParent(None)
 
@@ -291,6 +309,17 @@ class PlotControls(QWidget):
             widget = self.layout.itemAt(i).widget()
             if isinstance(widget, QLabel):
                 widget.setParent(None)
+        self.update_plot_button.setEnabled(False)
+        self.clear_data_button.setEnabled(False)
+
+    def update_display(self):
+        self.clear_display()
+        if self.plotItem is None:
+            return
+
+        header = self.plotItem.description
+        self.plotItem.set_row_visibility(self.show_all.isChecked())
+        # Clear the current display
 
         # self.data = data_dict
         # Add the header
