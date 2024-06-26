@@ -13,6 +13,8 @@ def is_a_container_key(key):
 
 def fillTree(value, parentItem):
     children = {}
+    if not hasattr(value, "keys"):
+        return
     for key in value.keys():
         print(key)
         if is_a_container_key(key):
