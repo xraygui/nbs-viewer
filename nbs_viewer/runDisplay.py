@@ -447,17 +447,12 @@ class PlotControls(QWidget):
             for button in self.norm_group.buttons()
             if button.isChecked()
         ]
-        if len(norm_checked_ids) == 0:
-            norm_checked_ids = None
-        if len(x_checked_ids) == 0:
-            x_checked_ids = None
-        if len(y_checked_ids) == 0:
-            y_checked_ids = None
+
         return x_checked_ids, y_checked_ids, norm_checked_ids
 
     def uncheck_all(self):
         for plotItem in self.plotItemList:
-            plotItem.update_plot_settings(None, None, None, "")
+            plotItem.update_plot_settings([], [], [], "")
         self.update_display()
 
     def checked_changed(self):
@@ -486,8 +481,12 @@ class PlotControls(QWidget):
 def getCommonAttr(plotItemList, attr):
     if len(plotItemList) == 0:
         return set()
+    first_attr = getattr(plotItemList[0], attr)
+    try:
+        rows = set(first_attr)
+    except TypeError:
+        rows = set([first_attr])
 
-    rows = set(getattr(plotItemList[0], attr))
     for plotItem in plotItemList:
         rows &= set(getattr(plotItem, attr))
     return rows

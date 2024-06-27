@@ -157,7 +157,7 @@ class PlotItem(QWidget):
         )
 
     def clear(self):
-        self.update_plot_settings(None, None, None, "")
+        self.update_plot_settings([], [], [], "")
         self.setDynamic(False)
         self.removeData()
 
@@ -225,12 +225,9 @@ class PlotItem(QWidget):
         return xlist, yfinal
 
     def removeData(self):
-        if self._checked_y is not None:
-            remove_keys = [
-                key for key in self.dataPlotters.keys() if key not in self._checked_y
-            ]
-        else:
-            remove_keys = list(self.dataPlotters.keys())
+        remove_keys = [
+            key for key in self.dataPlotters.keys() if key not in self._checked_y
+        ]
 
         for key in remove_keys:
             data_plotter = self.dataPlotters.pop(key)
@@ -239,7 +236,7 @@ class PlotItem(QWidget):
 
     def plotCheckedData(self):
         # print("plotCheckedData")
-        if self._checked_x is None or self._checked_y is None:
+        if len(self._checked_x) == 0 or len(self._checked_y) == 0:
             return
 
         if getattr(self, "_plot", None) is None:
@@ -301,10 +298,7 @@ class PlotItem(QWidget):
 
         xlist = [self.getData(key) for key in self._checked_x]
         ylist = [self.getData(key) for key in self._checked_y]
-        if self._checked_norm is not None:
-            normlist = [self.getData(key) for key in self._checked_norm]
-        else:
-            normlist = []
+        normlist = [self.getData(key) for key in self._checked_norm]
 
         if self._dynamic:
             # Lengths may be off due to uneven data updates

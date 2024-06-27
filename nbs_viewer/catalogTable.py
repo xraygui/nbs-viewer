@@ -169,33 +169,6 @@ class CatalogTableModel(QAbstractTableModel):
             # Return QVariant() for unsupported roles
             return QVariant()
 
-    """
-    def canFetchMore(self, parent=QModelIndex()):
-        if parent.isValid():
-            return False
-        return self._current_num_rows < self._catalog_length
-
-    def fetchMore(self, parent=QModelIndex()):
-        if parent.isValid():
-            return
-        remainder = self._catalog_length - self._current_num_rows
-        print(f"remainder to fetch: {remainder}")
-        rows_to_add = min(remainder, self._chunk_size)
-        if rows_to_add <= 0:
-            return
-        # self.beginInsertRows(
-        #     parent, self._current_num_rows, self._current_num_rows + rows_to_add - 1
-        # )
-        # print(
-        #     f"Fetching {self._current_num_rows} to {self._current_num_rows + rows_to_add - 1}"
-        # )
-        self._work_queue.append(
-            (self._current_num_rows, self._current_num_rows + rows_to_add - 1)
-        )
-        self._current_num_rows += rows_to_add
-        # self.endInsertRows()
-    """
-
     def rowCount(self, index=None):
         return self._catalog_length
 
