@@ -228,7 +228,7 @@ class PlotControls(QWidget):
         self.plot = plot
         self.data = None
         self.allkeylist = []
-        self.plotItem = None
+        self.plotItemList = []
         self.layout = QVBoxLayout(self)
 
         auto_add_layout = QHBoxLayout()
@@ -287,16 +287,13 @@ class PlotControls(QWidget):
 
     def addPlotItems(self, plotItemList):
         # print("Add Plot Item")
-        print(f"Adding {len(plotItemList)} items")
+        # print(f"Adding {len(plotItemList)} items")
         for plotItem in plotItemList:
             if not plotItem._connected:
                 plotItem.attach_plot(self.plot)
                 self.dynamic_update_box.clicked.connect(plotItem.setDynamic)
                 plotItem._connected = True
-        if len(plotItemList) > 0:
-            self.plotItem = plotItemList[0]
-        else:
-            self.plotItem = None
+
         self.plotItemList = plotItemList
         self.update_display()
 
@@ -314,11 +311,16 @@ class PlotControls(QWidget):
 
     def update_display(self):
         self.clear_display()
-        if self.plotItem is None:
+        if len(self.plotItemList) == 0:
             return
 
-        header = self.plotItem.description
-        self.plotItem.set_row_visibility(self.show_all.isChecked())
+        if len(self.plotItemList) == 1:
+            header = self.plotItemList[0].description
+        else:
+            header = "Multiple Selected Scans"
+        # header = self.plotItem.description
+        for plotItem in self.plotItemList:
+            plotItem.set_row_visibility(self.show_all.isChecked())
         # Clear the current display
 
         # self.data = data_dict
@@ -339,9 +341,9 @@ class PlotControls(QWidget):
         y_group2d = ExclusiveCheckBoxGroup(self)
         y_group1d.setExclusive(False)
 
-        checked_norm = self.plotItem._checked_norm
-        checked_x = self.plotItem._checked_x
-        checked_y = self.plotItem._checked_y
+        checked_norm = getCommonAttr(self.plotItemList, "_checked_norm")
+        checked_x = getCommonAttr(self.plotItemList, "_checked_x")
+        checked_y = getCommonAttr(self.plotItemList, "_checked_y")
 
         any_y_checked = False
 
@@ -359,9 +361,9 @@ class PlotControls(QWidget):
             normbox = QCheckBox()
             self.grid.addWidget(normbox, i + 1, 4)
 
-            if checked_norm is not None and key in checked_norm:
+            if key in checked_norm:
                 normbox.setChecked(True)
-            if checked_x is not None and key in checked_x:
+            if key in checked_x:
                 xbox.setChecked(True)
 
             return xbox, ybox, normbox
@@ -369,13 +371,18 @@ class PlotControls(QWidget):
         i = 0
         xgroups = {}
         allkeylist = []
-        for xdim, xlist in self.plotItem.xkeyDict.items():
-            if not any([x in self.plotItem.rows for x in xlist]):
+
+        rows = getCommonRows(self.plotItemList)
+        xkeyDict = getCommonXKeyDict(self.plotItemList)
+        ykeyDict = getCommonYKeyDict(self.plotItemList)
+
+        for xdim, xlist in xkeyDict.items():
+            if not any([x in rows for x in xlist]):
                 continue
             else:
                 xgroups[xdim] = ExclusiveCheckBoxGroup()
                 for x in xlist:
-                    if x in self.plotItem.rows:
+                    if x in rows:
                         allkeylist.append(x)
                         xbox, ybox, nbox = add_xyn_buttons(x, i)
                         xgroups[xdim].addButton(xbox, i)
@@ -383,24 +390,20 @@ class PlotControls(QWidget):
                         norm_group.addButton(nbox, i)
                         i += 1
 
-        for ydim, ylist in self.plotItem.all_ykeyDict.items():
+        for ydim, ylist in ykeyDict.items():
             for y in ylist:
-                if y in self.plotItem.rows:
+                if y in rows:
                     allkeylist.append(y)
                     xbox, ybox, nbox = add_xyn_buttons(y, i)
                     silly_x_group.addButton(xbox, i)
                     if ydim == 1:
-                        if checked_y is not None and y in checked_y:
+                        if y in checked_y:
                             ybox.setChecked(True)
                             any_y_checked = True
                         y_group1d.addButton(ybox, i)
                     else:
                         y_group2d.addButton(ybox, i)
-                        if (
-                            checked_y is not None
-                            and y in checked_y
-                            and not any_y_checked
-                        ):
+                        if y in checked_y and not any_y_checked:
                             ybox.setChecked(True)
                             any_y_checked = True
                     norm_group.addButton(nbox, i)
@@ -453,28 +456,79 @@ class PlotControls(QWidget):
         return x_checked_ids, y_checked_ids, norm_checked_ids
 
     def uncheck_all(self):
-        self.plotItem.update_plot_settings(None, None, None, "")
+        for plotItem in self.plotItemList:
+            plotItem.update_plot_settings(None, None, None, "")
         self.update_display()
 
     def checked_changed(self):
-        if self.plotItem is None:
-            return
-        checked_x, checked_y, checked_norm = self.checkedButtons()
-        transform_text = (
-            self.transform_text_edit.text() if self.transform_box.isChecked() else ""
-        )
-        print(f"Checked Changed, transform_text: {transform_text}")
-        # print(checked_x, checked_y, checked_norm)
-        self.plotItem.update_plot_settings(
-            checked_x, checked_y, checked_norm, transform_text
-        )
-        if self.auto_add:
-            self.plotItem.updatePlot()
+        for plotItem in self.plotItemList:
+            checked_x, checked_y, checked_norm = self.checkedButtons()
+            transform_text = (
+                self.transform_text_edit.text()
+                if self.transform_box.isChecked()
+                else ""
+            )
+            # print(f"Checked Changed, transform_text: {transform_text}")
+            # print(checked_x, checked_y, checked_norm)
+            plotItem.update_plot_settings(
+                checked_x, checked_y, checked_norm, transform_text
+            )
+            if self.auto_add:
+                plotItem.updatePlot()
 
     def update_plot(self):
         self.checked_changed()
         if not self.auto_add:
-            self.plotItem.updatePlot()
+            for plotItem in self.plotItemList:
+                plotItem.updatePlot()
+
+
+def getCommonAttr(plotItemList, attr):
+    if len(plotItemList) == 0:
+        return set()
+
+    rows = set(getattr(plotItemList[0], attr))
+    for plotItem in plotItemList:
+        rows &= set(getattr(plotItem, attr))
+    return rows
+
+
+def getCommonRows(plotItemList):
+    return getCommonAttr(plotItemList, "rows")
+
+
+def getCommonXKeyDict(plotItemList):
+    if len(plotItemList) == 0:
+        return dict()
+
+    xdims = set(plotItemList[0].xkeyDict.keys())
+    for plotItem in plotItemList:
+        xdims &= set(plotItem.xkeyDict.keys())
+    xdims = sorted(list(xdims))
+    xkeyDict = {}
+    for dim in xdims:
+        xlist = set(plotItemList[0].xkeyDict[dim])
+        for plotItem in plotItemList:
+            xlist &= set(plotItem.xkeyDict[dim])
+        xkeyDict[dim] = sorted(list(xlist))
+    return xkeyDict
+
+
+def getCommonYKeyDict(plotItemList):
+    if len(plotItemList) == 0:
+        return dict()
+    ydims = set(plotItemList[0].all_ykeyDict.keys())
+    for plotItem in plotItemList:
+        ydims &= set(plotItem.all_ykeyDict.keys())
+    ydims = sorted(list(ydims))
+
+    ykeyDict = {}
+    for dim in ydims:
+        ylist = set(plotItemList[0].all_ykeyDict[dim])
+        for plotItem in plotItemList:
+            ylist &= set(plotItem.all_ykeyDict[dim])
+        ykeyDict[dim] = sorted(list(ylist))
+    return ykeyDict
 
 
 def get1dDataFromRun(blueskyrun):

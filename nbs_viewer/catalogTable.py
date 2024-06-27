@@ -41,7 +41,7 @@ def _load_data(get_data, indexes):
 def _load_chunk(get_chunk, indexes):
     fetched_ranges = []
     for index in indexes:
-        print(index)
+        # print(index)
         # Check if index[0] is within any previously fetched range
         if any(start <= index[0] <= end for start, end in fetched_ranges):
             continue
@@ -138,7 +138,7 @@ class CatalogTableModel(QAbstractTableModel):
             return self.columns[section]
 
     def get_chunk(self, start, stop):
-        print(f"Fetching chunk for {start} to {stop}")
+        # print(f"Fetching chunk for {start} to {stop}")
         return [_run_to_row(run) for run in self.catalog.values()[start : stop + 1]]
 
     def data(self, index, role=Qt.DisplayRole):
