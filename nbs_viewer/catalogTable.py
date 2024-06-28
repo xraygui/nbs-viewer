@@ -25,19 +25,6 @@ def _run_to_row(run):
     return (uid, date, scan_id, scantype, plan_name, sample_name, sample_id, num_points)
 
 
-def _load_data(get_data, indexes):
-    print(f"Load a batch of {len(indexes)} data. This is run in a threadpool.")
-    for index in indexes:
-        row, column = index.row(), index.column()
-        try:
-            item = get_data(row, column)
-            print(f"Got item for {row} {column}")
-        except Exception:
-            print("Something went wrong!!")
-            continue
-        yield index, item
-
-
 def _load_chunk(get_chunk, indexes):
     fetched_ranges = []
     for index in indexes:
@@ -48,7 +35,7 @@ def _load_chunk(get_chunk, indexes):
         try:
             rows = get_chunk(index[0], index[1])
         except Exception as ex:
-            print("Something went wrong", ex)
+            print("Something went wrong loading chunk", ex)
             continue
         fetched_ranges.append((index[0], index[1]))
         for row, i in zip(rows, range(index[0], index[1] + 1)):
@@ -102,15 +89,12 @@ class CatalogTableModel(QAbstractTableModel):
 
     def _process_work_queue(self):
         if self._work_queue:
-            print("work queue populated")
-            # worker = create_worker(_load_data, self.get_data, tuple(self._work_queue))
             worker = create_worker(_load_chunk, self.get_chunk, tuple(self._work_queue))
             self._work_queue.clear()
             # Track this worker in case we need to ignore it and cancel due to
             # model reset.
             self._active_workers.add(worker)
             worker.finished.connect(lambda: self._active_workers.discard(worker))
-            # worker.yielded.connect(self.on_item_loaded)
             worker.yielded.connect(self.on_row_loaded)
             worker.start()
         # Else, no work to do.
@@ -121,7 +105,7 @@ class CatalogTableModel(QAbstractTableModel):
         # Update state and trigger Qt to run data() to update its internal model.
         index, item = payload
         self._data[index] = item
-        print("Loaded Item")
+        # print("Loaded Item")
         self.dataChanged.emit(index, index, [])
 
     def on_row_loaded(self, payload):

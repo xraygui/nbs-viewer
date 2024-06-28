@@ -87,7 +87,7 @@ class PlotItem(QWidget):
 
     def stopDynamicUpdates(self):
         self._dynamic = False
-        print("Stopping Dynamic Updates")
+        # print("Stopping Dynamic Updates")
         if self.timer is not None:
             self.timer.stop()
             self.timer = None
@@ -110,7 +110,7 @@ class PlotItem(QWidget):
     def _dynamic_update(self):
         if self._expected_points is None:
             self._expected_points = self._run.start.get("num_points", -1)
-        print("dynamic update triggered")
+        # print("dynamic update triggered")
         if self._run.metadata.get("stop", None) is not None:
             # print("Converting from dynamic to static")
             # print(self._run.metadata["stop"])
@@ -123,7 +123,7 @@ class PlotItem(QWidget):
                     .get("primary", -1)
                 )
         elif self._catalog is not None:
-            print("No Stop Doc, Updating Run from Catalog")
+            # print("No Stop Doc, Updating Run from Catalog")
             self._run = self._catalog[self.uid]
 
         self.update_plot_signal.emit()

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbs-viewer"
-description = "A simple Tiled viewer application."
+description = "A simple viewer application for data stored in a Blueksy-Tiled database."
 dynamic = ["version"]
 authors = [{ name = "Charles Titus", email = "ctitus@bnl.gov" }]
 readme = "README.md"
-keywords = ["SST", "viewer"]
+keywords = ["tiled", "viewer"]
 dependencies = [
 "numpy",
 "qtpy",
@@ -19,6 +19,16 @@ dependencies = [
 "databroker >= 2.0.0a105",
 "asteval",
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: Public Domain",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research"
+]
+
+[project.urls]
+Homepage = "https://github.com/xraygui/nbs-viewer"
+Issues = "https://github.com/xraygui/nbs-viewer/issues"
 
 [project.scripts]
 nbs-viewer = "nbs_viewer.viewer:main"

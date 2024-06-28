@@ -122,7 +122,7 @@ class ReverseModel(QSortFilterProxyModel):
         index = model.index(source_row, self.filterKeyColumn(), source_parent)
         data = model.data(index, Qt.DisplayRole)
         if data is None:
-            print(f"Row {source_row} has None data, skipping.")
+            # print(f"Row {source_row} has None data, skipping.")
             return False  # Optionally, decide how to handle None data
 
         # Convert data to string if it's not already one
@@ -135,12 +135,12 @@ class ReverseModel(QSortFilterProxyModel):
     def mapFromSource(self, index):
         if not self.invert:
             filteredIndex = super().mapFromSource(index)
-            if index.column() == 0:
-                print(f"Mapping {index.row()}")
-                print(f"From {filteredIndex.row()}")
+            # if index.column() == 0:
+            #    print(f"Mapping {index.row()}")
+            #    print(f"From {filteredIndex.row()}")
             return filteredIndex
         else:
-            print("Calling mapFromSource inverted... not sure why")
+            # print("Calling mapFromSource inverted... not sure why")
             model = self.sourceModel()
             newRow = model._catalog_length - index.row() - 1
             newIndex = model.index(newRow, index.column())

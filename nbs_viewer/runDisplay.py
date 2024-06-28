@@ -296,6 +296,7 @@ class PlotControls(QWidget):
 
         self.plotItemList = plotItemList
         self.update_display()
+        self.checked_changed()
 
     def clear_display(self):
         for i in reversed(range(self.grid.count())):

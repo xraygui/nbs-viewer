@@ -169,7 +169,7 @@ class DataSourcePicker(QDialog):
         self.data_sources = {
             "Tiled uri": URISource(),
             "Tiled Profile": ProfileSource(),
-            "Kafka": KafkaSource(),
+            # "Kafka": KafkaSource(),
         }
         for k, s in self.data_sources.items():
             self.source_type.addItem(k)

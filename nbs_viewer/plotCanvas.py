@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QSizePolicy,
 )
-from qtpy.QtCore import Qt, Signal, QObject, QTimer, Slot, QSize
+from qtpy.QtCore import Qt, Signal, Slot, QSize
 
 import matplotlib
 import numpy as np
@@ -274,7 +274,7 @@ class DataPlotter(QWidget):
         """
         # Clear the current lines from the plot
         # Index into the first N-1 dimensions of the data arrays
-        print(f"DataPlotter indices updated {indices}")
+        # print(f"DataPlotter indices updated {indices}")
         self.artist = self.plot_data(indices)
 
     def clear(self):
@@ -365,7 +365,7 @@ class MplCanvas(FigureCanvasQTAgg):
         return artist
 
     def clear(self):
-        print("Clearing Axes")
+        # print("Clearing Axes")
         self.axes.cla()
         self.draw()
 
@@ -436,10 +436,7 @@ class PlotWidget(QWidget):
 
 
 if __name__ == "__main__":
-    from tiled.client import from_uri
 
-    c = from_uri("https://tiled.nsls2.bnl.gov")["ucal", "raw"]
-    # run = c["ucal"]["raw"].items_indexer[-10][-1]
     app = QApplication([])
     widget = PlotWidget()
     widget.show()
