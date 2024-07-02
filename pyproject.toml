@@ -16,7 +16,7 @@ dependencies = [
 "tiled >= 0.1.0a105",
 "bluesky-widgets >= 0.0.15",
 "nslsii",
-"databroker >= 2.0.0a105",
+"databroker[client,server,back-compat] >= 2.0.0a105",
 "asteval",
 ]
 classifiers = [
