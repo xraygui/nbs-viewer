@@ -4,43 +4,21 @@ from qtpy.QtCore import QTimer, Signal
 from asteval import Interpreter
 
 
-def blueskyrun_to_string(blueskyrun):
-    # Replace this with your actual function
-    start = blueskyrun.metadata["start"]
-    scan_id = str(start["scan_id"])
-    scan_desc = ["Scan", scan_id]
-    if hasattr(start, "edge"):
-        scan_desc.append(start.get("edge"))
-        scan_desc.append("edge")
-    if hasattr(start, "scantype"):
-        scan_desc.append(start.get("scantype"))
-    else:
-        scan_desc.append(start.get("plan_name"))
-    if hasattr(start, "sample_md"):
-        scan_desc.append("of")
-        scan_desc.append(start["sample_md"].get("name", "Unknown"))
-    elif hasattr(start, "sample_name"):
-        scan_desc.append("of")
-        scan_desc.append(start["sample_name"])
-    str_desc = " ".join(scan_desc)
-    return str_desc
-
-
 class PlotItem(QWidget):
     update_plot_signal = Signal()
 
     def __init__(self, run, catalog=None, dynamic=False, parent=None):
         super().__init__(parent)
-        self._run = run
+        self._run = run  # This is now a BlueskyRun object
         self._catalog = catalog
         self._dynamic = dynamic
         self._connected = False
         self.dataPlotters = {}
-        self._plot_hints = getPlotHints(self._run)
+        self._plot_hints = self._run.getPlotHints()
         self._axhints = getAxisHints(self._plot_hints)
         # print("Axhints")
         # print(self._axhints)
-        xkeys, ykeys = getRunKeys(self._run)
+        xkeys, ykeys = self._run.getRunKeys()
         yfiltered = filterHintedKeys(self._plot_hints, ykeys)
         self.xkeyDict = xkeys
         self.ykeyDict = yfiltered
@@ -58,22 +36,16 @@ class PlotItem(QWidget):
         for ylist in self.all_ykeyDict.values():
             self._allrows += ylist
         self.setDefaultChecked()
-        self._description = blueskyrun_to_string(self._run)
-        self._uid = self._run.metadata["start"]["uid"]
-        self._scanid = self._run.metadata["start"]["scan_id"]
-        self._expected_points = self._run.start.get("num_points", -1)
+        self._description = str(self._run)
+        self._uid = self._run.uid
+        self._scanid = self._run.scan_id
+        self._expected_points = self._run.num_points
         self._transform_text = ""
         self.update_plot_signal.connect(self.plotCheckedData)
         if self._dynamic:
             self.startDynamicUpdates()
         else:
-            self._num_points = self._run.start.get("num_points", -1)
-            if self._num_points == -1:
-                self._num_points = (
-                    self._run.metadata.get("stop", {})
-                    .get("num_events", {})
-                    .get("primary", -1)
-                )
+            self._num_points = self._run.num_points
             self.timer = None
         self.aeval = Interpreter()  # Create an Asteval interpreter once
 
@@ -109,22 +81,16 @@ class PlotItem(QWidget):
 
     def _dynamic_update(self):
         if self._expected_points is None:
-            self._expected_points = self._run.start.get("num_points", -1)
+            self._expected_points = self._run.num_points
         # print("dynamic update triggered")
-        if self._run.metadata.get("stop", None) is not None:
+        if self._run.scanFinished():
             # print("Converting from dynamic to static")
             # print(self._run.metadata["stop"])
             self.stopDynamicUpdates()
-            self._num_points = self._run.start.get("num_points", -1)
-            if self._num_points == -1:
-                self._num_points = (
-                    self._run.metadata.get("stop", {})
-                    .get("num_events", {})
-                    .get("primary", -1)
-                )
+            self._num_points = self._run.num_points
         elif self._catalog is not None:
             # print("No Stop Doc, Updating Run from Catalog")
-            self._run = self._catalog[self.uid]
+            self._run.refresh()
 
         self.update_plot_signal.emit()
 
@@ -136,7 +102,7 @@ class PlotItem(QWidget):
 
     def setDynamic(self, enabled):
         if enabled:
-            if not self._dynamic and self._run.metadata.get("stop", None) is None:
+            if not self._dynamic and not self._run.scanFinished():
                 self.startDynamicUpdates()
         elif self._dynamic:
             self.stopDynamicUpdates()
@@ -296,9 +262,9 @@ class PlotItem(QWidget):
         Need to return dictionaries with keys so that I can store/update DataPlotters
         """
 
-        xlist = [self.getData(key) for key in self._checked_x]
-        ylist = [self.getData(key) for key in self._checked_y]
-        normlist = [self.getData(key) for key in self._checked_norm]
+        xlist = [self._run.getData(key) for key in self._checked_x]
+        ylist = [self._run.getData(key) for key in self._checked_y]
+        normlist = [self._run.getData(key) for key in self._checked_norm]
 
         if self._dynamic:
             # Lengths may be off due to uneven data updates
@@ -319,10 +285,7 @@ class PlotItem(QWidget):
             if minidx == self._expected_points:
                 self.stopDynamicUpdates()
 
-        if "shape" in self._run.start:
-            xshape = self._run.start["shape"]
-        else:
-            xshape = [self._num_points]
+        xshape = self._run.getShape()
 
         xlist_reshape = [reshape_truncated_array(x, xshape) for x in xlist]
         ylist_reshape = [reshape_truncated_array(y, xshape) for y in ylist]
@@ -330,47 +293,10 @@ class PlotItem(QWidget):
         return xlist_reshape, ylist_reshape, nlist_reshape
 
     def getData(self, key):
-        # re-optimize for performance later
-        # if not self._dynamic:
-        #    return self._data[key]
-        # else:
-        return self._run["primary", "data", key].read()
+        return self._run.getData(key)
 
     def getAxis(self, keys):
-        data = self._run["primary"]
-        for key in keys:
-            data = data[key]
-        return data.read().squeeze()
-
-
-def getRunKeys(run):
-    allData = {key: arr.shape for key, arr in run["primary", "data"].items()}
-    xkeyhints = run.start["hints"].get("dimensions", [])
-    keys1d = []
-    keysnd = []
-
-    xkeys = {}
-    ykeys = {}
-    for key in list(allData.keys()):
-        if len(allData[key]) == 1:
-            keys1d.append(key)
-        elif len(allData[key]) > 1:
-            keysnd.append(key)
-    if "time" in keys1d:
-        xkeys[0] = ["time"]
-        keys1d.pop(keys1d.index("time"))
-    for i, dimension in enumerate(xkeyhints):
-        axlist = dimension[0]
-        xkeys[i + 1] = []
-        for ax in axlist:
-            if ax in keys1d:
-                keys1d.pop(keys1d.index(ax))
-                xkeys[i + 1].append(ax)
-        if len(xkeys[i + 1]) == 0:
-            xkeys.pop(i + 1)
-    ykeys[1] = keys1d
-    ykeys[2] = keysnd
-    return xkeys, ykeys
+        return self._run.getAxis(keys)
 
 
 def getAxisHints(plotHints):
@@ -384,11 +310,6 @@ def getAxisHints(plotHints):
                     signal = signal[-1]
                 axhints[signal] = d["axes"]
     return axhints
-
-
-def getPlotHints(run):
-    plotHints = run.start.get("plot_hints", {})
-    return plotHints
 
 
 def filterHintedKeys(plotHints, ykeys):

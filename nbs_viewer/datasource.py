@@ -28,6 +28,7 @@ from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from os.path import exists
 from .catalogView import CatalogTableView
+from .catalogModel import BlueskyCatalog
 
 
 class URISource(QWidget):
@@ -71,7 +72,7 @@ class URISource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        # catalog = wrap_catalog(catalog)
+        catalog = BlueskyCatalog(catalog)
         catalogView = CatalogTableView(catalog)
         return catalogView, label
 
@@ -105,7 +106,7 @@ class ProfileSource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        # catalog = wrap_catalog(catalog)
+        catalog = BlueskyCatalog(catalog)
         catalogView = CatalogTableView(catalog)
         return catalogView, label
 
