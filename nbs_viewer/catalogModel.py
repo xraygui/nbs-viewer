@@ -3,6 +3,22 @@ from abc import ABC, abstractmethod
 import collections
 from .runModel import BlueskyRun, NBSRun
 from typing import Optional
+from importlib.metadata import entry_points
+
+
+def load_catalog_models():
+    """
+    Load catalog models from entrypoints.
+
+    Returns
+    -------
+    dict
+        A dictionary of catalog model names and their corresponding classes.
+    """
+    catalog_models = {}
+    for ep in entry_points(group="nbs_viewer.catalog_models"):
+        catalog_models[ep.name] = ep.load()
+    return catalog_models
 
 
 def iterfy(x):

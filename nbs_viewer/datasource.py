@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Signal, QSortFilterProxyModel
 from tiled.client import from_uri, from_profile
 
-
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 from databroker import temp as temporaryDB
@@ -28,7 +27,9 @@ from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from os.path import exists
 from .catalogView import CatalogTableView
-from .catalogModel import BlueskyCatalog
+from .catalogModel import load_catalog_models
+
+import toml
 
 
 class URISource(QWidget):
@@ -48,6 +49,8 @@ class URISource(QWidget):
         profile_hbox = QHBoxLayout()
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
+
+        self.catalog_models = load_catalog_models()
 
         uri_vstack = QVBoxLayout()
         uri_vstack.addLayout(uri_hbox)
@@ -72,9 +75,18 @@ class URISource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        catalog = BlueskyCatalog(catalog)
-        catalogView = CatalogTableView(catalog)
-        return catalogView, label
+            else:
+                return None, None  # User cancelled the dialog
+
+        # Now that we have the final catalog, show the model selection dialog
+        model_dialog = CatalogModelPicker(self.catalog_models, self)
+        if model_dialog.exec_():
+            selected_model = model_dialog.selected_model
+            catalog = selected_model(catalog)
+            catalogView = CatalogTableView(catalog)
+            return catalogView, label
+        else:
+            return None, None  # User cancelled the model selection
 
 
 class ProfileSource(QWidget):
@@ -86,6 +98,8 @@ class ProfileSource(QWidget):
         profile_hbox = QHBoxLayout()
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
+
+        self.catalog_models = load_catalog_models()
 
         profile_vstack = QVBoxLayout()
         profile_vstack.addLayout(profile_hbox)
@@ -106,9 +120,18 @@ class ProfileSource(QWidget):
                 for key in selected_keys:
                     catalog = catalog[key]
                     label += ":" + key
-        catalog = BlueskyCatalog(catalog)
-        catalogView = CatalogTableView(catalog)
-        return catalogView, label
+            else:
+                return None, None  # User cancelled the dialog
+
+        # Now that we have the final catalog, show the model selection dialog
+        model_dialog = CatalogModelPicker(self.catalog_models, self)
+        if model_dialog.exec_():
+            selected_model = model_dialog.selected_model
+            catalog = selected_model(catalog)
+            catalogView = CatalogTableView(catalog)
+            return catalogView, label
+        else:
+            return None, None  # User cancelled the model selection
 
 
 class KafkaSource(QWidget):
@@ -163,15 +186,23 @@ class KafkaSource(QWidget):
 
 
 class DataSourcePicker(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, config_file=None, parent=None):
         super().__init__(parent)
         self.source_type = QComboBox(self)
         self.layout_switcher = QStackedWidget(self)
-        self.data_sources = {
-            "Tiled uri": URISource(),
-            "Tiled Profile": ProfileSource(),
-            # "Kafka": KafkaSource(),
-        }
+        self.data_sources = {}
+
+        if config_file:
+            config = toml.load(config_file)
+            for catalog in config.get("catalog", []):
+                source_name = f"Config: {catalog['label']}"
+                config_source = ConfigSource(catalog)
+                self.data_sources[source_name] = config_source
+
+        self.data_sources["Tiled URI"] = URISource()
+        self.data_sources["Tiled Profile"] = ProfileSource()
+        # "Kafka": KafkaSource(),
+
         for k, s in self.data_sources.items():
             self.source_type.addItem(k)
             self.layout_switcher.addWidget(s)
@@ -195,8 +226,33 @@ class DataSourcePicker(QDialog):
         self.layout_switcher.setCurrentIndex(self.source_type.currentIndex())
 
     def getSource(self):
-        # catalog, label = self.layout_switcher.currentWidget().getSource()
         return self.layout_switcher.currentWidget().getSource()
+
+
+class CatalogModelPicker(QDialog):
+    def __init__(self, catalog_models, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Catalog Model")
+        self.catalog_models = catalog_models
+        self.selected_model = None
+
+        layout = QVBoxLayout(self)
+
+        self.model_combo = QComboBox(self)
+        self.model_combo.addItems(self.catalog_models.keys())
+        layout.addWidget(QLabel("Select a catalog model:"))
+        layout.addWidget(self.model_combo)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.setLayout(layout)
+
+    def accept(self):
+        self.selected_model = self.catalog_models[self.model_combo.currentText()]
+        super().accept()
 
 
 class KafkaView(QWidget):
@@ -261,8 +317,9 @@ class KafkaView(QWidget):
 class DataSelection(QWidget):
     add_rows_current_plot = Signal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, config_file=None, parent=None):
         super().__init__(parent)
+        self.config_file = config_file
 
         self.label = QLabel("Data Source")
         self.dropdown = QComboBox(self)
@@ -283,19 +340,51 @@ class DataSelection(QWidget):
         self.setLayout(layout)
 
     def add_new_source(self):
-        picker = DataSourcePicker(self)
+        picker = DataSourcePicker(config_file=self.config_file, parent=self)
         if picker.exec_():
             sourceView, label = picker.getSource()
-            sourceView.add_rows_current_plot.connect(self.emit_rows_selected)
-            self.stacked_widget.addWidget(sourceView)
-            self.dropdown.addItem(label)
-            self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
+            if sourceView is not None and label is not None:
+                sourceView.add_rows_current_plot.connect(self.emit_rows_selected)
+                self.stacked_widget.addWidget(sourceView)
+                self.dropdown.addItem(label)
+                self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
+            else:
+                # User cancelled one of the dialogs, do nothing
+                pass
 
     def emit_rows_selected(self, plotItem):
         self.add_rows_current_plot.emit(plotItem)
 
     def switch_table(self):
         self.stacked_widget.setCurrentIndex(self.dropdown.currentIndex())
+
+
+class ConfigSource(QWidget):
+    add_rows_current_plot = Signal(object)
+
+    def __init__(self, catalog_config, parent=None):
+        super().__init__(parent)
+        self.catalog_config = catalog_config
+        self.catalog_models = load_catalog_models()
+
+    def getSource(self):
+        catalog = from_uri(self.catalog_config["url"])
+        label = self.catalog_config["label"]
+
+        if self.catalog_config.get("catalog_keys"):
+            if isinstance(self.catalog_config["catalog_keys"], list):
+                for key in self.catalog_config["catalog_keys"]:
+                    catalog = catalog[key]
+            elif isinstance(self.catalog_config["catalog_keys"], str):
+                catalog = catalog[self.catalog_config["catalog_keys"]]
+            else:
+                raise ValueError("Invalid catalog_keys format in config")
+
+        selected_model = self.catalog_models[self.catalog_config["catalog_model"]]
+        catalog = selected_model(catalog)
+        catalogView = CatalogTableView(catalog)
+        catalogView.add_rows_current_plot.connect(self.add_rows_current_plot)
+        return catalogView, label
 
 
 class MainWindow(QMainWindow):
