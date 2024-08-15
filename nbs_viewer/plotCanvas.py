@@ -291,12 +291,12 @@ class DataPlotter(QWidget):
 
 
 class NavigationToolbar(NavigationToolbar2QT):
+    def __init__(self, canvas, parent=None):
+        super().__init__(canvas, parent)
 
-    def __init__(self, *args, **kwargs):
-        self.toolitems.append(("Autoscale", "Autoscale", "help", "autoscale"))
-        self.toolitems.append(("Autolegend", "Autolegend", "help", "autolegend"))
-
-        super().__init__(*args, **kwargs)
+        # Add custom buttons after initialization
+        self.addAction("Autoscale", self.autoscale)
+        self.addAction("Autolegend", self.autolegend)
 
     def autoscale(self):
         self.canvas.autoscale()

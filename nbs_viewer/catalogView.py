@@ -172,8 +172,8 @@ class ReverseModel(QSortFilterProxyModel):
 
 
 class CatalogTableView(QWidget):
-    add_rows_current_plot = Signal(object)
-    add_rows_new_plot = Signal(object)
+    itemsSelected = Signal(list)
+    itemsDeselected = Signal(list)
 
     def __init__(self, catalog, parent=None):
         super().__init__(parent)
@@ -191,8 +191,6 @@ class CatalogTableView(QWidget):
         self.display_button.clicked.connect(self.refresh_filters)
         self.invertButton = QPushButton("Reverse Data", self)
         self.invertButton.setEnabled(False)  # Enable the invertButton
-        self.plot_button1 = QPushButton("Add Data to Current Plot", self)
-        self.plot_button1.clicked.connect(self.emit_add_rows)
 
         self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
         self.scrollToBottomButton.clicked.connect(self.data_view.scrollToBottom)
@@ -222,11 +220,41 @@ class CatalogTableView(QWidget):
         layout.addLayout(scrollLayout)
         layout.addWidget(self.invertButton)
         layout.addWidget(self.data_view)
-        layout.addWidget(self.plot_button1)
         self.setLayout(layout)
 
         # Setup the model and filtering
         self.refresh_filters()
+
+        self.selected_plot_items = []  # New attribute to store selected PlotItems
+        self.data_view.selectionModel().selectionChanged.connect(
+            self.on_selection_changed
+        )
+
+    def on_selection_changed(self, selected, deselected):
+        selected_items = []
+        for index in selected.indexes():
+            if index.column() == 0:
+                key = index.data()
+                data = self.parent_catalog[key]
+                selected_items.append(PlotItem(data))
+        self.itemsSelected.emit(selected_items)
+
+        deselected_items = []
+        for index in deselected.indexes():
+            if index.column() == 0:
+                key = index.data()
+                data = self.parent_catalog[key]
+                deselected_items.append(PlotItem(data))
+        self.itemsDeselected.emit(deselected_items)
+
+    def get_selected_items(self):
+        selected_items = []
+        for index in self.data_view.selectionModel().selectedRows():
+            if index.column() == 0:
+                key = index.data()
+                data = self.parent_catalog[key]
+                selected_items.append(PlotItem(data))
+        return selected_items
 
     def setupModelAndView(self, catalog):
         table_model = CatalogTableModel(catalog)
@@ -245,24 +273,6 @@ class CatalogTableView(QWidget):
         )
         self.invertButton.clicked.connect(reverse.toggleInvert)
         self.invertButton.setEnabled(True)
-        self.data_view.selectionModel().selectionChanged.connect(self.rows_selected)
-
-    def rows_selected(self, selected, deselected):
-        selected_rows = selected.indexes()
-        if len(selected_rows) > 0:
-            self.plot_button1.setEnabled(True)
-        else:
-            self.plot_button1.setEnabled(False)
-
-    def emit_add_rows(self):
-        selected_rows = self.data_view.selectionModel().selectedRows()
-        selected_data = []
-        for index in selected_rows:
-            if index.column() == 0:  # Check if the column is 0
-                key = index.data()  # Get the key from the cell data
-                data = self.parent_catalog[key]  # Fetch the data using the key
-                selected_data.append(PlotItem(data))
-        self.add_rows_current_plot.emit(selected_data)
 
     def refresh_filters(self):
         catalog = self.parent_catalog

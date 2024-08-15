@@ -1,25 +1,34 @@
 import argparse
-from qtpy.QtWidgets import QApplication, QHBoxLayout, QWidget, QSplitter
+from qtpy.QtWidgets import QApplication, QVBoxLayout, QWidget, QTabWidget
 from qtpy.QtCore import Qt
-from .datasource import DataSelection
-from .runDisplay import DataDisplayWidget
+from .plotManager import PlotManagerWithBlueskyList, PlotManagerWithDataList
 
 
 class Viewer(QWidget):
     def __init__(self, config_file=None, parent=None):
         super(Viewer, self).__init__(parent)
-        self.layout = QHBoxLayout(self)
+        self.layout = QVBoxLayout(self)
 
-        splitter = QSplitter(Qt.Horizontal)
+        # Create a QTabWidget
+        self.tab_widget = QTabWidget(self)
+        # Set the tab position to the left (vertical tabs)
+        self.tab_widget.setTabPosition(QTabWidget.West)
 
-        self.data_selection = DataSelection(config_file)
-        splitter.addWidget(self.data_selection)
+        # Create the plot managers
+        self.data_list_manager = PlotManagerWithDataList(config_file, self)
+        self.bluesky_list_manager = PlotManagerWithBlueskyList(self)
 
-        self.data_display = DataDisplayWidget()
-        splitter.addWidget(self.data_display)
+        # Add the plot managers to the tab widget
+        self.tab_widget.addTab(self.data_list_manager, "Data List")
+        self.tab_widget.addTab(self.bluesky_list_manager, "Bluesky List")
 
-        self.layout.addWidget(splitter)
-        self.data_selection.add_rows_current_plot.connect(self.data_display.addPlotItem)
+        # Connect the signals
+        self.data_list_manager.addToPlot.connect(
+            self.bluesky_list_manager.list_widget.addPlotItem
+        )
+
+        # Add the tab widget to the main layout
+        self.layout.addWidget(self.tab_widget)
 
         self.setLayout(self.layout)
 

@@ -32,6 +32,32 @@ from .catalogModel import load_catalog_models
 import toml
 
 
+class ConfigSource(QWidget):
+
+    def __init__(self, catalog_config, parent=None):
+        super().__init__(parent)
+        self.catalog_config = catalog_config
+        self.catalog_models = load_catalog_models()
+
+    def getSource(self):
+        catalog = from_uri(self.catalog_config["url"])
+        label = self.catalog_config["label"]
+
+        if self.catalog_config.get("catalog_keys"):
+            if isinstance(self.catalog_config["catalog_keys"], list):
+                for key in self.catalog_config["catalog_keys"]:
+                    catalog = catalog[key]
+            elif isinstance(self.catalog_config["catalog_keys"], str):
+                catalog = catalog[self.catalog_config["catalog_keys"]]
+            else:
+                raise ValueError("Invalid catalog_keys format in config")
+
+        selected_model = self.catalog_models[self.catalog_config["catalog_model"]]
+        catalog = selected_model(catalog)
+        catalogView = CatalogTableView(catalog)
+        return catalogView, label
+
+
 class URISource(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -312,79 +338,6 @@ class KafkaView(QWidget):
         self.proxyModel.setFilterKeyColumn(
             2
         )  # Change to the column you want to filter by
-
-
-class DataSelection(QWidget):
-    add_rows_current_plot = Signal(object)
-
-    def __init__(self, config_file=None, parent=None):
-        super().__init__(parent)
-        self.config_file = config_file
-
-        self.label = QLabel("Data Source")
-        self.dropdown = QComboBox(self)
-        self.dropdown.currentIndexChanged.connect(self.switch_table)
-        self.new_source = QPushButton("New Data Source")
-        self.new_source.clicked.connect(self.add_new_source)
-
-        self.stacked_widget = QStackedWidget()
-
-        hbox_layout = QHBoxLayout()
-        hbox_layout.addWidget(self.label)
-        hbox_layout.addWidget(self.dropdown)
-
-        layout = QVBoxLayout()
-        layout.addLayout(hbox_layout)
-        layout.addWidget(self.new_source)
-        layout.addWidget(self.stacked_widget)
-        self.setLayout(layout)
-
-    def add_new_source(self):
-        picker = DataSourcePicker(config_file=self.config_file, parent=self)
-        if picker.exec_():
-            sourceView, label = picker.getSource()
-            if sourceView is not None and label is not None:
-                sourceView.add_rows_current_plot.connect(self.emit_rows_selected)
-                self.stacked_widget.addWidget(sourceView)
-                self.dropdown.addItem(label)
-                self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
-            else:
-                # User cancelled one of the dialogs, do nothing
-                pass
-
-    def emit_rows_selected(self, plotItem):
-        self.add_rows_current_plot.emit(plotItem)
-
-    def switch_table(self):
-        self.stacked_widget.setCurrentIndex(self.dropdown.currentIndex())
-
-
-class ConfigSource(QWidget):
-    add_rows_current_plot = Signal(object)
-
-    def __init__(self, catalog_config, parent=None):
-        super().__init__(parent)
-        self.catalog_config = catalog_config
-        self.catalog_models = load_catalog_models()
-
-    def getSource(self):
-        catalog = from_uri(self.catalog_config["url"])
-        label = self.catalog_config["label"]
-
-        if self.catalog_config.get("catalog_keys"):
-            if isinstance(self.catalog_config["catalog_keys"], list):
-                for key in self.catalog_config["catalog_keys"]:
-                    catalog = catalog[key]
-            elif isinstance(self.catalog_config["catalog_keys"], str):
-                catalog = catalog[self.catalog_config["catalog_keys"]]
-            else:
-                raise ValueError("Invalid catalog_keys format in config")
-
-        selected_model = self.catalog_models[self.catalog_config["catalog_model"]]
-        catalog = selected_model(catalog)
-        catalogView = CatalogTableView(catalog)
-        catalogView.add_rows_current_plot.connect(self.add_rows_current_plot)
-        return catalogView, label
 
 
 class MainWindow(QMainWindow):

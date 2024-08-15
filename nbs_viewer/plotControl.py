@@ -1,5 +1,4 @@
 from qtpy.QtWidgets import (
-    QApplication,
     QVBoxLayout,
     QHBoxLayout,
     QWidget,
@@ -9,121 +8,9 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QFrame,
     QPushButton,
-    QListWidget,
-    QListWidgetItem,
-    QSizePolicy,
     QLineEdit,
-    QAbstractItemView,
 )
-from qtpy.QtCore import Qt, Signal
-
-# from pyqtgraph import PlotWidget
-
-from .plotItem import PlotItem
-from .plotCanvas import PlotWidget
-
-
-class BlueskyListWidget(QListWidget):
-    """
-    A widget for displaying Bluesky Runs in a list.
-
-    Signals
-    -------
-    selectedDataChanged : Signal
-        Emitted when the selected data in the list changes. Emits a list of
-        (text, BlueskyRun) tuples based on the selected list items.
-    """
-
-    itemsSelected = Signal(list)
-    itemsDeselected = Signal(list)
-
-    def __init__(self, parent=None):
-        """
-        Initialize the BlueskyListWidget.
-
-        Parameters
-        ----------
-        parent : QWidget, optional
-            Parent widget, by default None
-        """
-        super().__init__(parent)
-
-        sizePolicy = self.sizePolicy()
-        sizePolicy.setHorizontalPolicy(QSizePolicy.Minimum)
-        # sizePolicy.setVerticalPolicy(QSizePolicy.Minimum)
-        self.setSizePolicy(sizePolicy)
-        self.selectionModel().selectionChanged.connect(self.handle_selection_change)
-        self.setSelectionMode(
-            QAbstractItemView.ExtendedSelection
-        )  # Enable multiple item selection
-
-        # self.itemSelectionChanged.connect(self.emit_selected_data)
-        self._plotItems = {}
-
-    def addPlotItem(self, plotItem):
-        """
-        Add a run or multiple runs to the list widget.
-
-        Parameters
-        ----------
-        blueskyrun : BlueskyRun or list/tuple of BlueskyRun
-            The run(s) to be added to the list widget.
-        """
-        if isinstance(plotItem, (list, tuple)):
-            for p in plotItem:
-                self.addPlotItem(p)
-        else:
-            item = QListWidgetItem(plotItem.description)
-            item.setData(Qt.UserRole, plotItem.uid)
-            # item.setData(Qt.UserRole, blueskyrun)
-            self._plotItems[plotItem.uid] = plotItem
-            self.addItem(item)
-
-    def removePlotItem(self, plotItem):
-        """
-        Remove a plot item from the list widget based on its UID.
-
-        Parameters
-        ----------
-        plotItem : PlotItem
-            The plot item to be removed from the list widget.
-        """
-        plotItem.clear()
-        # Iterate over all items in the list
-        for i in range(self.count()):
-            item = self.item(i)
-            # Check if the item's UID matches the plotItem's UID
-            if item.data(Qt.UserRole) == plotItem.uid:
-                # Remove the item from the list
-                self.takeItem(i)
-                # Optionally, delete the plotItem from the internal dictionary if it's being tracked
-                if plotItem.uid in self._plotItems:
-                    del self._plotItems[plotItem.uid]
-                break  # Exit the loop once the item is found and removed
-
-    def handle_selection_change(self, selected, deselected):
-        items_for_selection = self.selectedData()
-
-        items_for_deselection = []
-        for index in deselected.indexes():
-            item = self.itemFromIndex(index)
-            plotItem = self._plotItems[item.data(Qt.UserRole)]
-            items_for_deselection.append(plotItem)
-        self.itemsSelected.emit(items_for_selection)
-        self.itemsDeselected.emit(items_for_deselection)
-
-    def selectedData(self):
-        # print("Selecting Data")
-        selected_items = self.selectedItems()
-        items_for_emission = [
-            self._plotItems[item.data(Qt.UserRole)] for item in selected_items
-        ]
-        return items_for_emission
-
-    def removeSelectedItems(self):
-        items = self.selectedData()
-        for plotItem in items:
-            self.removePlotItem(plotItem)
+from qtpy.QtCore import Signal
 
 
 class ExclusiveCheckBoxGroup(QButtonGroup):
@@ -167,46 +54,56 @@ class MutuallyExclusiveCheckBoxGroups(QWidget):
         self.buttonsChanged.emit()
 
 
-class DataDisplayWidget(QWidget):
-    """
-    The main organizing widget that combines a plot, a list of Bluesky runs,
-    and controls to add runs to the plot.
+def getCommonAttr(plotItemList, attr):
+    if len(plotItemList) == 0:
+        return set()
+    first_attr = getattr(plotItemList[0], attr)
+    try:
+        rows = set(first_attr)
+    except TypeError:
+        rows = set([first_attr])
 
-    Parameters
-    ----------
-    parent : QWidget, optional
-        The parent widget, by default None.
-    """
+    for plotItem in plotItemList:
+        rows &= set(getattr(plotItem, attr))
+    return rows
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QHBoxLayout(self)
-        self.plot_widget = PlotWidget()
-        self.controls = PlotControls(self.plot_widget)
-        vlayout = QVBoxLayout()
 
-        self.runlist = BlueskyListWidget()
-        self.runlist.itemsSelected.connect(self.controls.addPlotItems)
+def getCommonRows(plotItemList):
+    return getCommonAttr(plotItemList, "rows")
 
-        self.remove_plot_items = QPushButton("Remove Items")
-        self.clear_plot_button = QPushButton("Clear Plot")
 
-        self.remove_plot_items.clicked.connect(self.runlist.removeSelectedItems)
-        self.clear_plot_button.clicked.connect(self.plot_widget.clearPlot)
+def getCommonXKeyDict(plotItemList):
+    if len(plotItemList) == 0:
+        return dict()
 
-        vlayout.addWidget(self.runlist)
-        vlayout.addWidget(self.remove_plot_items)
-        vlayout.addWidget(self.clear_plot_button)
+    xdims = set(plotItemList[0].xkeyDict.keys())
+    for plotItem in plotItemList:
+        xdims &= set(plotItem.xkeyDict.keys())
+    xdims = sorted(list(xdims))
+    xkeyDict = {}
+    for dim in xdims:
+        xlist = set(plotItemList[0].xkeyDict[dim])
+        for plotItem in plotItemList:
+            xlist &= set(plotItem.xkeyDict[dim])
+        xkeyDict[dim] = sorted(list(xlist))
+    return xkeyDict
 
-        self.layout.addWidget(self.plot_widget)
-        self.layout.addLayout(vlayout)
-        self.layout.addWidget(self.controls)
 
-    # def addRun(self, blueskyruns):
-    #     self.runlist.addRun(blueskyruns)
+def getCommonYKeyDict(plotItemList):
+    if len(plotItemList) == 0:
+        return dict()
+    ydims = set(plotItemList[0].all_ykeyDict.keys())
+    for plotItem in plotItemList:
+        ydims &= set(plotItem.all_ykeyDict.keys())
+    ydims = sorted(list(ydims))
 
-    def addPlotItem(self, plotItem):
-        self.runlist.addPlotItem(plotItem)
+    ykeyDict = {}
+    for dim in ydims:
+        ylist = set(plotItemList[0].all_ykeyDict[dim])
+        for plotItem in plotItemList:
+            ylist &= set(plotItem.all_ykeyDict[dim])
+        ykeyDict[dim] = sorted(list(ylist))
+    return ykeyDict
 
 
 class PlotControls(QWidget):
@@ -282,12 +179,11 @@ class PlotControls(QWidget):
     @property
     def auto_add(self):
         t = self.auto_add_box.isChecked()
-        # print(f"Auto add {t}")
         return t
 
     def addPlotItems(self, plotItemList):
-        # print("Add Plot Item")
-        # print(f"Adding {len(plotItemList)} items")
+        if not isinstance(plotItemList, (list, tuple)):
+            plotItemList = [plotItemList]
         for plotItem in plotItemList:
             if not plotItem._connected:
                 plotItem.attach_plot(self.plot)
@@ -319,13 +215,9 @@ class PlotControls(QWidget):
             header = self.plotItemList[0].description
         else:
             header = "Multiple Selected Scans"
-        # header = self.plotItem.description
         for plotItem in self.plotItemList:
             plotItem.set_row_visibility(self.show_all.isChecked())
-        # Clear the current display
 
-        # self.data = data_dict
-        # Add the header
         header_label = QLabel(header)
         self.layout.insertWidget(0, header_label)
 
@@ -335,7 +227,6 @@ class PlotControls(QWidget):
             self.grid.addWidget(label_widget, 0, i + 1)
         self.grid.addWidget(QLabel("Normalize"), 0, 4)
 
-        # Add the data
         norm_group = ExclusiveCheckBoxGroup(self)
         silly_x_group = ExclusiveCheckBoxGroup(self)
         y_group1d = QButtonGroup(self)
@@ -464,8 +355,6 @@ class PlotControls(QWidget):
                 if self.transform_box.isChecked()
                 else ""
             )
-            # print(f"Checked Changed, transform_text: {transform_text}")
-            # print(checked_x, checked_y, checked_norm)
             plotItem.update_plot_settings(
                 checked_x, checked_y, checked_norm, transform_text
             )
@@ -477,123 +366,3 @@ class PlotControls(QWidget):
         if not self.auto_add:
             for plotItem in self.plotItemList:
                 plotItem.updatePlot()
-
-
-def getCommonAttr(plotItemList, attr):
-    if len(plotItemList) == 0:
-        return set()
-    first_attr = getattr(plotItemList[0], attr)
-    try:
-        rows = set(first_attr)
-    except TypeError:
-        rows = set([first_attr])
-
-    for plotItem in plotItemList:
-        rows &= set(getattr(plotItem, attr))
-    return rows
-
-
-def getCommonRows(plotItemList):
-    return getCommonAttr(plotItemList, "rows")
-
-
-def getCommonXKeyDict(plotItemList):
-    if len(plotItemList) == 0:
-        return dict()
-
-    xdims = set(plotItemList[0].xkeyDict.keys())
-    for plotItem in plotItemList:
-        xdims &= set(plotItem.xkeyDict.keys())
-    xdims = sorted(list(xdims))
-    xkeyDict = {}
-    for dim in xdims:
-        xlist = set(plotItemList[0].xkeyDict[dim])
-        for plotItem in plotItemList:
-            xlist &= set(plotItem.xkeyDict[dim])
-        xkeyDict[dim] = sorted(list(xlist))
-    return xkeyDict
-
-
-def getCommonYKeyDict(plotItemList):
-    if len(plotItemList) == 0:
-        return dict()
-    ydims = set(plotItemList[0].all_ykeyDict.keys())
-    for plotItem in plotItemList:
-        ydims &= set(plotItem.all_ykeyDict.keys())
-    ydims = sorted(list(ydims))
-
-    ykeyDict = {}
-    for dim in ydims:
-        ylist = set(plotItemList[0].all_ykeyDict[dim])
-        for plotItem in plotItemList:
-            ylist &= set(plotItem.all_ykeyDict[dim])
-        ykeyDict[dim] = sorted(list(ylist))
-    return ykeyDict
-
-
-def get1dDataFromRun(blueskyrun):
-    if isinstance(blueskyrun, BlueskyRun):
-        return get1dData(blueskyrun.primary)
-    return get1dData(blueskyrun["primary", "data"])
-
-
-def get1dData(data):
-    allData = {key: arr.shape for key, arr in data.items()}
-    for key in list(allData.keys()):
-        if len(allData[key]) != 1:
-            del allData[key]
-    return {k: d.data for k, d in data.read(variables=list(allData.keys())).items()}
-
-
-def get1dKeys(run):
-    allData = {key: arr.shape for key, arr in run["primary", "data"].items()}
-    keys1d = []
-    for key in list(allData.keys()):
-        if len(allData[key]) == 1:
-            keys1d.append(key)
-    return keys1d
-
-
-def separateKeys(run):
-    allData = {key: arr.shape for key, arr in run["primary", "data"].items()}
-    keys1d = []
-    keysnd = []
-    for key in list(allData.keys()):
-        if len(allData[key]) == 1:
-            keys1d.append(key)
-        elif len(allData[key]) > 1:
-            keysnd.append(key)
-    return keys1d, keysnd
-
-
-def getPlotKey(key_or_dict):
-    if isinstance(key_or_dict, dict):
-        return key_or_dict["signal"]
-    else:
-        return key_or_dict
-
-
-def getPlotHints(run, all1dkeys):
-    """
-    So far only works for 1-d scans
-    """
-    xkey = run.start["hints"]["dimensions"][0][0][0]
-    yhints = run.start["plot_hints"]
-    ykeys_tmp = []
-    for keys in yhints.values():
-        ykeys_tmp += keys
-    ykeys = [y for y in ykeys_tmp if y in all1dkeys]
-    return xkey, ykeys, yhints
-
-
-if __name__ == "__main__":
-    from tiled.client import from_uri
-
-    # c = from_uri("https://tiled.nsls2.bnl.gov")["ucal", "raw"]
-    c = from_uri("http://localhost:8000")
-    # run = c["ucal"]["raw"].items_indexer[-10][-1]
-    app = QApplication([])
-    widget = DataDisplayWidget()
-    widget.show()
-    widget.addPlotItem([PlotItem(run) for run in c.values()])
-    app.exec_()
