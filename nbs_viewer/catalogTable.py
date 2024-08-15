@@ -1,6 +1,5 @@
 from qtpy.QtCore import QTimer, Qt, QVariant, QAbstractTableModel
 from bluesky_widgets.qt.threading import create_worker
-from datetime import datetime
 
 import collections
 
@@ -44,7 +43,7 @@ class CatalogTableModel(QAbstractTableModel):
         self._current_num_rows = 0
         self._chunk_size = chunk_size
         self._data = {}
-        self._uids = []
+        self._keys = {}  # Change this to a dictionary
         self._fetched_rows = 0
         self.columns = self.catalog.columns
 
@@ -82,8 +81,8 @@ class CatalogTableModel(QAbstractTableModel):
         self.dataChanged.emit(index, index, [])
 
     def on_row_loaded(self, payload):
-        rowNum, row = payload
-        # print(f"loading {rowNum} into data")
+        rowNum, (key, row) = payload
+        self._keys[rowNum] = key  # Store the key
         for i, item in enumerate(row):
             self._data[self.createIndex(rowNum, i)] = item
         self.dataChanged.emit(
@@ -95,9 +94,8 @@ class CatalogTableModel(QAbstractTableModel):
             return self.columns[section]
 
     def get_chunk(self, start, stop):
-        return [
-            run.to_row() for run in self.catalog.values_slice(slice(start, stop + 1))
-        ]
+        chunk = list(self.catalog.items_slice(slice(start, stop + 1)))
+        return [(key, run.to_row()) for key, run in chunk]
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():  # does > 0 bounds check
@@ -137,3 +135,10 @@ class CatalogTableModel(QAbstractTableModel):
         self._catalog_length = len(self.catalog)
         if self.canFetchMore():
             self.fetchMore()
+
+    def get_key(self, row):
+        if row not in self._keys:
+            # If the key for this row hasn't been loaded yet, trigger a load
+            self.data(self.createIndex(row, 0))
+            return None  # Return None to indicate the key isn't available yet
+        return self._keys[row]

@@ -60,7 +60,7 @@ class CatalogBase(ABC):
         list
             The list of metadata keys defined in the RUN_WRAPPER class.
         """
-        return self.RUN_WRAPPER.METADATA_KEYS
+        return self.RUN_WRAPPER.to_header()
 
     def __init__(self, catalog, parent=None):
         self._catalog = catalog

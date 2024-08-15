@@ -65,13 +65,21 @@ class CatalogRun(ABC):
 
 
 class BlueskyRun(CatalogRun):
-    METADATA_KEYS = [
-        "uid",
-        "date",
-        "scan_id",
-        "plan_name",
-        "num_points",
-    ]
+    METADATA_KEYS = {
+        "scan_id": ["start", "scan_id"],
+        "uid": ["start", "uid"],
+        "plan_name": ["start", "plan_name"],
+        "date": [],
+        "num_points": [],
+    }
+
+    DISPLAY_KEYS = {
+        "scan_id": "Scan ID",
+        "uid": "UID",
+        "plan_name": "Plan Name",
+        "date": "Date",
+        "num_points": "Scan Points",
+    }
 
     def __init__(self, run, key, catalog):
         self._catalog = catalog
@@ -80,17 +88,29 @@ class BlueskyRun(CatalogRun):
         self.setup()
 
     def setup(self):
-        self.metadata = self._run.metadata["start"]
+        self.metadata = self._run.metadata
 
-        self._date = datetime.fromtimestamp(self.metadata.get("time", 0)).isoformat()
+        self._date = datetime.fromtimestamp(
+            self.get_md_value(["start", "time"], 0)
+        ).isoformat()
 
-        for key in self.METADATA_KEYS:
-            if not hasattr(self.__class__, key):
-                value = self.metadata.get(key, None)
-                setattr(self, key, value)
+        for attr, keys in self.METADATA_KEYS.items():
+            if not hasattr(self.__class__, attr):
+                value = self.get_md_value(keys)
+                setattr(self, attr, value)
 
         if self._key is None:
             self._key = self.uid
+
+    def get_md_value(self, keys, default=None):
+        if not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        value = self.metadata
+        for key in keys:
+            value = value.get(key, {})
+        if value == {}:
+            value = default
+        return value
 
     @property
     def num_points(self):
@@ -99,14 +119,10 @@ class BlueskyRun(CatalogRun):
 
         Returns -1 if not defined in the metadata.
         """
-        if "num_points" in self.metadata:
-            return self.metadata.get("num_points")
-        else:
-            return (
-                self._run.metadata.get("stop", {})
-                .get("num_events", {})
-                .get("primary", -1)
-            )
+        value = self.get_md_value(["start", "num_points"], None)
+        if value is None:
+            value = self.get_md_value(["stop", "num_events", "primary"], -1)
+        return value
 
     @property
     def date(self):
@@ -116,13 +132,19 @@ class BlueskyRun(CatalogRun):
         """
         Returns a tuple of values corresponding to the METADATA_KEYS.
         """
-        return tuple(getattr(self, key, None) for key in self.METADATA_KEYS)
+        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS)
+
+    @classmethod
+    def to_header(cls):
+        attrs = cls.METADATA_KEYS.keys()
+        header_names = [cls.DISPLAY_KEYS.get(attr, attr) for attr in attrs]
+        return header_names
 
     def getShape(self):
-        return self.metadata.get("shape", [self.num_points])
+        return self.get_md_value(["start", "shape"], [self.num_points])
 
     def getPlotHints(self):
-        plotHints = self.metadata.get("plot_hints", {})
+        plotHints = self.get_md_value(["start", "plot_hints"], {})
         return plotHints
 
     def getData(self, key):
@@ -136,7 +158,7 @@ class BlueskyRun(CatalogRun):
 
     def getRunKeys(self):
         allData = {key: arr.shape for key, arr in self._run["primary", "data"].items()}
-        xkeyhints = self.metadata.get("dimensions", [])
+        xkeyhints = self.get_md_value(["start", "dimensions"], [])
         keys1d = []
         keysnd = []
 
@@ -172,25 +194,37 @@ class BlueskyRun(CatalogRun):
         return " ".join(scan_desc)
 
     def scanFinished(self):
-        return bool(self._run.metadata.get("stop", False))
+        return bool(self.metadata.get("stop", False))
 
     def scanSucceeded(self):
-        status = self._run.metadata.get("stop", {}).get("exit_status", "")
+        status = self.get_md_value(["stop", "exit_status"], "")
         return status == "success"
 
 
 class NBSRun(BlueskyRun):
-    METADATA_KEYS = [
-        "uid",
-        "date",
-        "scan_id",
-        "scantype",
-        "plan_name",
-        "edge",
-        "sample_name",
-        "sample_id",
-        "num_points",
-    ]
+    METADATA_KEYS = {
+        "uid": ["start", "uid"],
+        "date": [],
+        "scan_id": ["start", "scan_id"],
+        "scantype": ["start", "scantype"],
+        "plan_name": ["start", "plan_name"],
+        "edge": ["start", "edge"],
+        "sample_name": ["start", "sample_name"],
+        "sample_id": ["start", "sample_id"],
+        "num_points": [],
+    }
+
+    DISPLAY_KEYS = {
+        "uid": "UID",
+        "date": "Date",
+        "scan_id": "Scan ID",
+        "scantype": "Scan Type",
+        "plan_name": "Plan Name",
+        "edge": "Edge",
+        "sample_name": "Sample Name",
+        "sample_id": "Sample ID",
+        "num_points": "Scan Points",
+    }
 
     def __str__(self):
         scan_desc = ["Scan", str(self.scan_id)]
@@ -202,7 +236,9 @@ class NBSRun(BlueskyRun):
             scan_desc.append(self.plan_name)
         if self.sample_name:
             scan_desc.extend(["of", self.sample_name])
-        elif hasattr(self.metadata, "sample_md"):
+        else:
             scan_desc.append("of")
-            scan_desc.append(self.metadata["sample_md"].get("name", "Unknown"))
+            scan_desc.append(
+                self.get_md_value(["start", "sample_md", "name"], "Unknown")
+            )
         return " ".join(scan_desc)

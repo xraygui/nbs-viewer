@@ -9,6 +9,9 @@ from qtpy.QtWidgets import (
     QFrame,
     QPushButton,
     QLineEdit,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 from qtpy.QtCore import Signal
 
@@ -126,7 +129,35 @@ class PlotControls(QWidget):
         self.data = None
         self.allkeylist = []
         self.plotItemList = []
+
+        # Create the tab widget
+        self.tab_widget = QTabWidget()
+
+        # Create the plot control tab
+        self.plot_control_tab = QWidget()
+        self.plot_control_layout = QVBoxLayout(self.plot_control_tab)
+
+        # Create the metadata tab
+        self.metadata_tab = QWidget()
+        self.metadata_layout = QVBoxLayout(self.metadata_tab)
+        self.metadata_tree = QTreeWidget()
+        self.metadata_tree.setHeaderLabels(["Key", "Value"])
+        self.metadata_layout.addWidget(self.metadata_tree)
+
+        # Add tabs to the tab widget
+        self.tab_widget.addTab(self.plot_control_tab, "Plot Controls")
+        self.tab_widget.addTab(self.metadata_tab, "Metadata")
+
+        # Main layout
         self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.tab_widget)
+
+        # Set up the plot control tab (existing code)
+        self.setup_plot_control_tab()
+
+    def setup_plot_control_tab(self):
+        # Move all the existing layout setup code here
+        # Replace all instances of self.layout with self.plot_control_layout
 
         auto_add_layout = QHBoxLayout()
         auto_add_layout.addWidget(QLabel("Auto Add"))
@@ -134,7 +165,7 @@ class PlotControls(QWidget):
         self.auto_add_box.setChecked(True)
         self.auto_add_box.clicked.connect(self.checked_changed)
         auto_add_layout.addWidget(self.auto_add_box)
-        self.layout.addLayout(auto_add_layout)
+        self.plot_control_layout.addLayout(auto_add_layout)
 
         dynamic_update_layout = QHBoxLayout()
         dynamic_update_layout.addWidget(QLabel("Dynamic Update"))
@@ -142,7 +173,7 @@ class PlotControls(QWidget):
         self.dynamic_update_box.setChecked(False)
 
         dynamic_update_layout.addWidget(self.dynamic_update_box)
-        self.layout.addLayout(dynamic_update_layout)
+        self.plot_control_layout.addLayout(dynamic_update_layout)
 
         show_all_layout = QHBoxLayout()
         show_all_layout.addWidget(QLabel("Show all rows"))
@@ -150,7 +181,7 @@ class PlotControls(QWidget):
         self.show_all.setChecked(False)
         self.show_all.clicked.connect(self.update_display)
         show_all_layout.addWidget(self.show_all)
-        self.layout.addLayout(show_all_layout)
+        self.plot_control_layout.addLayout(show_all_layout)
 
         transform_layout = QHBoxLayout()
         transform_layout.addWidget(QLabel("Transform"))
@@ -158,13 +189,13 @@ class PlotControls(QWidget):
         self.transform_box.setChecked(False)
         self.transform_box.clicked.connect(self.checked_changed)
         transform_layout.addWidget(self.transform_box)
-        self.layout.addLayout(transform_layout)
+        self.plot_control_layout.addLayout(transform_layout)
 
         self.transform_text_edit = QLineEdit()
-        self.layout.addWidget(self.transform_text_edit)
+        self.plot_control_layout.addWidget(self.transform_text_edit)
 
         self.grid = QGridLayout()
-        self.layout.addLayout(self.grid)
+        self.plot_control_layout.addLayout(self.grid)
 
         self.update_plot_button = QPushButton("Update Plot")
         self.update_plot_button.clicked.connect(self.update_plot)
@@ -173,34 +204,52 @@ class PlotControls(QWidget):
         self.clear_data_button = QPushButton("Uncheck All")
         self.clear_data_button.clicked.connect(self.uncheck_all)
         self.clear_data_button.setEnabled(False)
-        self.layout.addWidget(self.update_plot_button)
-        self.layout.addWidget(self.clear_data_button)
+        self.plot_control_layout.addWidget(self.update_plot_button)
+        self.plot_control_layout.addWidget(self.clear_data_button)
 
-    @property
-    def auto_add(self):
-        t = self.auto_add_box.isChecked()
-        return t
+    def update_metadata_tab(self, metadata):
+        self.metadata_tree.clear()
+        self.add_dict_to_tree(metadata, self.metadata_tree.invisibleRootItem())
+        self.metadata_tree.expandAll()  # Expand all items
+
+    def add_dict_to_tree(self, dict_obj, parent_item):
+        for key, value in dict_obj.items():
+            if isinstance(value, dict):
+                item = QTreeWidgetItem(parent_item, [str(key), ""])
+                self.add_dict_to_tree(value, item)
+            else:
+                QTreeWidgetItem(parent_item, [str(key), str(value)])
 
     def addPlotItems(self, plotItemList):
+        # print("Adding plot items to control")
         if not isinstance(plotItemList, (list, tuple)):
             plotItemList = [plotItemList]
         for plotItem in plotItemList:
             if not plotItem._connected:
                 plotItem.attach_plot(self.plot)
                 self.dynamic_update_box.clicked.connect(plotItem.setDynamic)
-                plotItem._connected = True
 
         self.plotItemList = plotItemList
         self.update_display()
         self.checked_changed()
+
+        # Update metadata tab with the last added PlotItem's metadata
+        if plotItemList:
+            last_plot_item = plotItemList[-1]
+            self.update_metadata_tab(last_plot_item._run.metadata)
+
+    @property
+    def auto_add(self):
+        t = self.auto_add_box.isChecked()
+        return t
 
     def clear_display(self):
         for i in reversed(range(self.grid.count())):
             self.grid.itemAt(i).widget().setParent(None)
 
         # Clear the header from the layout
-        for i in reversed(range(self.layout.count())):
-            widget = self.layout.itemAt(i).widget()
+        for i in reversed(range(self.plot_control_layout.count())):
+            widget = self.plot_control_layout.itemAt(i).widget()
             if isinstance(widget, QLabel):
                 widget.setParent(None)
         self.update_plot_button.setEnabled(False)
@@ -219,7 +268,7 @@ class PlotControls(QWidget):
             plotItem.set_row_visibility(self.show_all.isChecked())
 
         header_label = QLabel(header)
-        self.layout.insertWidget(0, header_label)
+        self.plot_control_layout.insertWidget(0, header_label)
 
         # Add column labels
         for i, label in enumerate(["X", "Y"]):

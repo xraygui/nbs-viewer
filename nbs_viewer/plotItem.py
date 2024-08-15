@@ -99,6 +99,13 @@ class PlotItem(QWidget):
 
     def attach_plot(self, plot):
         self._plot = plot
+        self._connected = True
+
+    def disconnect_plot(self):
+        # print("In item disconnect plot")
+        self.removeData()
+        self._plot = None
+        self._connected = False
 
     def setDynamic(self, enabled):
         if enabled:
@@ -123,6 +130,7 @@ class PlotItem(QWidget):
         )
 
     def clear(self):
+        # print("Clearing PlotItem")
         self.update_plot_settings([], [], [], "")
         self.setDynamic(False)
         self.removeData()
@@ -130,6 +138,7 @@ class PlotItem(QWidget):
     def update_plot_settings(
         self, checked_x, checked_y, checked_norm, transformText=""
     ):
+        # print("Updating Plot Settings to", checked_x, checked_y)
         self._checked_x = checked_x
         self._checked_y = checked_y
         self._checked_norm = checked_norm
@@ -191,14 +200,14 @@ class PlotItem(QWidget):
         return xlist, yfinal
 
     def removeData(self):
-        remove_keys = [
-            key for key in self.dataPlotters.keys() if key not in self._checked_y
-        ]
+        # print("Remove data")
+        remove_keys = [key for key in self.dataPlotters.keys()]
 
         for key in remove_keys:
             data_plotter = self.dataPlotters.pop(key)
             data_plotter.remove()
             data_plotter.deleteLater()
+        # print("Done remove data")
 
     def plotCheckedData(self):
         # print("plotCheckedData")

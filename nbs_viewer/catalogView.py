@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
 )
-from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel
+from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
 
 from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
@@ -178,7 +178,7 @@ class CatalogTableView(QWidget):
     def __init__(self, catalog, parent=None):
         super().__init__(parent)
         self.parent_catalog = catalog
-
+        self.plot_items = {}
         self.data_view = QTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
@@ -225,36 +225,41 @@ class CatalogTableView(QWidget):
         # Setup the model and filtering
         self.refresh_filters()
 
-        self.selected_plot_items = []  # New attribute to store selected PlotItems
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
     def on_selection_changed(self, selected, deselected):
-        selected_items = []
-        for index in selected.indexes():
-            if index.column() == 0:
-                key = index.data()
-                data = self.parent_catalog[key]
-                selected_items.append(PlotItem(data))
-        self.itemsSelected.emit(selected_items)
-
-        deselected_items = []
         for index in deselected.indexes():
             if index.column() == 0:
-                key = index.data()
-                data = self.parent_catalog[key]
-                deselected_items.append(PlotItem(data))
-        self.itemsDeselected.emit(deselected_items)
+                model = self.data_view.model().sourceModel()
+                key = model.get_key(index.row())
+                if key is not None and key in self.plot_items:
+                    plot_item = self.plot_items.pop(key)
+                    print("Removing Data from inside catalogView")
+                    plot_item.removeData()
+
+        for index in selected.indexes():
+            if index.column() == 0:  # We still check for column 0 to avoid duplicates
+                model = self.data_view.model().sourceModel()
+                key = model.get_key(index.row())
+                if key is not None and key not in self.plot_items:
+                    data = self.parent_catalog[key]
+                    self.plot_items[key] = PlotItem(data)
+
+        self.itemsSelected.emit(list(self.plot_items.values()))
+
+    def deselect_items(self, items):
+        selection_model = self.data_view.selectionModel()
+        for index in self.data_view.selectedIndexes():
+            if index.column() == 0:
+                model = self.data_view.model().sourceModel()
+                key = model.get_key(index.row())
+                if key in [item.uid for item in items]:
+                    selection_model.select(index, QItemSelectionModel.Deselect)
 
     def get_selected_items(self):
-        selected_items = []
-        for index in self.data_view.selectionModel().selectedRows():
-            if index.column() == 0:
-                key = index.data()
-                data = self.parent_catalog[key]
-                selected_items.append(PlotItem(data))
-        return selected_items
+        return list(self.plot_items.values())
 
     def setupModelAndView(self, catalog):
         table_model = CatalogTableModel(catalog)

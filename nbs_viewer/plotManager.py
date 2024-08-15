@@ -84,6 +84,9 @@ class PlotManagerWithBlueskyList(PlotManagerBase):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_list_widget(BlueskyListWidget(self))
+        self.list_widget.itemsSelected.connect(
+            lambda x: print("PlotManagerBluesky itemsSelected")
+        )
 
 
 class PlotManagerWithDataList(PlotManagerBase):
@@ -104,6 +107,9 @@ class PlotManagerWithDataList(PlotManagerBase):
         super().__init__(parent)
         self.setup_list_widget(DataList(config_file, self))
         self.list_widget.itemsAdded.connect(self.addToPlot)
+        self.list_widget.itemsSelected.connect(
+            lambda x: print("PlotManagerData itemsSelected")
+        )
 
 
 if __name__ == "__main__":

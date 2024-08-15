@@ -75,10 +75,12 @@ class BlueskyListWidget(QWidget):
             self._addSinglePlotItem(plotItem)
 
     def _addSinglePlotItem(self, plotItem):
+        # print("Adding bluesky plot item")
         item = QListWidgetItem(plotItem.description)
         item.setData(Qt.UserRole, plotItem.uid)
         self._plotItems[plotItem.uid] = plotItem
         self.list_widget.addItem(item)
+        # print("Done adding bluesky plot item")
 
     def removePlotItem(self, plotItem):
         """
@@ -89,6 +91,7 @@ class BlueskyListWidget(QWidget):
         plotItem : PlotItem
             The plot item to be removed from the list widget.
         """
+        # print("Removing Plot Item from BlueskyList")
         plotItem.clear()
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
@@ -117,38 +120,3 @@ class BlueskyListWidget(QWidget):
             self.removePlotItem(plotItem)
         self.itemsRemoved.emit(items)
         return items
-
-    def addTempPlotItem(self, plotItem):
-        if isinstance(plotItem, (list, tuple)):
-            for p in plotItem:
-                self._addSingleTempPlotItem(p)
-        else:
-            self._addSingleTempPlotItem(plotItem)
-
-    def _addSingleTempPlotItem(self, plotItem):
-        if plotItem.uid not in self._plotItems:
-            item = QListWidgetItem(plotItem.description)
-            item.setData(Qt.UserRole, plotItem.uid)
-            self._temp_plotItems[plotItem.uid] = plotItem
-            self.list_widget.addItem(item)
-
-    def removeTempPlotItem(self, plotItem):
-        if isinstance(plotItem, (list, tuple)):
-            for item in plotItem:
-                self._removeSingleTempPlotItem(item)
-        else:
-            self._removeSingleTempPlotItem(plotItem)
-
-    def _removeSingleTempPlotItem(self, plotItem):
-        if plotItem.uid in self._temp_plotItems:
-            for i in range(self.list_widget.count()):
-                item = self.list_widget.item(i)
-                if item.data(Qt.UserRole) == plotItem.uid:
-                    self.list_widget.takeItem(i)
-                    del self._temp_plotItems[plotItem.uid]
-                    break
-
-    def add_temp_to_permanent(self):
-        for uid, plotItem in self._temp_plotItems.items():
-            self._plotItems[uid] = plotItem
-        self._temp_plotItems.clear()

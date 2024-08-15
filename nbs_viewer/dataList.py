@@ -28,6 +28,7 @@ class DataList(QWidget):
         self.plot_button = QPushButton("Add Selected to Plot List", self)
         self.plot_button.clicked.connect(self.add_selected_items)
 
+        # self.itemsSelected.connect(print)
         self.stacked_widget = QStackedWidget()
 
         hbox_layout = QHBoxLayout()
@@ -62,4 +63,16 @@ class DataList(QWidget):
         current_widget = self.stacked_widget.currentWidget()
         if hasattr(current_widget, "get_selected_items"):
             selected_items = current_widget.get_selected_items()
-            self.itemsAdded.emit(selected_items)
+            if selected_items:
+                if hasattr(current_widget, "deselect_items"):
+                    current_widget.deselect_items(selected_items)
+
+                for item in selected_items:
+                    # print("Disconnecting item")
+                    item.disconnect_plot()
+
+                # Emit the selected items
+                # print("Emitting items")
+                self.itemsAdded.emit(selected_items)
+
+                # Deselect the items
