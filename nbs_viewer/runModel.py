@@ -119,9 +119,9 @@ class BlueskyRun(CatalogRun):
 
         Returns -1 if not defined in the metadata.
         """
-        value = self.get_md_value(["start", "num_points"], None)
+        value = self.get_md_value(["stop", "num_events", "primary"], None)
         if value is None:
-            value = self.get_md_value(["stop", "num_events", "primary"], -1)
+            value = self.get_md_value(["start", "num_points"], -1)
         return value
 
     @property
@@ -158,7 +158,7 @@ class BlueskyRun(CatalogRun):
 
     def getRunKeys(self):
         allData = {key: arr.shape for key, arr in self._run["primary", "data"].items()}
-        xkeyhints = self.get_md_value(["start", "dimensions"], [])
+        xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
         keys1d = []
         keysnd = []
 

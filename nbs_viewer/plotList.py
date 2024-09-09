@@ -7,8 +7,10 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QSizePolicy,
     QAbstractItemView,
+    QInputDialog,
 )
 from qtpy.QtCore import Qt, Signal
+from .plotItem import CompoundPlotItem
 
 
 class BlueskyListWidget(QWidget):
@@ -55,9 +57,16 @@ class BlueskyListWidget(QWidget):
         self.remove_items_button = QPushButton("Remove Items")
         self.remove_items_button.clicked.connect(self.removeSelectedItems)
 
+        self.combine_items_button = QPushButton("Combine Items")
+        self.combine_items_button.clicked.connect(self.combineSelectedItems)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.remove_items_button)
+        button_layout.addWidget(self.combine_items_button)
+
         layout = QVBoxLayout(self)
         layout.addWidget(self.list_widget)
-        layout.addWidget(self.remove_items_button)
+        layout.addLayout(button_layout)
 
     def addPlotItem(self, plotItem):
         """
@@ -120,3 +129,16 @@ class BlueskyListWidget(QWidget):
             self.removePlotItem(plotItem)
         self.itemsRemoved.emit(items)
         return items
+
+    def combineSelectedItems(self):
+        selected_items = self.selectedData()
+        if len(selected_items) < 2:
+            # Optionally, show a message to the user that at least 2 items must be selected
+            return
+
+        label, ok = QInputDialog.getText(
+            self, "Combine Items", "Enter a label for the combined item:"
+        )
+        if ok and label:
+            compound_item = CompoundPlotItem(selected_items, label)
+            self.addPlotItem(compound_item)

@@ -214,7 +214,7 @@ class PlotControls(QWidget):
 
     def add_dict_to_tree(self, dict_obj, parent_item):
         for key, value in dict_obj.items():
-            if isinstance(value, dict):
+            if hasattr(value, "items"):
                 item = QTreeWidgetItem(parent_item, [str(key), ""])
                 self.add_dict_to_tree(value, item)
             else:
@@ -236,7 +236,7 @@ class PlotControls(QWidget):
         # Update metadata tab with the last added PlotItem's metadata
         if plotItemList:
             last_plot_item = plotItemList[-1]
-            self.update_metadata_tab(last_plot_item._run.metadata)
+            self.update_metadata_tab(last_plot_item.metadata)
 
     @property
     def auto_add(self):
