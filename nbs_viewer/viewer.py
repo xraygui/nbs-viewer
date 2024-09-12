@@ -37,7 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description="NBS Viewer")
     parser.add_argument("-f", "--config", help="Path to the catalog config file")
     args = parser.parse_args()
-
+    print("Starting Viewer Main")
     app = QApplication([])
     viewer = Viewer(config_file=args.config)
     viewer.show()

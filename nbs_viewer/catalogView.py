@@ -177,6 +177,7 @@ class CatalogTableView(QWidget):
 
     def __init__(self, catalog, parent=None):
         super().__init__(parent)
+        print("Creating CatalogTableView")
         self.parent_catalog = catalog
         self.plot_items = {}
         self.data_view = QTableView(self)
@@ -224,30 +225,49 @@ class CatalogTableView(QWidget):
 
         # Setup the model and filtering
         self.refresh_filters()
-
+        print("Setting up selectionModel")
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
     def on_selection_changed(self, selected, deselected):
-        for index in deselected.indexes():
-            if index.column() == 0:
-                model = self.data_view.model().sourceModel()
-                key = model.get_key(index.row())
-                if key is not None and key in self.plot_items:
-                    plot_item = self.plot_items.pop(key)
-                    print("Removing Data from inside catalogView")
-                    plot_item.removeData()
+        print("Selection Changed!")
+        print("Selected indices:", selected.indexes())
+        print("Deselected indices:", deselected.indexes())
+        new_plot_keys = []
+        # for index in deselected.indexes():
+        #     if index.column() == 0:
+        #         model = self.data_view.model().sourceModel()
+        #         key = model.get_key(index.row())
+        #         print(f"Deselecting {key}")
+        #         if key is not None and key in self.plot_items:
+        #             plot_item = self.plot_items.pop(key)
+        #             print(f"Removing Data {key} from inside catalogView, {plot_item}")
+        #             plot_item.removeData()
+
+        proxy_model = self.data_view.model()
+        source_model = proxy_model.sourceModel()
 
         for index in selected.indexes():
             if index.column() == 0:  # We still check for column 0 to avoid duplicates
-                model = self.data_view.model().sourceModel()
-                key = model.get_key(index.row())
+                source_index = proxy_model.mapToSource(index)
+                key = source_model.get_key(source_index.row())
                 if key is not None and key not in self.plot_items:
+                    new_plot_keys.append(key)
                     data = self.parent_catalog[key]
                     self.plot_items[key] = PlotItem(data)
+                elif key in self.plot_items:
+                    new_plot_keys.append(key)
 
-        self.itemsSelected.emit(list(self.plot_items.values()))
+        oldkeys = list(self.plot_items.keys())
+        for key in oldkeys:
+            if key not in new_plot_keys:
+                plot_item = self.plot_items.pop(key)
+                plot_item.removeData()
+
+        items_selected = list(self.plot_items.values())
+        print(items_selected)
+        self.itemsSelected.emit(items_selected)
 
     def deselect_items(self, items):
         selection_model = self.data_view.selectionModel()
@@ -284,3 +304,8 @@ class CatalogTableView(QWidget):
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
         self.setupModelAndView(catalog)
+        # Reconnect the selection model's signal after setting up the new model
+        self.data_view.selectionModel().selectionChanged.connect(
+            self.on_selection_changed
+        )
+        print("Reconnected selectionChanged signal after refresh")
