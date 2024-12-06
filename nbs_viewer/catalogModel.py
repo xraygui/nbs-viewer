@@ -44,8 +44,6 @@ def iterfy(x):
 
 class CatalogBase(ABC):
 
-    @classmethod
-    @property
     @abstractmethod
     def RUN_WRAPPER(cls):
         raise NotImplementedError

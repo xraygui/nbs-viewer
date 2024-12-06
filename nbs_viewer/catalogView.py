@@ -172,26 +172,55 @@ class ReverseModel(QSortFilterProxyModel):
 
 
 class CatalogTableView(QWidget):
+    """
+    A widget for displaying and managing catalog data in a table view.
+
+    Signals
+    -------
+    itemsSelected : Signal
+        Emitted when items are selected in the table.
+    itemsDeselected : Signal
+        Emitted when items are deselected from the table.
+    """
+
     itemsSelected = Signal(list)
     itemsDeselected = Signal(list)
 
     def __init__(self, catalog, parent=None):
+        """
+        Initialize the CatalogTableView.
+
+        Parameters
+        ----------
+        catalog : Catalog
+            The catalog to display
+        parent : QWidget, optional
+            Parent widget, by default None
+        """
         super().__init__(parent)
-        print("Creating CatalogTableView")
         self.parent_catalog = catalog
         self.plot_items = {}
+        self._setup_ui()
+        self.refresh_filters()
+
+    def _setup_ui(self):
+        """
+        Set up the user interface components.
+        """
         self.data_view = QTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
+        self.data_view.setSelectionMode(QTableView.ExtendedSelection)
 
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
-        # self.filter_list.append(ScantypeSearch(self))
+
         self.display_button = QPushButton("Display Selection", self)
         self.display_button.clicked.connect(self.refresh_filters)
+
         self.invertButton = QPushButton("Reverse Data", self)
-        self.invertButton.setEnabled(False)  # Enable the invertButton
+        self.invertButton.setEnabled(False)
 
         self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
         self.scrollToBottomButton.clicked.connect(self.data_view.scrollToBottom)
@@ -199,11 +228,9 @@ class CatalogTableView(QWidget):
         self.scrollToTopButton = QPushButton("Scroll to Top", self)
         self.scrollToTopButton.clicked.connect(self.data_view.scrollToTop)
 
-        # Add filter text box and drop-down
         self.filterLineEdit = QLineEdit(self)
         self.filterComboBox = QComboBox(self)
 
-        # Create a horizontal layout for the filter widgets
         filterLayout = QHBoxLayout()
         filterLayout.addWidget(QLabel("RegEx Filter"))
         filterLayout.addWidget(self.filterLineEdit)
@@ -223,79 +250,86 @@ class CatalogTableView(QWidget):
         layout.addWidget(self.data_view)
         self.setLayout(layout)
 
-        # Setup the model and filtering
-        self.refresh_filters()
-        print("Setting up selectionModel")
+    def on_selection_changed(self, selected, deselected):
+        """
+        Handle changes in the selection state of table rows.
+
+        Parameters
+        ----------
+        selected : QItemSelection
+            The newly selected items
+        deselected : QItemSelection
+            The newly deselected items
+        """
+        proxy_model = self.data_view.model()
+        source_model = proxy_model.sourceModel()
+
+        # Process deselections first
+        deselected_keys = set()
+        for index in deselected.indexes():
+            if index.column() == 0:
+                source_index = proxy_model.mapToSource(index)
+                key = source_model.get_key(source_index.row())
+                if key is not None:
+                    deselected_keys.add(key)
+
+        # Process selections
+        selected_keys = set()
+        for index in selected.indexes():
+            if index.column() == 0:
+                source_index = proxy_model.mapToSource(index)
+                key = source_model.get_key(source_index.row())
+                if key is not None:
+                    selected_keys.add(key)
+
+        # Update plot items efficiently
+        items_to_remove = []
+        for key in deselected_keys:
+            if key in self.plot_items and key not in selected_keys:
+                items_to_remove.append(key)
+
+        for key in items_to_remove:
+            plot_item = self.plot_items.pop(key)
+            plot_item.removeData()
+
+        for key in selected_keys:
+            if key not in self.plot_items:
+                data = self.parent_catalog[key]
+                self.plot_items[key] = PlotItem(data)
+
+        if selected_keys or deselected_keys:
+            self.itemsSelected.emit(list(self.plot_items.values()))
+
+    def setupModelAndView(self, catalog):
+        """
+        Set up the table model and view with the given catalog.
+
+        Parameters
+        ----------
+        catalog : Catalog
+            The catalog to display in the table
+        """
+        table_model = CatalogTableModel(catalog)
+        reverse = ReverseModel()
+        reverse.setSourceModel(table_model)
+
+        # Disconnect existing selection model if it exists
+        if self.data_view.model() is not None:
+            self.data_view.selectionModel().selectionChanged.disconnect()
+
+        self.data_view.setModel(reverse)
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
-    def on_selection_changed(self, selected, deselected):
-        print("Selection Changed!")
-        print("Selected indices:", selected.indexes())
-        print("Deselected indices:", deselected.indexes())
-        new_plot_keys = []
-        # for index in deselected.indexes():
-        #     if index.column() == 0:
-        #         model = self.data_view.model().sourceModel()
-        #         key = model.get_key(index.row())
-        #         print(f"Deselecting {key}")
-        #         if key is not None and key in self.plot_items:
-        #             plot_item = self.plot_items.pop(key)
-        #             print(f"Removing Data {key} from inside catalogView, {plot_item}")
-        #             plot_item.removeData()
-
-        proxy_model = self.data_view.model()
-        source_model = proxy_model.sourceModel()
-
-        for index in selected.indexes():
-            if index.column() == 0:  # We still check for column 0 to avoid duplicates
-                source_index = proxy_model.mapToSource(index)
-                key = source_model.get_key(source_index.row())
-                if key is not None and key not in self.plot_items:
-                    new_plot_keys.append(key)
-                    data = self.parent_catalog[key]
-                    self.plot_items[key] = PlotItem(data)
-                elif key in self.plot_items:
-                    new_plot_keys.append(key)
-
-        oldkeys = list(self.plot_items.keys())
-        for key in oldkeys:
-            if key not in new_plot_keys:
-                plot_item = self.plot_items.pop(key)
-                plot_item.removeData()
-
-        items_selected = list(self.plot_items.values())
-        print(items_selected)
-        self.itemsSelected.emit(items_selected)
-
-    def deselect_items(self, items):
-        selection_model = self.data_view.selectionModel()
-        for index in self.data_view.selectedIndexes():
-            if index.column() == 0:
-                model = self.data_view.model().sourceModel()
-                key = model.get_key(index.row())
-                if key in [item.uid for item in items]:
-                    selection_model.select(index, QItemSelectionModel.Deselect)
-
-    def get_selected_items(self):
-        return list(self.plot_items.values())
-
-    def setupModelAndView(self, catalog):
-        table_model = CatalogTableModel(catalog)
-        reverse = ReverseModel()
-        reverse.setSourceModel(table_model)
-        self.data_view.setModel(reverse)
-
-        # Connect filter line edit to set filter regexp
         self.filterLineEdit.textChanged.connect(reverse.setFilterRegExp)
 
-        # Populate and connect the combo box for selecting filter column
-        self.filterComboBox.clear()  # Clear the filterComboBox of any items
+        self.filterComboBox.clear()
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(
             lambda index: reverse.setFilterKeyColumn(index)
         )
+
         self.invertButton.clicked.connect(reverse.toggleInvert)
         self.invertButton.setEnabled(True)
 
@@ -309,3 +343,55 @@ class CatalogTableView(QWidget):
             self.on_selection_changed
         )
         print("Reconnected selectionChanged signal after refresh")
+
+    def get_selected_items(self):
+        """
+        Get the currently selected plot items.
+
+        Returns
+        -------
+        list
+            List of currently selected PlotItems
+        """
+        proxy_model = self.data_view.model()
+        if proxy_model is None:
+            return []
+
+        source_model = proxy_model.sourceModel()
+        selected_items = []
+
+        for index in self.data_view.selectedIndexes():
+            if index.column() == 0:  # Only process first column to avoid duplicates
+                source_index = proxy_model.mapToSource(index)
+                key = source_model.get_key(source_index.row())
+                if key is not None:
+                    if key not in self.plot_items:
+                        data = self.parent_catalog[key]
+                        self.plot_items[key] = PlotItem(data)
+                    selected_items.append(self.plot_items[key])
+
+        return selected_items
+
+    def deselect_items(self, items):
+        """
+        Deselect specific items from the view.
+
+        Parameters
+        ----------
+        items : list
+            List of PlotItems to deselect
+        """
+        selection_model = self.data_view.selectionModel()
+        if selection_model is None:
+            return
+
+        item_uids = [item.uid for item in items]
+
+        for index in self.data_view.selectedIndexes():
+            if index.column() == 0:
+                source_index = self.data_view.model().mapToSource(index)
+                key = source_index.model().get_key(source_index.row())
+                if key in item_uids:
+                    selection_model.select(
+                        index, QItemSelectionModel.Deselect | QItemSelectionModel.Rows
+                    )

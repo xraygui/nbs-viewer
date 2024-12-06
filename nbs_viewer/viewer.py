@@ -3,6 +3,12 @@ from qtpy.QtWidgets import QApplication, QVBoxLayout, QWidget, QTabWidget
 from qtpy.QtCore import Qt
 from .plotManager import PlotManagerWithBlueskyList, PlotManagerWithDataList
 
+# import logging
+
+# logging.basicConfig(
+#    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
+# )
+
 
 class Viewer(QWidget):
     def __init__(self, config_file=None, parent=None):

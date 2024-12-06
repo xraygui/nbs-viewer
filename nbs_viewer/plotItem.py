@@ -2,6 +2,8 @@ import numpy as np
 from qtpy.QtWidgets import QWidget
 from qtpy.QtCore import QTimer, Signal
 from asteval import Interpreter
+import time
+import logging
 
 
 class CompoundPlotItem(QWidget):
@@ -175,26 +177,56 @@ class CompoundPlotItem(QWidget):
 
 
 class PlotItem(QWidget):
+    """
+    A widget representing a plot item with visibility control and data caching.
+
+    Signals
+    -------
+    update_plot_signal : Signal
+        Emitted when the plot needs to be updated.
+    """
+
     update_plot_signal = Signal()
 
     def __init__(self, run, catalog=None, dynamic=False, parent=None):
+        """
+        Initialize the PlotItem.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            The run object containing the data
+        catalog : Catalog, optional
+            The catalog containing the run, by default None
+        dynamic : bool, optional
+            Whether to update dynamically, by default False
+        parent : QWidget, optional
+            Parent widget, by default None
+        """
+        t_start = time.time()
         super().__init__(parent)
-        self._run = run  # This is now a BlueskyRun object
+        self._run = run
         self._catalog = catalog
         self._dynamic = dynamic
         self._connected = False
+        self._visible = True
         self.dataPlotters = {}
+        logging.debug(f"Basic init took: {time.time() - t_start:.3f}s")
+
+        t1 = time.time()
         self._plot_hints = self._run.getPlotHints()
         self._axhints = getAxisHints(self._plot_hints)
-        # print("Axhints")
-        # print(self._axhints)
+        logging.debug(f"Getting hints took: {time.time() - t1:.3f}s")
+
+        t2 = time.time()
         xkeys, ykeys = self._run.getRunKeys()
         yfiltered = filterHintedKeys(self._plot_hints, ykeys)
         self.xkeyDict = xkeys
         self.ykeyDict = yfiltered
-        # print(self.xkeyDict)
-        # print(self.ykeyDict)
         self.all_ykeyDict = ykeys
+        logging.debug(f"Getting keys took: {time.time() - t2:.3f}s")
+
+        t3 = time.time()
         self._show_all = False
         self._hintedrows = []
         self._allrows = []
@@ -205,19 +237,169 @@ class PlotItem(QWidget):
             self._hintedrows += ylist
         for ylist in self.all_ykeyDict.values():
             self._allrows += ylist
+        logging.debug(f"Building rows took: {time.time() - t3:.3f}s")
+
+        t4 = time.time()
+        self._plot_data_cache = {}
+        self._dimensions_cache = {}
         self.setDefaultChecked()
         self._description = str(self._run)
         self._uid = self._run.uid
         self._scanid = self._run.scan_id
         self._expected_points = self._run.num_points
         self._transform_text = ""
+        logging.debug(f"Final setup took: {time.time() - t4:.3f}s")
+
         self.update_plot_signal.connect(self.plotCheckedData)
+
         if self._dynamic:
             self.startDynamicUpdates()
         else:
             self._num_points = self._run.num_points
             self.timer = None
-        self.aeval = Interpreter()  # Create an Asteval interpreter once
+        self.aeval = Interpreter()
+
+        logging.debug(f"Total PlotItem init took: {time.time() - t_start:.3f}s")
+
+    def getDimensions(self, key):
+        """
+        Get the number of dimensions for a key, using cache if available.
+
+        Parameters
+        ----------
+        key : str
+            The key to get dimensions for
+
+        Returns
+        -------
+        int
+            Number of dimensions
+        """
+        t_start = time.time()
+        if key not in self._dimensions_cache:
+            logging.debug(f"Getting dimensions for key {key}")
+            shape = self._run.getShape(key)
+            self._dimensions_cache[key] = len(shape)
+            logging.debug(
+                f"Getting dimensions for {key} took: {time.time() - t_start:.3f}s"
+            )
+        return self._dimensions_cache[key]
+
+    def updateKeyDimensions(self, keys_to_plot):
+        """
+        Update key dictionaries based on actual data dimensions,
+        but only for keys that are being plotted.
+
+        Parameters
+        ----------
+        keys_to_plot : list
+            List of keys that are about to be plotted
+        """
+        # Only check dimensions for keys that are:
+        # 1. Currently in dimension 1
+        # 2. Being plotted
+        # 3. Not already in dimensions cache
+        keys_to_check = [
+            key
+            for key in keys_to_plot
+            if key in self.all_ykeyDict[1] and key not in self._dimensions_cache
+        ]
+
+        if not keys_to_check:
+            return
+
+        # Move keys to correct dimension groups based on actual shape
+        keys_to_move = []
+        for key in keys_to_check:
+            if self.getDimensions(key) > 1:
+                keys_to_move.append(key)
+
+        for key in keys_to_move:
+            self.all_ykeyDict[1].remove(key)
+            self.all_ykeyDict[2].append(key)
+            if key in self.ykeyDict.get(1, []):
+                self.ykeyDict[1].remove(key)
+                if 2 not in self.ykeyDict:
+                    self.ykeyDict[2] = []
+                self.ykeyDict[2].append(key)
+
+    def getPlotData(self, xkeys, ykeys, nkeys):
+        """
+        Get plot data with caching for raw data only.
+        Transforms are always applied fresh to avoid memory bloat.
+
+        Parameters
+        ----------
+        xkeys : list
+            X-axis keys
+        ykeys : list
+            Y-axis keys
+        nkeys : list
+            Normalization keys
+
+        Returns
+        -------
+        tuple
+            (xplotlist, yplotlist, xkeylist, ykeylist)
+        """
+        t_start = time.time()
+
+        # Update dimensions only for keys we're about to plot
+        t1 = time.time()
+        self.updateKeyDimensions(ykeys + xkeys + nkeys)
+        logging.debug(f"Updating dimensions took: {time.time() - t1:.3f}s")
+
+        # Cache key only includes the data keys
+        cache_key = (tuple(xkeys), tuple(ykeys), tuple(nkeys))
+
+        # Try to get raw data from cache
+        if not self._dynamic and cache_key in self._plot_data_cache:
+            logging.debug("Using cached raw data")
+            xlist, ylist, norm = self._plot_data_cache[cache_key]
+        else:
+            t2 = time.time()
+            xlist = [self._run.getData(key) for key in xkeys]
+            ylist = [self._run.getData(key) for key in ykeys]
+            logging.debug(f"Getting x and y data took: {time.time() - t2:.3f}s")
+
+            t3 = time.time()
+            if nkeys:
+                norm = self._run.getData(nkeys[0])
+                for key in nkeys[1:]:
+                    norm = norm * self._run.getData(key)
+            else:
+                norm = None
+            logging.debug(f"Getting normalization data took: {time.time() - t3:.3f}s")
+
+            # Cache the raw data
+            if not self._dynamic:
+                self._plot_data_cache[cache_key] = (xlist, ylist, norm)
+
+        # Always process and transform the data fresh
+        t4 = time.time()
+        xplotlist = []
+        yplotlist = []
+        xkeylist = []
+
+        for key, y in zip(ykeys, ylist):
+            _, y = self.transformData(xlist, y, norm, self._transform_text)
+            xlist_reordered, xkeys, y_reordered = self.reorderDimensions(key, xlist, y)
+            xplotlist.append(xlist_reordered)
+            yplotlist.append(y_reordered)
+            xkeylist.append(xkeys)
+        logging.debug(f"Processing plot data took: {time.time() - t4:.3f}s")
+
+        logging.debug(f"Total getPlotData took: {time.time() - t_start:.3f}s")
+        return (xplotlist, yplotlist, xkeylist, ykeys)
+
+    def clear(self):
+        """
+        Clear the plot item and its caches.
+        """
+        self.update_plot_settings([], [], [], "")
+        self._plot_data_cache.clear()
+        self._dimensions_cache.clear()
+        self.removeData()
 
     def startDynamicUpdates(self):
         self.stopDynamicUpdates()
@@ -303,12 +485,6 @@ class PlotItem(QWidget):
             self._plot_hints.get("normalization", [])
         )
 
-    def clear(self):
-        # print("Clearing PlotItem")
-        self.update_plot_settings([], [], [], "")
-        self.setDynamic(False)
-        self.removeData()
-
     def update_plot_settings(
         self, checked_x, checked_y, checked_norm, transformText=""
     ):
@@ -330,10 +506,10 @@ class PlotItem(QWidget):
         ----------
         xlist : list of np.ndarray
             List of x data arrays.
-        ylist : list of np.ndarray
-            List of y data arrays.
-        normlist : list of np.ndarray
-            List of normalization arrays.
+        y : np.ndarray
+            The y data array.
+        norm : np.ndarray or scalar, optional
+            Normalization array or scalar value.
         transformText : str, optional
             Transformation expression to be evaluated, by default "".
 
@@ -342,17 +518,12 @@ class PlotItem(QWidget):
         tuple
             Transformed x and y data arrays.
         """
-        # Assumption time! Assume that we are just dividing by all norms
-        # Just divide y by norm for now! In the future, we will grab input from a variety of sources
-        # and make a more complex transform using Asteval
-        yfinal = 0
-
-        if np.isscalar(norm):
+        if norm is None:
+            yfinal = y
+        elif np.isscalar(norm):
             yfinal = y / norm
         else:
-            # Create a temporary variable for norm to avoid modifying the original norm
             temp_norm = norm
-            # Check if y_temp has more dimensions than temp_norm and adjust temp_norm accordingly
             while temp_norm.ndim < y.ndim:
                 temp_norm = np.expand_dims(temp_norm, axis=-1)
             yfinal = y / temp_norm
@@ -363,6 +534,7 @@ class PlotItem(QWidget):
             self.aeval.symtable["x"] = xlist
             self.aeval.symtable["norm"] = norm
             yfinal = self.aeval(transformText)
+
         return xlist, yfinal
 
     def removeData(self):
@@ -375,28 +547,13 @@ class PlotItem(QWidget):
             data_plotter.deleteLater()
         # print("Done remove data")
 
-    def getPlotData(self, xkeys, ykeys, nkeys):
-        xlist, ylist, normlist = self.getCheckedData(xkeys, ykeys, nkeys)
-
-        if len(normlist) > 0:
-            norm = np.prod(normlist, axis=0)
-        else:
-            norm = 1
-
-        xplotlist = []
-        yplotlist = []
-        xkeylist = []
-        ykeylist = []
-        for key, y in zip(ykeys, ylist):
-            _, y = self.transformData(xlist, y, norm, self._transform_text)
-            xlist_reordered, xkeys, y_reordered = self.reorderDimensions(key, xlist, y)
-            xplotlist.append(xlist_reordered)
-            yplotlist.append(y_reordered)
-            xkeylist.append(xkeys)
-            ykeylist.append(key)
-        return xplotlist, yplotlist, xkeylist, ykeylist
-
     def plotCheckedData(self):
+        """
+        Plot the currently checked data if the item is visible.
+        """
+        if not self._visible:
+            return
+
         if len(self._checked_x) == 0 or len(self._checked_y) == 0:
             return
 
@@ -504,6 +661,22 @@ class PlotItem(QWidget):
 
     def getAxis(self, keys):
         return self._run.getAxis(keys)
+
+    def setVisible(self, visible):
+        """
+        Set the visibility of this plot item.
+
+        Parameters
+        ----------
+        visible : bool
+            Whether the plot should be visible
+        """
+        self._visible = visible
+        if self._connected:
+            if visible:
+                self.plotCheckedData()
+            else:
+                self.removeData()
 
 
 def getAxisHints(plotHints):
