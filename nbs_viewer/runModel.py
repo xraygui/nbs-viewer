@@ -1,14 +1,17 @@
 from datetime import datetime
 from abc import ABC, abstractmethod
+import time
+import logging
+
+# logging.basicConfig(level=logging.DEBUG)
 
 
 class CatalogRun(ABC):
     @classmethod
-    @property
     @abstractmethod
     def METADATA_KEYS(cls):
         """
-        Abstract property that subclasses must define.
+        Abstract class method that subclasses must define.
         Should return a list of metadata keys.
         """
         pass
@@ -48,10 +51,10 @@ class CatalogRun(ABC):
         pass
 
     @abstractmethod
-    def getShape(self):
+    def getShape(self, key):
         """
-        Generic method to get the shape of the run.
-        Should return the shape of the X-axis data.
+        Abstract method that subclasses must implement.
+        Should return the shape of the data for a given key.
         """
         pass
 
@@ -65,6 +68,10 @@ class CatalogRun(ABC):
 
 
 class BlueskyRun(CatalogRun):
+    """
+    A class representing a Bluesky run with data caching capabilities.
+    """
+
     METADATA_KEYS = {
         "scan_id": ["start", "scan_id"],
         "uid": ["start", "uid"],
@@ -82,10 +89,34 @@ class BlueskyRun(CatalogRun):
     }
 
     def __init__(self, run, key, catalog):
+        """
+        Initialize the BlueskyRun.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            The run object
+        key : str
+            The key for this run
+        catalog : Catalog
+            The catalog containing the run
+        """
         self._catalog = catalog
         self._key = key
         self._run = run
+        self._data_cache = {}
+        self._axis_cache = {}
+        self._shape_cache = {}
         self.setup()
+
+    def refresh(self):
+        """
+        Refresh the run data and clear caches.
+        """
+        self._data_cache.clear()
+        self._axis_cache.clear()
+        self._shape_cache.clear()
+        super().refresh()
 
     def setup(self):
         self.metadata = self._run.metadata
@@ -140,49 +171,129 @@ class BlueskyRun(CatalogRun):
         header_names = [cls.DISPLAY_KEYS.get(attr, attr) for attr in attrs]
         return header_names
 
-    def getShape(self):
-        return self.get_md_value(["start", "shape"], [self.num_points])
+    def getShape(self, key):
+        """
+        Get the shape of data for a given key using metadata.
+
+        Parameters
+        ----------
+        key : str
+            The key to get shape for
+
+        Returns
+        -------
+        tuple
+            The shape of the data
+        """
+        t_start = time.time()
+        if key not in self._shape_cache:
+            logging.debug(f"Getting shape for key {key}")
+            try:
+                # Try to get shape from metadata first
+                shape = self._run["primary", "data", key].metadata["shape"]
+                self._shape_cache[key] = shape
+                logging.debug("Got shape from metadata")
+            except (KeyError, AttributeError):
+                # If metadata doesn't have shape, get it from data
+                logging.debug("Falling back to getting shape from data")
+                self._shape_cache[key] = self.getData(key).shape
+            logging.debug(f"Getting shape for {key} took: {time.time() - t_start:.3f}s")
+        return self._shape_cache[key]
 
     def getPlotHints(self):
         plotHints = self.get_md_value(["start", "plot_hints"], {})
         return plotHints
 
     def getData(self, key):
-        return self._run["primary", "data", key].read()
+        """
+        Get data for a given key, using cache if available.
+
+        Parameters
+        ----------
+        key : str
+            The key to get data for
+
+        Returns
+        -------
+        array-like
+            The data for the given key
+        """
+        t_start = time.time()
+        if key not in self._data_cache:
+            logging.debug(f"Fetching data for key {key}")
+            self._data_cache[key] = self._run["primary", "data", key].read()
+            logging.debug(f"Fetching data for {key} took: {time.time() - t_start:.3f}s")
+        return self._data_cache[key]
 
     def getAxis(self, keys):
-        data = self._run["primary"]
-        for key in keys:
-            data = data[key]
-        return data.read().squeeze()
+        """
+        Get axis data for given keys, using cache if available.
+
+        Parameters
+        ----------
+        keys : list
+            The keys to get axis data for
+
+        Returns
+        -------
+        array-like
+            The axis data for the given keys
+        """
+        cache_key = tuple(keys)
+        if cache_key not in self._axis_cache:
+            data = self._run["primary"]
+            for key in keys:
+                data = data[key]
+            self._axis_cache[cache_key] = data.read().squeeze()
+        return self._axis_cache[cache_key]
 
     def getRunKeys(self):
-        allData = {key: arr.shape for key, arr in self._run["primary", "data"].items()}
-        xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
-        keys1d = []
-        keysnd = []
+        """
+        Get the run keys without shape information initially.
 
+        Returns
+        -------
+        tuple
+            A tuple of (xkeys, ykeys) dictionaries
+        """
+        t_start = time.time()
+
+        # Get all available keys
+        logging.debug("Getting available keys")
+        all_keys = list(self._run["primary", "data"].keys())
+        t0 = time.time()
+        logging.debug(f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s")
+
+        t1 = time.time()
+        xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
+        logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
+
+        # Initialize dictionaries
         xkeys = {}
-        ykeys = {}
-        for key in list(allData.keys()):
-            if len(allData[key]) == 1:
-                keys1d.append(key)
-            elif len(allData[key]) > 1:
-                keysnd.append(key)
-        if "time" in keys1d:
+        ykeys = {1: [], 2: []}  # We'll determine actual dimensions later
+
+        # Handle time key if present
+        if "time" in all_keys:
             xkeys[0] = ["time"]
-            keys1d.pop(keys1d.index("time"))
+            all_keys.remove("time")
+
+        # Process dimension hints
+        t2 = time.time()
         for i, dimension in enumerate(xkeyhints):
             axlist = dimension[0]
             xkeys[i + 1] = []
             for ax in axlist:
-                if ax in keys1d:
-                    keys1d.pop(keys1d.index(ax))
+                if ax in all_keys:
+                    all_keys.remove(ax)
                     xkeys[i + 1].append(ax)
             if len(xkeys[i + 1]) == 0:
                 xkeys.pop(i + 1)
-        ykeys[1] = keys1d
-        ykeys[2] = keysnd
+        logging.debug(f"Processing hints took: {time.time() - t2:.3f}s")
+
+        # All remaining keys go to ykeys[1] initially
+        ykeys[1] = all_keys
+
+        logging.debug(f"Total getRunKeys took: {time.time() - t_start:.3f}s")
         return xkeys, ykeys
 
     def __str__(self):

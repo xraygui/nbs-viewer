@@ -12,6 +12,9 @@ from qtpy.QtWidgets import (
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
+    QMessageBox,
+    QComboBox,
+    QInputDialog,
 )
 from qtpy.QtCore import Signal
 
@@ -123,12 +126,24 @@ class PlotControls(QWidget):
         The parent widget, by default None.
     """
 
+    DEFAULT_TRANSFORMS = {
+        "No Transform": "",
+        "Invert (1/y)": "1/y",
+        "Normalize to Max": "y/max(y)",
+        "Normalize to Min": "y/min(y)",
+        "Normalize to Pre/Post edge": "(y - mean(y[:10]))/(mean(y[-10:]) - mean(y[:10]))",
+        "Normalize to Sum": "y/sum(y)",
+        "Log Scale": "log(y)",
+        "Log(1/y)": "log(1/y)",
+    }
+
     def __init__(self, plot, parent=None):
         super().__init__(parent)
         self.plot = plot
         self.data = None
         self.allkeylist = []
         self.plotItemList = []
+        self._transforms = self.DEFAULT_TRANSFORMS.copy()
 
         # Create the tab widget
         self.tab_widget = QTabWidget()
@@ -152,7 +167,6 @@ class PlotControls(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.addWidget(self.tab_widget)
 
-        # Set up the plot control tab (existing code)
         self.setup_plot_control_tab()
 
     def setup_plot_control_tab(self):
@@ -183,16 +197,43 @@ class PlotControls(QWidget):
         show_all_layout.addWidget(self.show_all)
         self.plot_control_layout.addLayout(show_all_layout)
 
-        transform_layout = QHBoxLayout()
-        transform_layout.addWidget(QLabel("Transform"))
+        transform_frame = QFrame()
+        transform_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        transform_layout = QVBoxLayout(transform_frame)
+
+        transform_header = QHBoxLayout()
+        transform_header.addWidget(QLabel("Transform"))
         self.transform_box = QCheckBox()
         self.transform_box.setChecked(False)
-        self.transform_box.clicked.connect(self.checked_changed)
-        transform_layout.addWidget(self.transform_box)
-        self.plot_control_layout.addLayout(transform_layout)
+        self.transform_box.clicked.connect(self.transform_state_changed)
+        transform_header.addWidget(self.transform_box)
+        transform_layout.addLayout(transform_header)
 
+        # Transform combo box
+        self.transform_combo = QComboBox()
+        self.transform_combo.setEnabled(False)
+        self.transform_combo.addItems(self._transforms.keys())
+        self.transform_combo.currentTextChanged.connect(self.on_transform_selected)
+        transform_layout.addWidget(self.transform_combo)
+
+        # Custom transform input
+        custom_transform_layout = QHBoxLayout()
         self.transform_text_edit = QLineEdit()
-        self.plot_control_layout.addWidget(self.transform_text_edit)
+        self.transform_text_edit.setEnabled(False)
+        self.transform_text_edit.setPlaceholderText(
+            "Enter custom transform (e.g., y/max(y))"
+        )
+        self.transform_text_edit.editingFinished.connect(
+            self.on_custom_transform_changed
+        )
+        custom_transform_layout.addWidget(self.transform_text_edit)
+
+        save_transform_btn = QPushButton("Save")
+        save_transform_btn.clicked.connect(self.save_custom_transform)
+        custom_transform_layout.addWidget(save_transform_btn)
+
+        transform_layout.addLayout(custom_transform_layout)
+        self.plot_control_layout.addWidget(transform_frame)
 
         self.grid = QGridLayout()
         self.plot_control_layout.addLayout(self.grid)
@@ -396,9 +437,48 @@ class PlotControls(QWidget):
             plotItem.update_plot_settings([], [], [], "")
         self.update_display()
 
-    def checked_changed(self):
+    def validate_dimensions(self, checked_y):
+        """
+        Validate that all selected Y data has the same dimensionality.
+
+        Parameters
+        ----------
+        checked_y : list
+            List of selected Y keys
+
+        Returns
+        -------
+        tuple
+            (is_valid, dimension, error_message)
+        """
+        if not checked_y:
+            return True, None, ""
+
+        dimensions = []
         for plotItem in self.plotItemList:
-            checked_x, checked_y, checked_norm = self.checkedButtons()
+            for key in checked_y:
+                dim = plotItem.getDimensions(key)
+                dimensions.append(dim)
+
+        if not dimensions:
+            return True, None, ""
+
+        first_dim = dimensions[0]
+        if not all(dim == first_dim for dim in dimensions):
+            return False, None, "Cannot mix 1D and 2D data in the same plot"
+
+        return True, first_dim, ""
+
+    def checked_changed(self):
+        checked_x, checked_y, checked_norm = self.checkedButtons()
+
+        # Validate dimensions before updating
+        is_valid, _, error_msg = self.validate_dimensions(checked_y)
+        if not is_valid:
+            QMessageBox.warning(self, "Invalid Selection", error_msg)
+            self.uncheck_all()
+            return
+        for plotItem in self.plotItemList:
             transform_text = (
                 self.transform_text_edit.text()
                 if self.transform_box.isChecked()
@@ -411,7 +491,68 @@ class PlotControls(QWidget):
                 plotItem.updatePlot()
 
     def update_plot(self):
+        checked_x, checked_y, checked_norm = self.checkedButtons()
+
+        # Validate dimensions before plotting
+        is_valid, _, error_msg = self.validate_dimensions(checked_y)
+        if not is_valid:
+            QMessageBox.warning(self, "Invalid Selection", error_msg)
+            self.uncheck_all()
+            return
+
         self.checked_changed()
         if not self.auto_add:
             for plotItem in self.plotItemList:
                 plotItem.updatePlot()
+
+    def transform_state_changed(self):
+        """Handle transform checkbox state change."""
+        is_checked = self.transform_box.isChecked()
+        self.transform_combo.setEnabled(is_checked)
+        self.transform_text_edit.setEnabled(is_checked)
+        if not is_checked:
+            self.transform_combo.setCurrentText("No Transform")
+        self.checked_changed()
+
+    def on_transform_selected(self, transform_name):
+        """Handle transform selection from combo box."""
+        if transform_name in self._transforms:
+            self.transform_text_edit.setText(self._transforms[transform_name])
+            self.checked_changed()
+
+    def on_custom_transform_changed(self):
+        """Handle custom transform text changes."""
+        if self.transform_combo.currentText() != "Custom":
+            self.transform_combo.setCurrentText("Custom")
+        self.checked_changed()
+
+    def save_custom_transform(self):
+        """Save current custom transform to the combo box."""
+        custom_text = self.transform_text_edit.text().strip()
+        if not custom_text:
+            return
+
+        name, ok = QInputDialog.getText(
+            self, "Save Transform", "Enter a name for this transform:"
+        )
+        if ok and name:
+            name = name.strip()
+            if name in self._transforms:
+                reply = QMessageBox.question(
+                    self,
+                    "Transform exists",
+                    f"Transform '{name}' already exists. Overwrite?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply == QMessageBox.No:
+                    return
+
+            self._transforms[name] = custom_text
+            current_items = [
+                self.transform_combo.itemText(i)
+                for i in range(self.transform_combo.count())
+            ]
+            if name not in current_items:
+                self.transform_combo.addItem(name)
+            self.transform_combo.setCurrentText(name)

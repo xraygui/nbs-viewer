@@ -25,11 +25,14 @@ class BlueskyListWidget(QWidget):
         Emitted when items are deselected in the list.
     itemsRemoved : Signal
         Emitted when items are removed from the list.
+    itemVisibilityChanged : Signal
+        Emitted when an item's visibility is toggled.
     """
 
     itemsSelected = Signal(list)
     itemsDeselected = Signal(list)
     itemsRemoved = Signal(list)
+    itemVisibilityChanged = Signal(object, bool)
 
     def __init__(self, parent=None):
         """
@@ -50,6 +53,7 @@ class BlueskyListWidget(QWidget):
         self.list_widget.selectionModel().selectionChanged.connect(
             self.handle_selection_change
         )
+        self.list_widget.itemChanged.connect(self.handle_item_changed)
 
         self._plotItems = {}
         self._temp_plotItems = {}  # New temporary dictionary for selected items
@@ -87,6 +91,8 @@ class BlueskyListWidget(QWidget):
         # print("Adding bluesky plot item")
         item = QListWidgetItem(plotItem.description)
         item.setData(Qt.UserRole, plotItem.uid)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
         self._plotItems[plotItem.uid] = plotItem
         self.list_widget.addItem(item)
         # print("Done adding bluesky plot item")
@@ -142,3 +148,17 @@ class BlueskyListWidget(QWidget):
         if ok and label:
             compound_item = CompoundPlotItem(selected_items, label)
             self.addPlotItem(compound_item)
+
+    def handle_item_changed(self, item):
+        """
+        Handle changes to list items, specifically checkbox state changes.
+
+        Parameters
+        ----------
+        item : QListWidgetItem
+            The item that changed
+        """
+        plot_item = self._plotItems[item.data(Qt.UserRole)]
+        is_visible = item.checkState() == Qt.Checked
+        plot_item.setVisible(is_visible)
+        self.itemVisibilityChanged.emit(plot_item, is_visible)
