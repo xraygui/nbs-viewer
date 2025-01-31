@@ -198,7 +198,7 @@ class PlotItem(QWidget):
             The run object containing the data
         catalog : Catalog, optional
             The catalog containing the run, by default None
-        dynamic : bool, optional
+        dynamic : bool, optional_
             Whether to update dynamically, by default False
         parent : QWidget, optional
             Parent widget, by default None
@@ -251,12 +251,11 @@ class PlotItem(QWidget):
         logging.debug(f"Final setup took: {time.time() - t4:.3f}s")
 
         self.update_plot_signal.connect(self.plotCheckedData)
-
+        self.timer = None
         if self._dynamic:
             self.startDynamicUpdates()
         else:
             self._num_points = self._run.num_points
-            self.timer = None
         self.aeval = Interpreter()
 
         logging.debug(f"Total PlotItem init took: {time.time() - t_start:.3f}s")
@@ -358,15 +357,15 @@ class PlotItem(QWidget):
             xlist, ylist, norm = self._plot_data_cache[cache_key]
         else:
             t2 = time.time()
-            xlist = [self._run.getData(key) for key in xkeys]
-            ylist = [self._run.getData(key) for key in ykeys]
+            xlist = [self.getData(key) for key in xkeys]
+            ylist = [self.getData(key) for key in ykeys]
             logging.debug(f"Getting x and y data took: {time.time() - t2:.3f}s")
 
             t3 = time.time()
             if nkeys:
-                norm = self._run.getData(nkeys[0])
+                norm = self.getData(nkeys[0])
                 for key in nkeys[1:]:
-                    norm = norm * self._run.getData(key)
+                    norm = norm * self.getData(key)
             else:
                 norm = None
             logging.debug(f"Getting normalization data took: {time.time() - t3:.3f}s")

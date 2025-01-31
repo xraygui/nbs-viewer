@@ -66,6 +66,18 @@ class CatalogRun(ABC):
         """
         return {}
 
+    @abstractmethod
+    def to_header(self):
+        """
+        Get a dictionary of metadata suitable for display in a header.
+
+        Returns
+        -------
+        dict
+            Dictionary of metadata key-value pairs
+        """
+        pass
+
 
 class BlueskyRun(CatalogRun):
     """

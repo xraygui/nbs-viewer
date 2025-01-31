@@ -26,7 +26,7 @@ from .catalogTree import CatalogPicker
 from .catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from os.path import exists
-from .catalogView import CatalogTableView
+from .catalogView import CatalogTableView, KafkaView
 from .catalogModel import load_catalog_models
 
 import toml
@@ -227,7 +227,7 @@ class DataSourcePicker(QDialog):
 
         self.data_sources["Tiled URI"] = URISource()
         self.data_sources["Tiled Profile"] = ProfileSource()
-        # "Kafka": KafkaSource(),
+        self.data_sources["Kafka"] = KafkaSource()
 
         for k, s in self.data_sources.items():
             self.source_type.addItem(k)
@@ -279,65 +279,6 @@ class CatalogModelPicker(QDialog):
     def accept(self):
         self.selected_model = self.catalog_models[self.model_combo.currentText()]
         super().accept()
-
-
-class KafkaView(QWidget):
-    add_rows_current_plot = Signal(object)
-
-    def __init__(self, dispatcher, topics, parent=None):
-        super().__init__(parent)
-        self.dispatcher = dispatcher
-        self.dispatcher.setParent(self)
-        self.label = QLabel("Subscribe to Kafka topics " + " ".join(topics))
-        self.plot_button1 = QPushButton("Add Data to Current Plot", self)
-        self.plot_button1.clicked.connect(self.emit_add_rows)
-        layout = QVBoxLayout()
-        layout.addWidget(self.label)
-
-        self.catalog = temporaryDB()
-        self.data_view = QTableView(self)
-        self.data_view.setSelectionBehavior(QTableView.SelectRows)
-        self.table_model = CatalogTableModel(self.catalog.v2, chunk_size=1)
-        self.proxyModel = QSortFilterProxyModel()
-        self.proxyModel.setSourceModel(self.table_model)
-        self.data_view.setModel(self.proxyModel)
-
-        self.filterLineEdit = QLineEdit()
-        self.filterLineEdit.textChanged.connect(self.filterChanged)
-
-        layout.addWidget(self.filterLineEdit)
-        layout.addWidget(self.data_view)
-        layout.addWidget(self.plot_button1)
-
-        self.setLayout(layout)
-
-        self.dispatcher.subscribe(self.catalog.v1.insert)
-        self.dispatcher.subscribe(self.add_run, name="start")
-        self.dispatcher.start()
-
-    def emit_add_rows(self):
-        selected_rows = self.data_view.selectionModel().selectedRows()
-        selected_data = []
-        for index in selected_rows:
-            if index.column() == 0:  # Check if the column is 0
-                key = index.data()  # Get the key from the cell data
-                data = PlotItem(
-                    self.catalog.v2[key], self.catalog.v2, dynamic=True
-                )  # Fetch the data using the key
-                selected_data.append(data)
-        self.add_rows_current_plot.emit(selected_data)
-
-    def add_run(self, name, doc):
-        # self.runs.append(run)
-        self.table_model.updateCatalog()
-
-    def filterChanged(self, text):
-        # Set the filter regexp based on the text input
-        self.proxyModel.setFilterRegExp(text)
-        # Assuming we're filtering based on the first column
-        self.proxyModel.setFilterKeyColumn(
-            2
-        )  # Change to the column you want to filter by
 
 
 class MainWindow(QMainWindow):
