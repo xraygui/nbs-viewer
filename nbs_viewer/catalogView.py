@@ -201,6 +201,7 @@ class CatalogTableView(QWidget):
         super().__init__(parent)
         self.parent_catalog = catalog
         self.plot_items = {}
+        self._dynamic = False
         self._setup_ui()
         self.refresh_filters()
 
@@ -296,7 +297,7 @@ class CatalogTableView(QWidget):
         for key in selected_keys:
             if key not in self.plot_items:
                 data = self.parent_catalog[key]
-                self.plot_items[key] = PlotItem(data)
+                self.plot_items[key] = PlotItem(data, dynamic=self._dynamic)
 
         if selected_keys or deselected_keys:
             self.itemsSelected.emit(list(self.plot_items.values()))
@@ -368,7 +369,7 @@ class CatalogTableView(QWidget):
                 if key is not None:
                     if key not in self.plot_items:
                         data = self.parent_catalog[key]
-                        self.plot_items[key] = PlotItem(data)
+                        self.plot_items[key] = PlotItem(data, dynamic=self._dynamic)
                     selected_items.append(self.plot_items[key])
 
         return selected_items
@@ -441,7 +442,7 @@ class KafkaView(CatalogTableView):
 
         # Set up the model and view (reusing CatalogTableView's setup)
         self.setupModelAndView(None)  # Pass None since we're using our own model
-
+        self._dynamic = True
         # Subscribe dispatcher
         self.dispatcher.subscribe(self.run_manager.dispatch)
         self.dispatcher.start()
