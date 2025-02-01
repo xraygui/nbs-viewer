@@ -22,12 +22,12 @@ from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 from databroker import temp as temporaryDB
 import uuid
 
-from .catalogTree import CatalogPicker
-from .catalogTable import CatalogTableModel
+from .views.catalog.catalogTree import CatalogPicker
+from .models.catalog.catalogTable import CatalogTableModel
 from .plotItem import PlotItem
 from os.path import exists
-from .catalogView import CatalogTableView, KafkaView
-from .catalogModel import load_catalog_models
+from .views.catalog.catalogView import CatalogTableView, KafkaView
+from .models.catalog.catalogModel import load_catalog_models
 
 import toml
 

@@ -13,10 +13,10 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
 
-from .catalogTable import CatalogTableModel
-from .plotItem import PlotItem
-from .search import DateSearchWidget
-from .kafkaRunModel import KafkaRunTableModel, KafkaRunManager
+from ...models.catalog.catalogTable import CatalogTableModel
+from ...models.plot.run_controller import RunModelController
+from ...search import DateSearchWidget
+from ...kafkaRunModel import KafkaRunTableModel, KafkaRunManager
 
 
 class CustomHeaderView(QHeaderView):
@@ -199,11 +199,10 @@ class CatalogTableView(QWidget):
             Parent widget, by default None
         """
         super().__init__(parent)
-        self.parent_catalog = catalog
-        self.plot_items = {}
+        self._catalog = catalog
+        self._controllers = {}
         self._dynamic = False
         self._setup_ui()
-        self.refresh_filters()
 
     def _setup_ui(self):
         """
@@ -284,23 +283,24 @@ class CatalogTableView(QWidget):
                 if key is not None:
                     selected_keys.add(key)
 
-        # Update plot items efficiently
+        # Update controllers efficiently
         items_to_remove = []
         for key in deselected_keys:
-            if key in self.plot_items and key not in selected_keys:
+            if key in self._controllers and key not in selected_keys:
                 items_to_remove.append(key)
 
         for key in items_to_remove:
-            plot_item = self.plot_items.pop(key)
-            plot_item.removeData()
+            controller = self._controllers.pop(key)
+            controller.cleanup()
 
         for key in selected_keys:
-            if key not in self.plot_items:
-                data = self.parent_catalog[key]
-                self.plot_items[key] = PlotItem(data, dynamic=self._dynamic)
+            if key not in self._controllers:
+                data = self._catalog[key]
+                controller = RunModelController(data, dynamic=self._dynamic)
+                self._controllers[key] = controller
 
         if selected_keys or deselected_keys:
-            self.itemsSelected.emit(list(self.plot_items.values()))
+            self.itemsSelected.emit(list(self._controllers.values()))
 
     def setupModelAndView(self, catalog):
         """
@@ -336,7 +336,7 @@ class CatalogTableView(QWidget):
         self.invertButton.setEnabled(True)
 
     def refresh_filters(self):
-        catalog = self.parent_catalog
+        catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
         self.setupModelAndView(catalog)
@@ -348,12 +348,12 @@ class CatalogTableView(QWidget):
 
     def get_selected_items(self):
         """
-        Get the currently selected plot items.
+        Get the currently selected controllers.
 
         Returns
         -------
         list
-            List of currently selected PlotItems
+            List of currently selected RunModelControllers
         """
         proxy_model = self.data_view.model()
         if proxy_model is None:
@@ -363,14 +363,15 @@ class CatalogTableView(QWidget):
         selected_items = []
 
         for index in self.data_view.selectedIndexes():
-            if index.column() == 0:  # Only process first column to avoid duplicates
+            if index.column() == 0:
                 source_index = proxy_model.mapToSource(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
-                    if key not in self.plot_items:
-                        data = self.parent_catalog[key]
-                        self.plot_items[key] = PlotItem(data, dynamic=self._dynamic)
-                    selected_items.append(self.plot_items[key])
+                    if key not in self._controllers:
+                        data = self._catalog[key]
+                        controller = RunModelController(data, dynamic=self._dynamic)
+                        self._controllers[key] = controller
+                    selected_items.append(self._controllers[key])
 
         return selected_items
 
@@ -381,13 +382,13 @@ class CatalogTableView(QWidget):
         Parameters
         ----------
         items : list
-            List of PlotItems to deselect
+            List of RunModelControllers to deselect
         """
         selection_model = self.data_view.selectionModel()
         if selection_model is None:
             return
 
-        item_uids = [item.uid for item in items]
+        item_uids = [item.run_data.run.uid for item in items]
 
         for index in self.data_view.selectedIndexes():
             if index.column() == 0:

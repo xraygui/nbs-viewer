@@ -68,7 +68,7 @@ class DataList(QWidget):
                     current_widget.deselect_items(selected_items)
 
                 for item in selected_items:
-                    # print("Disconnecting item")
+                    print("Disconnecting item")
                     item.disconnect_plot()
 
                 # Emit the selected items

@@ -2,6 +2,7 @@ from datetime import datetime
 import time
 import logging
 from .base import CatalogRun
+from typing import List
 
 
 class BlueskyRun(CatalogRun):
@@ -345,3 +346,14 @@ class BlueskyRun(CatalogRun):
         """
         status = self.get_md_value(["stop", "exit_status"], "")
         return status == "success"
+
+    def getAvailableKeys(self) -> List[str]:
+        """
+        Get list of all available data keys.
+
+        Returns
+        -------
+        List[str]
+            List of available keys
+        """
+        return list(self._run["primary", "data"].keys())

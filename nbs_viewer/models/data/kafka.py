@@ -1,6 +1,7 @@
 from collections import defaultdict
 import numpy as np
 from .base import CatalogRun
+from typing import List
 
 
 class KafkaRun(CatalogRun):
@@ -333,3 +334,14 @@ class KafkaRun(CatalogRun):
         For Kafka runs, this is a no-op as data is updated via process_event.
         """
         pass
+
+    def getAvailableKeys(self) -> List[str]:
+        """
+        Get list of all available data keys.
+
+        Returns
+        -------
+        List[str]
+            List of available keys
+        """
+        return list(self._data_buffer.keys())

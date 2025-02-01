@@ -12,7 +12,7 @@ from qtpy.QtCore import Signal, Qt
 
 from .plotItem import PlotItem
 from .plotCanvas import PlotWidget
-from .plotControl import PlotControls
+from .views.plot.controls.plotControl import PlotControls
 from .plotList import BlueskyListWidget
 from .dataList import DataList
 
@@ -65,7 +65,7 @@ class PlotManagerBase(QWidget):
         self.splitter.insertWidget(0, self.list_widget)
 
         # Connect signals
-        self.list_widget.itemsSelected.connect(self.controls.addPlotItems)
+        self.list_widget.itemsSelected.connect(self.controls.add_controllers)
 
         # Set initial sizes (adjust as needed)
         self.splitter.setSizes([200, 400, 200])  # list, plot, controls

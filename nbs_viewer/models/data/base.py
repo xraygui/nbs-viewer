@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from typing import Dict, List, Tuple, Any
+import numpy as np
 
 
 class CatalogRun(ABC):
@@ -69,7 +71,7 @@ class CatalogRun(ABC):
         self.setup()
 
     @abstractmethod
-    def getData(self, key):
+    def getData(self, key: str) -> np.ndarray:
         """
         Get data for a given key.
 
@@ -80,13 +82,13 @@ class CatalogRun(ABC):
 
         Returns
         -------
-        array-like
+        np.ndarray
             The data for the given key
         """
         pass
 
     @abstractmethod
-    def getShape(self, key):
+    def getShape(self, key: str) -> Tuple[int, ...]:
         """
         Get the shape of data for a given key.
 
@@ -102,19 +104,19 @@ class CatalogRun(ABC):
         """
         pass
 
-    def getPlotHints(self):
+    def getPlotHints(self) -> Dict[str, Any]:
         """
         Get plot hints for this run.
 
         Returns
         -------
         dict
-            Dictionary of plot hints. Default implementation returns empty dict.
+            Plot hints dictionary. Default implementation returns empty dict.
         """
         return {}
 
     @abstractmethod
-    def to_header(self):
+    def to_header(self) -> Dict[str, Any]:
         """
         Get a dictionary of metadata suitable for display in a header.
 
@@ -124,3 +126,110 @@ class CatalogRun(ABC):
             Dictionary of metadata key-value pairs
         """
         pass
+
+    @abstractmethod
+    def getRunKeys(self) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
+        """
+        Get organized x and y keys for plotting.
+
+        Returns
+        -------
+        Tuple[Dict[int, List[str]], Dict[int, List[str]]]
+            A tuple of (xkeys, ykeys) where each is a dictionary mapping
+            dimension (int) to list of keys (str)
+        """
+        pass
+
+    @abstractmethod
+    def getAxis(self, keys: List[str]) -> np.ndarray:
+        """
+        Get axis data for a sequence of keys.
+
+        Parameters
+        ----------
+        keys : List[str]
+            Sequence of keys to traverse
+
+        Returns
+        -------
+        np.ndarray
+            The axis data
+        """
+        pass
+
+    @abstractmethod
+    def get_hinted_keys(self) -> Dict[int, List[str]]:
+        """
+        Get filtered keys based on run's hints.
+
+        Each run type may have different hint structures and filtering logic.
+        This method encapsulates that run-specific logic.
+
+        Returns
+        -------
+        Dict[int, List[str]]
+            Keys filtered by hints, organized by dimension
+        """
+        pass
+
+    @abstractmethod
+    def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Get default key selection for this run type.
+
+        Each run type may have different conventions for what should be
+        plotted by default. This method encapsulates that run-specific logic.
+
+        Returns
+        -------
+        Tuple[List[str], List[str], List[str]]
+            Default (x_keys, y_keys, norm_keys) for this run
+        """
+        pass
+
+    def getDimensions(self, key: str) -> int:
+        """
+        Get number of dimensions for a key.
+
+        Parameters
+        ----------
+        key : str
+            The key to get dimensions for
+
+        Returns
+        -------
+        int
+            Number of dimensions
+        """
+        return len(self.getShape(key))
+
+    @abstractmethod
+    def getAvailableKeys(self) -> List[str]:
+        """
+        Get list of all available data keys.
+
+        Returns
+        -------
+        List[str]
+            List of available keys
+        """
+        pass
+
+    def getAxisHints(self) -> Dict[str, List[List[str]]]:
+        """
+        Get axis hints from plot hints.
+
+        Returns
+        -------
+        Dict[str, List[List[str]]]
+            Dictionary mapping signal names to lists of axis key sequences
+        """
+        hints = {}
+        for dlist in self.getPlotHints().values():
+            for d in dlist:
+                if isinstance(d, dict) and "axes" in d:
+                    signal = d["signal"]
+                    if isinstance(signal, list):
+                        signal = signal[-1]
+                    hints[signal] = d["axes"]
+        return hints
