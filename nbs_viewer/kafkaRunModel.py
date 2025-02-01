@@ -177,12 +177,12 @@ class KafkaRun(CatalogRun):
         if "time" not in data:
             val = doc.get("time", 0.0)
             self._data_buffer["time"].append(val)
-            print(f"Event time: {val}")
+            # print(f"Event time: {val}")
 
         # Update data buffers
         for key, value in data.items():
             self._data_buffer[key].append(value)
-            print(f"Event {key}: {value}")
+            # print(f"Event {key}: {value}")
 
     def process_event_page(self, doc):
         """
@@ -221,12 +221,12 @@ class KafkaRun(CatalogRun):
         if "time" not in data:
             timestamps = doc.get("time", [])
             self._data_buffer["time"].extend(timestamps)
-            print(f"Event page time: {timestamps}")
+            # print(f"Event page time: {timestamps}")
 
         # Update data buffers
         for key, values in data.items():
             self._data_buffer[key].extend(values)
-            print(f"Event page {key}: {values}")
+            # print(f"Event page {key}: {values}")
 
     def process_stop(self, doc):
         """

@@ -178,8 +178,20 @@ class DataPlotter(QWidget):
     ----------
     canvas : MplCanvas
         The MplCanvas instance where the data will be plotted.
-    lines : list
-        A list of Line2D objects representing the plotted data.
+    artist : Line2D or None
+        The matplotlib artist representing the plotted data.
+    _x : list
+        List of x data arrays.
+    _y : array_like
+        The y data array.
+    _xkeys : list
+        List of x axis keys.
+    _label : str
+        Label for the plot.
+    _indices : tuple or None
+        Current indices for slicing multidimensional data.
+    x_dim : int
+        Number of x dimensions to plot.
     """
 
     def __init__(self, parent, canvas, x, y, xkeys, label, dimension=1):
@@ -188,12 +200,20 @@ class DataPlotter(QWidget):
 
         Parameters
         ----------
+        parent : QWidget
+            Parent widget.
         canvas : MplCanvas
             The MplCanvas instance where the data will be plotted.
         x : list of array_like
             The x data to plot.
         y : array_like
             The y data to plot.
+        xkeys : list
+            List of x axis keys.
+        label : str
+            Label for the plot.
+        dimension : int, optional
+            Number of dimensions to plot, by default 1.
         """
         super().__init__(parent)
         self.canvas = canvas
@@ -204,6 +224,7 @@ class DataPlotter(QWidget):
         self._indices = None
         self.x_dim = dimension
         self.artist = None
+        self._style = None  # Store the style when first created
         self.artist = self.plot_data()
 
     @property
@@ -216,48 +237,63 @@ class DataPlotter(QWidget):
 
     def plot_data(self, indices=None):
         """
-        Plots the given x, y data on the associated MplCanvas instance. If x and y have more than one dimension,
-        only the last axis is plotted.
+        Plots the given x, y data on the associated MplCanvas instance.
 
         Parameters
         ----------
-        x : list of array_like
-            The x data to plot. If x is multidimensional, only the last axis is plotted.
-        y : array_like
-            The y data to plot. If y is multidimensional, only the last axis is plotted.
+        indices : tuple, optional
+            Indices for slicing multidimensional data, by default None.
 
         Returns
         -------
-        list
-            A list of Line2D objects representing the plotted data.
+        Line2D or None
+            The matplotlib artist representing the plotted data.
         """
         if indices is not None:
             self._indices = indices
         else:
             indices = self._indices
-        # print(f"DataPlotter {self._label}")
+
         xlistmod = []
-        # self.dimension needs to be set better?
-        # indices need to account for extra axes from detector
         if indices is None:
             indices = tuple([0 for n in range(len(self._x) - self.x_dim)])
         for x in self._x:
-            # print(f"Original x shape: {x.shape}")
             if len(x.shape) > 1:
                 xlistmod.append(x[indices])
             else:
                 xlistmod.append(x)
         y = self._y[indices]
-        # for x in xlistmod:
-        #    print(f"xlistmod shape: {x.shape}")
         x = xlistmod[-self.x_dim :]
-        # print(len(x))
-        # print(y.shape)
-        artist = self.canvas.plot(x, y, self.artist, label=self._label)
-        return artist
+
+        if self.artist is not None:
+            # Update existing artist with new data
+            self.artist.set_data(x[0], y)
+            self.artist.set_visible(True)
+        else:
+            # Create new artist and store its style
+            self.artist = self.canvas.plot(x, y, None, label=self._label)
+            if self._style is None:
+                self._style = {
+                    "color": self.artist.get_color(),
+                    "linestyle": self.artist.get_linestyle(),
+                    "marker": self.artist.get_marker(),
+                    "linewidth": self.artist.get_linewidth(),
+                    "markersize": self.artist.get_markersize(),
+                }
+
+        return self.artist
 
     def update_data(self, x, y):
-        # print("update data")
+        """
+        Updates the data and redraws the plot.
+
+        Parameters
+        ----------
+        x : list of array_like
+            New x data.
+        y : array_like
+            New y data.
+        """
         self._x = x
         self._y = y
         self.artist = self.plot_data()
@@ -265,29 +301,49 @@ class DataPlotter(QWidget):
     @Slot(tuple)
     def update_indices(self, indices):
         """
-        Updates the plotted data based on the provided indices into the first N-1 dimensions of the data.
+        Updates the plotted data based on the provided indices.
 
         Parameters
         ----------
         indices : tuple
             Indices into the first N-1 dimensions of the data arrays.
         """
-        # Clear the current lines from the plot
-        # Index into the first N-1 dimensions of the data arrays
-        # print(f"DataPlotter indices updated {indices}")
         self.artist = self.plot_data(indices)
 
     def clear(self):
+        """Removes the artist from the plot and clears it."""
         if self.artist is not None:
-            if hasattr(self.artist, "remove"):
-                self.artist.remove()
-            else:
-                self.canvas.clear()
-        self.canvas.draw()
-        self.artist = None
+            # Call remove() on the artist itself
+            self.artist.remove()
+            # Ensure the artist is properly deleted
+            self.artist = None
+            # Redraw the canvas to show the changes
+            self.canvas.draw()
 
     def remove(self):
-        self.parent().remove_data(self)
+        """Removes this plotter from its parent and cleans up the artist."""
+        self.clear()  # First clear the artist
+        self.parent().remove_data(self)  # Then remove from parent
+
+    def set_visible(self, visible):
+        """
+        Sets the visibility of the plot artist.
+
+        Parameters
+        ----------
+        visible : bool
+            Whether to show or hide the artist.
+        """
+        if self.artist is not None:
+            self.artist.set_visible(visible)
+            if visible and self._style is not None:
+                # Restore original style when showing
+                self.artist.set_color(self._style["color"])
+                self.artist.set_linestyle(self._style["linestyle"])
+                self.artist.set_marker(self._style["marker"])
+                self.artist.set_linewidth(self._style["linewidth"])
+                self.artist.set_markersize(self._style["markersize"])
+            self.canvas.draw()
 
 
 class NavigationToolbar(NavigationToolbar2QT):
@@ -326,73 +382,102 @@ class MplCanvas(FigureCanvasQTAgg):
         self.aspect_ratio = width / height
 
     def sizeHint(self):
-        # Provide a size hint that respects the aspect ratio
         width = self.width()
         height = int(width / self.aspect_ratio)
         return QSize(width, height)
 
     def heightForWidth(self, width):
-        # Calculate the height for a given width to maintain the aspect ratio
         return int(width / self.aspect_ratio)
 
     def plot(self, xlist, y, artist=None, **kwargs):
-        # print(f"plot x list {len(xlist)}")
-        # print(f"plot y shape {y.shape}")
+        """
+        Plot data on the canvas.
+
+        Parameters
+        ----------
+        xlist : list
+            List of x data arrays
+        y : array_like
+            Y data array
+        artist : Artist, optional
+            Existing artist to update, by default None
+        **kwargs
+            Additional keyword arguments passed to plot
+
+        Returns
+        -------
+        Artist
+            The matplotlib artist created or updated
+        """
         if len(y.shape) == 1:
-            # print(f"plot x shape {xlist[0].shape}")
+            # Only clear axes if switching from 2D to 1D
             if self.currentDim != 1:
-                self.axes.cla()
-                self.axes.remove()
+                # Properly clean up old axes
+                old_axes = self.axes
+                self.fig.delaxes(old_axes)
                 self.axes = self.fig.add_subplot(111)
-            if not isinstance(artist, Line2D):
-                artist = self.axes.plot(xlist[0], y, **kwargs)[0]
-            else:
-                # print(f"Updating artist {artist}")
+                self.currentDim = 1
+
+            if isinstance(artist, Line2D):
                 artist.set_data(xlist[0], y)
-            self.currentDim = 1
+            else:
+                artist = self.axes.plot(xlist[0], y, **kwargs)[0]
+
             if self._autoscale:
                 self.autoscale()
             self.updateLegend()
+
         elif len(y.shape) == 2 and len(xlist) > 1:
-            self.axes.cla()
-            artist = self.axes.contourf(xlist[-1], xlist[-2], y)
-            # artist = self.axes.imshow(y)
-            self.currentDim = 2
+            # Only clear for 2D plots or dimension changes
+            if self.currentDim != 2:
+                # Properly clean up old axes
+                old_axes = self.axes
+                self.fig.delaxes(old_axes)
+                self.axes = self.fig.add_subplot(111)
+                artist = self.axes.contourf(xlist[-1], xlist[-2], y)
+                self.currentDim = 2
         else:
             print(f"Unsupported dimensionality! {y.shape}, {len(xlist)}")
             artist = None
+
         self.draw()
         return artist
 
     def clear(self):
-        # print("Clearing Axes")
+        """Clear all artists from the axes and reset state."""
+        # Clear the figure and axes
         self.axes.cla()
+        self.fig.clear()
+        self.axes = self.fig.add_subplot(111)
+
+        # Reset dimension state
+        self.currentDim = 1
+
+        # Redraw the canvas
         self.draw()
 
     def autoscale(self):
-        """
-        Adjusts the y scale of the plot based on the maximum and minimum of the y data in lines
-        """
-
-        # print("Autoscaling")
         lines = self.axes.get_lines()
-        y_min = min([line.get_ydata().min() for line in lines])
-        y_max = max([line.get_ydata().max() for line in lines])
-        span = y_max - y_min
-        self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+        if not lines:
+            return
 
-        x_min = min([line.get_xdata().min() for line in lines])
-        x_max = max([line.get_xdata().max() for line in lines])
+        y_min = min(line.get_ydata().min() for line in lines)
+        y_max = max(line.get_ydata().max() for line in lines)
+        span = y_max - y_min
+        if span > 0:
+            self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+
+        x_min = min(line.get_xdata().min() for line in lines)
+        x_max = max(line.get_xdata().max() for line in lines)
         xspan = x_max - x_min
-        self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+        if xspan > 0:
+            self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
 
     def updateLegend(self):
         legend = self.axes.get_legend()
         if legend is not None:
             visibility = legend.get_visible()
-            # Update the legend
             self.axes.legend()
-            # Restore the legend visibility state
             self.axes.get_legend().set_visible(visibility)
 
 

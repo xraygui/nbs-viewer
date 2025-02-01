@@ -38,7 +38,7 @@ class PlotManagerBase(QWidget):
         self.controls = PlotControls(self.plot_widget)
 
         self.clear_plot_button = QPushButton("Clear Plot")
-        self.clear_plot_button.clicked.connect(self.plot_widget.clearPlot)
+        self.clear_plot_button.clicked.connect(self.controls.clear_plot)
 
         # Create a widget for controls
         control_widget = QWidget()

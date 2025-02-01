@@ -556,3 +556,21 @@ class PlotControls(QWidget):
             if name not in current_items:
                 self.transform_combo.addItem(name)
             self.transform_combo.setCurrentText(name)
+
+    def clear_plot(self):
+        """Clear all data plotters and reset the plot and controls."""
+        # Reset all plot items to unchecked state
+        self.uncheck_all()
+
+        # Use PlotWidget's clearPlot to handle both canvas and data plotters
+        self.plot.clearPlot()
+
+        # Reset transform state
+        self.transform_box.setChecked(False)
+        self.transform_combo.setCurrentText("No Transform")
+        self.transform_text_edit.clear()
+
+        # Reset checkboxes
+        self.auto_add_box.setChecked(True)
+        self.dynamic_update_box.setChecked(False)
+        self.show_all.setChecked(False)
