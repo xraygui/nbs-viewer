@@ -1,7 +1,7 @@
 from databroker.queries import In, NotIn, TimeRange
 from abc import ABC, abstractmethod
 import collections
-from .runModel import BlueskyRun, NBSRun
+from .models.data import BlueskyRun, NBSRun
 from typing import Optional
 from importlib.metadata import entry_points
 
