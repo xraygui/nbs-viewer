@@ -22,8 +22,9 @@ class PlotControlWidget(QWidget):
 
     state_changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, plotModel, parent=None):
         super().__init__(parent)
+        self.plotModel = plotModel
         self._setup_ui()
 
     def _setup_ui(self) -> None:

@@ -4,21 +4,19 @@ from qtpy.QtWidgets import (
     QWidget,
     QTabWidget,
     QTreeWidget,
-    QTreeWidgetItem,
 )
 
-from ....models.plot.run_controller import RunModelController
-from ..run_display import RunDisplayWidget
-from .auto_add import AutoAddControl
-from .dynamic_update import DynamicUpdateControl
-from .transform import TransformControl
+from .controls.run_display import RunDisplayWidget
+from .controls.auto_add import AutoAddControl
+from .controls.dynamic_update import DynamicUpdateControl
+from .controls.transform import TransformControl
 
 
 class PlotControls(QWidget):
     """
     A widget for interactive plotting controls.
 
-    Manages multiple runs and their display settings through RunModelControllers.
+    Manages multiple runs and their display settings through RunModels.
     Includes transform options and metadata display.
 
     Parameters
@@ -32,8 +30,6 @@ class PlotControls(QWidget):
     def __init__(self, plotModel, parent=None):
         super().__init__(parent)
         self.plotModel = plotModel
-        self._controllers: List[RunModelController] = []
-        self._lines = {}  # Store line references by ID
 
         # Create the tab widget
         self.tab_widget = QTabWidget()
@@ -62,68 +58,66 @@ class PlotControls(QWidget):
     def setup_plot_control_tab(self):
         """Setup the plot control tab with all its widgets."""
         # Auto add control
-        self.auto_add = AutoAddControl()
-        self.auto_add.state_changed.connect(self._on_auto_add_changed)
+        self.auto_add = AutoAddControl(self.plotModel)
         self.plot_control_layout.addWidget(self.auto_add)
 
         # Dynamic update control
-        self.dynamic_update = DynamicUpdateControl()
-        self.dynamic_update.state_changed.connect(self._on_dynamic_changed)
+        self.dynamic_update = DynamicUpdateControl(self.plotModel)
         self.plot_control_layout.addWidget(self.dynamic_update)
 
         # Transform control
-        self.transform = TransformControl()
-        self.transform.state_changed.connect(self._on_transform_changed)
+        self.transform = TransformControl(self.plotModel)
         self.plot_control_layout.addWidget(self.transform)
 
         # Run display widget
-        self.run_display = RunDisplayWidget()
-        self.run_display.selection_changed.connect(self._on_selection_changed)
+        self.run_display = RunDisplayWidget(self.plotModel)
         self.plot_control_layout.addWidget(self.run_display)
 
-    def add_controllers(self, controllers: List[RunModelController]) -> None:
+    '''
+
+    def add_models(self, models: List[RunModel]) -> None:
         """
         Add new run controllers to manage.
 
         Parameters
         ----------
-        controllers : List[RunModelController]
+        controllers : List[RunModel]
             List of controllers to add
         """
-        if not isinstance(controllers, (list, tuple)):
-            controllers = [controllers]
+        if not isinstance(models, (list, tuple)):
+            models = [models]
 
         # Disconnect old controllers
-        for controller in self._controllers:
+        for model in self._models:
             try:
-                controller.data_updated.disconnect(self._on_data_updated)
-                controller.line_removed.disconnect(self._on_line_removed)
+                model.data_updated.disconnect(self._on_data_updated)
+                model.line_removed.disconnect(self._on_line_removed)
             except (TypeError, RuntimeError):
                 # Ignore if signals were not connected
                 pass
 
         # Create new list with unique controllers
-        new_controllers = []
-        existing_ids = {id(c) for c in self._controllers}
+        new_models = []
+        existing_ids = {id(m) for m in self._models}
 
-        for controller in controllers:
-            if id(controller) not in existing_ids:
-                new_controllers.append(controller)
-                existing_ids.add(id(controller))
+        for model in models:
+            if id(model) not in existing_ids:
+                new_models.append(model)
+                existing_ids.add(id(model))
 
         # Connect new controllers
-        self._controllers.extend(new_controllers)
-        for controller in new_controllers:
-            controller.data_updated.connect(self._on_data_updated)
-            controller.line_removed.connect(self._on_line_removed)
-            controller.set_dynamic(self.dynamic_update.get_state()["dynamic"])
+        self._models.extend(new_models)
+        for model in new_models:
+            model.data_updated.connect(self._on_data_updated)
+            model.line_removed.connect(self._on_line_removed)
+            model.set_dynamic(self.dynamic_update.get_state()["dynamic"])
 
         # Update display
-        self.run_display.set_controllers(self._controllers)
+        self.run_display.set_models(self._models)
 
         # Update metadata with last controller's run
-        if new_controllers:  # Only update if we actually added new controllers
-            self.update_metadata_tab(new_controllers[-1].run_data.run.metadata)
+        if new_models:  # Only update if we actually added new controllers
+            self.update_metadata_tab(new_models[-1].run_data.run.metadata)
 
     def _on_auto_add_changed(self) -> None:
         """Handle auto add state changes."""
@@ -133,14 +127,14 @@ class PlotControls(QWidget):
     def _on_dynamic_changed(self) -> None:
         """Handle dynamic update state changes."""
         is_dynamic = self.dynamic_update.get_state()["dynamic"]
-        for controller in self._controllers:
-            controller.set_dynamic(is_dynamic)
+        for model in self._models:
+            model.set_dynamic(is_dynamic)
 
     def _on_transform_changed(self) -> None:
         """Handle transform state changes."""
         transform_state = self.transform.get_state()
-        for controller in self._controllers:
-            controller.run_data.set_transform(transform_state["text"])
+        for model in self._models:
+            model.run_data.set_transform(transform_state["text"])
 
     def _on_selection_changed(self) -> None:
         """Handle selection changes in run display."""
@@ -211,21 +205,22 @@ class PlotControls(QWidget):
     def clear_plot(self) -> None:
         """Clear all controllers and reset the plot."""
         # Cleanup controllers
-        for controller in self._controllers:
-            controller.cleanup()
-        self._controllers.clear()
+        for model in self._models:
+            model.cleanup()
+        self._models.clear()
 
         # Clear display
-        self.run_display.set_controllers([])
+        self.run_display.set_models([])
 
         # Clear plot
         self.plot.clearPlot()
 
     def update_plot(self) -> None:
         """Update the plot with current selection."""
-        if not self._controllers:
+        if not self._models:
             return
 
         # Get data from all controllers
-        for controller in self._controllers:
-            controller.update_plot()
+        for model in self._models:
+            model.update_plot()
+    '''

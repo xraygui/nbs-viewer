@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 import logging
 from .base import CatalogRun
-from typing import List
+from typing import Dict, List, Tuple
 
 
 class BlueskyRun(CatalogRun):
@@ -50,7 +50,7 @@ class BlueskyRun(CatalogRun):
         """
         return list(cls._METADATA_MAP.keys())
 
-    def __init__(self, run, key, catalog):
+    def __init__(self, run, key, catalog, parent=None):
         """
         Initialize the BlueskyRun.
 
@@ -63,9 +63,7 @@ class BlueskyRun(CatalogRun):
         catalog : Catalog
             The catalog containing the run
         """
-        self._catalog = catalog
-        self._key = key
-        self._run = run
+        super().__init__(run, key, catalog, parent)
         self._data_cache = {}
         self._axis_cache = {}
         self._shape_cache = {}
@@ -204,6 +202,103 @@ class BlueskyRun(CatalogRun):
             logging.debug(f"Getting shape for {key} took: {time.time() - t_start:.3f}s")
         return self._shape_cache[key]
 
+    def get_hinted_keys(self) -> Dict[int, List[str]]:
+        """
+        Get filtered keys based on NBS run's hints.
+
+        Uses plot hints to filter keys, focusing on primary signals
+        and their dimensions.
+
+        Returns
+        -------
+        Dict[int, List[str]]
+            Keys filtered by hints, organized by dimension
+        """
+        hints = self.getPlotHints()
+        _, all_keys = self.getRunKeys()
+
+        # Collect hinted fields
+        hinted = []
+        for fields in hints.values():
+            for field in fields:
+                if isinstance(field, dict):
+                    if "signal" in field:
+                        signal = field["signal"]
+                        if isinstance(signal, list):
+                            hinted.extend(signal)
+                        else:
+                            hinted.append(signal)
+                else:
+                    hinted.append(field)
+
+        # Filter keys by dimension
+        filtered = {}
+        for dim, key_list in all_keys.items():
+            filtered[dim] = [key for key in key_list if key in hinted]
+
+        return filtered
+
+    def _get_flattened_fields(self, fields: list) -> List[str]:
+        """
+        Get flattened list of fields from hints.
+
+        Parameters
+        ----------
+        fields : list
+            List of fields from hints
+
+        Returns
+        -------
+        List[str]
+            Flattened list of field names
+        """
+        flattened = []
+        for field in fields:
+            if isinstance(field, dict):
+                if "signal" in field:
+                    signal = field["signal"]
+                    if isinstance(signal, list):
+                        flattened.extend(signal)
+                    else:
+                        flattened.append(signal)
+            else:
+                flattened.append(field)
+        return flattened
+
+    def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Get default key selection for NBS run.
+
+        For NBS data, typically selects:
+        - First non-zero dimension x key
+        - Primary signals from hints for y
+        - Normalization signals from hints for norm
+
+        Returns
+        -------
+        Tuple[List[str], List[str], List[str]]
+            Default (x_keys, y_keys, norm_keys) for this run
+        """
+        x_keys, _ = self.getRunKeys()
+        hints = self.getPlotHints()
+
+        # Select x keys
+        selected_x = []
+        if 1 in x_keys:
+            for n in x_keys.keys():
+                if n != 0:
+                    selected_x.append(x_keys[n][0])
+        elif 0 in x_keys:
+            selected_x = [x_keys[0][0]]
+
+        # Get y keys from primary hints
+        selected_y = self._get_flattened_fields(hints.get("primary", []))
+
+        # Get normalization keys from hints
+        selected_norm = self._get_flattened_fields(hints.get("normalization", []))
+
+        return selected_x, selected_y, selected_norm
+
     def getPlotHints(self):
         """
         Get plot hints from the run metadata.
@@ -232,9 +327,9 @@ class BlueskyRun(CatalogRun):
         """
         t_start = time.time()
         if key not in self._data_cache:
-            logging.debug(f"Fetching data for key {key}")
+            print(f"Fetching data for key {key}")
             self._data_cache[key] = self._run["primary", "data", key].read()
-            logging.debug(f"Fetching data for {key} took: {time.time() - t_start:.3f}s")
+            print(f"Fetching data for {key} took: {time.time() - t_start:.3f}s")
         return self._data_cache[key]
 
     def getAxis(self, keys):

@@ -63,8 +63,13 @@ class KafkaRun(CatalogRun):
         """
         return [cls.DISPLAY_KEYS.get(attr, attr) for attr in cls._METADATA_MAP]
 
-    def __init__(self, start_doc, key, catalog=None):
-        super().__init__(None, key, catalog)
+    def __init__(
+        self,
+        start_doc,
+        key,
+        catalog=None,
+    ):
+        super().__init__(None, key, catalog, parent=None)
         self._start_doc = start_doc
         self._data_buffer = defaultdict(list)
         self._descriptors = {}
@@ -172,6 +177,7 @@ class KafkaRun(CatalogRun):
 
         for key, value in data.items():
             self._data_buffer[key].append(value)
+        self.data_updated.emit()
 
     def process_event_page(self, doc):
         """
@@ -208,6 +214,7 @@ class KafkaRun(CatalogRun):
 
         for key, values in data.items():
             self._data_buffer[key].extend(values)
+        self.data_updated.emit()
 
     def process_stop(self, doc):
         """
@@ -229,6 +236,7 @@ class KafkaRun(CatalogRun):
                 UID of the start document
         """
         self._stop_doc = doc
+        self.data_updated.emit()
 
     def scanFinished(self):
         """

@@ -1,9 +1,9 @@
-from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple, Any
+from qtpy.QtCore import QObject, Signal
 import numpy as np
 
 
-class CatalogRun(ABC):
+class CatalogRun(QObject):
     """
     Abstract base class for catalog run implementations.
 
@@ -21,7 +21,6 @@ class CatalogRun(ABC):
     """
 
     @classmethod
-    @abstractmethod
     def METADATA_KEYS(cls):
         """
         Abstract class method that subclasses must define.
@@ -34,7 +33,10 @@ class CatalogRun(ABC):
         """
         pass
 
-    def __init__(self, run, key, catalog):
+    data_updated = Signal()
+
+    def __init__(self, run, key, catalog, parent=None):
+        super().__init__(parent)
         self._run = run
         self._key = key
         self._catalog = catalog
@@ -50,7 +52,6 @@ class CatalogRun(ABC):
         """
         return f"{self.__class__.__name__}({self._run!r})"
 
-    @abstractmethod
     def setup(self):
         """
         Set up the run object.
@@ -70,7 +71,6 @@ class CatalogRun(ABC):
         self._run = self._catalog[self._key]
         self.setup()
 
-    @abstractmethod
     def getData(self, key: str) -> np.ndarray:
         """
         Get data for a given key.
@@ -87,7 +87,6 @@ class CatalogRun(ABC):
         """
         pass
 
-    @abstractmethod
     def getShape(self, key: str) -> Tuple[int, ...]:
         """
         Get the shape of data for a given key.
@@ -115,7 +114,6 @@ class CatalogRun(ABC):
         """
         return {}
 
-    @abstractmethod
     def to_header(self) -> Dict[str, Any]:
         """
         Get a dictionary of metadata suitable for display in a header.
@@ -127,7 +125,6 @@ class CatalogRun(ABC):
         """
         pass
 
-    @abstractmethod
     def getRunKeys(self) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
         """
         Get organized x and y keys for plotting.
@@ -140,7 +137,6 @@ class CatalogRun(ABC):
         """
         pass
 
-    @abstractmethod
     def getAxis(self, keys: List[str]) -> np.ndarray:
         """
         Get axis data for a sequence of keys.
@@ -157,7 +153,6 @@ class CatalogRun(ABC):
         """
         pass
 
-    @abstractmethod
     def get_hinted_keys(self) -> Dict[int, List[str]]:
         """
         Get filtered keys based on run's hints.
@@ -172,7 +167,6 @@ class CatalogRun(ABC):
         """
         pass
 
-    @abstractmethod
     def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
         """
         Get default key selection for this run type.
@@ -203,7 +197,6 @@ class CatalogRun(ABC):
         """
         return len(self.getShape(key))
 
-    @abstractmethod
     def getAvailableKeys(self) -> List[str]:
         """
         Get list of all available data keys.

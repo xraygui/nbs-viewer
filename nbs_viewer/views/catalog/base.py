@@ -16,7 +16,6 @@ from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
 from ...models.catalog.catalogTable import CatalogTableModel
 from ...models.plot.runModel import RunModel
 from ...search import DateSearchWidget
-from ...kafkaRunModel import KafkaRunTableModel, KafkaRunManager
 
 
 class CustomHeaderView(QHeaderView):
@@ -203,6 +202,7 @@ class CatalogTableView(QWidget):
         self._controllers = {}
         self._dynamic = False
         self._setup_ui()
+        self.refresh_filters()
 
     def _setup_ui(self):
         """
@@ -398,120 +398,3 @@ class CatalogTableView(QWidget):
                     selection_model.select(
                         index, QItemSelectionModel.Deselect | QItemSelectionModel.Rows
                     )
-
-
-class RunCatalog:
-    """Dictionary-like interface for accessing KafkaRuns by UID."""
-
-    def __init__(self, model):
-        self._model = model
-
-    def __getitem__(self, uid):
-        """Get a run by its UID."""
-        for run in self._model._runs:
-            if run.uid == uid:
-                return run
-        raise KeyError(f"No run found with UID {uid}")
-
-
-class KafkaView(CatalogTableView):
-    """Widget for displaying and managing Kafka streams.
-
-    Parameters
-    ----------
-    dispatcher : object
-        The Kafka document dispatcher
-    topics : list
-        List of Kafka topics to subscribe to
-    parent : QWidget, optional
-        Parent widget, by default None
-    """
-
-    def __init__(self, dispatcher, topics, parent=None):
-        # Initialize with None catalog since we'll use KafkaRunTableModel
-        self.filter_list = []
-
-        super().__init__(None, parent)
-        self.dispatcher = dispatcher
-        self.dispatcher.setParent(self)
-
-        # Create and set up the Kafka-specific model
-        self.table_model = KafkaRunTableModel()
-        self.run_manager = KafkaRunManager(self.table_model)
-        # Create dictionary-like interface for runs
-        self.parent_catalog = RunCatalog(self.table_model)
-
-        # Set up the model and view (reusing CatalogTableView's setup)
-        self.setupModelAndView(None)  # Pass None since we're using our own model
-        self._dynamic = True
-        # Subscribe dispatcher
-        self.dispatcher.subscribe(self.run_manager.dispatch)
-        self.dispatcher.start()
-
-    def _setup_ui(self):
-        """
-        Set up the user interface components.
-        """
-        self.data_view = QTableView(self)
-        data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
-        self.data_view.setHorizontalHeader(data_header)
-        self.data_view.setSelectionBehavior(QTableView.SelectRows)
-        self.data_view.setSelectionMode(QTableView.ExtendedSelection)
-
-        self.invertButton = QPushButton("Reverse Data", self)
-        self.invertButton.setEnabled(False)
-
-        self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
-        self.scrollToBottomButton.clicked.connect(self.data_view.scrollToBottom)
-
-        self.scrollToTopButton = QPushButton("Scroll to Top", self)
-        self.scrollToTopButton.clicked.connect(self.data_view.scrollToTop)
-
-        self.filterLineEdit = QLineEdit(self)
-        self.filterComboBox = QComboBox(self)
-
-        filterLayout = QHBoxLayout()
-        filterLayout.addWidget(QLabel("RegEx Filter"))
-        filterLayout.addWidget(self.filterLineEdit)
-        filterLayout.addWidget(self.filterComboBox)
-
-        scrollLayout = QHBoxLayout()
-        scrollLayout.addWidget(self.scrollToTopButton)
-        scrollLayout.addWidget(self.scrollToBottomButton)
-
-        layout = QVBoxLayout()
-        layout.addLayout(filterLayout)
-        layout.addLayout(scrollLayout)
-        layout.addWidget(self.invertButton)
-        layout.addWidget(self.data_view)
-        self.setLayout(layout)
-
-    def setupModelAndView(self, catalog=None):
-        """Override to use our KafkaRunTableModel instead of CatalogTableModel."""
-        # Skip creating a new model since we already have one
-
-        reverse = ReverseModel()
-        reverse.setSourceModel(self.table_model)
-
-        # Disconnect existing selection model if it exists
-        if self.data_view.model() is not None:
-            self.data_view.selectionModel().selectionChanged.disconnect()
-
-        self.data_view.setModel(reverse)
-        self.data_view.selectionModel().selectionChanged.connect(
-            self.on_selection_changed
-        )
-
-        self.filterLineEdit.textChanged.connect(reverse.setFilterRegExp)
-
-        self.filterComboBox.clear()
-        self.filterComboBox.addItems(self.table_model.columns)
-        self.filterComboBox.currentIndexChanged.connect(
-            lambda index: reverse.setFilterKeyColumn(index)
-        )
-
-        self.invertButton.clicked.connect(reverse.toggleInvert)
-        self.invertButton.setEnabled(True)
-
-    def refresh_filters(self):
-        pass

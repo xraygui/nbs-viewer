@@ -12,8 +12,6 @@ from qtpy.QtWidgets import (
     QButtonGroup,
 )
 
-from ...models.plot.run_controller import RunModelController
-
 
 class ExclusiveCheckBoxGroup(QButtonGroup):
     """Group of checkboxes where only one can be checked at a time."""
@@ -41,25 +39,28 @@ class RunDisplayWidget(QWidget):
         Emitted when key selection changes
     """
 
-    selection_changed = Signal()
+    selection_changed = Signal(list, list, list)
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, plotModel, parent: Optional[QWidget] = None):
         super().__init__(parent)
 
         # State
-        self._controllers: List[RunModelController] = []
+        self.plotModel = plotModel
         self._all_keys: Set[str] = set()
         self._show_all = False
 
         # UI setup
         self._setup_ui()
+        self.plotModel.available_keys_changed.connect(self._update_display)
+        self.plotModel.run_models_changed.connect(self._update_header)
+        self.selection_changed.connect(self.plotModel.selection_changed)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
         layout = QVBoxLayout(self)
 
         # Header for showing run info
-        self._header_label = QLabel()
+        self._header_label = QLabel(self.plotModel.getHeaderLabel())
         layout.addWidget(self._header_label)
 
         # Show all keys toggle
@@ -73,11 +74,12 @@ class RunDisplayWidget(QWidget):
 
         # Grid for key selection
         self._grid = QGridLayout()
+        self._grid.setColumnStretch(0, 1)  # Give more space to labels
         layout.addLayout(self._grid)
 
         # Update and clear buttons
         self._update_button = QPushButton("Update Selection")
-        self._update_button.clicked.connect(self._on_update_clicked)
+        self._update_button.clicked.connect(self._update_selection)
         self._update_button.setEnabled(False)
         layout.addWidget(self._update_button)
 
@@ -86,64 +88,43 @@ class RunDisplayWidget(QWidget):
         self._clear_button.setEnabled(False)
         layout.addWidget(self._clear_button)
 
-    def set_controllers(self, controllers: List[RunModelController]) -> None:
-        """
-        Set the controllers to display.
+    def _update_header(self) -> None:
+        """Update the header label with run info."""
+        self._header_label.setText(self.plotModel.getHeaderLabel())
 
-        Parameters
-        ----------
-        controllers : List[RunModelController]
-            List of controllers to display keys for
-        """
-        # Cleanup old controllers
-        self._controllers = controllers
-
-        # Update header
-        if len(controllers) == 1:
-            run = controllers[0].run_data.run
-            self._header_label.setText(f"Run: {run.name} ({run.scan_id})")
-        else:
-            self._header_label.setText(f"Multiple Runs Selected ({len(controllers)})")
-
-        # Update display
-        self._update_display()
-
+    # Update for plotModel
     def _update_display(self) -> None:
         """Update the key selection grid."""
         # Clear existing grid
         self._clear_grid()
 
-        if not self._controllers:
-            self._update_button.setEnabled(False)
-            self._clear_button.setEnabled(False)
-            return
-
         # Get common keys across controllers
-        available_keys = set.intersection(
-            *[controller.state_model.available_keys for controller in self._controllers]
-        )
+        available_keys = self.plotModel.available_keys
+        # Ensure "time" is first if present
+        if "time" in available_keys:
+            available_keys = ["time"] + [k for k in available_keys if k != "time"]
 
         # Add column headers with alignment
         for i, label in enumerate(["", "X", "Y", "", "Norm"]):
-            if label:  # Skip empty separator
-                header = QLabel(label)
-                header.setAlignment(Qt.AlignCenter)
-                self._grid.addWidget(header, 0, i)
+            header = QLabel(label)
+            header.setAlignment(Qt.AlignCenter)
+            if i in [1, 2, 4]:  # X, Y, and Norm columns
+                header.setStyleSheet("QLabel { margin-left: 50%; }")
+            self._grid.addWidget(header, 0, i)
 
         # Create checkbox groups
-        self._x_group = ExclusiveCheckBoxGroup(self)
-        self._y_group = QButtonGroup(self)  # Multiple Y allowed
+        self._x_group = QButtonGroup(self)  # Changed from ExclusiveCheckBoxGroup
+        self._x_group.setExclusive(True)
+        self._y_group = QButtonGroup(self)
         self._y_group.setExclusive(False)
-        self._norm_group = ExclusiveCheckBoxGroup(self)
+        self._norm_group = QButtonGroup(self)
+        self._norm_group.setExclusive(False)
 
-        # Sort keys but put time first if present
-        sorted_keys = sorted(available_keys)
-        if "time" in sorted_keys:
-            sorted_keys.remove("time")
-            sorted_keys.insert(0, "time")
+        # Create button to key mappings
+        self._button_key_map = {}
 
         # Add key rows
-        for i, key in enumerate(sorted_keys):
+        for i, key in enumerate(available_keys):
             # Key label
             label = QLabel(key)
             label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -154,12 +135,14 @@ class RunDisplayWidget(QWidget):
             x_box.setStyleSheet("QCheckBox { margin-left: 50%; }")
             self._grid.addWidget(x_box, i + 1, 1)
             self._x_group.addButton(x_box)
+            self._button_key_map[x_box] = key
 
             # Y checkbox
             y_box = QCheckBox()
             y_box.setStyleSheet("QCheckBox { margin-left: 50%; }")
             self._grid.addWidget(y_box, i + 1, 2)
             self._y_group.addButton(y_box)
+            self._button_key_map[y_box] = key
 
             # Separator
             line = QFrame()
@@ -171,10 +154,11 @@ class RunDisplayWidget(QWidget):
             norm_box.setStyleSheet("QCheckBox { margin-left: 50%; }")
             self._grid.addWidget(norm_box, i + 1, 4)
             self._norm_group.addButton(norm_box)
+            self._button_key_map[norm_box] = key
 
             # Connect signals
             for box in [x_box, y_box, norm_box]:
-                box.clicked.connect(self._on_selection_changed)
+                box.clicked.connect(self._update_selection)
 
         # Enable buttons
         self._update_button.setEnabled(True)
@@ -192,14 +176,6 @@ class RunDisplayWidget(QWidget):
         self._show_all = self._show_all_box.isChecked()
         self._update_display()
 
-    def _on_selection_changed(self) -> None:
-        """Handle checkbox selection changes."""
-        self.selection_changed.emit()
-
-    def _on_update_clicked(self) -> None:
-        """Handle update button clicks."""
-        self._update_controllers()
-
     def _on_clear_clicked(self) -> None:
         """Handle clear button clicks."""
         # Clear all checkboxes
@@ -208,39 +184,28 @@ class RunDisplayWidget(QWidget):
                 button.setChecked(False)
 
         # Update controllers
-        self._update_controllers()
+        self._update_selection()
 
-    def _update_controllers(self) -> None:
+    # Update for plotModel
+    def _update_selection(self) -> None:
         """Update all controllers with current selection."""
-        if not self._controllers:
-            return
+        # Get selected keys using the button-key mapping
+        x_keys = [
+            self._button_key_map[button]
+            for button in self._x_group.buttons()
+            if button.isChecked()
+        ]
 
-        # Get selected keys
-        x_keys = []
-        y_keys = []
-        norm_keys = []
+        y_keys = [
+            self._button_key_map[button]
+            for button in self._y_group.buttons()
+            if button.isChecked()
+        ]
 
-        # Helper to get key from button
-        def get_key(button) -> str:
-            return (
-                self._grid.itemAtPosition(self._grid.indexOf(button) // 5 + 1, 0)
-                .widget()
-                .text()
-            )
+        norm_keys = [
+            self._button_key_map[button]
+            for button in self._norm_group.buttons()
+            if button.isChecked()
+        ]
 
-        # Collect selected keys
-        for button in self._x_group.buttons():
-            if button.isChecked():
-                x_keys.append(get_key(button))
-
-        for button in self._y_group.buttons():
-            if button.isChecked():
-                y_keys.append(get_key(button))
-
-        for button in self._norm_group.buttons():
-            if button.isChecked():
-                norm_keys.append(get_key(button))
-
-        # Update all controllers
-        for controller in self._controllers:
-            controller.state_model.set_selection(x_keys, y_keys, norm_keys)
+        self.selection_changed.emit(x_keys, y_keys, norm_keys)

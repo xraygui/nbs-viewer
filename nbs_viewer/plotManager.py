@@ -10,8 +10,8 @@ from qtpy.QtCore import Signal, Qt
 
 # from pyqtgraph import PlotWidget
 
-from .plotCanvas import PlotCanvas
-from .views.plot.controls.plotControl import PlotControls
+from .views.plot.plotWidget import PlotCanvas
+from .views.plot.plotControl import PlotControls
 
 
 class PlotWidget(QWidget):

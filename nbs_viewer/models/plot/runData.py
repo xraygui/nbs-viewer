@@ -76,6 +76,8 @@ class RunData(QObject):
         Tuple[List[np.ndarray], List[np.ndarray], List[str]]
             Tuple of (x_data_list, y_data_list, x_keys_list)
         """
+        print("RunData get_plot_data")
+        print(xkeys, ykeys, norm_keys)
         # Cache key includes all input keys
         cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
 
@@ -222,7 +224,7 @@ class RunData(QObject):
         """
         if transform_text != self._transform_text:
             self._transform_text = transform_text
-            self.transform_changed.emit()
+            self.data_changed.emit()
 
     def set_dynamic(self, enabled: bool) -> None:
         """
