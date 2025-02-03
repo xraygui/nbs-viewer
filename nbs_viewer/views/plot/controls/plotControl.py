@@ -29,9 +29,9 @@ class PlotControls(QWidget):
         The parent widget, by default None
     """
 
-    def __init__(self, plot, parent=None):
+    def __init__(self, plotModel, parent=None):
         super().__init__(parent)
-        self.plot = plot
+        self.plotModel = plotModel
         self._controllers: List[RunModelController] = []
         self._lines = {}  # Store line references by ID
 

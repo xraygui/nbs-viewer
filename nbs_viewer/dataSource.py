@@ -14,19 +14,16 @@ from qtpy.QtWidgets import (
     QTableView,
     QFileDialog,
 )
-from qtpy.QtCore import Signal, QSortFilterProxyModel
 from tiled.client import from_uri, from_profile
 
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
-from databroker import temp as temporaryDB
 import uuid
 
 from .views.catalog.catalogTree import CatalogPicker
-from .models.catalog.catalogTable import CatalogTableModel
-from .plotItem import PlotItem
 from os.path import exists
-from .views.catalog.catalogView import CatalogTableView, KafkaView
+from .views.catalog.catalogView import CatalogTableView
+from .models.catalog.kafka import KafkaCatalog
 from .models.catalog.catalogModel import load_catalog_models
 
 import toml
@@ -207,7 +204,8 @@ class KafkaSource(QWidget):
             unique_group_id,
             consumer_config=kafka_config["runengine_producer_config"],
         )
-        kafka_widget = KafkaView(kafka_dispatcher, topics)
+        catalog = KafkaCatalog(kafka_dispatcher)
+        kafka_widget = CatalogTableView(catalog)
         return kafka_widget, beamline_acronym
 
 
@@ -279,18 +277,3 @@ class CatalogModelPicker(QDialog):
     def accept(self):
         self.selected_model = self.catalog_models[self.model_combo.currentText()]
         super().accept()
-
-
-class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
-        super(MainWindow, self).__init__(parent)
-
-        self.custom_widget = DataSelection()
-        self.setCentralWidget(self.custom_widget)
-
-
-if __name__ == "__main__":
-    app = QApplication([])
-    main = MainWindow()
-    main.show()
-    app.exec_()

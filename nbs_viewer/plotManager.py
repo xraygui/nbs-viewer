@@ -10,14 +10,11 @@ from qtpy.QtCore import Signal, Qt
 
 # from pyqtgraph import PlotWidget
 
-from .plotItem import PlotItem
-from .plotCanvas import PlotWidget
+from .plotCanvas import PlotCanvas
 from .views.plot.controls.plotControl import PlotControls
-from .plotList import BlueskyListWidget
-from .dataList import DataList
 
 
-class PlotManagerBase(QWidget):
+class PlotWidget(QWidget):
     """
     Base class for PlotManager that combines a plot and controls.
 
@@ -27,15 +24,15 @@ class PlotManagerBase(QWidget):
         The parent widget, by default None.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, plotModel, parent=None):
         super().__init__(parent)
         self.layout = QHBoxLayout(self)
         self.splitter = QSplitter(Qt.Horizontal)
         self.layout.addWidget(self.splitter)
 
         # Create widgets
-        self.plot_widget = PlotWidget()
-        self.controls = PlotControls(self.plot_widget)
+        self.plot_widget = PlotCanvas(plotModel)
+        self.controls = PlotControls(plotModel)
 
         self.clear_plot_button = QPushButton("Clear Plot")
         self.clear_plot_button.clicked.connect(self.controls.clear_plot)

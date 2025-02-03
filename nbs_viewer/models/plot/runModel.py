@@ -2,10 +2,10 @@ from typing import List, Optional, Set
 from qtpy.QtCore import QObject, Signal
 
 from ..data.base import CatalogRun
-from .run_data import RunData
+from .runData import RunData
 
 
-class RunStateModel(QObject):
+class RunModel(QObject):
     """
     Model for managing run data selection and filtering state.
 
@@ -72,6 +72,45 @@ class RunStateModel(QObject):
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
         self._initialize_keys()
+
+    def update_plot(self):
+        """Emit data for current selection."""
+        x_keys = self.selected_x
+        y_keys = self.selected_y
+        norm_keys = self.selected_norm
+
+        for y_key in y_keys:
+            x_data = self._run_data.get_data(x_keys[0]) if x_keys else None
+            y_data = self._run_data.get_data(y_key)
+            if norm_keys:
+                norm_data = self._run_data.get_data(norm_keys[0])
+                if norm_data is not None and y_data is not None:
+                    y_data = y_data / norm_data
+
+            if x_data is not None and y_data is not None:
+                metadata = {"x_key": x_keys[0], "y_key": y_key, "run_id": self._run.uid}
+                self.data_updated.emit(x_data, y_data, metadata)
+
+    def set_dynamic(self, enabled: bool) -> None:
+        """
+        Enable/disable dynamic updates.
+
+        Parameters
+        ----------
+        enabled : bool
+            Whether to enable dynamic updates
+        """
+        self._dynamic = enabled
+        self._run_data.set_dynamic(enabled)
+
+    def cleanup(self) -> None:
+        """Clean up resources."""
+        # Disconnect signals
+        try:
+            self._run_data.data_changed.disconnect(self.update_plot)
+        except (TypeError, RuntimeError):
+            # Ignore if signal was not connected
+            pass
 
     @property
     def available_keys(self) -> Set[str]:
