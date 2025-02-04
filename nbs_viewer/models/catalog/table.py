@@ -49,12 +49,12 @@ class CatalogTableModel(QAbstractTableModel):
             Parent object.
         """
         super().__init__()
-        print("CatalogTableModel init")
+        # print("CatalogTableModel init")
         self._catalog = catalog
         self._catalog.data_updated.connect(self.updateCatalog)
         self._catalog.new_run_available.connect(self.new_run_available)
         self._catalog_length = len(self._catalog)
-        print("Catalog length: ", self._catalog_length)
+        # print("Catalog length: ", self._catalog_length)
         self._current_num_rows = 0
         self._fetched_rows = 0
         self._chunk_size = chunk_size
@@ -161,13 +161,28 @@ class CatalogTableModel(QAbstractTableModel):
         return self._catalog.columns
 
     def updateCatalog(self):
-        """Update catalog data when new data arrives."""
-        old_length = self._catalog_length
-        self._catalog_length = len(self._catalog)
+        """Update catalog data when new data arrives or rows are removed."""
+        new_length = len(self._catalog)
 
-        if self._catalog_length > old_length:
-            self.beginInsertRows(QModelIndex(), old_length, self._catalog_length - 1)
-            self.endInsertRows()
+        if new_length != self._catalog_length:
+            # Clear cached data since indices will change
+            self._data.clear()
+            self._keys.clear()
+
+            if new_length < self._catalog_length:
+                # Rows were removed
+                self.beginRemoveRows(
+                    QModelIndex(), new_length, self._catalog_length - 1
+                )
+                self._catalog_length = new_length
+                self.endRemoveRows()
+            else:
+                # Rows were added
+                self.beginInsertRows(
+                    QModelIndex(), self._catalog_length, new_length - 1
+                )
+                self._catalog_length = new_length
+                self.endInsertRows()
 
         # Notify views that data has changed
         start_idx = self.createIndex(0, 0)

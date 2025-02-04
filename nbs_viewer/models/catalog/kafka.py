@@ -131,8 +131,8 @@ class KafkaCatalog(CatalogBase):
                 self._run_map[uid].process_stop(doc)
                 self.data_updated.emit()
             else:
-                print(f"KafkaCatalog _handle_document unknown uid from stop doc: {uid}")
-
+                # print(f"KafkaCatalog _handle_document unknown uid from stop doc: {uid}")
+                pass
         elif name == "descriptor":
             uid = doc.get("run_start")
             try:
@@ -151,14 +151,53 @@ class KafkaCatalog(CatalogBase):
             if run:
                 run.process_event(doc)
             else:
-                print(f"KafkaCatalog _handle_document start_uid not found")
-
+                # print(f"KafkaCatalog _handle_document start_uid not found")
+                pass
         elif name == "event_page":
             run = self.get_run_from_descriptor(doc)
             if run:
                 run.process_event_page(doc)
             else:
-                print(f"KafkaCatalog _handle_document start_uid not found")
+                pass
+                # print(f"KafkaCatalog _handle_document start_uid not found")
 
         else:
             print(f"KafkaCatalog _handle_document unknown name: {name}")
+
+    def remove_runs(self, uids: List[str]) -> None:
+        """Remove specified runs from the catalog.
+
+        Parameters
+        ----------
+        uids : List[str]
+            List of run UIDs to remove
+        """
+        # First, get the indices that will be removed
+        indices_to_remove = []
+        for i, run in enumerate(self._runs):
+            if run.uid in uids:
+                indices_to_remove.append(i)
+
+        # Remove from highest index to lowest to maintain correct ordering
+        for index in sorted(indices_to_remove, reverse=True):
+            run = self._runs.pop(index)
+            self._run_map.pop(run.uid)
+
+            # Remove any descriptor mappings for this run
+            desc_uids = [
+                desc_uid
+                for desc_uid, start_uid in self._descriptors_map.items()
+                if start_uid == run.uid
+            ]
+            for desc_uid in desc_uids:
+                self._descriptors_map.pop(desc_uid)
+
+        # Emit signal after all removals are complete
+        self.data_updated.emit()
+
+    def remove_all_runs(self) -> None:
+        """Remove all runs from the catalog."""
+        self._run_map.clear()
+        self._runs.clear()
+        self._descriptors_map.clear()
+        self.data_updated.emit()

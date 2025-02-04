@@ -11,7 +11,13 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
 )
-from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
+from qtpy.QtCore import (
+    Qt,
+    Signal,
+    QSortFilterProxyModel,
+    QItemSelectionModel,
+    QModelIndex,
+)
 
 from ...models.catalog.table import CatalogTableModel
 from ...models.plot.runModel import RunModel
@@ -122,8 +128,7 @@ class ReverseModel(QSortFilterProxyModel):
         index = model.index(source_row, self.filterKeyColumn(), source_parent)
         data = model.data(index, Qt.DisplayRole)
         if data is None:
-            # print(f"Row {source_row} has None data, skipping.")
-            return False  # Optionally, decide how to handle None data
+            return False
 
         # Convert data to string if it's not already one
         data_str = str(data)
@@ -132,43 +137,39 @@ class ReverseModel(QSortFilterProxyModel):
         # print(f"Row {source_row}, Data: {data_str}, Match: {match}")
         return match
 
-    def mapFromSource(self, index):
-        if not self.invert:
-            filteredIndex = super().mapFromSource(index)
-            # if index.column() == 0:
-            #    print(f"Mapping {index.row()}")
-            #    print(f"From {filteredIndex.row()}")
-            return filteredIndex
-        else:
-            # print("Calling mapFromSource inverted... not sure why")
-            model = self.sourceModel()
-            newRow = model._catalog_length - index.row() - 1
-            newIndex = model.index(newRow, index.column())
-            return newIndex
+    def mapFromSource(self, sourceIndex):
+        if not sourceIndex.isValid():
+            return QModelIndex()
 
-    def mapToSource(self, index):
         if not self.invert:
-            filteredIndex = super().mapToSource(index)
-            # if index.column() == 0:
-            #     print(f"Mapping {index.row()}")
-            #     print(f"To {filteredIndex.row()}")
-            #     print(f"Total rows: {self.rowCount()}")
-            return filteredIndex
-        else:
-            if index.row() == -1:
-                return super().mapToSource(index)
-            newRow = self.rowCount() - index.row() - 1
-            newIndex = self.index(newRow, index.column())
-            filteredIndex = super().mapToSource(newIndex)
-            return filteredIndex
+            return super().mapFromSource(sourceIndex)
+
+        sourceModel = self.sourceModel()
+        if sourceIndex.model() is not sourceModel:
+            return QModelIndex()
+
+        row = sourceModel.rowCount() - sourceIndex.row() - 1
+        return self.createIndex(row, sourceIndex.column())
+
+    def mapToSource(self, proxyIndex):
+        if not proxyIndex.isValid():
+            return QModelIndex()
+
+        if not self.invert:
+            return super().mapToSource(proxyIndex)
+
+        if proxyIndex.model() is not self:
+            return QModelIndex()
+
+        row = self.rowCount() - proxyIndex.row() - 1
+        return self.sourceModel().createIndex(row, proxyIndex.column())
 
     def toggleInvert(self):
-        """
-        Toggle the inversion of row order and refresh the view.
-        """
+        """Toggle the inversion of row order and refresh the view."""
         self.invert = not self.invert
         self.sourceModel()._invert = self.invert
-        self.invalidate()  # This will refresh the view
+        self.invalidateFilter()  # Use invalidateFilter instead of invalidate
+        self.layoutChanged.emit()  # Notify views that layout has changed
 
 
 class CatalogTableView(QWidget):
@@ -185,6 +186,7 @@ class CatalogTableView(QWidget):
 
     itemsSelected = Signal(list)
     itemsDeselected = Signal(list)
+    selectionChanged = Signal()
 
     def __init__(self, catalog, parent=None):
         """
@@ -301,6 +303,7 @@ class CatalogTableView(QWidget):
 
         if selected_keys or deselected_keys:
             self.itemsSelected.emit(list(self._controllers.values()))
+            self.selectionChanged.emit()
 
     def setupModelAndView(self, catalog):
         """

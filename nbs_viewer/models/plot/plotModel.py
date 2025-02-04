@@ -34,9 +34,9 @@ class PlotModel(QObject):
         self._available_keys = set()
         self._indices = None
         self._auto_add = True  # Default to True for better UX
-        self._dynamic_update = False
+        self._dynamic_update = True
         self._transform = {"enabled": False, "text": ""}
-        self._retain_selection = False  # New flag to retain selection
+        self._retain_selection = True  # New flag to retain selection
         # Add current selection state
         self._current_x_keys = []
         self._current_y_keys = []
@@ -62,7 +62,7 @@ class PlotModel(QObject):
 
     def update_available_keys(self) -> None:
         """Update the list of available data keys."""
-        print("PlotModel update_available_keys")
+        # print("PlotModel update_available_keys")
         if not self.runModels:
             if not self._retain_selection:
                 self._available_keys = []
@@ -196,7 +196,7 @@ class PlotModel(QObject):
         force_update : bool, optional
             Whether to force update the plot regardless of auto_add setting
         """
-        print("PlotModel set_selection")
+        # print("PlotModel set_selection")
         # Always update internal state
         self._current_x_keys = x_keys
         self._current_y_keys = y_keys
@@ -211,7 +211,7 @@ class PlotModel(QObject):
 
         # Update plot if auto_add is enabled or force_update is True
         if self._auto_add or force_update:
-            print("PlotModel set_selection calling _update_plot")
+            # print("PlotModel set_selection calling _update_plot")
             self._update_plot()
 
     def _update_plot(self) -> None:
@@ -247,7 +247,11 @@ class PlotModel(QObject):
         self.run_models_changed.emit(self.runModels)
 
         # Handle selection synchronization
-        if not self._retain_selection and len(self.runModels) == 1:
+        has_selection = (
+            self._current_x_keys or self._current_y_keys or self._current_norm_keys
+        )
+        retain_selection = self._retain_selection and has_selection
+        if not retain_selection and len(self.runModels) == 1:
             # First model and not retaining - adopt its selection if it has one
             x_keys = runModel.selected_x
             y_keys = runModel.selected_y

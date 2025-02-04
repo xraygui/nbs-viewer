@@ -70,7 +70,7 @@ class KafkaRun(CatalogRun):
         catalog=None,
     ):
         super().__init__(None, key, catalog, parent=None)
-        print("New KafkaRun")
+        # print("New KafkaRun")
         self._start_doc = start_doc
         self._data_buffer = defaultdict(list)
         self._descriptors = {}

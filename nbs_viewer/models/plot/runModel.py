@@ -88,8 +88,8 @@ class RunModel(QObject):
         x_keys = self.selected_x
         y_keys = self.selected_y
         norm_keys = self.selected_norm
-        print("Selected Keys")
-        print(x_keys, y_keys, norm_keys)
+        # print("Selected Keys")
+        # print(x_keys, y_keys, norm_keys)
 
         should_draw = False
         for existing_x, existing_y in self._artists.keys():

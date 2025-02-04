@@ -78,8 +78,8 @@ class RunData(QObject):
         Tuple[List[np.ndarray], List[np.ndarray], List[str]]
             Tuple of (x_data_list, y_data_list, x_keys_list)
         """
-        print("RunData get_plot_data")
-        print(xkeys, ykeys, norm_keys)
+        # print("RunData get_plot_data")
+        # print(xkeys, ykeys, norm_keys)
         if not xkeys or not ykeys:
             return [], [], []
         # Cache key includes all input keys

@@ -131,7 +131,7 @@ class RunDisplayWidget(QWidget):
 
     def _update_header(self) -> None:
         """Update the header label with run info."""
-        print("RunDisplayWidget update_header")
+        # print("RunDisplayWidget update_header")
         self._header_label.setText(self.plotModel.getHeaderLabel())
 
     def _update_display(self) -> None:
@@ -249,8 +249,8 @@ class RunDisplayWidget(QWidget):
         self, x_keys: List[str], y_keys: List[str], norm_keys: List[str]
     ) -> None:
         """Update checkbox states when selection changes externally."""
-        print("RunDisplayWidget _on_selection_changed")
-        print(x_keys, y_keys, norm_keys)
+        # print("RunDisplayWidget _on_selection_changed")
+        # print(x_keys, y_keys, norm_keys)
 
         # Update internal state
         self._current_x_keys = x_keys
@@ -285,7 +285,7 @@ class RunDisplayWidget(QWidget):
     def _on_checkbox_changed(self) -> None:
         """Handle checkbox state changes without forcing plot updates."""
         # Get selected keys using the button-key mapping
-        print("RunDisplayWidget _on_checkbox_changed")
+        # print("RunDisplayWidget _on_checkbox_changed")
 
         x_keys = [
             self._button_key_map[button]
@@ -314,7 +314,7 @@ class RunDisplayWidget(QWidget):
     def _on_update_clicked(self) -> None:
         """Handle Update Selection button clicks by forcing plot update."""
         # Get selected keys using the button-key mapping
-        print("RunDisplayWidget _on_update_clicked")
+        # print("RunDisplayWidget _on_update_clicked")
         x_keys = [
             self._button_key_map[button]
             for button in self._x_group.buttons()

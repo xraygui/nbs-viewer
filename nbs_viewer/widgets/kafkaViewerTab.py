@@ -1,4 +1,4 @@
-import nslsii.kafka_utils
+import nslsii
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 import uuid
 
@@ -37,10 +37,11 @@ def make_kafka_source(
 
 
 class KafkaViewerTab(QWidget):
-    name = "IPython Console"
+    name = "Data Viewer"
     signal_update_widget = Signal(object)
 
     def __init__(self, model, parent=None):
+        print("KafkaViewerTab init")
         super().__init__(parent)
         self.model = model
         self.config = model.settings.gui_config
@@ -49,6 +50,7 @@ class KafkaViewerTab(QWidget):
         topic_string = self.config.get("kafka", {}).get(
             "topic_string", "bluesky.runengine.documents"
         )
+        print(f"KafkaViewerTab config: {bl_acronym}, {kafka_config}, {topic_string}")
         self.kafkaSource = make_kafka_source(
             config_file=kafka_config,
             beamline_acronym=bl_acronym,
@@ -71,3 +73,4 @@ class KafkaViewerTab(QWidget):
         self.splitter.addWidget(self.controlWidget)
 
         self.setLayout(self.layout)
+        print("KafkaViewerTab init done")
