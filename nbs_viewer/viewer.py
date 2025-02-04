@@ -1,7 +1,7 @@
 import argparse
 from qtpy.QtWidgets import QApplication, QVBoxLayout, QWidget, QTabWidget
 from qtpy.QtCore import Qt
-from .plotManager import PlotManagerWithBlueskyList, PlotManagerWithDataList
+from .mainWidget import MainWidget
 
 # import logging
 
@@ -19,7 +19,9 @@ class Viewer(QWidget):
         self.tab_widget = QTabWidget(self)
         # Set the tab position to the left (vertical tabs)
         self.tab_widget.setTabPosition(QTabWidget.West)
-
+        self.mainWidget = MainWidget(self)
+        self.tab_widget.addTab(self.mainWidget, "Main")
+        """
         # Create the plot managers
         self.data_list_manager = PlotManagerWithDataList(config_file, self)
         self.bluesky_list_manager = PlotManagerWithBlueskyList(self)
@@ -32,6 +34,7 @@ class Viewer(QWidget):
         self.data_list_manager.addToPlot.connect(
             self.bluesky_list_manager.list_widget.addPlotItem
         )
+        """
 
         # Add the tab widget to the main layout
         self.layout.addWidget(self.tab_widget)

@@ -11,11 +11,17 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
 )
-from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
+from qtpy.QtCore import (
+    Qt,
+    Signal,
+    QSortFilterProxyModel,
+    QItemSelectionModel,
+    QModelIndex,
+)
 
-from .catalogTable import CatalogTableModel
-from .plotItem import PlotItem
-from .search import DateSearchWidget
+from ...models.catalog.table import CatalogTableModel
+from ...models.plot.runModel import RunModel
+from ...search import DateSearchWidget
 
 
 class CustomHeaderView(QHeaderView):
@@ -122,8 +128,7 @@ class ReverseModel(QSortFilterProxyModel):
         index = model.index(source_row, self.filterKeyColumn(), source_parent)
         data = model.data(index, Qt.DisplayRole)
         if data is None:
-            # print(f"Row {source_row} has None data, skipping.")
-            return False  # Optionally, decide how to handle None data
+            return False
 
         # Convert data to string if it's not already one
         data_str = str(data)
@@ -132,43 +137,39 @@ class ReverseModel(QSortFilterProxyModel):
         # print(f"Row {source_row}, Data: {data_str}, Match: {match}")
         return match
 
-    def mapFromSource(self, index):
-        if not self.invert:
-            filteredIndex = super().mapFromSource(index)
-            # if index.column() == 0:
-            #    print(f"Mapping {index.row()}")
-            #    print(f"From {filteredIndex.row()}")
-            return filteredIndex
-        else:
-            # print("Calling mapFromSource inverted... not sure why")
-            model = self.sourceModel()
-            newRow = model._catalog_length - index.row() - 1
-            newIndex = model.index(newRow, index.column())
-            return newIndex
+    def mapFromSource(self, sourceIndex):
+        if not sourceIndex.isValid():
+            return QModelIndex()
 
-    def mapToSource(self, index):
         if not self.invert:
-            filteredIndex = super().mapToSource(index)
-            # if index.column() == 0:
-            #     print(f"Mapping {index.row()}")
-            #     print(f"To {filteredIndex.row()}")
-            #     print(f"Total rows: {self.rowCount()}")
-            return filteredIndex
-        else:
-            if index.row() == -1:
-                return super().mapToSource(index)
-            newRow = self.rowCount() - index.row() - 1
-            newIndex = self.index(newRow, index.column())
-            filteredIndex = super().mapToSource(newIndex)
-            return filteredIndex
+            return super().mapFromSource(sourceIndex)
+
+        sourceModel = self.sourceModel()
+        if sourceIndex.model() is not sourceModel:
+            return QModelIndex()
+
+        row = sourceModel.rowCount() - sourceIndex.row() - 1
+        return self.createIndex(row, sourceIndex.column())
+
+    def mapToSource(self, proxyIndex):
+        if not proxyIndex.isValid():
+            return QModelIndex()
+
+        if not self.invert:
+            return super().mapToSource(proxyIndex)
+
+        if proxyIndex.model() is not self:
+            return QModelIndex()
+
+        row = self.rowCount() - proxyIndex.row() - 1
+        return self.sourceModel().createIndex(row, proxyIndex.column())
 
     def toggleInvert(self):
-        """
-        Toggle the inversion of row order and refresh the view.
-        """
+        """Toggle the inversion of row order and refresh the view."""
         self.invert = not self.invert
         self.sourceModel()._invert = self.invert
-        self.invalidate()  # This will refresh the view
+        self.invalidateFilter()  # Use invalidateFilter instead of invalidate
+        self.layoutChanged.emit()  # Notify views that layout has changed
 
 
 class CatalogTableView(QWidget):
@@ -185,6 +186,7 @@ class CatalogTableView(QWidget):
 
     itemsSelected = Signal(list)
     itemsDeselected = Signal(list)
+    selectionChanged = Signal()
 
     def __init__(self, catalog, parent=None):
         """
@@ -198,8 +200,9 @@ class CatalogTableView(QWidget):
             Parent widget, by default None
         """
         super().__init__(parent)
-        self.parent_catalog = catalog
-        self.plot_items = {}
+        self._catalog = catalog
+        self._controllers = {}
+        self._dynamic = False
         self._setup_ui()
         self.refresh_filters()
 
@@ -282,23 +285,25 @@ class CatalogTableView(QWidget):
                 if key is not None:
                     selected_keys.add(key)
 
-        # Update plot items efficiently
+        # Update controllers efficiently
         items_to_remove = []
         for key in deselected_keys:
-            if key in self.plot_items and key not in selected_keys:
+            if key in self._controllers and key not in selected_keys:
                 items_to_remove.append(key)
 
         for key in items_to_remove:
-            plot_item = self.plot_items.pop(key)
-            plot_item.removeData()
+            controller = self._controllers.pop(key)
+            controller.cleanup()
 
         for key in selected_keys:
-            if key not in self.plot_items:
-                data = self.parent_catalog[key]
-                self.plot_items[key] = PlotItem(data)
+            if key not in self._controllers:
+                data = self._catalog.get_run(key)
+                controller = RunModel(data, dynamic=self._dynamic)
+                self._controllers[key] = controller
 
         if selected_keys or deselected_keys:
-            self.itemsSelected.emit(list(self.plot_items.values()))
+            self.itemsSelected.emit(list(self._controllers.values()))
+            self.selectionChanged.emit()
 
     def setupModelAndView(self, catalog):
         """
@@ -334,7 +339,7 @@ class CatalogTableView(QWidget):
         self.invertButton.setEnabled(True)
 
     def refresh_filters(self):
-        catalog = self.parent_catalog
+        catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
         self.setupModelAndView(catalog)
@@ -346,12 +351,12 @@ class CatalogTableView(QWidget):
 
     def get_selected_items(self):
         """
-        Get the currently selected plot items.
+        Get the currently selected controllers.
 
         Returns
         -------
         list
-            List of currently selected PlotItems
+            List of currently selected RunModels
         """
         proxy_model = self.data_view.model()
         if proxy_model is None:
@@ -361,14 +366,15 @@ class CatalogTableView(QWidget):
         selected_items = []
 
         for index in self.data_view.selectedIndexes():
-            if index.column() == 0:  # Only process first column to avoid duplicates
+            if index.column() == 0:
                 source_index = proxy_model.mapToSource(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
-                    if key not in self.plot_items:
-                        data = self.parent_catalog[key]
-                        self.plot_items[key] = PlotItem(data)
-                    selected_items.append(self.plot_items[key])
+                    if key not in self._controllers:
+                        data = self._catalog[key]
+                        controller = RunModel(data, dynamic=self._dynamic)
+                        self._controllers[key] = controller
+                    selected_items.append(self._controllers[key])
 
         return selected_items
 
@@ -379,13 +385,13 @@ class CatalogTableView(QWidget):
         Parameters
         ----------
         items : list
-            List of PlotItems to deselect
+            List of RunModels to deselect
         """
         selection_model = self.data_view.selectionModel()
         if selection_model is None:
             return
 
-        item_uids = [item.uid for item in items]
+        item_uids = [item.run_data.run.uid for item in items]
 
         for index in self.data_view.selectedIndexes():
             if index.column() == 0:

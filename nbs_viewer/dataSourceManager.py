@@ -11,7 +11,18 @@ from qtpy.QtCore import Signal
 from .dataSource import DataSourcePicker
 
 
-class DataList(QWidget):
+"""
+This is now the primary thing to refactor -- very poorly named, this is really 
+the central widget that controls the data sources and the plot list. It is what
+controls adding and removing runs from the temporary plot.
+
+We probably need to combine this with plotManager, or at least make it a lot more obvious
+what is going on. The connections to the plotControl also need to be more obvious.
+Possibly we need to separate out a model from the view.
+"""
+
+
+class DataSourceManager(QWidget):
     itemsSelected = Signal(list)
     itemsDeselected = Signal(list)
     itemsAdded = Signal(list)
@@ -68,7 +79,7 @@ class DataList(QWidget):
                     current_widget.deselect_items(selected_items)
 
                 for item in selected_items:
-                    # print("Disconnecting item")
+                    print("Disconnecting item")
                     item.disconnect_plot()
 
                 # Emit the selected items

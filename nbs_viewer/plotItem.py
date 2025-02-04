@@ -109,9 +109,17 @@ class CompoundPlotItem(QWidget):
         self._connected = True
 
     def disconnect_plot(self):
+        """Disconnect this plot item from its plot widget."""
+        # First remove all data plotters
         self.removeData()
+        # Then clear our plot reference and connection state
         self._plot = None
         self._connected = False
+        # Reset our internal state
+        self._checked_x = []
+        self._checked_y = []
+        self._checked_norm = []
+        self._transform_text = ""
 
     def setDefaultChecked(self):
         self._checked_x = self.xkeyDict[1][0] if 1 in self.xkeyDict else []
@@ -131,10 +139,26 @@ class CompoundPlotItem(QWidget):
         self._transform_text = transformText
 
     def updatePlot(self):
-        self.removeData()
+        """
+        Update the plot with current settings.
+        Only removes plotters that need to change.
+        """
+        # Get currently plotted keys
+        current_keys = set(self.dataPlotters.keys())
+        # Get keys that should be plotted based on current settings
+        target_keys = set(self._checked_y)
+
+        # Remove plotters for keys that shouldn't be shown
+        for key in current_keys - target_keys:
+            data_plotter = self.dataPlotters.pop(key)
+            data_plotter.remove()
+            data_plotter.deleteLater()
+
+        # Use plotCheckedData to handle the actual plotting
         self.plotCheckedData()
 
     def removeData(self):
+        """Actually remove all data plotters."""
         remove_keys = list(self.dataPlotters.keys())
         for key in remove_keys:
             data_plotter = self.dataPlotters.pop(key)
@@ -142,14 +166,18 @@ class CompoundPlotItem(QWidget):
             data_plotter.deleteLater()
 
     def plotCheckedData(self):
+        for dataPlotter in self.dataPlotters.values():
+            dataPlotter.set_visible(False)
+
         if len(self._checked_x) == 0 or len(self._checked_y) == 0:
             return
 
         if getattr(self, "_plot", None) is None:
+            self.removeData()
             return
 
-        ykeys = self._checked_y
         xkeys = self._checked_x
+        ykeys = self._checked_y
         nkeys = self._checked_norm
         print(ykeys)
         for ykey in ykeys:
@@ -165,8 +193,11 @@ class CompoundPlotItem(QWidget):
             y = np.mean(yplotlist, axis=0)
 
             if ykey in self.dataPlotters:
+                # Update existing plotter and make visible
                 self.dataPlotters[ykey].update_data(xlist, y)
+                self.dataPlotters[ykey].set_visible(True)
             else:
+                # Create new plotter for this key
                 label = f"{ykey}.{self._scanid}"
                 self.dataPlotters[ykey] = self._plot.addPlotData(
                     xlist, y, xkeylist, label
@@ -174,6 +205,22 @@ class CompoundPlotItem(QWidget):
 
     def setDynamic(self, *args):
         pass
+
+    def setVisible(self, visible):
+        """
+        Set the visibility of this plot item.
+
+        Parameters
+        ----------
+        visible : bool
+            Whether the plot should be visible
+        """
+        self._visible = visible
+        if self._connected:
+            for data_plotter in self.dataPlotters.values():
+                data_plotter.set_visible(visible)
+            if visible:
+                self.plotCheckedData()
 
 
 class PlotItem(QWidget):
@@ -198,7 +245,7 @@ class PlotItem(QWidget):
             The run object containing the data
         catalog : Catalog, optional
             The catalog containing the run, by default None
-        dynamic : bool, optional
+        dynamic : bool, optional_
             Whether to update dynamically, by default False
         parent : QWidget, optional
             Parent widget, by default None
@@ -251,12 +298,11 @@ class PlotItem(QWidget):
         logging.debug(f"Final setup took: {time.time() - t4:.3f}s")
 
         self.update_plot_signal.connect(self.plotCheckedData)
-
+        self.timer = None
         if self._dynamic:
             self.startDynamicUpdates()
         else:
             self._num_points = self._run.num_points
-            self.timer = None
         self.aeval = Interpreter()
 
         logging.debug(f"Total PlotItem init took: {time.time() - t_start:.3f}s")
@@ -358,15 +404,15 @@ class PlotItem(QWidget):
             xlist, ylist, norm = self._plot_data_cache[cache_key]
         else:
             t2 = time.time()
-            xlist = [self._run.getData(key) for key in xkeys]
-            ylist = [self._run.getData(key) for key in ykeys]
+            xlist = [self.getData(key) for key in xkeys]
+            ylist = [self.getData(key) for key in ykeys]
             logging.debug(f"Getting x and y data took: {time.time() - t2:.3f}s")
 
             t3 = time.time()
             if nkeys:
-                norm = self._run.getData(nkeys[0])
+                norm = self.getData(nkeys[0])
                 for key in nkeys[1:]:
-                    norm = norm * self._run.getData(key)
+                    norm = norm * self.getData(key)
             else:
                 norm = None
             logging.debug(f"Getting normalization data took: {time.time() - t3:.3f}s")
@@ -436,18 +482,29 @@ class PlotItem(QWidget):
         return self._uid
 
     def _dynamic_update(self):
+        """Handle dynamic updates of plot data."""
+        # Don't update if we're not connected to a plot
+
         if self._expected_points is None:
             self._expected_points = self._run.num_points
-        # print("dynamic update triggered")
+
         if self._run.scanFinished():
-            # print("Converting from dynamic to static")
-            # print(self._run.metadata["stop"])
             self.stopDynamicUpdates()
             self._num_points = self._run.num_points
         elif self._catalog is not None:
-            # print("No Stop Doc, Updating Run from Catalog")
             self._run.refresh()
 
+        if not self._connected or not self._plot:
+            return
+
+        # Don't update if we have no checked data to plot
+        if not self._checked_x or not self._checked_y:
+            return
+
+        # Don't update if we're not visible
+        if not self._visible:
+            return
+        # Only emit update signal if we're visible and have data to plot
         self.update_plot_signal.emit()
 
     def set_row_visibility(self, show_all_rows):
@@ -458,10 +515,17 @@ class PlotItem(QWidget):
         self._connected = True
 
     def disconnect_plot(self):
-        # print("In item disconnect plot")
+        """Disconnect this plot item from its plot widget."""
+        # First remove all data plotters
         self.removeData()
+        # Then clear our plot reference and connection state
         self._plot = None
         self._connected = False
+        # Reset our internal state
+        self._checked_x = []
+        self._checked_y = []
+        self._checked_norm = []
+        self._transform_text = ""
 
     def setDynamic(self, enabled):
         if enabled:
@@ -495,7 +559,12 @@ class PlotItem(QWidget):
         self._transform_text = transformText
 
     def updatePlot(self):
-        self.removeData()
+        """
+        Update the plot with current settings.
+        Only removes plotters that need to change.
+        """
+
+        # Use plotCheckedData to handle the actual plotting
         self.plotCheckedData()
 
     def transformData(self, xlist, y, norm, transformText=""):
@@ -538,34 +607,44 @@ class PlotItem(QWidget):
         return xlist, yfinal
 
     def removeData(self):
-        # print("Remove data")
-        remove_keys = [key for key in self.dataPlotters.keys()]
-
+        """Actually remove all data plotters."""
+        remove_keys = list(self.dataPlotters.keys())
         for key in remove_keys:
             data_plotter = self.dataPlotters.pop(key)
             data_plotter.remove()
             data_plotter.deleteLater()
-        # print("Done remove data")
 
     def plotCheckedData(self):
         """
-        Plot the currently checked data if the item is visible.
+        Plot the currently checked data if the item is visible and connected.
         """
+        # First ensure all existing plotters are hidden
+        for dataPlotter in self.dataPlotters.values():
+            dataPlotter.set_visible(False)
+
+        # Don't proceed if we have no data to plot
+        if not self._checked_x or not self._checked_y:
+            return
+
+        # Don't proceed if we're not connected to a plot
+        if not self._connected or not self._plot:
+            self.removeData()
+            return
+
+        # Don't proceed if we're not visible
         if not self._visible:
             return
 
-        if len(self._checked_x) == 0 or len(self._checked_y) == 0:
-            return
-
-        if getattr(self, "_plot", None) is None:
-            return
         xkeys = self._checked_x
         ykeys = self._checked_y
         nkeys = self._checked_norm
         xplotlist, yplotlist, xkeylist, ykeylist = self.getPlotData(xkeys, ykeys, nkeys)
+
         for xlist, y, xkeys, ykey in zip(xplotlist, yplotlist, xkeylist, ykeylist):
             if ykey in self.dataPlotters:
-                self.dataPlotters[ykey].update_data(xlist, y)
+                plotter = self.dataPlotters[ykey]
+                plotter.update_data(xlist, y)
+                plotter.set_visible(True)
             else:
                 label = f"{ykey}.{self._scanid}"
                 self.dataPlotters[ykey] = self._plot.addPlotData(xlist, y, xkeys, label)
@@ -672,11 +751,13 @@ class PlotItem(QWidget):
             Whether the plot should be visible
         """
         self._visible = visible
-        if self._connected:
+
+        # Only update plotters if we're connected to a plot
+        if self._connected and self._plot:
+            for data_plotter in self.dataPlotters.values():
+                data_plotter.set_visible(visible)
             if visible:
                 self.plotCheckedData()
-            else:
-                self.removeData()
 
 
 def getAxisHints(plotHints):
