@@ -11,13 +11,30 @@ class DynamicUpdateControl(PlotControlWidget):
 
     Parameters
     ----------
+    plot_model : PlotModel
+        The plot model to control
     parent : QWidget, optional
         Parent widget, by default None
     """
 
+    def __init__(self, plotModel, parent=None):
+        """
+        Initialize the widget.
+
+        Parameters
+        ----------
+        plot_model : PlotModel
+            The plot model to control
+        parent : QWidget, optional
+            Parent widget, by default None
+        """
+        super().__init__(plotModel, parent)
+        # Set initial state from model
+        self._dynamic_box.setChecked(self.plotModel.dynamic_update)
+
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        layout = QHBoxLayout(self)
+        layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Dynamic update toggle
@@ -26,6 +43,7 @@ class DynamicUpdateControl(PlotControlWidget):
         self._dynamic_box.setChecked(False)
         self._dynamic_box.clicked.connect(self.state_changed)
         layout.addWidget(self._dynamic_box)
+        self.setLayout(layout)
 
     def get_state(self) -> dict:
         """
@@ -49,3 +67,8 @@ class DynamicUpdateControl(PlotControlWidget):
         """
         if "dynamic" in state:
             self._dynamic_box.setChecked(state["dynamic"])
+
+    def state_changed(self) -> None:
+        """Handle state changes."""
+        state = self.get_state()
+        self.plotModel.set_dynamic_update(state["dynamic"])

@@ -90,12 +90,15 @@ class RunDisplayWidget(QWidget):
 
     def _update_header(self) -> None:
         """Update the header label with run info."""
+        print("RunDisplayWidget update_header")
         self._header_label.setText(self.plotModel.getHeaderLabel())
 
     # Update for plotModel
     def _update_display(self) -> None:
         """Update the key selection grid."""
         # Clear existing grid
+        print("RunDisplayWidget update_display")
+
         self._clear_grid()
 
         # Get common keys across controllers

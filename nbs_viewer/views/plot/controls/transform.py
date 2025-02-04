@@ -23,6 +23,8 @@ class TransformControl(PlotControlWidget):
 
     Parameters
     ----------
+    plot_model : PlotModel
+        The plot model to control
     parent : QWidget, optional
         Parent widget, by default None
     """
@@ -40,14 +42,29 @@ class TransformControl(PlotControlWidget):
         "Log(1/y)": "log(1/y)",
     }
 
-    def __init__(self, parent=None):
+    def __init__(self, plotModel, parent=None):
+        """
+        Initialize the widget.
+
+        Parameters
+        ----------
+        plot_model : PlotModel
+            The plot model to control
+        parent : QWidget, optional
+            Parent widget, by default None
+        """
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
-        super().__init__(parent)
+        super().__init__(plotModel, parent)
+        # Set initial state from model
+        transform_state = self.plotModel.transform
+        self._transform_box.setChecked(transform_state["enabled"])
+        if transform_state["text"]:
+            self._transform_text_edit.setText(transform_state["text"])
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
         # Main layout
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Transform frame
@@ -89,6 +106,7 @@ class TransformControl(PlotControlWidget):
 
         transform_layout.addLayout(custom_transform_layout)
         layout.addWidget(transform_frame)
+        self.setLayout(layout)
 
     def _on_transform_state_changed(self) -> None:
         """Handle transform checkbox state change."""
@@ -98,19 +116,19 @@ class TransformControl(PlotControlWidget):
         if not is_checked:
             self._transform_combo.setCurrentText("No Transform")
             self._transform_text_edit.clear()
-        self.state_changed.emit()
+        self.state_changed()
 
     def _on_transform_selected(self, transform_name: str) -> None:
         """Handle transform selection from combo box."""
         if transform_name in self._transforms:
             self._transform_text_edit.setText(self._transforms[transform_name])
-            self.state_changed.emit()
+            self.state_changed()
 
     def _on_custom_transform_changed(self) -> None:
         """Handle custom transform text changes."""
         if self._transform_combo.currentText() != "Custom":
             self._transform_combo.setCurrentText("Custom")
-        self.state_changed.emit()
+        self.state_changed()
 
     def _save_custom_transform(self) -> None:
         """Save current custom transform to the combo box."""
@@ -154,11 +172,7 @@ class TransformControl(PlotControlWidget):
         """
         return {
             "enabled": self._transform_box.isChecked(),
-            "text": (
-                self._transform_text_edit.text()
-                if self._transform_box.isChecked()
-                else ""
-            ),
+            "text": self._transform_text_edit.text(),
         }
 
     def set_state(self, state: dict) -> None:
@@ -177,3 +191,8 @@ class TransformControl(PlotControlWidget):
 
         if "text" in state:
             self._transform_text_edit.setText(state["text"])
+
+    def state_changed(self) -> None:
+        """Handle state changes."""
+        state = self.get_state()
+        self.plotModel.set_transform(state)

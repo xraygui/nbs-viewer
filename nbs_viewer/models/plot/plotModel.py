@@ -24,6 +24,8 @@ class PlotModel(QObject):
     run_models_changed = Signal(list)
     draw_requested = Signal()
     autoscale_requested = Signal()
+    visibility_changed = Signal(object, bool)  # (artist, is_visible)
+    legend_update_requested = Signal()  # New signal for legend updates
 
     def __init__(self, parent=None):
         """Initialize the plot model."""
@@ -31,6 +33,9 @@ class PlotModel(QObject):
         self.runModels = []
         self._available_keys = set()
         self._indices = None
+        self._auto_add = True
+        self._dynamic_update = False
+        self._transform = {"enabled": False, "text": ""}
 
     def getHeaderLabel(self) -> str:
         if len(self.runModels) == 0:
@@ -52,6 +57,7 @@ class PlotModel(QObject):
 
     def update_available_keys(self) -> None:
         """Update the list of available data keys."""
+        print("PlotModel update_available_keys")
         if not self.runModels:
             self._available_keys = []
         else:
@@ -86,6 +92,43 @@ class PlotModel(QObject):
         for model in models_to_add:
             self.addRunModel(model)
 
+    def set_auto_add(self, enabled: bool) -> None:
+        """
+        Set auto-add state.
+
+        Parameters
+        ----------
+        enabled : bool
+            Whether to automatically add new selections
+        """
+        self._auto_add = enabled
+
+    def set_dynamic_update(self, enabled: bool) -> None:
+        """
+        Set dynamic update state.
+
+        Parameters
+        ----------
+        enabled : bool
+            Whether to enable dynamic updates
+        """
+        self._dynamic_update = enabled
+        for model in self.runModels:
+            model.set_dynamic(enabled)
+
+    def set_transform(self, state: dict) -> None:
+        """
+        Set transform state.
+
+        Parameters
+        ----------
+        state : dict
+            Dictionary with transform state (enabled and text)
+        """
+        self._transform = state.copy()
+        for model in self.runModels:
+            model.set_transform(state)
+
     def addRunModel(self, runModel: QObject) -> None:
         """
         Add a new run model and connect its signals.
@@ -95,6 +138,10 @@ class PlotModel(QObject):
         runModel : QObject
             The model to add.
         """
+        # Set initial states from current control settings
+        runModel.set_dynamic(self._dynamic_update)
+        runModel.set_transform(self._transform)
+
         # Connect to data updates
         self.runModels.append(runModel)
         self.run_models_changed.emit(self.runModels)
@@ -103,6 +150,7 @@ class PlotModel(QObject):
         runModel.artist_needed.connect(self.artist_needed)
         runModel.draw_requested.connect(self.draw_requested)
         runModel.autoscale_requested.connect(self.autoscale_requested)
+        runModel.visibility_changed.connect(self.visibility_changed)
         # Connect to selection changes
         self.selection_changed.connect(runModel.set_selection)
 
@@ -118,15 +166,38 @@ class PlotModel(QObject):
         runModel : QObject
             The model to remove.
         """
-        self.runModels.remove(runModel)
-        # runModel.data_updated.disconnect()
-        runModel.available_keys_changed.disconnect()
-        runModel.autoscale_requested.disconnect()
-        runModel.draw_requested.disconnect()
-        runModel.artist_needed.disconnect()
-        # Remove associated artists
-        removed_artists = runModel._artists.values()
-        for artist in removed_artists:
-            self.artist_removed.emit(artist)
-        self.run_models_changed.emit(self.runModels)
-        self.update_available_keys()
+        if runModel in self.runModels:
+            self.runModels.remove(runModel)
+            runModel.cleanup()
+
+            # Disconnect all signals with specific slots
+            try:
+                runModel.available_keys_changed.disconnect(self.update_available_keys)
+                runModel.autoscale_requested.disconnect(self.autoscale_requested)
+                runModel.draw_requested.disconnect(self.draw_requested)
+                runModel.artist_needed.disconnect(self.artist_needed)
+                runModel.visibility_changed.disconnect(self.visibility_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+            # Clean up the run model (which will clean up its artists)
+
+            # Emit changes
+            self.run_models_changed.emit(self.runModels)
+            self.update_available_keys()
+            self.draw_requested.emit()
+
+    @property
+    def auto_add(self) -> bool:
+        """Whether auto-add is enabled."""
+        return self._auto_add
+
+    @property
+    def dynamic_update(self) -> bool:
+        """Whether dynamic update is enabled."""
+        return self._dynamic_update
+
+    @property
+    def transform(self) -> dict:
+        """Current transform state."""
+        return self._transform.copy()

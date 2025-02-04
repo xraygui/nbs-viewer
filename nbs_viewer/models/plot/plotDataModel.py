@@ -30,6 +30,7 @@ class PlotDataModel(QWidget):
     artist_needed = Signal(object)
     draw_requested = Signal()
     autoscale_requested = Signal()
+    visibility_changed = Signal(object, bool)  # (artist, is_visible)
 
     def __init__(self, x, y, xkeys, label, indices=None, dimension=1, parent=None):
         """
@@ -106,17 +107,32 @@ class PlotDataModel(QWidget):
         if self.artist is not None:
             # Update existing artist with new data
             self.artist.set_data(x[0], y)
+            was_visible = self.artist.get_visible()
             self.artist.set_visible(True)
+            if not was_visible:
+                self.visibility_changed.emit(self, True)
             self.autoscale_requested.emit()
         else:
             # Create new artist and store its style
             self.artist_needed.emit(self)
 
     def set_visible(self, visible):
+        """
+        Set the visibility of the artist.
+
+        Parameters
+        ----------
+        visible : bool
+            Whether to show or hide the artist
+        """
         if self.artist is not None:
+            was_visible = self.artist.get_visible()
             self.artist.set_visible(visible)
+            if was_visible != visible:
+                self.visibility_changed.emit(self, visible)
             if visible:
                 self.autoscale_requested.emit()
+            self.draw_requested.emit()
 
     def set_artist(self, artist):
         self.artist = artist
@@ -151,7 +167,9 @@ class PlotDataModel(QWidget):
     def clear(self):
         """Removes the artist from the plot and clears it."""
         if self.artist is not None:
-            # Call remove() on the artist itself
+            was_visible = self.artist.get_visible()
             self.artist.remove()
-            # Ensure the artist is properly deleted
+            if was_visible:
+                self.visibility_changed.emit(self, False)
             self.artist = None
+            self.draw_requested.emit()

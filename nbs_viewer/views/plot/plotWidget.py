@@ -35,13 +35,10 @@ class NavigationToolbar(NavigationToolbar2QT):
         self.canvas.draw()
 
     def autolegend(self):
+        """Toggle legend visibility and update with current visible lines."""
         legend = self.canvas.axes.get_legend()
-        if legend is None:
-            self.canvas.axes.legend()
-            self.canvas.draw()
-        elif not legend.get_visible():
-            legend.set_visible(True)
-            self.canvas.draw()
+        if legend is None or not legend.get_visible():
+            self.canvas.updateLegend()
         else:
             legend.set_visible(False)
             self.canvas.draw()
@@ -61,6 +58,12 @@ class MplCanvas(FigureCanvasQTAgg):
         self.plotModel.artist_needed.connect(self.create_artist)
         self.plotModel.draw_requested.connect(self.draw)
         self.plotModel.autoscale_requested.connect(self.autoscale)
+        self.plotModel.visibility_changed.connect(self._on_visibility_changed)
+
+    def _on_visibility_changed(self, plot_data, is_visible):
+        """Handle visibility changes by updating the legend."""
+        self.updateLegend()
+        self.autoscale()
 
     def sizeHint(self):
         width = self.width()
@@ -164,46 +167,16 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def updateLegend(self):
         """Update the plot legend to show only visible lines."""
-        # Remove existing legend
-        legend = self.axes.get_legend()
-        if legend is not None:
-            legend.remove()
-
-        # Get all lines and debug their state
-        all_lines = self.axes.get_lines()
-        print(f"Total lines in plot: {len(all_lines)}")
-        for line in all_lines:
-            print(
-                f"Line '{line.get_label()}': visible={line.get_visible()}, "
-                f"color={line.get_color()}, style={line.get_linestyle()}"
-            )
-
         # Get visible lines and their labels
-        visible_lines = [line for line in all_lines if line.get_visible()]
-        print(f"Visible lines found: {len(visible_lines)}")
-
+        visible_lines = [line for line in self.axes.get_lines() if line.get_visible()]
         if visible_lines:
-            # Get labels, ensuring each line has a valid label
-            labels = []
-            for line in visible_lines:
-                label = line.get_label()
-                if label.startswith("_"):  # matplotlib's default labels start with _
-                    label = f"Line {len(labels) + 1}"
-                labels.append(label)
-                print(f"Adding to legend: {label}")
-
-            # Create new legend with only visible lines
-            try:
-                leg = self.axes.legend(visible_lines, labels)
-                print(f"Legend created with {len(leg.get_texts())} entries")
-                # Make sure legend is visible
-                leg.set_visible(True)
-            except Exception as e:
-                print(f"Error creating legend: {str(e)}")
+            labels = [line.get_label() for line in visible_lines]
+            self.axes.legend(visible_lines, labels)
         else:
-            print("No visible lines to create legend")
-
-        # Force a redraw
+            # Remove legend if no visible lines
+            legend = self.axes.get_legend()
+            if legend is not None:
+                legend.remove()
         self.draw()
 
 

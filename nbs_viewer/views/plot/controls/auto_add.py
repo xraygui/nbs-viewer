@@ -11,13 +11,30 @@ class AutoAddControl(PlotControlWidget):
 
     Parameters
     ----------
+    plot_model : PlotModel
+        The plot model to control
     parent : QWidget, optional
         Parent widget, by default None
     """
 
+    def __init__(self, plotModel, parent=None):
+        """
+        Initialize the widget.
+
+        Parameters
+        ----------
+        plot_model : PlotModel
+            The plot model to control
+        parent : QWidget, optional
+            Parent widget, by default None
+        """
+        super().__init__(plotModel, parent)
+        # Set initial state from model
+        self._auto_add_box.setChecked(self.plotModel.auto_add)
+
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        layout = QHBoxLayout(self)
+        layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Auto add toggle
@@ -26,6 +43,7 @@ class AutoAddControl(PlotControlWidget):
         self._auto_add_box.setChecked(True)
         self._auto_add_box.clicked.connect(self.state_changed)
         layout.addWidget(self._auto_add_box)
+        self.setLayout(layout)
 
     def get_state(self) -> dict:
         """
@@ -49,3 +67,8 @@ class AutoAddControl(PlotControlWidget):
         """
         if "auto_add" in state:
             self._auto_add_box.setChecked(state["auto_add"])
+
+    def state_changed(self) -> None:
+        """Handle state changes."""
+        state = self.get_state()
+        self.plotModel.set_auto_add(state["auto_add"])

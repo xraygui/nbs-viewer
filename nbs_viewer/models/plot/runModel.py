@@ -34,6 +34,7 @@ class RunModel(QObject):
     artist_needed = Signal(object)
     draw_requested = Signal()
     autoscale_requested = Signal()
+    visibility_changed = Signal(object, bool)  # (artist, is_visible)
 
     def __init__(self, run: CatalogRun, dynamic: bool = False):
         super().__init__()
@@ -58,7 +59,6 @@ class RunModel(QObject):
         """Initialize the list of available keys from the run."""
         # Get all keys from run
         xkeys, ykeys = self._run.getRunKeys()
-
         # Collect all keys from both dictionaries while preserving order
         all_keys = []
         for keys in xkeys.values():
@@ -80,7 +80,7 @@ class RunModel(QObject):
 
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
-        self._initialize_keys()
+        # self._initialize_keys()
         self.update_plot()
 
     def update_plot(self):
@@ -98,6 +98,10 @@ class RunModel(QObject):
             else:
                 self._artists[(existing_x, existing_y)].set_visible(False)
                 should_draw = True
+
+        if not x_keys or not y_keys:
+            return
+
         xdatalist, ydatalist, xkeylist = self._run_data.get_plot_data(
             x_keys, y_keys, norm_keys
         )
@@ -112,14 +116,29 @@ class RunModel(QObject):
                     artist.update_data(x_data, y_data)
                     artist.set_visible(True)
                 else:
-                    artist = PlotDataModel(x_data, y_data, x_key, y_key)
+                    # Create label with y_key and scan_id
+                    label = f"{y_key}.{self._run.scan_id}"
+                    artist = PlotDataModel(x_data, y_data, x_key, label)
                     artist.artist_needed.connect(self.artist_needed)
                     artist.autoscale_requested.connect(self.autoscale_requested)
+                    artist.draw_requested.connect(self.draw_requested)
+                    artist.visibility_changed.connect(self.visibility_changed)
                     self._artists[(x_key, y_key)] = artist
                     artist.plot_data()
 
         if should_draw:
             self.draw_requested.emit()
+
+    def set_transform(self, transform_state) -> None:
+        """
+        Set the transformation expression.
+
+        Parameters
+        ----------
+        transform_state : dict
+            Python expression for data transformation
+        """
+        self._run_data.set_transform(transform_state)
 
     def set_dynamic(self, enabled: bool) -> None:
         """
@@ -133,13 +152,25 @@ class RunModel(QObject):
         self._dynamic = enabled
         self._run_data.set_dynamic(enabled)
 
-    def cleanup(self) -> None:
-        """Clean up resources."""
-        # Disconnect signals
+    def cleanup(self):
+        """Clean up resources and remove all artists."""
+        # Clean up all artists
+        for artist in self._artists.values():
+            artist.clear()
+            try:
+                artist.artist_needed.disconnect(self.artist_needed)
+                artist.autoscale_requested.disconnect(self.autoscale_requested)
+                artist.draw_requested.disconnect(self.draw_requested)
+                artist.visibility_changed.disconnect(self.visibility_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+        self._artists.clear()
+
+        # Disconnect RunData signals
         try:
-            self._run_data.data_changed.disconnect(self.update_plot)
+            self._run_data.data_changed.disconnect(self._on_data_changed)
         except (TypeError, RuntimeError):
-            # Ignore if signal was not connected
             pass
 
     @property

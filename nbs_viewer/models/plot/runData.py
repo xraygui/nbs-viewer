@@ -78,6 +78,8 @@ class RunData(QObject):
         """
         print("RunData get_plot_data")
         print(xkeys, ykeys, norm_keys)
+        if not xkeys or not ykeys:
+            return [], [], []
         # Cache key includes all input keys
         cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
 
@@ -213,7 +215,7 @@ class RunData(QObject):
 
         return xlist_reordered, xkeys_reordered, y_reordered
 
-    def set_transform(self, transform_text: str) -> None:
+    def set_transform(self, transform_state) -> None:
         """
         Set the transformation expression.
 
@@ -222,6 +224,11 @@ class RunData(QObject):
         transform_text : str
             Python expression for data transformation
         """
+        if transform_state["enabled"]:
+            transform_text = transform_state["text"]
+        else:
+            transform_text = ""
+
         if transform_text != self._transform_text:
             self._transform_text = transform_text
             self.data_changed.emit()
