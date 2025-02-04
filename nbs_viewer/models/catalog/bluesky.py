@@ -32,6 +32,12 @@ class BlueskyCatalog(CatalogBase):
         self._catalog = catalog
         self._wrapped_runs = {}
 
+    def __len__(self):
+        return len(self._catalog)
+
+    def __getattr__(self, name):
+        return getattr(self._catalog, name)
+
     @property
     def columns(self) -> List[str]:
         """Get column names for display."""

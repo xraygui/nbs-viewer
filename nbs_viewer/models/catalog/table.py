@@ -1,7 +1,7 @@
 """Base table model for catalog data display."""
 
 from typing import Any, List, Optional
-from qtpy.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QTimer
+from qtpy.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QTimer, Signal
 from bluesky_widgets.qt.threading import create_worker
 import collections
 
@@ -33,6 +33,8 @@ class CatalogTableModel(QAbstractTableModel):
     catalogs efficiently.
     """
 
+    new_run_available = Signal(str)  # emits run uid
+
     def __init__(self, catalog, chunk_size=50, parent=None):
         """
         Initialize the table model.
@@ -46,9 +48,15 @@ class CatalogTableModel(QAbstractTableModel):
         parent : QObject, optional
             Parent object.
         """
-        super().__init__(parent)
+        super().__init__()
+        print("CatalogTableModel init")
         self._catalog = catalog
+        self._catalog.data_updated.connect(self.updateCatalog)
+        self._catalog.new_run_available.connect(self.new_run_available)
         self._catalog_length = len(self._catalog)
+        print("Catalog length: ", self._catalog_length)
+        self._current_num_rows = 0
+        self._fetched_rows = 0
         self._chunk_size = chunk_size
         self._data = {}
         self._keys = {}
@@ -71,6 +79,13 @@ class CatalogTableModel(QAbstractTableModel):
             worker.start()
 
         self._data_loading_timer.singleShot(LOADING_LATENCY, self._process_work_queue)
+
+    def on_item_loaded(self, payload):
+        # Update state and trigger Qt to run data() to update its internal model.
+        index, item = payload
+        self._data[index] = item
+        # print("Loaded Item")
+        self.dataChanged.emit(index, index, [])
 
     def on_row_loaded(self, payload):
         """Handle loaded row data."""
@@ -103,7 +118,8 @@ class CatalogTableModel(QAbstractTableModel):
         list
             List of (key, row) tuples.
         """
-        return list(self._catalog.items_slice(slice(start, stop + 1)))
+        chunk = list(self._catalog.items_slice(slice(start, stop + 1)))
+        return [(key, run.to_row()) for key, run in chunk]
 
     def data(self, index, role=Qt.DisplayRole):
         """Get data for display."""
@@ -139,10 +155,24 @@ class CatalogTableModel(QAbstractTableModel):
         """Get total number of columns."""
         return len(self._catalog.columns)
 
+    @property
+    def columns(self):
+        """Get columns."""
+        return self._catalog.columns
+
     def updateCatalog(self):
-        """Update catalog data."""
+        """Update catalog data when new data arrives."""
+        old_length = self._catalog_length
         self._catalog_length = len(self._catalog)
-        self.layoutChanged.emit()
+
+        if self._catalog_length > old_length:
+            self.beginInsertRows(QModelIndex(), old_length, self._catalog_length - 1)
+            self.endInsertRows()
+
+        # Notify views that data has changed
+        start_idx = self.createIndex(0, 0)
+        end_idx = self.createIndex(self._catalog_length - 1, len(self.columns) - 1)
+        self.dataChanged.emit(start_idx, end_idx, [])
 
     def get_key(self, row):
         """Get key for given row."""

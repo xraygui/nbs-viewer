@@ -125,6 +125,17 @@ class CatalogRun(QObject):
         """
         pass
 
+    def to_row(self) -> List[Any]:
+        """
+        Returns a tuple of values corresponding to the METADATA_KEYS.
+
+        Returns
+        -------
+        tuple
+            Values for each metadata key
+        """
+        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS())
+
     def getRunKeys(self) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
         """
         Get organized x and y keys for plotting.
@@ -153,20 +164,6 @@ class CatalogRun(QObject):
         """
         pass
 
-    def get_hinted_keys(self) -> Dict[int, List[str]]:
-        """
-        Get filtered keys based on run's hints.
-
-        Each run type may have different hint structures and filtering logic.
-        This method encapsulates that run-specific logic.
-
-        Returns
-        -------
-        Dict[int, List[str]]
-            Keys filtered by hints, organized by dimension
-        """
-        pass
-
     def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
         """
         Get default key selection for this run type.
@@ -179,7 +176,8 @@ class CatalogRun(QObject):
         Tuple[List[str], List[str], List[str]]
             Default (x_keys, y_keys, norm_keys) for this run
         """
-        pass
+        print("Getting Default Selection")
+        return ([], [], [])
 
     def getDimensions(self, key: str) -> int:
         """
@@ -226,3 +224,66 @@ class CatalogRun(QObject):
                         signal = signal[-1]
                     hints[signal] = d["axes"]
         return hints
+
+    def _get_flattened_fields(self, fields: list) -> List[str]:
+        """
+        Get flattened list of fields from hints.
+
+        Parameters
+        ----------
+        fields : list
+            List of fields from hints
+
+        Returns
+        -------
+        List[str]
+            Flattened list of field names
+        """
+        flattened = []
+        for field in fields:
+            if isinstance(field, dict):
+                if "signal" in field:
+                    signal = field["signal"]
+                    if isinstance(signal, list):
+                        flattened.extend(signal)
+                    else:
+                        flattened.append(signal)
+            else:
+                flattened.append(field)
+        return flattened
+
+    def get_hinted_keys(self) -> Dict[int, List[str]]:
+        """
+        Get filtered keys based on NBS run's hints.
+
+        Uses plot hints to filter keys, focusing on primary signals
+        and their dimensions.
+
+        Returns
+        -------
+        Dict[int, List[str]]
+            Keys filtered by hints, organized by dimension
+        """
+        hints = self.getPlotHints()
+        _, all_keys = self.getRunKeys()
+
+        # Collect hinted fields
+        hinted = []
+        for fields in hints.values():
+            for field in fields:
+                if isinstance(field, dict):
+                    if "signal" in field:
+                        signal = field["signal"]
+                        if isinstance(signal, list):
+                            hinted.extend(signal)
+                        else:
+                            hinted.append(signal)
+                else:
+                    hinted.append(field)
+
+        # Filter keys by dimension
+        filtered = {}
+        for dim, key_list in all_keys.items():
+            filtered[dim] = [key for key in key_list if key in hinted]
+
+        return filtered

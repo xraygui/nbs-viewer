@@ -202,69 +202,6 @@ class BlueskyRun(CatalogRun):
             logging.debug(f"Getting shape for {key} took: {time.time() - t_start:.3f}s")
         return self._shape_cache[key]
 
-    def get_hinted_keys(self) -> Dict[int, List[str]]:
-        """
-        Get filtered keys based on NBS run's hints.
-
-        Uses plot hints to filter keys, focusing on primary signals
-        and their dimensions.
-
-        Returns
-        -------
-        Dict[int, List[str]]
-            Keys filtered by hints, organized by dimension
-        """
-        hints = self.getPlotHints()
-        _, all_keys = self.getRunKeys()
-
-        # Collect hinted fields
-        hinted = []
-        for fields in hints.values():
-            for field in fields:
-                if isinstance(field, dict):
-                    if "signal" in field:
-                        signal = field["signal"]
-                        if isinstance(signal, list):
-                            hinted.extend(signal)
-                        else:
-                            hinted.append(signal)
-                else:
-                    hinted.append(field)
-
-        # Filter keys by dimension
-        filtered = {}
-        for dim, key_list in all_keys.items():
-            filtered[dim] = [key for key in key_list if key in hinted]
-
-        return filtered
-
-    def _get_flattened_fields(self, fields: list) -> List[str]:
-        """
-        Get flattened list of fields from hints.
-
-        Parameters
-        ----------
-        fields : list
-            List of fields from hints
-
-        Returns
-        -------
-        List[str]
-            Flattened list of field names
-        """
-        flattened = []
-        for field in fields:
-            if isinstance(field, dict):
-                if "signal" in field:
-                    signal = field["signal"]
-                    if isinstance(signal, list):
-                        flattened.extend(signal)
-                    else:
-                        flattened.append(signal)
-            else:
-                flattened.append(field)
-        return flattened
-
     def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
         """
         Get default key selection for NBS run.
@@ -284,6 +221,9 @@ class BlueskyRun(CatalogRun):
 
         # Select x keys
         selected_x = []
+        selected_y = []
+        selected_norm = []
+
         if 1 in x_keys:
             for n in x_keys.keys():
                 if n != 0:
@@ -292,11 +232,17 @@ class BlueskyRun(CatalogRun):
             selected_x = [x_keys[0][0]]
 
         # Get y keys from primary hints
-        selected_y = self._get_flattened_fields(hints.get("primary", []))
-
-        # Get normalization keys from hints
-        selected_norm = self._get_flattened_fields(hints.get("normalization", []))
-
+        if hints.get("primary", []):
+            selected_y = self._get_flattened_fields(hints.get("primary", []))
+            # Get normalization keys from hints
+            selected_norm = self._get_flattened_fields(hints.get("normalization", []))
+        else:
+            detectors = self.get_md_value(["start", "detectors"], [])
+            if detectors:
+                selected_y = [detectors[0]]
+            else:
+                selected_y = []
+            selected_norm = []
         return selected_x, selected_y, selected_norm
 
     def getPlotHints(self):

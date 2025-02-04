@@ -4,6 +4,23 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Dict, Generator, Tuple
 import collections
 from qtpy.QtCore import Signal, QObject
+from importlib.metadata import entry_points
+
+
+def load_catalog_models():
+    """
+    Load catalog models from entrypoints.
+
+    Returns
+    -------
+    dict
+        A dictionary of catalog model names and their corresponding classes.
+    """
+    catalog_models = {}
+    for ep in entry_points(group="nbs_viewer.catalog_models"):
+        print("Loading catalog model: ", ep.name)
+        catalog_models[ep.name] = ep.load()
+    return catalog_models
 
 
 def iterfy(x):
@@ -43,6 +60,7 @@ class CatalogBase(QObject):
 
     data_updated = Signal()
     selection_changed = Signal(object)
+    new_run_available = Signal(str)  # emits run uid
 
     def __init__(self, parent: Optional[QObject] = None):
         """Initialize the catalog model."""

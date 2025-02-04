@@ -11,7 +11,6 @@ from qtpy.QtWidgets import (
     QDialogButtonBox,
     QLineEdit,
     QStackedWidget,
-    QTableView,
     QFileDialog,
 )
 from tiled.client import from_uri, from_profile
@@ -22,9 +21,10 @@ import uuid
 
 from .views.catalog.catalogTree import CatalogPicker
 from os.path import exists
-from .views.catalog.catalogView import CatalogTableView
+from .views.catalog.base import CatalogTableView
+from .views.catalog.kafka import KafkaView
 from .models.catalog.kafka import KafkaCatalog
-from .models.catalog.catalogModel import load_catalog_models
+from .models.catalog.base import load_catalog_models
 
 import toml
 
@@ -205,7 +205,7 @@ class KafkaSource(QWidget):
             consumer_config=kafka_config["runengine_producer_config"],
         )
         catalog = KafkaCatalog(kafka_dispatcher)
-        kafka_widget = CatalogTableView(catalog)
+        kafka_widget = KafkaView(catalog)
         return kafka_widget, beamline_acronym
 
 

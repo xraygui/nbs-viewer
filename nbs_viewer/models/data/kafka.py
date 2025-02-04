@@ -1,7 +1,7 @@
 from collections import defaultdict
 import numpy as np
 from .base import CatalogRun
-from typing import List
+from typing import List, Tuple
 
 
 class KafkaRun(CatalogRun):
@@ -66,10 +66,11 @@ class KafkaRun(CatalogRun):
     def __init__(
         self,
         start_doc,
-        key,
+        key=None,
         catalog=None,
     ):
         super().__init__(None, key, catalog, parent=None)
+        print("New KafkaRun")
         self._start_doc = start_doc
         self._data_buffer = defaultdict(list)
         self._descriptors = {}
@@ -81,11 +82,29 @@ class KafkaRun(CatalogRun):
         self.time = self._start_doc.get("time")
         self.uid = self._start_doc.get("uid")
         self.scan_id = self._start_doc.get("scan_id")
+        self.plan_name = self._start_doc.get("plan_name", "")
+        self.sample_name = self._start_doc.get("sample_name", "")
         self._plot_hints = self._start_doc.get("plot_hints", {})
         self.hints = self._start_doc.get("hints", {})
         self.motors = self._start_doc.get("motors", [])
         self.num_points = self._start_doc.get("num_points")
         self.metadata = self._start_doc
+
+    def get_md_value(self, path, default=None):
+        """
+        Get a metadata value from the start document.
+        """
+        doc_name = path[0]
+        if doc_name == "start":
+            doc = self._start_doc
+        else:
+            raise ValueError(f"Invalid document name: {doc_name}")
+
+        for key in path[1:]:
+            doc = doc.get(key, {})
+        if doc == {}:
+            doc = default
+        return doc
 
     def getData(self, key):
         """
@@ -162,6 +181,7 @@ class KafkaRun(CatalogRun):
             seq_num : int
                 Sequence number of this event
         """
+        # print("KafkaRun process_event")
         descriptor_uid = doc.get("descriptor")
         if descriptor_uid not in self._descriptors:
             return
@@ -177,6 +197,7 @@ class KafkaRun(CatalogRun):
 
         for key, value in data.items():
             self._data_buffer[key].append(value)
+        # print("KafkaRun process_event done")
         self.data_updated.emit()
 
     def process_event_page(self, doc):
@@ -198,6 +219,7 @@ class KafkaRun(CatalogRun):
             seq_num : list
                 List of sequence numbers for each event
         """
+        # print("KafkaRun process_event_page")
         descriptor_uid = doc.get("descriptor")
         if descriptor_uid not in self._descriptors:
             return
@@ -214,6 +236,7 @@ class KafkaRun(CatalogRun):
 
         for key, values in data.items():
             self._data_buffer[key].extend(values)
+        # print("KafkaRun process_event_page done")
         self.data_updated.emit()
 
     def process_stop(self, doc):
@@ -353,3 +376,46 @@ class KafkaRun(CatalogRun):
             List of available keys
         """
         return list(self._data_buffer.keys())
+
+    def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Get default key selection for NBS run.
+
+        For NBS data, typically selects:
+        - First non-zero dimension x key
+        - Primary signals from hints for y
+        - Normalization signals from hints for norm
+
+        Returns
+        -------
+        Tuple[List[str], List[str], List[str]]
+            Default (x_keys, y_keys, norm_keys) for this run
+        """
+        x_keys, _ = self.getRunKeys()
+        hints = self.getPlotHints()
+
+        # Select x keys
+        selected_x = []
+        selected_y = []
+        selected_norm = []
+
+        if 1 in x_keys:
+            for n in x_keys.keys():
+                if n != 0:
+                    selected_x.append(x_keys[n][0])
+        elif 0 in x_keys:
+            selected_x = [x_keys[0][0]]
+
+        # Get y keys from primary hints
+        if hints.get("primary", []):
+            selected_y = self._get_flattened_fields(hints.get("primary", []))
+            # Get normalization keys from hints
+            selected_norm = self._get_flattened_fields(hints.get("normalization", []))
+        else:
+            detectors = self.get_md_value(["start", "detectors"], [])
+            if detectors:
+                selected_y = [detectors[0]]
+            else:
+                selected_y = []
+            selected_norm = []
+        return selected_x, selected_y, selected_norm

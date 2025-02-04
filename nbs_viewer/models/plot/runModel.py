@@ -198,6 +198,7 @@ class RunModel(QObject):
         x_keys: List[str],
         y_keys: List[str],
         norm_keys: Optional[List[str]] = None,
+        force_update: bool = False,
     ) -> None:
         """
         Set the current key selection.
@@ -221,4 +222,5 @@ class RunModel(QObject):
             self._selected_x = x_keys
             self._selected_y = y_keys
             self._selected_norm = norm_keys or []
-            self.update_plot()
+            if force_update:
+                self.update_plot()

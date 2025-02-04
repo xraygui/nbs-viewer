@@ -4,12 +4,14 @@ from qtpy.QtWidgets import (
     QWidget,
     QTabWidget,
     QTreeWidget,
+    QHBoxLayout,
 )
 
 from .controls.run_display import RunDisplayWidget
 from .controls.auto_add import AutoAddControl
 from .controls.dynamic_update import DynamicUpdateControl
 from .controls.transform import TransformControl
+from .controls.retain_selection import RetainSelectionControl
 
 
 class PlotControls(QWidget):
@@ -57,13 +59,22 @@ class PlotControls(QWidget):
 
     def setup_plot_control_tab(self):
         """Setup the plot control tab with all its widgets."""
+        # Create horizontal layout for controls
+        controls_layout = QHBoxLayout()
+
         # Auto add control
         self.auto_add = AutoAddControl(self.plotModel)
-        self.plot_control_layout.addWidget(self.auto_add)
+        controls_layout.addWidget(self.auto_add)
 
         # Dynamic update control
         self.dynamic_update = DynamicUpdateControl(self.plotModel)
-        self.plot_control_layout.addWidget(self.dynamic_update)
+        controls_layout.addWidget(self.dynamic_update)
+
+        # Retain selection control
+        self.retain_selection = RetainSelectionControl(self.plotModel)
+
+        self.plot_control_layout.addLayout(controls_layout)
+        self.plot_control_layout.addWidget(self.retain_selection)
 
         # Transform control
         self.transform = TransformControl(self.plotModel)

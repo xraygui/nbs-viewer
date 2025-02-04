@@ -39,5 +39,5 @@ packages = ["nbs_viewer"]
 [tool.setuptools_scm]
 
 [project.entry-points."nbs_viewer.catalog_models"]
-blueskycatalog = "nbs_viewer.models.catalog.catalogModel:BlueskyCatalog"
-nbscatalog = "nbs_viewer.models.catalog.catalogModel:NBSCatalog"
+blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
+nbscatalog = "nbs_viewer.models.catalog.bluesky:NBSCatalog"

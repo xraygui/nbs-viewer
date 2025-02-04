@@ -13,7 +13,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal, QSortFilterProxyModel, QItemSelectionModel
 
-from ...models.catalog.catalogTable import CatalogTableModel
+from ...models.catalog.table import CatalogTableModel
 from ...models.plot.runModel import RunModel
 from ...search import DateSearchWidget
 
@@ -295,7 +295,7 @@ class CatalogTableView(QWidget):
 
         for key in selected_keys:
             if key not in self._controllers:
-                data = self._catalog[key]
+                data = self._catalog.get_run(key)
                 controller = RunModel(data, dynamic=self._dynamic)
                 self._controllers[key] = controller
 

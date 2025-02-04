@@ -35,15 +35,17 @@ class RunData(QObject):
     def __init__(self, run: CatalogRun, dynamic: bool = False):
         super().__init__()
         self._run = run
-        self._dynamic = dynamic
-
-        # Caching
         self._plot_data_cache: Dict[Tuple, Tuple] = {}
         self._dimensions_cache: Dict[str, int] = {}
 
         # Transform state
         self._transform_text = ""
         self._transform = Interpreter()
+
+        self._dynamic = False
+        self.set_dynamic(dynamic)
+
+        # Caching
 
     @property
     def run(self) -> CatalogRun:
@@ -245,4 +247,7 @@ class RunData(QObject):
         if enabled != self._dynamic:
             self._dynamic = enabled
             if enabled:
+                self._run.data_updated.connect(self.data_changed)
                 self.clear_caches()
+            else:
+                self._run.data_updated.disconnect(self.data_changed)
