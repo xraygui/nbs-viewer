@@ -153,17 +153,20 @@ class MplCanvas(FigureCanvasQTAgg):
         if not visible_lines:
             return
 
-        y_min = min(line.get_ydata().min() for line in visible_lines)
-        y_max = max(line.get_ydata().max() for line in visible_lines)
-        span = y_max - y_min
-        if span > 0:
-            self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+        try:
+            y_min = min(line.get_ydata().min() for line in visible_lines)
+            y_max = max(line.get_ydata().max() for line in visible_lines)
+            span = y_max - y_min
+            if span > 0:
+                self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
 
-        x_min = min(line.get_xdata().min() for line in visible_lines)
-        x_max = max(line.get_xdata().max() for line in visible_lines)
-        xspan = x_max - x_min
-        if xspan > 0:
-            self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+            x_min = min(line.get_xdata().min() for line in visible_lines)
+            x_max = max(line.get_xdata().max() for line in visible_lines)
+            xspan = x_max - x_min
+            if xspan > 0:
+                self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+        except ValueError as e:
+            print(f"Error autoscaling: {e}")
 
     def updateLegend(self):
         """Update the plot legend to show only visible lines."""
