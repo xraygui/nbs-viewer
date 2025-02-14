@@ -169,7 +169,6 @@ class KafkaSource(QWidget):
         self.file_label = QLabel(f"Current file: {self.selected_file}")
         self.bl_label = QLabel("Beamline Acronym")
         self.bl_input = QLineEdit()
-        self.selected_file = None
         layout = QVBoxLayout(self)
         bl_layout = QHBoxLayout()
         bl_layout.addWidget(self.bl_label)

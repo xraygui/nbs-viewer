@@ -76,7 +76,11 @@ class MplCanvas(FigureCanvasQTAgg):
     def create_artist(self, plotData):
         x = plotData._xplot
         y = plotData._yplot
-        artist = self.plot(x, y, None, label=plotData._label)
+        try:
+            artist = self.plot(x, y, None, label=plotData._label)
+        except Exception as e:
+            print(f"Error creating artist for {plotData._label}: {e}")
+            artist = None
         plotData.set_artist(artist)
         return artist
 
@@ -153,14 +157,32 @@ class MplCanvas(FigureCanvasQTAgg):
         if not visible_lines:
             return
 
-        y_min = min(line.get_ydata().min() for line in visible_lines)
-        y_max = max(line.get_ydata().max() for line in visible_lines)
-        span = y_max - y_min
-        if span > 0:
-            self.axes.set_ylim(y_min - 0.05 * span, y_max + 0.05 * span)
+        y_min = []
+        y_max = []
+        x_min = []
+        x_max = []
+        for line in visible_lines:
+            ydata = line.get_ydata()
+            xdata = line.get_xdata()
+            if len(ydata) > 0 and len(xdata) > 0:
+                y_min.append(ydata.min())
+                y_max.append(ydata.max())
+                x_min.append(xdata.min())
+                x_max.append(xdata.max())
 
-        x_min = min(line.get_xdata().min() for line in visible_lines)
-        x_max = max(line.get_xdata().max() for line in visible_lines)
+        if len(y_min) > 0:
+            y_min = min(y_min)
+            y_max = max(y_max)
+            x_min = min(x_min)
+            x_max = max(x_max)
+        else:
+            print("No visible lines to autoscale")
+            return
+
+        yspan = y_max - y_min
+        if yspan > 0:
+            self.axes.set_ylim(y_min - 0.05 * yspan, y_max + 0.05 * yspan)
+
         xspan = x_max - x_min
         if xspan > 0:
             self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)

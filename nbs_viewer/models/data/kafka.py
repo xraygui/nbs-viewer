@@ -120,7 +120,10 @@ class KafkaRun(CatalogRun):
         np.ndarray
             Array of values for the key
         """
-        return np.array(self._data_buffer.get(key, []))
+        print(f"Getting data for key: {key}")
+        data = np.array(self._data_buffer.get(key, []))
+        print(f"Data for key {key}: has shape {data.shape}")
+        return data
 
     def getShape(self, key):
         """
