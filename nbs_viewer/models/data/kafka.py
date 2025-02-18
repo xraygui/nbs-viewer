@@ -90,6 +90,22 @@ class KafkaRun(CatalogRun):
         self.num_points = self._start_doc.get("num_points")
         self.metadata = self._start_doc
 
+    def __str__(self):
+        """
+        Get a string representation of the run.
+
+        Returns
+        -------
+        str
+            Human-readable description of the run
+        """
+        scan_desc = ["Scan", str(self.scan_id)]
+
+        if self.plan_name:
+            scan_desc.append(self.plan_name)
+
+        return " ".join(scan_desc)
+
     def get_md_value(self, path, default=None):
         """
         Get a metadata value from the start document.
@@ -120,9 +136,9 @@ class KafkaRun(CatalogRun):
         np.ndarray
             Array of values for the key
         """
-        print(f"Getting data for key: {key}")
+        # print(f"Getting data for key: {key}")
         data = np.array(self._data_buffer.get(key, []))
-        print(f"Data for key {key}: has shape {data.shape}")
+        # print(f"Data for key {key}: has shape {data.shape}")
         return data
 
     def getShape(self, key):

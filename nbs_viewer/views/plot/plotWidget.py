@@ -7,6 +7,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QSpinBox,
     QSizePolicy,
+    QSplitter,
 )
 from qtpy.QtCore import Qt, Signal, Slot, QSize
 
@@ -20,6 +21,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from .plotDimensionWidget import PlotDimensionControl
+from .plotControl import PlotControls
 
 
 class NavigationToolbar(NavigationToolbar2QT):
@@ -216,18 +218,31 @@ class PlotWidget(QWidget):
     def __init__(self, plotModel, parent=None):
         super().__init__(parent)
         self.plotModel = plotModel
-        self.layout = QHBoxLayout(self)
-        self.plot_layout = QVBoxLayout()
-        # self.plot = PlotWidget()
+
+        # Create main splitter
+        self.layout = QSplitter(Qt.Horizontal)
+
+        # Create and setup plot container widget
+        self.plot_container = QWidget()
+        self.plot_layout = QVBoxLayout(self.plot_container)
+
+        # Add plot widgets to container
         self.plot = MplCanvas(self.plotModel, self, 5, 4, 100)
         self.toolbar = NavigationToolbar(self.plot, self)
-        # self.dimensionControls = PlotDimensionControl(self.plotModel)
-
         self.plot_layout.addWidget(self.toolbar)
         self.plot_layout.addWidget(self.plot)
-        # self.plot_layout.addWidget(self.dimensionControls)
 
-        self.layout.addLayout(self.plot_layout)
+        # Create plot controls
+        self.plotControls = PlotControls(self.plotModel)
+
+        # Add widgets to splitter
+        self.layout.addWidget(self.plot_container)
+        self.layout.addWidget(self.plotControls)
+
+        # Create main layout and add splitter
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.layout)
 
     """
     def addPlotData(self, x, y, xkeys, ykey, dimension=1):

@@ -44,6 +44,7 @@ class RunData(QObject):
 
         self._dynamic = False
         self.set_dynamic(dynamic)
+        self._initialize_keys()
 
         # Caching
 
@@ -251,3 +252,25 @@ class RunData(QObject):
                 self.clear_caches()
             else:
                 self._run.data_updated.disconnect(self.data_changed)
+
+    def _initialize_keys(self) -> None:
+        """Initialize the list of available keys from the run."""
+        # Get all keys from run
+        xkeys, ykeys = self._run.getRunKeys()
+        # Collect all keys from both dictionaries while preserving order
+        all_keys = []
+        for keys in xkeys.values():
+            for key in keys:
+                if key not in all_keys:
+                    all_keys.append(key)
+        for keys in ykeys.values():
+            for key in keys:
+                if key not in all_keys:
+                    all_keys.append(key)
+
+        self._available_keys = all_keys
+
+    @property
+    def available_keys(self) -> List[str]:
+        """Get the list of available keys."""
+        return self._available_keys

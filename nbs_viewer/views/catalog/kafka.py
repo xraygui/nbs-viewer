@@ -33,7 +33,8 @@ class KafkaView(CatalogTableView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dynamic = True
-        self.selectionChanged.connect(self._update_button_states)
+        self.itemSelected.connect(self._update_button_states)
+        self.itemDeselected.connect(self._update_button_states)
 
     def _setup_ui(self):
         """

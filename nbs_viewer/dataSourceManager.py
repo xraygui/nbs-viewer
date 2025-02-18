@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Signal
 from .dataSource import DataSourcePicker
+from .views.plot.canvasControl import CanvasControlWidget
 
 
 """
@@ -23,14 +24,37 @@ Possibly we need to separate out a model from the view.
 
 
 class DataSourceManager(QWidget):
-    itemsSelected = Signal(list)
-    itemsDeselected = Signal(list)
-    itemsAdded = Signal(list)
+    """
+    Widget managing data sources and their selection state.
 
-    def __init__(self, config_file=None, parent=None):
+    Signals
+    -------
+    itemSelected : Signal
+        Emitted when a run is selected (RunData, canvas_id)
+    itemDeselected : Signal
+        Emitted when a run is deselected (RunData, canvas_id)
+    selectionChanged : Signal
+        Emitted when the overall selection changes (List[RunData], canvas_id)
+    """
+
+    itemSelected = Signal(object)  # (RunData, canvas_id)
+    itemDeselected = Signal(object)  # (RunData, canvas_id)
+    selectionChanged = Signal(list)  # (List[RunData], canvas_id)
+
+    def __init__(self, plot_model, canvas_manager, config_file=None, parent=None):
         super().__init__(parent)
+        self.plot_model = plot_model
+        self.canvas_controls = CanvasControlWidget(canvas_manager, self)
         self.config_file = config_file
 
+        # Connect selection signals to plot model
+        self.itemSelected.connect(self.plot_model.add_run)
+        self.itemDeselected.connect(self.plot_model.remove_run)
+
+        # Connect selection changed to canvas controls
+        self.selectionChanged.connect(self.canvas_controls.handle_run_selection)
+
+        # Create UI elements
         self.label = QLabel("Data Source")
         self.dropdown = QComboBox(self)
         self.dropdown.currentIndexChanged.connect(self.switch_table)
@@ -39,9 +63,9 @@ class DataSourceManager(QWidget):
         self.plot_button = QPushButton("Add Selected to Plot List", self)
         self.plot_button.clicked.connect(self.add_selected_items)
 
-        # self.itemsSelected.connect(print)
         self.stacked_widget = QStackedWidget()
 
+        # Layout
         hbox_layout = QHBoxLayout()
         hbox_layout.addWidget(self.label)
         hbox_layout.addWidget(self.dropdown)
@@ -50,6 +74,7 @@ class DataSourceManager(QWidget):
         layout.addLayout(hbox_layout)
         layout.addWidget(self.new_source)
         layout.addWidget(self.stacked_widget)
+        layout.addWidget(self.canvas_controls)
         layout.addWidget(self.plot_button)
         self.setLayout(layout)
 
@@ -58,14 +83,14 @@ class DataSourceManager(QWidget):
         if picker.exec_():
             sourceView, label = picker.getSource()
             if sourceView is not None and label is not None:
-                sourceView.itemsSelected.connect(self.itemsSelected)
-                sourceView.itemsDeselected.connect(self.itemsDeselected)
+                # Connect to individual selection signals
+                sourceView.itemSelected.connect(self.itemSelected)
+                sourceView.itemDeselected.connect(self.itemDeselected)
+                sourceView.selectionChanged.connect(self.selectionChanged)
+
                 self.stacked_widget.addWidget(sourceView)
                 self.dropdown.addItem(label)
                 self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
-            else:
-                # User cancelled one of the dialogs, do nothing
-                pass
 
     def switch_table(self):
         self.stacked_widget.setCurrentIndex(self.dropdown.currentIndex())
@@ -81,9 +106,5 @@ class DataSourceManager(QWidget):
                 for item in selected_items:
                     print("Disconnecting item")
                     item.disconnect_plot()
-
-                # Emit the selected items
-                # print("Emitting items")
-                self.itemsAdded.emit(selected_items)
-
-                # Deselect the items
+                    # Emit selection for each item
+                    self.itemSelected.emit(item, "main")

@@ -16,8 +16,6 @@ class RunModel(QObject):
 
     Parameters
     ----------
-    run : CatalogRun
-        The run object providing the data
     run_data : RunData
         The RunData service for data access and transformation
 
@@ -36,51 +34,40 @@ class RunModel(QObject):
     autoscale_requested = Signal()
     visibility_changed = Signal(object, bool)  # (artist, is_visible)
 
-    def __init__(self, run: CatalogRun, dynamic: bool = False):
+    def __init__(self, run_data: RunData):
         super().__init__()
-        self._run = run
-        self._run_data = RunData(run, dynamic)
+        self._run_data = run_data
 
         # Selection state
-        self._available_keys: Set[str] = set()
         self._selected_x: List[str] = []
         self._selected_y: List[str] = []
         self._selected_norm: List[str] = []
         self._artists = {}
 
         # Initialize state
-        self._initialize_keys()
         self._set_default_selection()
 
         # Connect to RunData signals
         self._run_data.data_changed.connect(self._on_data_changed)
 
-    def _initialize_keys(self) -> None:
-        """Initialize the list of available keys from the run."""
-        # Get all keys from run
-        xkeys, ykeys = self._run.getRunKeys()
-        # Collect all keys from both dictionaries while preserving order
-        all_keys = []
-        for keys in xkeys.values():
-            for key in keys:
-                if key not in all_keys:
-                    all_keys.append(key)
-        for keys in ykeys.values():
-            for key in keys:
-                if key not in all_keys:
-                    all_keys.append(key)
+    @property
+    def run(self) -> CatalogRun:
+        """Get the underlying run object."""
+        return self._run_data.run
 
-        self._available_keys = all_keys
-        self.available_keys_changed.emit()
+    @property
+    def available_keys(self) -> Set[str]:
+        """Get the set of available keys."""
+        return self._run_data.available_keys
 
     def _set_default_selection(self) -> None:
         """Set default key selection based on run hints."""
-        x_keys, y_keys, norm_keys = self._run.get_default_selection()
+        x_keys, y_keys, norm_keys = self.run.get_default_selection()
         self.set_selection(x_keys, y_keys, norm_keys)
 
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
-        # self._initialize_keys()
+        self.available_keys_changed.emit()
         self.update_plot()
 
     def update_plot(self):
@@ -117,7 +104,7 @@ class RunModel(QObject):
                     artist.set_visible(True)
                 else:
                     # Create label with y_key and scan_id
-                    label = f"{y_key}.{self._run.scan_id}"
+                    label = f"{y_key}.{self.run.scan_id}"
                     artist = PlotDataModel(x_data, y_data, x_key, label)
                     artist.artist_needed.connect(self.artist_needed)
                     artist.autoscale_requested.connect(self.autoscale_requested)
@@ -174,11 +161,6 @@ class RunModel(QObject):
             pass
 
     @property
-    def available_keys(self) -> Set[str]:
-        """Get the set of available keys."""
-        return self._available_keys.copy()
-
-    @property
     def selected_x(self) -> List[str]:
         """Get selected x-axis keys."""
         return self._selected_x.copy()
@@ -219,8 +201,10 @@ class RunModel(QObject):
             or (norm_keys or []) != self._selected_norm
         ):
 
-            self._selected_x = x_keys
-            self._selected_y = y_keys
-            self._selected_norm = norm_keys or []
+            self._selected_x = [key for key in x_keys if key in self.available_keys]
+            self._selected_y = [key for key in y_keys if key in self.available_keys]
+            self._selected_norm = [
+                key for key in norm_keys if key in self.available_keys
+            ]
             if force_update:
                 self.update_plot()

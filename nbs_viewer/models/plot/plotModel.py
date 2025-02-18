@@ -3,15 +3,16 @@
 from typing import List, Optional
 from qtpy.QtCore import QObject, Signal
 import numpy as np
+from .runModel import RunModel
 
 
 class PlotModel(QObject):
     """
-    Model coordinating between run controllers and plot artists.
+    Model coordinating between run data and plot artists.
 
     This class handles the high-level coordination between data sources
-    and their visual representation, delegating actual artist management
-    to PlotArtistManager.
+    and their visual representation, managing RunModels and delegating
+    actual artist management to PlotDataModel.
     """
 
     # Signals for view to create/update/remove artists
@@ -20,36 +21,45 @@ class PlotModel(QObject):
     artist_data_updated = Signal(object, np.ndarray, np.ndarray)
     available_keys_changed = Signal()
     indices_update = Signal()
-    selection_changed = Signal(list, list, list)
+    selection_changed = Signal()
     run_models_changed = Signal(list)
     draw_requested = Signal()
     autoscale_requested = Signal()
     visibility_changed = Signal(object, bool)  # (artist, is_visible)
     legend_update_requested = Signal()  # New signal for legend updates
+    run_added = Signal(object)  # RunData added to model
+    run_removed = Signal(object)  # RunData removed from model
+    run_selection_changed = Signal(list)  # Currently selected RunData list
 
-    def __init__(self, parent=None):
-        """Initialize the plot model."""
-        super().__init__(parent)
-        self.runModels = []
+    def __init__(self, is_main_canvas=False):
+        """
+        Initialize the plot model.
+
+        Parameters
+        ----------
+        is_main_canvas : bool
+            If True, all runs are automatically selected
+        """
+        super().__init__()
+        self._run_models = {}  # run_uid -> RunModel
+        self._selected_runs = set()  # Set of selected run UIDs
+        self._is_main_canvas = is_main_canvas
         self._available_keys = set()
-        self._indices = None
-        self._auto_add = True  # Default to True for better UX
-        self._dynamic_update = True
-        self._transform = {"enabled": False, "text": ""}
-        self._retain_selection = True  # New flag to retain selection
-        # Add current selection state
         self._current_x_keys = []
         self._current_y_keys = []
         self._current_norm_keys = []
+        self._auto_add = True
+        self._retain_selection = False
+        self._transform = {"enabled": False, "text": ""}
 
     def getHeaderLabel(self) -> str:
-        if len(self.runModels) == 0:
+        if len(self._run_models) == 0:
             return "No Runs Selected"
-        elif len(self.runModels) == 1:
-            run = self.runModels[0]._run_data.run
+        elif len(self._run_models) == 1:
+            run = next(iter(self._run_models.values()))._run_data.run
             return f"Run: {run.plan_name} ({run.scan_id})"
         else:
-            return f"Multiple Runs Selected ({len(self.runModels)})"
+            return f"Multiple Runs Selected ({len(self._run_models)})"
 
     @property
     def available_keys(self) -> set:
@@ -63,16 +73,16 @@ class PlotModel(QObject):
     def update_available_keys(self) -> None:
         """Update the list of available data keys."""
         # print("PlotModel update_available_keys")
-        if not self.runModels:
+        if not self._run_models:
             if not self._retain_selection:
                 self._available_keys = []
             # If retaining selection, keep the old available_keys
         else:
             # Initialize with ordered keys from first model
-            available_keys = list(self.runModels[0].available_keys)
+            available_keys = list(next(iter(self._run_models.values())).available_keys)
 
             # Get intersection with other models
-            for runModel in self.runModels[1:]:
+            for runModel in self._run_models.values():
                 available_keys = [
                     key for key in available_keys if key in runModel.available_keys
                 ]
@@ -80,56 +90,115 @@ class PlotModel(QObject):
             self._available_keys = available_keys
         self.available_keys_changed.emit()
 
-    def setRunModels(self, runModels: List[QObject]) -> None:
-        """Set the run models and handle selection retention."""
-        # Store current selection if retaining
-        current_selection = None
-        if self._retain_selection and not runModels:
-            current_selection = (
-                self._current_x_keys.copy(),
-                self._current_y_keys.copy(),
-                self._current_norm_keys.copy(),
-            )
+    def update_selection(self, run_data_list, canvas_id="main"):
+        """Update the complete selection state."""
+        current_uids = {run_data.run.uid for run_data in run_data_list}
+        existing_uids = set(self._run_models.keys())
 
-        # Get sets of current and new run model IDs
-        current_model_ids = {id(model) for model in self.runModels}
-        new_model_ids = {id(model) for model in runModels}
+        # Remove RunModels that are no longer in list
+        for uid in existing_uids - current_uids:
+            run_model = self._run_models.pop(uid)
+            self._disconnect_run_model(run_model)
+            run_model.cleanup()
+            if uid in self._selected_runs:
+                self._selected_runs.remove(uid)
 
-        # Remove models that are not in the new list
-        models_to_remove = [
-            model for model in self.runModels if id(model) not in new_model_ids
+        # Add new RunModels
+        for run_data in run_data_list:
+            uid = run_data.run.uid
+            if uid not in self._run_models:
+                run_model = RunModel(run_data)
+                self._connect_run_model(run_model)
+                self._run_models[uid] = run_model
+                self.run_added.emit(run_data)
+
+                # For main canvas, auto-select all runs
+                if self._is_main_canvas:
+                    self._selected_runs.add(uid)
+
+        # Update plot based on selection
+        self._update_plot_from_selection()
+        self.run_selection_changed.emit(self.selected_runs)
+
+    def select_runs(self, run_data_list):
+        """
+        Select specific runs for plotting.
+
+        Parameters
+        ----------
+        run_data_list : List[RunData]
+            Runs to select
+        """
+        for run_data in run_data_list:
+            uid = run_data.run.uid
+            if uid in self._run_models:
+                self._selected_runs.add(uid)
+
+        self._update_plot_from_selection()
+        self.run_selection_changed.emit(self.selected_runs)
+
+    def deselect_runs(self, run_data_list):
+        """
+        Deselect specific runs from plotting.
+
+        Parameters
+        ----------
+        run_data_list : List[RunData]
+            Runs to deselect
+        """
+        for run_data in run_data_list:
+            uid = run_data.run.uid
+            if uid in self._selected_runs:
+                self._selected_runs.remove(uid)
+
+        self._update_plot_from_selection()
+        self.run_selection_changed.emit(self.selected_runs)
+
+    def _update_plot_from_selection(self):
+        """Update plot based on current run selection."""
+        if self._is_main_canvas:
+            # All runs are selected
+            selected_models = list(self._run_models.values())
+        else:
+            # Only plot selected runs
+            selected_models = [
+                model
+                for uid, model in self._run_models.items()
+                if uid in self._selected_runs
+            ]
+
+        self.run_models_changed.emit(selected_models)
+        self._update_plot()
+
+    @property
+    def selected_runs(self):
+        """Get list of currently selected RunData objects."""
+        return [
+            self._run_models[uid]._run_data
+            for uid in self._selected_runs
+            if uid in self._run_models
         ]
-        for model in models_to_remove:
-            self.removeRunModel(model)
 
-        # Add models that are not in the current list
-        models_to_add = [
-            model for model in runModels if id(model) not in current_model_ids
-        ]
-        for model in models_to_add:
-            self.addRunModel(model)
+    @property
+    def available_runs(self):
+        """Get list of all available RunData objects."""
+        return [model._run_data for model in self._run_models.values()]
 
-        # Restore selection if needed, ensuring compatibility with new runs
-        if current_selection and self._retain_selection and runModels:
-            x_keys, y_keys, norm_keys = current_selection
+    def _connect_run_model(self, run_model):
+        """Connect signals from a RunModel."""
+        run_model.available_keys_changed.connect(self.update_available_keys)
+        run_model.artist_needed.connect(self.artist_needed)
+        run_model.draw_requested.connect(self.draw_requested)
+        run_model.autoscale_requested.connect(self.autoscale_requested)
+        run_model.visibility_changed.connect(self.visibility_changed)
 
-            # Get intersection of available keys from all models
-            available_keys = set(runModels[0].available_keys)
-            for model in runModels[1:]:
-                available_keys &= set(model.available_keys)
-
-            # Filter selections to only include available keys
-            x_keys = [key for key in x_keys if key in available_keys]
-            y_keys = [key for key in y_keys if key in available_keys]
-            norm_keys = [key for key in norm_keys if key in available_keys]
-
-            # Only update if we have valid keys to plot
-            if x_keys or y_keys:
-                self.set_selection(x_keys, y_keys, norm_keys, force_update=True)
-            else:
-                # If no compatible keys, clear the selection
-                self.set_selection([], [], [], force_update=True)
-                print("No compatible keys found in new run for retained selection")
+    def _disconnect_run_model(self, run_model):
+        """Disconnect signals from a RunModel."""
+        run_model.available_keys_changed.disconnect(self.update_available_keys)
+        run_model.artist_needed.disconnect(self.artist_needed)
+        run_model.draw_requested.disconnect(self.draw_requested)
+        run_model.autoscale_requested.disconnect(self.autoscale_requested)
+        run_model.visibility_changed.disconnect(self.visibility_changed)
 
     def set_auto_add(self, enabled: bool) -> None:
         """
@@ -154,8 +223,7 @@ class PlotModel(QObject):
         enabled : bool
             Whether to enable dynamic updates
         """
-        self._dynamic_update = enabled
-        for model in self.runModels:
+        for model in self._run_models.values():
             model.set_dynamic(enabled)
 
     def set_transform(self, state: dict) -> None:
@@ -167,9 +235,11 @@ class PlotModel(QObject):
         state : dict
             Dictionary with transform state (enabled and text)
         """
-        self._transform = state.copy()
-        for model in self.runModels:
-            model.set_transform(state)
+        # Ensure we maintain the expected structure
+        default_state = {"enabled": False, "text": ""}
+        self._transform = {**default_state, **state}
+        for model in self._run_models.values():
+            model.set_transform(self._transform)
 
     def set_selection(
         self,
@@ -203,11 +273,11 @@ class PlotModel(QObject):
         self._current_norm_keys = norm_keys or []
 
         # Update selection in all run models (without triggering plot updates)
-        for model in self.runModels:
+        for model in self._run_models.values():
             model.set_selection(x_keys, y_keys, norm_keys, force_update=False)
 
         # Notify views of selection change
-        self.selection_changed.emit(x_keys, y_keys, norm_keys)
+        self.selection_changed.emit()
 
         # Update plot if auto_add is enabled or force_update is True
         if self._auto_add or force_update:
@@ -218,91 +288,9 @@ class PlotModel(QObject):
         """
         Update all run models and trigger plot redraw.
         """
-        for model in self.runModels:
+        for model in self._run_models.values():
             model.update_plot()
         self.draw_requested.emit()
-
-    def addRunModel(self, runModel: QObject) -> None:
-        """
-        Add a new run model and connect its signals.
-
-        Parameters
-        ----------
-        runModel : QObject
-            The model to add.
-        """
-        # Set initial states
-        runModel.set_dynamic(self._dynamic_update)
-        runModel.set_transform(self._transform)
-
-        # Connect signals before adding to list to prevent premature updates
-        runModel.available_keys_changed.connect(self.update_available_keys)
-        runModel.artist_needed.connect(self.artist_needed)
-        runModel.draw_requested.connect(self.draw_requested)
-        runModel.autoscale_requested.connect(self.autoscale_requested)
-        runModel.visibility_changed.connect(self.visibility_changed)
-
-        # Add to list and notify of change
-        self.runModels.append(runModel)
-        self.run_models_changed.emit(self.runModels)
-
-        # Handle selection synchronization
-        has_selection = (
-            self._current_x_keys or self._current_y_keys or self._current_norm_keys
-        )
-        retain_selection = self._retain_selection and has_selection
-        if not retain_selection and len(self.runModels) == 1:
-            # First model and not retaining - adopt its selection if it has one
-            x_keys = runModel.selected_x
-            y_keys = runModel.selected_y
-            norm_keys = runModel.selected_norm
-            if x_keys or y_keys or norm_keys:
-                # Use set_selection to properly handle the initial selection
-                self.set_selection(
-                    x_keys, y_keys, norm_keys, force_update=self._auto_add
-                )
-        elif self._current_x_keys or self._current_y_keys:
-            # Apply current selection to new model
-            runModel.set_selection(
-                self._current_x_keys, self._current_y_keys, self._current_norm_keys
-            )
-            # Only update plot if auto_add is enabled
-            if self._auto_add:
-                runModel.update_plot()
-                self.draw_requested.emit()
-
-        # Update available keys
-        self.update_available_keys()
-
-    def removeRunModel(self, runModel: QObject) -> None:
-        """
-        Remove a run model and its artists.
-
-        Parameters
-        ----------
-        runModel : QObject
-            The model to remove.
-        """
-        if runModel in self.runModels:
-            self.runModels.remove(runModel)
-            runModel.cleanup()
-
-            # Disconnect all signals with specific slots
-            try:
-                runModel.available_keys_changed.disconnect(self.update_available_keys)
-                runModel.autoscale_requested.disconnect(self.autoscale_requested)
-                runModel.draw_requested.disconnect(self.draw_requested)
-                runModel.artist_needed.disconnect(self.artist_needed)
-                runModel.visibility_changed.disconnect(self.visibility_changed)
-            except (TypeError, RuntimeError):
-                pass
-
-            # Clean up the run model (which will clean up its artists)
-
-            # Emit changes
-            self.run_models_changed.emit(self.runModels)
-            self.update_available_keys()
-            self.draw_requested.emit()
 
     @property
     def auto_add(self) -> bool:
@@ -312,12 +300,14 @@ class PlotModel(QObject):
     @property
     def dynamic_update(self) -> bool:
         """Whether dynamic update is enabled."""
-        return self._dynamic_update
+        return all(model.dynamic_update for model in self._run_models.values())
 
     @property
     def transform(self) -> dict:
-        """Current transform state."""
-        return self._transform.copy()
+        """Current transform state with default values if not set."""
+        default_state = {"enabled": False, "text": ""}
+        # Merge current state with defaults
+        return {**default_state, **self._transform}
 
     def set_retain_selection(self, enabled: bool) -> None:
         """
@@ -329,3 +319,46 @@ class PlotModel(QObject):
             Whether to retain the current selection when runs change
         """
         self._retain_selection = enabled
+
+    def add_run(self, run_data):
+        """
+        Add a single run to the model.
+
+        Parameters
+        ----------
+        run_data : RunData
+            Run to add to the model
+        """
+        uid = run_data.run.uid
+        if uid not in self._run_models:
+            run_model = RunModel(run_data)
+            self._connect_run_model(run_model)
+            self._run_models[uid] = run_model
+            self.run_added.emit(run_data)
+
+            # For main canvas, auto-select all runs
+            if self._is_main_canvas:
+                self._selected_runs.add(uid)
+                self._update_plot_from_selection()
+                self.run_selection_changed.emit(self.selected_runs)
+
+    def remove_run(self, run_data):
+        """
+        Remove a single run from the model.
+
+        Parameters
+        ----------
+        run_data : RunData
+            Run to remove from the model
+        """
+        uid = run_data.run.uid
+        if uid in self._run_models:
+            run_model = self._run_models.pop(uid)
+            self._disconnect_run_model(run_model)
+            run_model.cleanup()
+            self.run_removed.emit(run_data)
+
+            if uid in self._selected_runs:
+                self._selected_runs.remove(uid)
+                self._update_plot_from_selection()
+                self.run_selection_changed.emit(self.selected_runs)
