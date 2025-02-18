@@ -80,10 +80,7 @@ class CanvasRunList(QWidget):
     def _add_run_to_list(self, run_data):
         """Add a single run to the list widget."""
         # Get a more descriptive label from metadata
-        metadata = run_data.run.metadata.get("start", {})
-        scan_id = metadata.get("scan_id", "Unknown")
-        scan_name = metadata.get("plan_name", "")
-        label = f"{scan_id}: {scan_name}"
+        label = run_data.display_name
 
         item = QListWidgetItem(label)
         item.setData(Qt.UserRole, run_data.run.uid)
@@ -101,7 +98,7 @@ class CanvasRunList(QWidget):
     def _on_run_removed(self, run_data):
         """Handle run removed from model."""
         items = self.list_widget.findItems(
-            str(run_data.run.metadata.get("start", {}).get("scan_id", "Unknown")),
+            str(run_data.display_name),
             Qt.MatchExactly,
         )
         for item in items:
@@ -209,5 +206,4 @@ class CanvasRunList(QWidget):
         )
         if run_data:
             is_visible = item.checkState() == Qt.Checked
-            run_data.set_visible(is_visible)  # Assuming RunData has this method
             self.plot_model.update_visibility(run_data, is_visible)

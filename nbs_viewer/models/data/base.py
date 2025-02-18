@@ -1,14 +1,15 @@
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 from qtpy.QtCore import QObject, Signal
 import numpy as np
 
 
 class CatalogRun(QObject):
     """
-    Abstract base class for catalog run implementations.
+    Base class for catalog run implementations.
 
-    This class defines the interface that all run implementations must follow,
-    whether they are reading from a catalog, Kafka stream, or other source.
+    Provides data access, caching, and transformation services for a run.
+    Can be shared between multiple models that need access to the same
+    transformed data.
 
     Parameters
     ----------
@@ -17,7 +18,9 @@ class CatalogRun(QObject):
     key : str
         The key/identifier for this run
     catalog : object, optional
-        The catalog containing this run, by default None
+        The catalog containing this run
+    dynamic : bool, optional
+        Whether to enable dynamic updates, by default False
     """
 
     @classmethod
@@ -33,13 +36,29 @@ class CatalogRun(QObject):
         """
         pass
 
-    data_updated = Signal()
+    data_changed = Signal()
+    transform_changed = Signal()
 
-    def __init__(self, run, key, catalog, parent=None):
+    def __init__(self, run, key, catalog=None, dynamic=False, parent=None):
         super().__init__(parent)
         self._run = run
         self._key = key
         self._catalog = catalog
+
+        # Caching
+        self._plot_data_cache = {}  # Cache for transformed plot data
+        self._dimensions_cache = {}  # Cache for data dimensions
+
+        # Transform state
+        self._transform_text = ""
+        self._transform = Interpreter()
+
+        # Dynamic updates
+        self._dynamic = False
+        self.set_dynamic(dynamic)
+
+        # Initialize available keys
+        self._initialize_keys()
 
     def __repr__(self):
         """
@@ -287,3 +306,196 @@ class CatalogRun(QObject):
             filtered[dim] = [key for key in key_list if key in hinted]
 
         return filtered
+
+    def get_plot_data(self, xkeys, ykeys, norm_keys=None):
+        """
+        Get transformed and cached plot data.
+
+        Parameters
+        ----------
+        xkeys : List[str]
+            Keys for x-axis data
+        ykeys : List[str]
+            Keys for y-axis data
+        norm_keys : Optional[List[str]]
+            Keys for normalization data
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], List[np.ndarray], List[str]]
+            Tuple of (x_data_list, y_data_list, x_keys_list)
+        """
+        if not xkeys or not ykeys:
+            return [], [], []
+
+        cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
+
+        # Try cache first
+        if cache_key in self._plot_data_cache:
+            return self._plot_data_cache[cache_key]
+
+        # Get raw data
+        x_data = [self.getData(key) for key in xkeys]
+        y_data = [self.getData(key) for key in ykeys]
+
+        if norm_keys:
+            norm_data = [self.getData(key) for key in norm_keys]
+            y_data = [y / n for y, n in zip(y_data, norm_data)]
+
+        # Apply transforms
+        if self._transform_text:
+            y_data = [self._transform.evaluate(y) for y in y_data]
+
+        result = (x_data, y_data, xkeys)
+        self._plot_data_cache[cache_key] = result
+        return result
+
+    def set_dynamic(self, enabled):
+        """Enable/disable dynamic updates."""
+        if enabled != self._dynamic:
+            self._dynamic = enabled
+            if enabled:
+                # Connect to data update signals
+                pass  # Implementation depends on data source
+            else:
+                # Disconnect signals
+                pass
+            self.clear_caches()
+
+    def clear_caches(self):
+        """Clear all data caches."""
+        self._plot_data_cache.clear()
+        self._dimensions_cache.clear()
+        self.data_changed.emit()
+
+    def transform_data(
+        self, xlist: List[np.ndarray], y: np.ndarray, norm: Optional[np.ndarray] = None
+    ) -> Tuple[List[np.ndarray], np.ndarray]:
+        """
+        Transform data using normalization and custom transformations.
+
+        Parameters
+        ----------
+        xlist : List[np.ndarray]
+            List of x-axis data arrays
+        y : np.ndarray
+            Y-axis data array
+        norm : Optional[np.ndarray]
+            Optional normalization data
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], np.ndarray]
+            Transformed (x_data_list, y_data)
+        """
+        # Apply normalization if provided
+        if norm is not None:
+            y = y / norm
+
+        # Apply custom transform if set
+        if self._transform_text:
+            y = self._transform.evaluate(y)
+
+        return xlist, y
+
+    def _reorder_dimensions(
+        self, key: str, xlist: List[np.ndarray], y: np.ndarray, xkeys: List[str]
+    ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
+        """
+        Reorder dimensions based on axis hints and data shape.
+
+        Parameters
+        ----------
+        key : str
+            The data key being processed
+        xlist : List[np.ndarray]
+            List of x-axis data arrays
+        y : np.ndarray
+            Y-axis data array
+        xkeys : List[str]
+            List of x-axis keys
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], List[str], np.ndarray]
+            Reordered (x_data_list, x_keys_list, y_data)
+        """
+        # Get dimension info
+        xdim = len(xlist)
+        axis_hints = self.getAxisHints()
+
+        # Get axis additions from hints
+        if key in axis_hints:
+            xadditions = [self.getAxis(axkey) for axkey in axis_hints[key]]
+            xadditional_keys = [axkey[-1] for axkey in axis_hints[key]]
+        else:
+            xadditions = []
+            xadditional_keys = []
+
+        # Add dimensions if needed
+        current_dim = xdim + len(xadditions)
+        if current_dim < len(y.shape):
+            for n in range(current_dim, len(y.shape)):
+                xadditions.append(np.arange(y.shape[n]))
+                xadditional_keys.append(f"Dimension {n}")
+
+        # Reorder based on number of additions
+        if len(xadditions) == 1:
+            xlist_reordered = xlist[:-1] + xadditions + [xlist[-1]]
+            xkeys_reordered = xkeys[:-1] + xadditional_keys + [xkeys[-1]]
+            y_reordered = np.swapaxes(y, -2, -1)
+        else:
+            xlist_reordered = xlist + xadditions
+            xkeys_reordered = xkeys + xadditional_keys
+            y_reordered = y
+
+        return xlist_reordered, xkeys_reordered, y_reordered
+
+    def set_transform(self, transform_state: Dict[str, Any]) -> None:
+        """
+        Set the transformation expression.
+
+        Parameters
+        ----------
+        transform_state : Dict[str, Any]
+            Dictionary with transform settings:
+            - enabled: bool, whether transform is enabled
+            - text: str, Python expression for data transformation
+        """
+        if transform_state["enabled"]:
+            transform_text = transform_state["text"]
+        else:
+            transform_text = ""
+
+        if transform_text != self._transform_text:
+            self._transform_text = transform_text
+            self.clear_caches()
+            self.transform_changed.emit()
+
+    def _initialize_keys(self) -> None:
+        """Initialize the list of available keys from the run."""
+        # Get all keys from run
+        xkeys, ykeys = self.getRunKeys()
+
+        # Collect all keys from both dictionaries while preserving order
+        all_keys = []
+        for keys in xkeys.values():
+            for key in keys:
+                if key not in all_keys:
+                    all_keys.append(key)
+        for keys in ykeys.values():
+            for key in keys:
+                if key not in all_keys:
+                    all_keys.append(key)
+
+        self._available_keys = all_keys
+
+    @property
+    def available_keys(self) -> List[str]:
+        """Get the list of available keys."""
+        return self._available_keys
+
+    @property
+    def display_name(self) -> str:
+        """Get the display name of the run."""
+        return str(self._run)

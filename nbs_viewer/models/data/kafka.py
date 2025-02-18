@@ -72,6 +72,7 @@ class KafkaRun(CatalogRun):
         super().__init__(None, key, catalog, parent=None)
         # print("New KafkaRun")
         self._start_doc = start_doc
+        self._stop_doc = {}
         self._data_buffer = defaultdict(list)
         self._descriptors = {}
         self._plot_hints = {}
@@ -113,6 +114,8 @@ class KafkaRun(CatalogRun):
         doc_name = path[0]
         if doc_name == "start":
             doc = self._start_doc
+        elif doc_name == "stop":
+            doc = self._stop_doc
         else:
             raise ValueError(f"Invalid document name: {doc_name}")
 

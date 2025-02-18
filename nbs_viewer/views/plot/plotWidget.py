@@ -191,16 +191,16 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def updateLegend(self):
         """Update the plot legend to show only visible lines."""
+        # Clear existing legend first
+        if self.axes.get_legend():
+            self.axes.get_legend().remove()
+
         # Get visible lines and their labels
         visible_lines = [line for line in self.axes.get_lines() if line.get_visible()]
         if visible_lines:
             labels = [line.get_label() for line in visible_lines]
             self.axes.legend(visible_lines, labels)
-        else:
-            # Remove legend if no visible lines
-            legend = self.axes.get_legend()
-            if legend is not None:
-                legend.remove()
+
         self.draw()
 
 

@@ -21,7 +21,7 @@ class PlotModel(QObject):
     artist_data_updated = Signal(object, np.ndarray, np.ndarray)
     available_keys_changed = Signal()
     indices_update = Signal()
-    selection_changed = Signal()
+    selection_changed = Signal(list, list, list)
     run_models_changed = Signal(list)
     draw_requested = Signal()
     autoscale_requested = Signal()
@@ -51,6 +51,7 @@ class PlotModel(QObject):
         self._auto_add = True
         self._retain_selection = False
         self._transform = {"enabled": False, "text": ""}
+        self._visible_runs = set()  # Track visible run UIDs
 
     def getHeaderLabel(self) -> str:
         if len(self._run_models) == 0:
@@ -71,24 +72,40 @@ class PlotModel(QObject):
         self.indices_update.emit()
 
     def update_available_keys(self) -> None:
-        """Update the list of available data keys."""
-        # print("PlotModel update_available_keys")
+        """Update available keys and maintain selection state."""
         if not self._run_models:
             if not self._retain_selection:
                 self._available_keys = []
-            # If retaining selection, keep the old available_keys
-        else:
-            # Initialize with ordered keys from first model
-            available_keys = list(next(iter(self._run_models.values())).available_keys)
+                # Clear selection if not retaining
+                self.set_selection([], [], [], force_update=False)
+            return
 
-            # Get intersection with other models
-            for runModel in self._run_models.values():
-                available_keys = [
-                    key for key in available_keys if key in runModel.available_keys
-                ]
+        # Get intersection of keys from all models
+        first_model = next(iter(self._run_models.values()))
+        available_keys = list(first_model.available_keys)
+        for model in self._run_models.values():
+            available_keys = [
+                key for key in available_keys if key in model.available_keys
+            ]
 
+        # Update if changed
+        if set(available_keys) != set(self._available_keys):
             self._available_keys = available_keys
-        self.available_keys_changed.emit()
+
+            # Filter current selection to valid keys
+            valid_x = [k for k in self._current_x_keys if k in available_keys]
+            valid_y = [k for k in self._current_y_keys if k in available_keys]
+            valid_norm = [k for k in self._current_norm_keys if k in available_keys]
+
+            if (
+                valid_x != self._current_x_keys
+                or valid_y != self._current_y_keys
+                or valid_norm != self._current_norm_keys
+            ):
+                # Update selection if keys were removed
+                self.set_selection(valid_x, valid_y, valid_norm, force_update=False)
+
+            self.available_keys_changed.emit()
 
     def update_selection(self, run_data_list, canvas_id="main"):
         """Update the complete selection state."""
@@ -110,6 +127,7 @@ class PlotModel(QObject):
                 run_model = RunModel(run_data)
                 self._connect_run_model(run_model)
                 self._run_models[uid] = run_model
+                self._visible_runs.add(uid)  # New runs are visible by default
                 self.run_added.emit(run_data)
 
                 # For main canvas, auto-select all runs
@@ -277,7 +295,9 @@ class PlotModel(QObject):
             model.set_selection(x_keys, y_keys, norm_keys, force_update=False)
 
         # Notify views of selection change
-        self.selection_changed.emit()
+        self.selection_changed.emit(
+            self._current_x_keys, self._current_y_keys, self._current_norm_keys
+        )
 
         # Update plot if auto_add is enabled or force_update is True
         if self._auto_add or force_update:
@@ -322,25 +342,52 @@ class PlotModel(QObject):
 
     def add_run(self, run_data):
         """
-        Add a single run to the model.
+        Add a single run to the model and handle key selection.
 
         Parameters
         ----------
-        run_data : RunData
+        run_data : CatalogRun
             Run to add to the model
         """
         uid = run_data.run.uid
-        if uid not in self._run_models:
-            run_model = RunModel(run_data)
-            self._connect_run_model(run_model)
-            self._run_models[uid] = run_model
-            self.run_added.emit(run_data)
+        if uid in self._run_models:
+            return
 
-            # For main canvas, auto-select all runs
-            if self._is_main_canvas:
-                self._selected_runs.add(uid)
-                self._update_plot_from_selection()
-                self.run_selection_changed.emit(self.selected_runs)
+        # Create and connect new run model
+        run_model = RunModel(run_data)
+        self._connect_run_model(run_model)
+        self._run_models[uid] = run_model
+        self._visible_runs.add(uid)
+
+        # Update available keys first
+        self.update_available_keys()
+
+        # Determine key selection
+        if len(self._run_models) == 1 and not self._retain_selection:
+            # First run, get default selection
+            x_keys, y_keys, norm_keys = run_data.run.get_default_selection()
+            self.set_selection(x_keys, y_keys, norm_keys, force_update=False)
+        else:
+            # Apply current selection to new run
+            run_model.set_selection(
+                self._current_x_keys,
+                self._current_y_keys,
+                self._current_norm_keys,
+                force_update=False,
+            )
+
+        # Emit signals in correct order
+        self.run_added.emit(run_data)
+
+        # Handle main canvas auto-selection
+        if self._is_main_canvas:
+            self._selected_runs.add(uid)
+            self._update_plot_from_selection()
+            self.run_selection_changed.emit(self.selected_runs)
+
+        # Force plot update and legend refresh
+        self._update_plot()
+        self.legend_update_requested.emit()
 
     def remove_run(self, run_data):
         """
@@ -356,9 +403,70 @@ class PlotModel(QObject):
             run_model = self._run_models.pop(uid)
             self._disconnect_run_model(run_model)
             run_model.cleanup()
-            self.run_removed.emit(run_data)
 
+            # First remove from selection if selected
             if uid in self._selected_runs:
                 self._selected_runs.remove(uid)
                 self._update_plot_from_selection()
                 self.run_selection_changed.emit(self.selected_runs)
+
+            # Then emit removal and request legend update
+            self.run_removed.emit(run_data)
+            self.legend_update_requested.emit()
+
+    def update_visibility(self, run_data, is_visible):
+        """
+        Update run visibility.
+
+        Parameters
+        ----------
+        run_data : RunData
+            Run to update visibility for
+        is_visible : bool
+            New visibility state
+        """
+        uid = run_data.run.uid
+        if uid in self._run_models:
+            run_model = self._run_models[uid]
+            if is_visible:
+                self._visible_runs.add(uid)
+            else:
+                self._visible_runs.discard(uid)
+            run_model.set_visible(is_visible)
+
+    @property
+    def current_selection(self) -> tuple:
+        """Get current key selection state."""
+        return (
+            self._current_x_keys.copy(),
+            self._current_y_keys.copy(),
+            self._current_norm_keys.copy(),
+        )
+
+    @property
+    def selected_keys(self) -> dict:
+        """Get dictionary of selected keys by type."""
+        return {
+            "x": self._current_x_keys.copy(),
+            "y": self._current_y_keys.copy(),
+            "norm": self._current_norm_keys.copy(),
+        }
+
+    def is_key_selected(self, key: str, axis: str) -> bool:
+        """
+        Check if a key is selected for a given axis.
+
+        Parameters
+        ----------
+        key : str
+            The key to check
+        axis : str
+            The axis type ('x', 'y', or 'norm')
+        """
+        if axis == "x":
+            return key in self._current_x_keys
+        elif axis == "y":
+            return key in self._current_y_keys
+        elif axis == "norm":
+            return key in self._current_norm_keys
+        return False

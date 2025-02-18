@@ -11,20 +11,11 @@ class RunModel(QObject):
     Model for managing run data selection and filtering state.
 
     Manages available keys, key selection, and filtering options for a run.
-    Uses RunData service for data access while maintaining its own selection
-    state.
 
     Parameters
     ----------
-    run_data : RunData
-        The RunData service for data access and transformation
-
-    Signals
-    -------
-    available_keys_changed : Signal
-        Emitted when the set of available keys changes
-    selection_changed : Signal
-        Emitted when the selected keys change
+    run : CatalogRun
+        The run to manage state for
     """
 
     available_keys_changed = Signal()
@@ -34,31 +25,41 @@ class RunModel(QObject):
     autoscale_requested = Signal()
     visibility_changed = Signal(object, bool)  # (artist, is_visible)
 
-    def __init__(self, run_data: RunData):
+    def __init__(self, run: CatalogRun):
         super().__init__()
-        self._run_data = run_data
+        self._run = run
 
         # Selection state
         self._selected_x: List[str] = []
         self._selected_y: List[str] = []
         self._selected_norm: List[str] = []
         self._artists = {}
+        self._is_visible = True  # Track overall visibility state
+        self._available_keys = set()  # Track our own copy of available keys
 
         # Initialize state
+        self._update_available_keys()  # Initial key setup
         self._set_default_selection()
 
-        # Connect to RunData signals
-        self._run_data.data_changed.connect(self._on_data_changed)
+        # Connect to run signals
+        self._run.data_changed.connect(self._on_data_changed)
 
     @property
     def run(self) -> CatalogRun:
         """Get the underlying run object."""
-        return self._run_data.run
+        return self._run
 
     @property
     def available_keys(self) -> Set[str]:
         """Get the set of available keys."""
-        return self._run_data.available_keys
+        return self._available_keys
+
+    def _update_available_keys(self) -> None:
+        """Update internal available keys from run."""
+        new_keys = set(self._run.available_keys)
+        if new_keys != self._available_keys:
+            self._available_keys = new_keys
+            self.available_keys_changed.emit()
 
     def _set_default_selection(self) -> None:
         """Set default key selection based on run hints."""
@@ -67,7 +68,7 @@ class RunModel(QObject):
 
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
-        self.available_keys_changed.emit()
+        self._update_available_keys()
         self.update_plot()
 
     def update_plot(self):
@@ -75,8 +76,6 @@ class RunModel(QObject):
         x_keys = self.selected_x
         y_keys = self.selected_y
         norm_keys = self.selected_norm
-        # print("Selected Keys")
-        # print(x_keys, y_keys, norm_keys)
 
         should_draw = False
         for existing_x, existing_y in self._artists.keys():
@@ -89,7 +88,7 @@ class RunModel(QObject):
         if not x_keys or not y_keys:
             return
 
-        xdatalist, ydatalist, xkeylist = self._run_data.get_plot_data(
+        xdatalist, ydatalist, xkeylist = self._run.get_plot_data(
             x_keys, y_keys, norm_keys
         )
         for n, y_key in enumerate(y_keys):
@@ -101,7 +100,7 @@ class RunModel(QObject):
                 artist = self._artists.get((x_key, y_key), None)
                 if artist is not None:
                     artist.update_data(x_data, y_data)
-                    artist.set_visible(True)
+                    artist.set_visible(self._is_visible)  # Use saved visibility state
                 else:
                     # Create label with y_key and scan_id
                     label = f"{y_key}.{self.run.scan_id}"
@@ -112,6 +111,7 @@ class RunModel(QObject):
                     artist.visibility_changed.connect(self.visibility_changed)
                     self._artists[(x_key, y_key)] = artist
                     artist.plot_data()
+                    artist.set_visible(self._is_visible)  # Set initial visibility
 
         if should_draw:
             self.draw_requested.emit()
@@ -125,7 +125,7 @@ class RunModel(QObject):
         transform_state : dict
             Python expression for data transformation
         """
-        self._run_data.set_transform(transform_state)
+        self._run.set_transform(transform_state)
 
     def set_dynamic(self, enabled: bool) -> None:
         """
@@ -137,7 +137,7 @@ class RunModel(QObject):
             Whether to enable dynamic updates
         """
         self._dynamic = enabled
-        self._run_data.set_dynamic(enabled)
+        self._run.set_dynamic(enabled)
 
     def cleanup(self):
         """Clean up resources and remove all artists."""
@@ -156,7 +156,7 @@ class RunModel(QObject):
 
         # Disconnect RunData signals
         try:
-            self._run_data.data_changed.disconnect(self._on_data_changed)
+            self._run.data_changed.disconnect(self._on_data_changed)
         except (TypeError, RuntimeError):
             pass
 
@@ -208,3 +208,20 @@ class RunModel(QObject):
             ]
             if force_update:
                 self.update_plot()
+
+    def set_visible(self, is_visible):
+        """
+        Set visibility for all artists.
+
+        Parameters
+        ----------
+        is_visible : bool
+            New visibility state
+        """
+        self._is_visible = is_visible  # Save visibility state
+        self.update_plot()
+
+    @property
+    def available_keys(self) -> Set[str]:
+        """Get the set of available keys."""
+        return self._available_keys.copy()

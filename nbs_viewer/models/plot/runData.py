@@ -49,6 +49,11 @@ class RunData(QObject):
         # Caching
 
     @property
+    def display_name(self) -> str:
+        """Get the display name of the run."""
+        return str(self._run)
+
+    @property
     def run(self) -> CatalogRun:
         """Get the underlying run object."""
         return self._run
