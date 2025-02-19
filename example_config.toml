@@ -1,4 +1,10 @@
 [[catalog]]
+label = "NEXAFS"
+url = "https://tiled.nsls2.bnl.gov"
+catalog_keys = ["ucal", "raw"]
+catalog_model = "nbscatalog"
+
+[[catalog]]
 label = "RSoXS Demo"
 url = "http://tiled-demo.blueskyproject.io"
 catalog_keys = ["rsoxs", "raw"]
