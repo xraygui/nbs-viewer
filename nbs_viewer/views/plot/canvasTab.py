@@ -1,6 +1,6 @@
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QSplitter
 from qtpy.QtCore import Qt
-from ..catalog.canvasRunList import CanvasRunList
+from ..canvasRunList import CanvasRunList
 from .plotWidget import PlotWidget
 
 

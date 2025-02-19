@@ -5,6 +5,7 @@ from typing import Any, List, Optional, Dict, Generator, Tuple
 import collections
 from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points
+from ..data.base import CatalogRun
 
 
 def load_catalog_models():
@@ -53,19 +54,27 @@ class CatalogBase(QObject):
     Signals
     -------
     data_updated : Signal
-        Emitted when catalog data changes.
-    selection_changed : Signal(object)
-        Emitted when run selection changes.
+        Emitted when catalog data changes
+    selection_changed : Signal(list)
+        Emitted when run selection changes with list of selected CatalogRun objects
+    new_run_available : Signal(str)
+        Emitted when a new run is available with run UID
+    item_selected : Signal(object)
+        Emitted when a single run is selected with the CatalogRun object
+    item_deselected : Signal(object)
+        Emitted when a single run is deselected with the CatalogRun object
     """
 
     data_updated = Signal()
-    selection_changed = Signal(object)
-    new_run_available = Signal(str)  # emits run uid
+    selection_changed = Signal(list)  # List[CatalogRun]
+    new_run_available = Signal(str)  # uid of new run
+    item_selected = Signal(object)  # CatalogRun
+    item_deselected = Signal(object)  # CatalogRun
 
     def __init__(self, parent: Optional[QObject] = None):
         """Initialize the catalog model."""
         super().__init__(parent)
-        self._selection = set()
+        self._selection = set()  # Set of selected UIDs
         self._filters = []
         self._runs = []
 
@@ -85,24 +94,24 @@ class CatalogBase(QObject):
         """
         raise NotImplementedError
 
-    def get_run(self, uid: str) -> Any:
+    def get_run(self, uid: str) -> CatalogRun:
         """
         Get a specific run by UID.
 
         Parameters
         ----------
         uid : str
-            Unique identifier for the run.
+            Unique identifier for the run
 
         Returns
         -------
-        Any
-            The run object.
+        CatalogRun
+            The run object
 
         Raises
         ------
         KeyError
-            If run with given UID is not found.
+            If run with given UID is not found
         """
         raise NotImplementedError
 
@@ -146,11 +155,13 @@ class CatalogBase(QObject):
         Parameters
         ----------
         uid : str
-            Unique identifier for the run.
+            Unique identifier for the run
         """
-        self._selection.add(uid)
-        run = self.get_run(uid)
-        self.selection_changed.emit(run)
+        if uid not in self._selection:
+            self._selection.add(uid)
+            run = self.get_run(uid)
+            self.item_selected.emit(run)
+            self.selection_changed.emit(self.get_selected_runs())
 
     def deselect_run(self, uid: str) -> None:
         """
@@ -159,19 +170,28 @@ class CatalogBase(QObject):
         Parameters
         ----------
         uid : str
-            Unique identifier for the run.
+            Unique identifier for the run
         """
-        self._selection.discard(uid)
-        self.selection_changed.emit(None)
+        if uid in self._selection:
+            self._selection.discard(uid)
+            run = self.get_run(uid)
+            self.item_deselected.emit(run)
+            self.selection_changed.emit(self.get_selected_runs())
 
     def clear_selection(self) -> None:
         """Clear all selections."""
         self._selection.clear()
-        self.selection_changed.emit(None)
+        self.selection_changed.emit([])
 
-    @property
-    def selected_runs(self) -> List[Any]:
-        """Get currently selected runs."""
+    def get_selected_runs(self) -> List[CatalogRun]:
+        """
+        Get currently selected runs.
+
+        Returns
+        -------
+        List[CatalogRun]
+            List of selected run objects
+        """
         return [self.get_run(uid) for uid in self._selection]
 
     def __len__(self) -> int:

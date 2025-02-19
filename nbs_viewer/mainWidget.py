@@ -1,8 +1,8 @@
-from .dataSourceManager import DataSourceManager
+from .views.dataSourceSwitcher import DataSourceSwitcher
 from .models.plot.canvasManager import CanvasManager
 from .views.plot.canvasTab import CanvasTab
 from .views.plot.plotWidget import PlotWidget
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QSplitter
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QSplitter, QTabBar
 from qtpy.QtCore import Qt
 
 
@@ -25,7 +25,7 @@ class MainWidget(QWidget):
 
         # Create tab widget
         self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.setTabsClosable(True)  # Enable close buttons by default
         self.tab_widget.tabCloseRequested.connect(self._on_tab_close)
 
         # Layout
@@ -45,7 +45,7 @@ class MainWidget(QWidget):
         main_model = self.canvas_manager.canvases["main"]
 
         # Create main tab widgets
-        data_source = DataSourceManager(main_model, self.canvas_manager)
+        data_source = DataSourceSwitcher(main_model, self.canvas_manager)
         plot_widget = PlotWidget(main_model)
 
         # Create main tab layout
@@ -58,15 +58,16 @@ class MainWidget(QWidget):
         layout.addWidget(splitter)
         main_tab.setLayout(layout)
 
-        # Add to tab widget
-        self.tab_widget.addTab(main_tab, "Main")
-        self.tab_widget.setTabsClosable(False)  # Main tab can't be closed
+        # Add to tab widget and disable close button for main tab only
+        index = self.tab_widget.addTab(main_tab, "Main")
+        self.tab_widget.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
     def _on_canvas_added(self, canvas_id, plot_model):
         """Handle new canvas creation."""
         if canvas_id != "main":
             tab = CanvasTab(plot_model, self.canvas_manager, canvas_id)
             self.tab_widget.addTab(tab, f"Canvas {canvas_id}")
+            # No need to set closable since the tab widget is already closable
             self.tab_widget.setCurrentWidget(tab)
 
     def _on_canvas_removed(self, canvas_id):

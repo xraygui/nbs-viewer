@@ -20,9 +20,7 @@ from qtpy.QtCore import (
 )
 
 from ...models.catalog.table import CatalogTableModel
-from ...models.plot.runModel import RunModel
 from ...search import DateSearchWidget
-from ...models.plot.runData import RunData
 
 
 class CustomHeaderView(QHeaderView):
@@ -176,17 +174,11 @@ class ReverseModel(QSortFilterProxyModel):
 class CatalogTableView(QWidget):
     """A widget for displaying and managing catalog data in a table view."""
 
-    # Update signals to handle individual selections
-    itemSelected = Signal(object)  # (RunData)
-    itemDeselected = Signal(object)  # (RunData)
-    selectionChanged = Signal(list)  # (List[RunData])
-
     def __init__(self, catalog, parent=None):
         """Initialize the CatalogTableView."""
         super().__init__(parent)
         self._catalog = catalog
-        self._run_data = {}  # uid -> RunData
-        self._dynamic = False
+        self._handling_selection = False  # Flag to prevent circular updates
         self._setup_ui()
         self.refresh_filters()
 
@@ -239,30 +231,27 @@ class CatalogTableView(QWidget):
 
     def on_selection_changed(self, selected, deselected):
         """Handle changes in the selection state of table rows."""
+        if self._handling_selection:
+            return  # Skip if we're handling a programmatic selection change
+
         proxy_model = self.data_view.model()
         source_model = proxy_model.sourceModel()
 
-        selected_runs = []
         # Handle newly selected items
         for index in selected.indexes():
             if index.column() == 0:  # Only process first column
                 source_index = proxy_model.mapToSource(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
-                    if key not in self._run_data:
-                        data = self._catalog.get_run(key)
-                        self._run_data[key] = RunData(data, dynamic=self._dynamic)
-                    selected_runs.append(self._run_data[key])
-                    self.itemSelected.emit(self._run_data[key])
-        self.selectionChanged.emit(selected_runs)
+                    self._catalog.select_run(key)
 
         # Handle newly deselected items
         for index in deselected.indexes():
             if index.column() == 0:  # Only process first column
                 source_index = proxy_model.mapToSource(index)
                 key = source_model.get_key(source_index.row())
-                if key is not None and key in self._run_data:
-                    self.itemDeselected.emit(self._run_data[key])
+                if key is not None:
+                    self._catalog.deselect_run(key)
 
     def setupModelAndView(self, catalog):
         """
@@ -310,31 +299,14 @@ class CatalogTableView(QWidget):
 
     def get_selected_items(self):
         """
-        Get the currently selected RunData instances.
+        Get the currently selected runs.
 
         Returns
         -------
         list
-            List of currently selected RunData instances
+            List of currently selected CatalogRun instances
         """
-        proxy_model = self.data_view.model()
-        if proxy_model is None:
-            return []
-
-        source_model = proxy_model.sourceModel()
-        selected_data = []
-
-        for index in self.data_view.selectedIndexes():
-            if index.column() == 0:
-                source_index = proxy_model.mapToSource(index)
-                key = source_model.get_key(source_index.row())
-                if key is not None:
-                    if key not in self._run_data:
-                        data = self._catalog.get_run(key)
-                        self._run_data[key] = RunData(data, dynamic=self._dynamic)
-                    selected_data.append(self._run_data[key])
-
-        return selected_data
+        return self._catalog.get_selected_runs()
 
     def deselect_items(self, items):
         """
@@ -343,19 +315,36 @@ class CatalogTableView(QWidget):
         Parameters
         ----------
         items : list
-            List of RunData instances to deselect
+            List of CatalogRun instances to deselect
         """
         selection_model = self.data_view.selectionModel()
         if selection_model is None:
             return
 
-        item_uids = [item.run.uid for item in items]
+        item_uids = [item.uid for item in items]
 
-        for index in self.data_view.selectedIndexes():
-            if index.column() == 0:
-                source_index = self.data_view.model().mapToSource(index)
-                key = source_index.model().get_key(source_index.row())
-                if key in item_uids:
-                    selection_model.select(
-                        index, QItemSelectionModel.Deselect | QItemSelectionModel.Rows
-                    )
+        try:
+            self._handling_selection = True  # Set flag before making changes
+            for index in self.data_view.selectedIndexes():
+                if index.column() == 0:
+                    source_index = self.data_view.model().mapToSource(index)
+                    key = source_index.model().get_key(source_index.row())
+                    if key in item_uids:
+                        selection_model.select(
+                            index,
+                            QItemSelectionModel.Deselect | QItemSelectionModel.Rows,
+                        )
+        finally:
+            self._handling_selection = False  # Always reset flag
+
+    def cleanup(self):
+        """Clean up resources before removal."""
+        # Clear all selections first
+        self._catalog.clear_selection()
+
+        # Disconnect signals
+        if self.data_view.model() is not None:
+            self.data_view.selectionModel().selectionChanged.disconnect()
+
+        # Clear model
+        self.data_view.setModel(None)

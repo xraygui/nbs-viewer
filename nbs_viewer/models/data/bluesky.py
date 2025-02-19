@@ -68,6 +68,8 @@ class BlueskyRun(CatalogRun):
         self._axis_cache = {}
         self._shape_cache = {}
         self.setup()
+        # Initialize keys after setup since all data is available
+        self._initialize_keys()
 
     def refresh(self):
         """

@@ -1,6 +1,7 @@
 from typing import Dict, List, Tuple, Any, Optional
 from qtpy.QtCore import QObject, Signal
 import numpy as np
+from asteval import Interpreter
 
 
 class CatalogRun(QObject):
@@ -46,8 +47,8 @@ class CatalogRun(QObject):
         self._catalog = catalog
 
         # Caching
-        self._plot_data_cache = {}  # Cache for transformed plot data
-        self._dimensions_cache = {}  # Cache for data dimensions
+        self._plot_data_cache = {}
+        self._dimensions_cache = {}
 
         # Transform state
         self._transform_text = ""
@@ -55,10 +56,15 @@ class CatalogRun(QObject):
 
         # Dynamic updates
         self._dynamic = False
-        self.set_dynamic(dynamic)
 
-        # Initialize available keys
-        self._initialize_keys()
+        # Initialize empty key list - subclasses can update later
+        self._available_keys = []
+
+        # Connect data_changed to cache clearing
+        self.data_changed.connect(self._on_data_changed)
+
+        # Set dynamic state last since it may trigger signals
+        self.set_dynamic(dynamic)
 
     def __repr__(self):
         """
@@ -327,28 +333,48 @@ class CatalogRun(QObject):
         """
         if not xkeys or not ykeys:
             return [], [], []
-
+        # Cache key includes all input keys
         cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
 
-        # Try cache first
-        if cache_key in self._plot_data_cache:
-            return self._plot_data_cache[cache_key]
+        # Try to get raw data from cache
+        if not self._dynamic and cache_key in self._plot_data_cache:
+            xlist, ylist, norm = self._plot_data_cache[cache_key]
+        else:
+            # Get raw data
+            xlist = [self.getData(key) for key in xkeys]
+            ylist = [self.getData(key) for key in ykeys]
 
-        # Get raw data
-        x_data = [self.getData(key) for key in xkeys]
-        y_data = [self.getData(key) for key in ykeys]
+            # Handle normalization
+            if norm_keys:
+                norm = self.getData(norm_keys[0])
+                for key in norm_keys[1:]:
+                    norm = norm * self.getData(key)
+            else:
+                norm = None
 
-        if norm_keys:
-            norm_data = [self.getData(key) for key in norm_keys]
-            y_data = [y / n for y, n in zip(y_data, norm_data)]
+            # Cache raw data if not dynamic
+            if not self._dynamic:
+                self._plot_data_cache[cache_key] = (xlist, ylist, norm)
 
-        # Apply transforms
-        if self._transform_text:
-            y_data = [self._transform.evaluate(y) for y in y_data]
+        # Transform data
+        xplotlist = []
+        yplotlist = []
+        xkeylist = []
 
-        result = (x_data, y_data, xkeys)
-        self._plot_data_cache[cache_key] = result
-        return result
+        for key, y in zip(ykeys, ylist):
+            # Apply transformations
+            x_transformed, y_transformed = self.transform_data(xlist, y, norm)
+
+            # Handle axis hints and reordering
+            x_reordered, xkeys, y_reordered = self._reorder_dimensions(
+                key, x_transformed, y_transformed, xkeys
+            )
+
+            xplotlist.append(x_reordered)
+            yplotlist.append(y_reordered)
+            xkeylist.append(xkeys)
+
+        return xplotlist, yplotlist, xkeylist
 
     def set_dynamic(self, enabled):
         """Enable/disable dynamic updates."""
@@ -362,8 +388,13 @@ class CatalogRun(QObject):
                 pass
             self.clear_caches()
 
+    def _on_data_changed(self):
+        """Clear caches when data changes without re-emitting signal."""
+        self._plot_data_cache.clear()
+        self._dimensions_cache.clear()
+
     def clear_caches(self):
-        """Clear all data caches."""
+        """Clear all data caches and notify of change."""
         self._plot_data_cache.clear()
         self._dimensions_cache.clear()
         self.data_changed.emit()
@@ -389,14 +420,24 @@ class CatalogRun(QObject):
             Transformed (x_data_list, y_data)
         """
         # Apply normalization if provided
-        if norm is not None:
-            y = y / norm
+        if norm is None:
+            yfinal = y
+        elif np.isscalar(norm):
+            yfinal = y / norm
+        else:
+            temp_norm = norm
+            while temp_norm.ndim < y.ndim:
+                temp_norm = np.expand_dims(temp_norm, axis=-1)
+            yfinal = y / temp_norm
 
-        # Apply custom transform if set
+        # Apply custom transformation
         if self._transform_text:
-            y = self._transform.evaluate(y)
+            self._transform.symtable["y"] = yfinal
+            self._transform.symtable["x"] = xlist
+            self._transform.symtable["norm"] = norm
+            yfinal = self._transform(self._transform_text)
 
-        return xlist, y
+        return xlist, yfinal
 
     def _reorder_dimensions(
         self, key: str, xlist: List[np.ndarray], y: np.ndarray, xkeys: List[str]
@@ -469,11 +510,10 @@ class CatalogRun(QObject):
 
         if transform_text != self._transform_text:
             self._transform_text = transform_text
-            self.clear_caches()
             self.transform_changed.emit()
 
-    def _initialize_keys(self) -> None:
-        """Initialize the list of available keys from the run."""
+    def _initialize_keys(self):
+        """Initialize available keys. Can be called multiple times."""
         # Get all keys from run
         xkeys, ykeys = self.getRunKeys()
 
@@ -489,6 +529,7 @@ class CatalogRun(QObject):
                     all_keys.append(key)
 
         self._available_keys = all_keys
+        self.data_changed.emit()  # Notify of key changes
 
     @property
     def available_keys(self) -> List[str]:
@@ -498,4 +539,4 @@ class CatalogRun(QObject):
     @property
     def display_name(self) -> str:
         """Get the display name of the run."""
-        return str(self._run)
+        return str(self)

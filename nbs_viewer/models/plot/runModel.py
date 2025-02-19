@@ -2,7 +2,6 @@ from typing import List, Optional, Set
 from qtpy.QtCore import QObject, Signal
 
 from ..data.base import CatalogRun
-from .runData import RunData
 from .plotDataModel import PlotDataModel
 
 
@@ -142,23 +141,31 @@ class RunModel(QObject):
     def cleanup(self):
         """Clean up resources and remove all artists."""
         # Clean up all artists
-        for artist in self._artists.values():
-            artist.clear()
+        for artist in list(self._artists.values()):  # Make copy of values
             try:
+                # Clear the artist
+                artist.clear()
+                # Disconnect all signals
                 artist.artist_needed.disconnect(self.artist_needed)
                 artist.autoscale_requested.disconnect(self.autoscale_requested)
                 artist.draw_requested.disconnect(self.draw_requested)
                 artist.visibility_changed.disconnect(self.visibility_changed)
-            except (TypeError, RuntimeError):
-                pass
+            except Exception as e:
+                print(f"Warning: Error cleaning up artist signals: {e}")
 
+        # Clear artist dictionary
         self._artists.clear()
 
         # Disconnect RunData signals
         try:
             self._run.data_changed.disconnect(self._on_data_changed)
-        except (TypeError, RuntimeError):
-            pass
+        except Exception as e:
+            print(f"Warning: Error disconnecting run signals: {e}")
+
+        # Clear selection state
+        self._selected_x.clear()
+        self._selected_y.clear()
+        self._selected_norm.clear()
 
     @property
     def selected_x(self) -> List[str]:
@@ -220,8 +227,3 @@ class RunModel(QObject):
         """
         self._is_visible = is_visible  # Save visibility state
         self.update_plot()
-
-    @property
-    def available_keys(self) -> Set[str]:
-        """Get the set of available keys."""
-        return self._available_keys.copy()
