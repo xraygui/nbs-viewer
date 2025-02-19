@@ -98,6 +98,7 @@ class BlueskyCatalog(CatalogBase):
             self._catalog.items()[slice_obj] if slice_obj else self._catalog.items()
         )
         for key, value in sliced_items:
+            # print(f"Wrapping run {key}")
             yield key, self.wrap_run(value, key)
 
     def search(self, query: Dict) -> "BlueskyCatalog":

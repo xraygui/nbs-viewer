@@ -180,6 +180,9 @@ class CatalogBase(QObject):
 
     def clear_selection(self) -> None:
         """Clear all selections."""
+        selection_copy = self._selection.copy()
+        for uid in selection_copy:
+            self.deselect_run(uid)
         self._selection.clear()
         self.selection_changed.emit([])
 

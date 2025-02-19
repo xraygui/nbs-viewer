@@ -331,50 +331,54 @@ class CatalogRun(QObject):
         Tuple[List[np.ndarray], List[np.ndarray], List[str]]
             Tuple of (x_data_list, y_data_list, x_keys_list)
         """
-        if not xkeys or not ykeys:
-            return [], [], []
-        # Cache key includes all input keys
-        cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
+        try:
+            if not xkeys or not ykeys:
+                return [], [], []
+            # Cache key includes all input keys
+            cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
 
-        # Try to get raw data from cache
-        if not self._dynamic and cache_key in self._plot_data_cache:
-            xlist, ylist, norm = self._plot_data_cache[cache_key]
-        else:
-            # Get raw data
-            xlist = [self.getData(key) for key in xkeys]
-            ylist = [self.getData(key) for key in ykeys]
-
-            # Handle normalization
-            if norm_keys:
-                norm = self.getData(norm_keys[0])
-                for key in norm_keys[1:]:
-                    norm = norm * self.getData(key)
+            # Try to get raw data from cache
+            if not self._dynamic and cache_key in self._plot_data_cache:
+                xlist, ylist, norm = self._plot_data_cache[cache_key]
             else:
-                norm = None
+                # Get raw data
+                xlist = [self.getData(key) for key in xkeys]
+                ylist = [self.getData(key) for key in ykeys]
 
-            # Cache raw data if not dynamic
-            if not self._dynamic:
-                self._plot_data_cache[cache_key] = (xlist, ylist, norm)
+                # Handle normalization
+                if norm_keys:
+                    norm = self.getData(norm_keys[0])
+                    for key in norm_keys[1:]:
+                        norm = norm * self.getData(key)
+                else:
+                    norm = None
 
-        # Transform data
-        xplotlist = []
-        yplotlist = []
-        xkeylist = []
+                # Cache raw data if not dynamic
+                if not self._dynamic:
+                    self._plot_data_cache[cache_key] = (xlist, ylist, norm)
 
-        for key, y in zip(ykeys, ylist):
-            # Apply transformations
-            x_transformed, y_transformed = self.transform_data(xlist, y, norm)
+            # Transform data
+            xplotlist = []
+            yplotlist = []
+            xkeylist = []
 
-            # Handle axis hints and reordering
-            x_reordered, xkeys, y_reordered = self._reorder_dimensions(
-                key, x_transformed, y_transformed, xkeys
-            )
+            for key, y in zip(ykeys, ylist):
+                # Apply transformations
+                x_transformed, y_transformed = self.transform_data(xlist, y, norm)
 
-            xplotlist.append(x_reordered)
-            yplotlist.append(y_reordered)
-            xkeylist.append(xkeys)
+                # Handle axis hints and reordering
+                x_reordered, xkeys, y_reordered = self._reorder_dimensions(
+                    key, x_transformed, y_transformed, xkeys
+                )
 
-        return xplotlist, yplotlist, xkeylist
+                xplotlist.append(x_reordered)
+                yplotlist.append(y_reordered)
+                xkeylist.append(xkeys)
+
+            return xplotlist, yplotlist, xkeylist
+        except Exception as e:
+            print(f"Error getting plot data: {e}")
+            return [], [], []  # Return empty data on error
 
     def set_dynamic(self, enabled):
         """Enable/disable dynamic updates."""
@@ -513,23 +517,28 @@ class CatalogRun(QObject):
             self.transform_changed.emit()
 
     def _initialize_keys(self):
-        """Initialize available keys. Can be called multiple times."""
-        # Get all keys from run
-        xkeys, ykeys = self.getRunKeys()
+        """Initialize available keys safely."""
+        try:
+            # Get all keys from run
+            xkeys, ykeys = self.getRunKeys()
 
-        # Collect all keys from both dictionaries while preserving order
-        all_keys = []
-        for keys in xkeys.values():
-            for key in keys:
-                if key not in all_keys:
-                    all_keys.append(key)
-        for keys in ykeys.values():
-            for key in keys:
-                if key not in all_keys:
-                    all_keys.append(key)
+            # Collect all keys from both dictionaries while preserving order
+            all_keys = []
+            for keys in xkeys.values():
+                for key in keys:
+                    if key not in all_keys:
+                        all_keys.append(key)
+            for keys in ykeys.values():
+                for key in keys:
+                    if key not in all_keys:
+                        all_keys.append(key)
 
-        self._available_keys = all_keys
-        self.data_changed.emit()  # Notify of key changes
+            self._available_keys = all_keys
+        except Exception as e:
+            print(f"Error initializing keys: {e}")
+            self._available_keys = []
+        finally:
+            self.data_changed.emit()  # Always notify of key changes
 
     @property
     def available_keys(self) -> List[str]:
