@@ -45,15 +45,8 @@ class RunDisplayWidget(QWidget):
 
     def __init__(self, plotModel, parent: Optional[QWidget] = None):
         super().__init__(parent)
-
-        # State
         self.plotModel = plotModel
-        self._all_keys: Set[str] = set()
         self._show_all = False
-        # Track current selection state
-        self._current_x_keys = []
-        self._current_y_keys = []
-        self._current_norm_keys = []
 
         # UI setup
         self._setup_ui()
@@ -61,10 +54,9 @@ class RunDisplayWidget(QWidget):
         # Connect signals
         self.plotModel.available_keys_changed.connect(self._update_display)
         self.plotModel.run_models_changed.connect(self._update_header)
-        self.selection_changed.connect(self.plotModel.selection_changed)
-        self.plotModel.selection_changed.connect(self._on_selection_changed)
+        self.plotModel.selection_changed.connect(self._update_checkboxes)
 
-        # Initial update after all connections are set
+        # Initial update
         self._update_display()
 
     def _setup_ui(self) -> None:
@@ -176,7 +168,7 @@ class RunDisplayWidget(QWidget):
             # X checkbox
             x_box = QCheckBox()
             x_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            x_box.setChecked(key in self._current_x_keys)
+            x_box.setChecked(self.plotModel.is_key_selected(key, "x"))
             self._grid.addWidget(x_box, i + 1, 1)
             self._x_group.addButton(x_box)
             self._button_key_map[x_box] = key
@@ -184,7 +176,7 @@ class RunDisplayWidget(QWidget):
             # Y checkbox
             y_box = QCheckBox()
             y_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            y_box.setChecked(key in self._current_y_keys)
+            y_box.setChecked(self.plotModel.is_key_selected(key, "y"))
             self._grid.addWidget(y_box, i + 1, 2)
             self._y_group.addButton(y_box)
             self._button_key_map[y_box] = key
@@ -198,7 +190,7 @@ class RunDisplayWidget(QWidget):
             # Norm checkbox
             norm_box = QCheckBox()
             norm_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            norm_box.setChecked(key in self._current_norm_keys)
+            norm_box.setChecked(self.plotModel.is_key_selected(key, "norm"))
             self._grid.addWidget(norm_box, i + 1, 4)
             self._norm_group.addButton(norm_box)
             self._button_key_map[norm_box] = key
@@ -244,43 +236,6 @@ class RunDisplayWidget(QWidget):
 
         # Update controllers without forcing plot update
         self._on_checkbox_changed()
-
-    def _on_selection_changed(
-        self, x_keys: List[str], y_keys: List[str], norm_keys: List[str]
-    ) -> None:
-        """Update checkbox states when selection changes externally."""
-        # print("RunDisplayWidget _on_selection_changed")
-        # print(x_keys, y_keys, norm_keys)
-
-        # Update internal state
-        self._current_x_keys = x_keys
-        self._current_y_keys = y_keys
-        self._current_norm_keys = norm_keys
-
-        # If we have buttons, update their states
-        if hasattr(self, "_x_group"):
-            # Block signals to prevent recursive updates
-            for group in [self._x_group, self._y_group, self._norm_group]:
-                for button in group.buttons():
-                    button.blockSignals(True)
-
-            # Update checkbox states
-            for button in self._x_group.buttons():
-                key = self._button_key_map[button]
-                button.setChecked(key in x_keys)
-
-            for button in self._y_group.buttons():
-                key = self._button_key_map[button]
-                button.setChecked(key in y_keys)
-
-            for button in self._norm_group.buttons():
-                key = self._button_key_map[button]
-                button.setChecked(key in norm_keys)
-
-            # Unblock signals
-            for group in [self._x_group, self._y_group, self._norm_group]:
-                for button in group.buttons():
-                    button.blockSignals(False)
 
     def _on_checkbox_changed(self) -> None:
         """Handle checkbox state changes without forcing plot updates."""
@@ -338,3 +293,31 @@ class RunDisplayWidget(QWidget):
             self.plotModel.set_selection(x_keys, y_keys, norm_keys, force_update=True)
         else:
             self.selection_changed.emit(x_keys, y_keys, norm_keys)
+
+    def _update_checkboxes(self, x_keys, y_keys, norm_keys):
+        """Update checkbox states from model."""
+        if not hasattr(self, "_x_group"):
+            return
+
+        # Block signals to prevent feedback
+        for group in [self._x_group, self._y_group, self._norm_group]:
+            for button in group.buttons():
+                button.blockSignals(True)
+
+        # Update states
+        for button in self._x_group.buttons():
+            key = self._button_key_map[button]
+            button.setChecked(self.plotModel.is_key_selected(key, "x"))
+
+        for button in self._y_group.buttons():
+            key = self._button_key_map[button]
+            button.setChecked(self.plotModel.is_key_selected(key, "y"))
+
+        for button in self._norm_group.buttons():
+            key = self._button_key_map[button]
+            button.setChecked(self.plotModel.is_key_selected(key, "norm"))
+
+        # Unblock signals
+        for group in [self._x_group, self._y_group, self._norm_group]:
+            for button in group.buttons():
+                button.blockSignals(False)

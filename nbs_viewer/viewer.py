@@ -16,29 +16,9 @@ class Viewer(QWidget):
         self.layout = QVBoxLayout(self)
 
         # Create a QTabWidget
-        self.tab_widget = QTabWidget(self)
-        # Set the tab position to the left (vertical tabs)
-        self.tab_widget.setTabPosition(QTabWidget.West)
+
         self.mainWidget = MainWidget(self)
-        self.tab_widget.addTab(self.mainWidget, "Main")
-        """
-        # Create the plot managers
-        self.data_list_manager = PlotManagerWithDataList(config_file, self)
-        self.bluesky_list_manager = PlotManagerWithBlueskyList(self)
-
-        # Add the plot managers to the tab widget
-        self.tab_widget.addTab(self.data_list_manager, "Data List")
-        self.tab_widget.addTab(self.bluesky_list_manager, "Bluesky List")
-
-        # Connect the signals
-        self.data_list_manager.addToPlot.connect(
-            self.bluesky_list_manager.list_widget.addPlotItem
-        )
-        """
-
-        # Add the tab widget to the main layout
-        self.layout.addWidget(self.tab_widget)
-
+        self.layout.addWidget(self.mainWidget)
         self.setLayout(self.layout)
 
 

@@ -54,6 +54,7 @@ class PlotDataModel(QWidget):
             Number of dimensions to plot, by default 1.
         """
         super().__init__(parent=parent)
+        # print(f"\nCreating PlotDataModel for {label}")
         self._x = x
         self._y = y
         self._xplot = None
@@ -105,6 +106,7 @@ class PlotDataModel(QWidget):
         self._yplot = y
 
         if self.artist is not None:
+            # print(f"  Updating existing artist")
             # Update existing artist with new data
             self.artist.set_data(x[0], y)
             was_visible = self.artist.get_visible()
@@ -113,7 +115,7 @@ class PlotDataModel(QWidget):
                 self.visibility_changed.emit(self, True)
             self.autoscale_requested.emit()
         else:
-            # Create new artist and store its style
+            # print(f"  Requesting new artist")
             self.artist_needed.emit(self)
 
     def set_visible(self, visible):
@@ -165,11 +167,20 @@ class PlotDataModel(QWidget):
         self.plot_data(indices)
 
     def clear(self):
-        """Removes the artist from the plot and clears it."""
+        """Remove artist from plot and clean up."""
         if self.artist is not None:
-            was_visible = self.artist.get_visible()
-            self.artist.remove()
-            if was_visible:
-                self.visibility_changed.emit(self, False)
-            self.artist = None
-            self.draw_requested.emit()
+            # print(f"\nClearing {self._label}")
+            # print(f"  Artist visible: {self.artist.get_visible()}")
+            # print(f"  Artist axes: {self.artist.axes}")
+            try:
+                if self.artist.axes is not None:
+                    self.artist.remove()
+                    # print("  Artist removed from axes")
+                self.artist.set_data([], [])
+                # print("  Artist data cleared")
+            except Exception as e:
+                print(f"  Error cleaning up artist: {e}")
+            finally:
+                self.artist = None
+                # print("  Artist reference cleared")
+                self.draw_requested.emit()

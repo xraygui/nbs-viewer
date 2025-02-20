@@ -3,6 +3,7 @@ import time
 import logging
 from .base import CatalogRun
 from typing import Dict, List, Tuple
+import numpy as np
 
 
 class BlueskyRun(CatalogRun):
@@ -67,7 +68,31 @@ class BlueskyRun(CatalogRun):
         self._data_cache = {}
         self._axis_cache = {}
         self._shape_cache = {}
+        self._has_data = False  # Track if run has valid data
+
+        # Setup metadata first since it's always available
         self.setup()
+
+        # Try to initialize data access, but don't fail if unavailable
+        try:
+            self._check_data_access()
+            self._initialize_keys()
+        except Exception as e:
+            print(f"Warning: Could not initialize data for run {key}: {e}")
+            self._available_keys = []
+
+    def _check_data_access(self):
+        """Check if run has accessible data."""
+        try:
+            # Check if primary stream exists and has data
+            if ("primary", "data") in self._run:
+                self._has_data = True
+            else:
+                print(f"Warning: Run {self._key} has no primary data stream")
+                self._has_data = False
+        except Exception as e:
+            print(f"Error checking data access for run {self._key}: {e}")
+            self._has_data = False
 
     def refresh(self):
         """
@@ -271,11 +296,15 @@ class BlueskyRun(CatalogRun):
         array-like
             The data for the given key
         """
-        t_start = time.time()
+        if not self._has_data:
+            return np.array([])  # Return empty array if no data
+
         if key not in self._data_cache:
-            print(f"Fetching data for key {key}")
-            self._data_cache[key] = self._run["primary", "data", key].read()
-            print(f"Fetching data for {key} took: {time.time() - t_start:.3f}s")
+            try:
+                self._data_cache[key] = self._run["primary", "data", key].read()
+            except Exception as e:
+                print(f"Error reading data for key {key}: {e}")
+                return np.array([])
         return self._data_cache[key]
 
     def getAxis(self, keys):
@@ -309,45 +338,52 @@ class BlueskyRun(CatalogRun):
         tuple
             A tuple of (xkeys, ykeys) dictionaries
         """
-        t_start = time.time()
+        if not self._has_data:
+            return {}, {}  # Return empty key sets if no data
 
-        # Get all available keys
-        logging.debug("Getting available keys")
-        all_keys = list(self._run["primary", "data"].keys())
-        t0 = time.time()
-        logging.debug(f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s")
+        try:
+            t_start = time.time()
 
-        t1 = time.time()
-        xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
-        logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
+            # Get all available keys
+            logging.debug("Getting available keys")
+            all_keys = list(self._run["primary", "data"].keys())
+            t0 = time.time()
+            logging.debug(f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s")
 
-        # Initialize dictionaries
-        xkeys = {}
-        ykeys = {1: [], 2: []}  # We'll determine actual dimensions later
+            t1 = time.time()
+            xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
+            logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
 
-        # Handle time key if present
-        if "time" in all_keys:
-            xkeys[0] = ["time"]
-            all_keys.remove("time")
+            # Initialize dictionaries
+            xkeys = {}
+            ykeys = {1: [], 2: []}  # We'll determine actual dimensions later
 
-        # Process dimension hints
-        t2 = time.time()
-        for i, dimension in enumerate(xkeyhints):
-            axlist = dimension[0]
-            xkeys[i + 1] = []
-            for ax in axlist:
-                if ax in all_keys:
-                    all_keys.remove(ax)
-                    xkeys[i + 1].append(ax)
-            if len(xkeys[i + 1]) == 0:
-                xkeys.pop(i + 1)
-        logging.debug(f"Processing hints took: {time.time() - t2:.3f}s")
+            # Handle time key if present
+            if "time" in all_keys:
+                xkeys[0] = ["time"]
+                all_keys.remove("time")
 
-        # All remaining keys go to ykeys[1] initially
-        ykeys[1] = all_keys
+            # Process dimension hints
+            t2 = time.time()
+            for i, dimension in enumerate(xkeyhints):
+                axlist = dimension[0]
+                xkeys[i + 1] = []
+                for ax in axlist:
+                    if ax in all_keys:
+                        all_keys.remove(ax)
+                        xkeys[i + 1].append(ax)
+                if len(xkeys[i + 1]) == 0:
+                    xkeys.pop(i + 1)
+            logging.debug(f"Processing hints took: {time.time() - t2:.3f}s")
 
-        logging.debug(f"Total getRunKeys took: {time.time() - t_start:.3f}s")
-        return xkeys, ykeys
+            # All remaining keys go to ykeys[1] initially
+            ykeys[1] = all_keys
+
+            logging.debug(f"Total getRunKeys took: {time.time() - t_start:.3f}s")
+            return xkeys, ykeys
+        except Exception as e:
+            print(f"Error getting run keys for {self._key}: {e}")
+            return {}, {}
 
     def __str__(self):
         """

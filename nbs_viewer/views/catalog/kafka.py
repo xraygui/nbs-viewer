@@ -33,7 +33,8 @@ class KafkaView(CatalogTableView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dynamic = True
-        self.selectionChanged.connect(self._update_button_states)
+        # Update these signal connections to use catalog signals
+        self._catalog.selection_changed.connect(self._update_button_states)
 
     def _setup_ui(self):
         """
@@ -120,15 +121,20 @@ class KafkaView(CatalogTableView):
         # Connect to catalog's data updated signal to manage button states
         self._catalog.data_updated.connect(self._update_button_states)
 
-    def _update_button_states(self):
+    def _update_button_states(self, selected_runs=None):
         """Update button states based on current data."""
-        # print("Updating Button States")
         has_runs = len(self._catalog) > 0
         self.removeAllButton.setEnabled(has_runs)
 
         # Update remove selected button based on both selection and having runs
         selected = (
-            bool(self.data_view.selectionModel().selectedRows()) if has_runs else False
+            bool(selected_runs)
+            if selected_runs is not None
+            else (
+                bool(self.data_view.selectionModel().selectedRows())
+                if has_runs
+                else False
+            )
         )
         self.removeSelectedButton.setEnabled(selected)
 
@@ -264,3 +270,11 @@ class KafkaView(CatalogTableView):
         self.data_view.selectionModel().clearSelection()
 
         self._catalog.remove_all_runs()
+
+    def cleanup(self):
+        """Additional cleanup for Kafka view."""
+        # Disable auto-plotting before cleanup
+        self.autoPlotCheckBox.setChecked(False)
+
+        # Call parent cleanup
+        super().cleanup()

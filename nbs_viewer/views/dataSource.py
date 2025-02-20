@@ -1,6 +1,4 @@
 from qtpy.QtWidgets import (
-    QApplication,
-    QMainWindow,
     QVBoxLayout,
     QWidget,
     QLabel,
@@ -19,12 +17,12 @@ import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 import uuid
 
-from .views.catalog.catalogTree import CatalogPicker
+from .catalog.catalogTree import CatalogPicker
 from os.path import exists
-from .views.catalog.base import CatalogTableView
-from .views.catalog.kafka import KafkaView
-from .models.catalog.kafka import KafkaCatalog
-from .models.catalog.base import load_catalog_models
+from .catalog.base import CatalogTableView
+from .catalog.kafka import KafkaView
+from ..models.catalog.kafka import KafkaCatalog
+from ..models.catalog.base import load_catalog_models
 
 import toml
 
@@ -52,7 +50,7 @@ class ConfigSource(QWidget):
         selected_model = self.catalog_models[self.catalog_config["catalog_model"]]
         catalog = selected_model(catalog)
         catalogView = CatalogTableView(catalog)
-        return catalogView, label
+        return catalogView, catalog, label
 
 
 class URISource(QWidget):
@@ -99,7 +97,7 @@ class URISource(QWidget):
                     catalog = catalog[key]
                     label += ":" + key
             else:
-                return None, None  # User cancelled the dialog
+                return None, None, None  # User cancelled the dialog
 
         # Now that we have the final catalog, show the model selection dialog
         model_dialog = CatalogModelPicker(self.catalog_models, self)
@@ -107,9 +105,9 @@ class URISource(QWidget):
             selected_model = model_dialog.selected_model
             catalog = selected_model(catalog)
             catalogView = CatalogTableView(catalog)
-            return catalogView, label
+            return catalogView, catalog, label
         else:
-            return None, None  # User cancelled the model selection
+            return None, None, None  # User cancelled the model selection
 
 
 class ProfileSource(QWidget):
@@ -144,7 +142,7 @@ class ProfileSource(QWidget):
                     catalog = catalog[key]
                     label += ":" + key
             else:
-                return None, None  # User cancelled the dialog
+                return None, None, None  # User cancelled the dialog
 
         # Now that we have the final catalog, show the model selection dialog
         model_dialog = CatalogModelPicker(self.catalog_models, self)
@@ -152,9 +150,9 @@ class ProfileSource(QWidget):
             selected_model = model_dialog.selected_model
             catalog = selected_model(catalog)
             catalogView = CatalogTableView(catalog)
-            return catalogView, label
+            return catalogView, catalog, label
         else:
-            return None, None  # User cancelled the model selection
+            return None, None, None  # User cancelled the model selection
 
 
 class KafkaSource(QWidget):
@@ -205,7 +203,7 @@ class KafkaSource(QWidget):
         )
         catalog = KafkaCatalog(kafka_dispatcher)
         kafka_widget = KafkaView(catalog)
-        return kafka_widget, beamline_acronym
+        return kafka_widget, catalog, beamline_acronym
 
 
 class DataSourcePicker(QDialog):

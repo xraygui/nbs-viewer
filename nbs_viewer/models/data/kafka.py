@@ -69,13 +69,15 @@ class KafkaRun(CatalogRun):
         key=None,
         catalog=None,
     ):
-        super().__init__(None, key, catalog, parent=None)
-        # print("New KafkaRun")
         self._start_doc = start_doc
+        self.setup()
+        self._stop_doc = {}
         self._data_buffer = defaultdict(list)
         self._descriptors = {}
         self._plot_hints = {}
-        self.setup()
+        # Initialize with basic keys, will update when descriptors arrive
+        super().__init__(None, key, catalog, parent=None)
+        # print("New KafkaRun")
 
     def setup(self):
         """Set up the run object by extracting metadata from start document."""
@@ -90,6 +92,22 @@ class KafkaRun(CatalogRun):
         self.num_points = self._start_doc.get("num_points")
         self.metadata = self._start_doc
 
+    def __str__(self):
+        """
+        Get a string representation of the run.
+
+        Returns
+        -------
+        str
+            Human-readable description of the run
+        """
+        scan_desc = ["Scan", str(self.scan_id)]
+
+        if self.plan_name:
+            scan_desc.append(self.plan_name)
+
+        return " ".join(scan_desc)
+
     def get_md_value(self, path, default=None):
         """
         Get a metadata value from the start document.
@@ -97,6 +115,8 @@ class KafkaRun(CatalogRun):
         doc_name = path[0]
         if doc_name == "start":
             doc = self._start_doc
+        elif doc_name == "stop":
+            doc = self._stop_doc
         else:
             raise ValueError(f"Invalid document name: {doc_name}")
 
@@ -120,9 +140,9 @@ class KafkaRun(CatalogRun):
         np.ndarray
             Array of values for the key
         """
-        print(f"Getting data for key: {key}")
+        # print(f"Getting data for key: {key}")
         data = np.array(self._data_buffer.get(key, []))
-        print(f"Data for key {key}: has shape {data.shape}")
+        # print(f"Data for key {key}: has shape {data.shape}")
         return data
 
     def getShape(self, key):
@@ -164,6 +184,8 @@ class KafkaRun(CatalogRun):
         """
         if doc.get("name") == "primary":
             self._descriptors[doc.get("uid")] = doc
+            # Update available keys when we get new descriptors
+            self._initialize_keys()
 
     def process_event(self, doc):
         """
@@ -201,7 +223,7 @@ class KafkaRun(CatalogRun):
         for key, value in data.items():
             self._data_buffer[key].append(value)
         # print("KafkaRun process_event done")
-        self.data_updated.emit()
+        self.data_changed.emit()
 
     def process_event_page(self, doc):
         """
@@ -240,7 +262,7 @@ class KafkaRun(CatalogRun):
         for key, values in data.items():
             self._data_buffer[key].extend(values)
         # print("KafkaRun process_event_page done")
-        self.data_updated.emit()
+        self.data_changed.emit()
 
     def process_stop(self, doc):
         """
@@ -262,7 +284,7 @@ class KafkaRun(CatalogRun):
                 UID of the start document
         """
         self._stop_doc = doc
-        self.data_updated.emit()
+        self.data_changed.emit()
 
     def scanFinished(self):
         """
@@ -355,7 +377,6 @@ class KafkaRun(CatalogRun):
             return np.array([])
 
         key = keys[-1]
-
         if key == "time":
             return np.array(self._data_buffer.get("time", []))
 
