@@ -1,3 +1,5 @@
+print("In KafkaViewerTab.py")
+
 import nslsii
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 import uuid
@@ -7,7 +9,6 @@ from ..models.catalog.kafka import KafkaCatalog
 
 from ..models.plot.plotModel import PlotModel
 from ..views.plot.plotWidget import PlotWidget
-from ..views.plot.plotControl import PlotControls
 
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QWidget, QHBoxLayout, QSplitter
@@ -33,7 +34,7 @@ def make_kafka_source(
     )
     catalog = KafkaCatalog(kafka_dispatcher)
     kafka_widget = KafkaView(catalog)
-    return kafka_widget
+    return kafka_widget, catalog
 
 
 class KafkaViewerTab(QWidget):
@@ -51,17 +52,18 @@ class KafkaViewerTab(QWidget):
             "topic_string", "bluesky.runengine.documents"
         )
         print(f"KafkaViewerTab config: {bl_acronym}, {kafka_config}, {topic_string}")
-        self.kafkaSource = make_kafka_source(
+        kafkaSource, catalog = make_kafka_source(
             config_file=kafka_config,
             beamline_acronym=bl_acronym,
             topic_string=topic_string,
         )
+        self.kafkaSource = kafkaSource
+        self.catalog = catalog
 
         self.plotModel = PlotModel()
-
-        self.kafkaSource.itemsSelected.connect(self.plotModel.setRunModels)
+        self.catalog.item_selected.connect(self.plotModel.add_run)
+        self.catalog.item_deselected.connect(self.plotModel.remove_run)
         self.plotWidget = PlotWidget(self.plotModel)
-        self.controlWidget = PlotControls(self.plotModel)
 
         self.layout = QHBoxLayout(self)
         self.splitter = QSplitter(Qt.Horizontal)
@@ -70,7 +72,6 @@ class KafkaViewerTab(QWidget):
         # Add widgets to splitter
         self.splitter.addWidget(self.kafkaSource)
         self.splitter.addWidget(self.plotWidget)
-        self.splitter.addWidget(self.controlWidget)
 
         self.setLayout(self.layout)
         print("KafkaViewerTab init done")

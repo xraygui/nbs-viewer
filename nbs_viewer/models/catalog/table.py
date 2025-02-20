@@ -118,7 +118,7 @@ class CatalogTableModel(QAbstractTableModel):
         list
             List of (key, row) tuples.
         """
-        print(f"Getting chunk {start} to {stop}")
+        # print(f"Getting chunk {start} to {stop}")
         chunk = list(self._catalog.items_slice(slice(start, stop + 1)))
         return [(key, run.to_row()) for key, run in chunk]
 
