@@ -188,7 +188,7 @@ class CatalogRun(QObject):
         Tuple[List[str], List[str], List[str]]
             Default (x_keys, y_keys, norm_keys) for this run
         """
-        print("Getting Default Selection")
+        # print("Getting Default Selection")
         return ([], [], [])
 
     def getDimensions(self, key: str) -> int:

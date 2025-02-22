@@ -258,9 +258,9 @@ class PlotWidget(QWidget):
         self.plot_layout.addWidget(self.plot)
 
         # Add debug button
-        self.debug_button = QPushButton("Debug Plot State")
-        self.debug_button.clicked.connect(self._debug_plot_state)
-        self.plot_layout.addWidget(self.debug_button)
+        # self.debug_button = QPushButton("Debug Plot State")
+        # self.debug_button.clicked.connect(self._debug_plot_state)
+        # self.plot_layout.addWidget(self.debug_button)
 
         # Create plot controls
         self.plotControls = PlotControls(self.plotModel)

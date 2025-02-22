@@ -19,7 +19,7 @@ def load_catalog_models():
     """
     catalog_models = {}
     for ep in entry_points(group="nbs_viewer.catalog_models"):
-        print("Loading catalog model: ", ep.name)
+        # print("Loading catalog model: ", ep.name)
         catalog_models[ep.name] = ep.load()
     return catalog_models
 

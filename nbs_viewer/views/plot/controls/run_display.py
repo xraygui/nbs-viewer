@@ -145,9 +145,9 @@ class RunDisplayWidget(QWidget):
     def _build_header(self) -> None:
         """Update the header label and run selector."""
         run_models = self.plotModel.get_selected_models()
-        print(f"Building header for {len(run_models)} runs")
-        print(f"{len(self.plotModel._visible_runs)} are visible")
-        print(f"{len(self.plotModel._run_models)} are in run_models")
+        # print(f"Building header for {len(run_models)} runs")
+        # print(f"{len(self.plotModel._visible_runs)} are visible")
+        # print(f"{len(self.plotModel._run_models)} are in run_models")
         # Block signals during update
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
@@ -308,7 +308,7 @@ class RunDisplayWidget(QWidget):
         if self._linked_mode:
             self.plotModel.set_selection(x_keys, y_keys, norm_keys, force_update=False)
         elif self._current_run:
-            print(f"Setting selection for current run: {x_keys}, {y_keys}, {norm_keys}")
+            # print(f"Setting selection for current run: {x_keys}, {y_keys}, {norm_keys}")
             self._current_run.set_selection(
                 x_keys, y_keys, norm_keys, force_update=True
             )
@@ -357,13 +357,13 @@ class RunDisplayWidget(QWidget):
 
     def _on_run_selected(self) -> None:
         """Handle run selection in unlinked mode."""
-        print("RunDisplayWidget _on_run_selected")
+        # print("RunDisplayWidget _on_run_selected")
         if self._linked_mode:
-            print("_linked_mode is True, how did we get here?")
+            # print("_linked_mode is True, how did we get here?")
             return
 
         self._current_run = self._run_selector.currentData()
-        print(f"self._current_run: {self._current_run.run.scan_id}")
+        # print(f"self._current_run: {self._current_run.run.scan_id}")
         self._update_display()
         self._update_header()
 

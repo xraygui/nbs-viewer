@@ -339,7 +339,7 @@ class CatalogTableView(QWidget):
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
-        print("Reconnected selectionChanged signal after refresh")
+        # print("Reconnected selectionChanged signal after refresh")
 
     def get_selected_items(self):
         """

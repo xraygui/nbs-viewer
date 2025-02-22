@@ -127,7 +127,7 @@ class CanvasRunList(QWidget):
 
     def _on_selection_changed(self, selected_runs):
         """Update checkbox states to match model's visible runs."""
-        print(f"CanvasRunList _on_selection_changed: {len(selected_runs)}")
+        # print(f"CanvasRunList _on_selection_changed: {len(selected_runs)}")
         try:
             # Block itemChanged signal to prevent recursion
             self.list_widget.blockSignals(True)
