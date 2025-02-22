@@ -18,6 +18,7 @@ dependencies = [
 "nslsii",
 "databroker[client,server,back-compat] >= 2.0.0a105",
 "asteval",
+"tomli >= 2.0.0; python_version < '3.11'",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

@@ -24,7 +24,10 @@ from .catalog.kafka import KafkaView
 from ..models.catalog.kafka import KafkaCatalog
 from ..models.catalog.base import load_catalog_models
 
-import toml
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # Python <3.11
 
 
 class ConfigSource(QWidget):
@@ -214,7 +217,8 @@ class DataSourcePicker(QDialog):
         self.data_sources = {}
 
         if config_file:
-            config = toml.load(config_file)
+            with open(config_file, "rb") as f:  # Open in binary mode for tomllib
+                config = tomllib.load(f)
             for catalog in config.get("catalog", []):
                 source_name = f"Config: {catalog['label']}"
                 config_source = ConfigSource(catalog)
