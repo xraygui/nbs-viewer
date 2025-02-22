@@ -24,19 +24,6 @@ class CatalogRun(QObject):
         Whether to enable dynamic updates, by default False
     """
 
-    @classmethod
-    def METADATA_KEYS(cls):
-        """
-        Abstract class method that subclasses must define.
-        Should return a list of metadata keys.
-
-        Returns
-        -------
-        list
-            List of metadata keys required by this run type
-        """
-        pass
-
     data_changed = Signal()
     transform_changed = Signal()
 
@@ -159,7 +146,7 @@ class CatalogRun(QObject):
         tuple
             Values for each metadata key
         """
-        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS())
+        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS)
 
     def getRunKeys(self) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
         """

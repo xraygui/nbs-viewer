@@ -122,20 +122,6 @@ class ReverseModel(QSortFilterProxyModel):
         super().__init__(*args, **kwargs)
         self.setDynamicSortFilter(True)
 
-    def filterAcceptsRow(self, source_row, source_parent):
-        model = self.sourceModel()
-        index = model.index(source_row, self.filterKeyColumn(), source_parent)
-        data = model.data(index, Qt.DisplayRole)
-        if data is None:
-            return False
-
-        # Convert data to string if it's not already one
-        data_str = str(data)
-        regex = self.filterRegExp()
-        match = regex.indexIn(data_str) != -1
-        # print(f"Row {source_row}, Data: {data_str}, Match: {match}")
-        return match
-
     def mapFromSource(self, sourceIndex):
         if not sourceIndex.isValid():
             return QModelIndex()
@@ -167,8 +153,29 @@ class ReverseModel(QSortFilterProxyModel):
         """Toggle the inversion of row order and refresh the view."""
         self.invert = not self.invert
         self.sourceModel()._invert = self.invert
-        self.invalidateFilter()  # Use invalidateFilter instead of invalidate
-        self.layoutChanged.emit()  # Notify views that layout has changed
+
+        # Just handle layout change
+        self.layoutAboutToBeChanged.emit()
+        self.layoutChanged.emit()
+
+
+class FilterModel(QSortFilterProxyModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setDynamicSortFilter(True)
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        model = self.sourceModel()
+        source_index = model.index(source_row, self.filterKeyColumn(), source_parent)
+
+        # Get data directly from source model - don't map through proxy
+        data = model.data(source_index, Qt.DisplayRole)
+        if data is None:
+            return False
+
+        data_str = str(data)
+        regex = self.filterRegExp()
+        return regex.indexIn(data_str) != -1
 
 
 class CatalogTableView(QWidget):
@@ -232,26 +239,56 @@ class CatalogTableView(QWidget):
     def on_selection_changed(self, selected, deselected):
         """Handle changes in the selection state of table rows."""
         if self._handling_selection:
-            return  # Skip if we're handling a programmatic selection change
+            return
 
-        proxy_model = self.data_view.model()
-        source_model = proxy_model.sourceModel()
+        # Get the source model by traversing proxy chain
+        model = self.data_view.model()
+        while hasattr(model, "sourceModel"):
+            source_model = model.sourceModel()
+            if not hasattr(source_model, "sourceModel"):
+                break
+            model = source_model
 
         # Handle newly selected items
         for index in selected.indexes():
             if index.column() == 0:  # Only process first column
-                source_index = proxy_model.mapToSource(index)
+                # Map through all proxy models to get source index
+                source_index = index
+                current_model = self.data_view.model()
+                while hasattr(current_model, "mapToSource"):
+                    source_index = current_model.mapToSource(source_index)
+                    current_model = current_model.sourceModel()
+
                 key = source_model.get_key(source_index.row())
                 if key is not None:
                     self._catalog.select_run(key)
 
-        # Handle newly deselected items
+        # Handle deselected items similarly
         for index in deselected.indexes():
-            if index.column() == 0:  # Only process first column
-                source_index = proxy_model.mapToSource(index)
+            if index.column() == 0:
+                source_index = index
+                current_model = self.data_view.model()
+                while hasattr(current_model, "mapToSource"):
+                    source_index = current_model.mapToSource(source_index)
+                    current_model = current_model.sourceModel()
+
                 key = source_model.get_key(source_index.row())
                 if key is not None:
                     self._catalog.deselect_run(key)
+
+    def _handle_invert(self):
+        """Handle inversion by clearing selection and toggling order."""
+
+        # Clear any existing selection
+        selection_model = self.data_view.selectionModel()
+        if selection_model:
+            selection_model.clearSelection()
+
+        # Get models and toggle invert
+        filter_model = self.data_view.model()
+        reverse_model = filter_model.sourceModel()
+        reverse_model.toggleInvert()
+        filter_model.invalidateFilter()
 
     def setupModelAndView(self, catalog):
         """
@@ -262,28 +299,35 @@ class CatalogTableView(QWidget):
         catalog : Catalog
             The catalog to display in the table
         """
+        # Create model chain: source -> reverse -> filter
         table_model = CatalogTableModel(catalog)
-        reverse = ReverseModel()
-        reverse.setSourceModel(table_model)
+        reverse_model = ReverseModel(parent=self.data_view)
+        filter_model = FilterModel(parent=self.data_view)
+
+        # Connect models
+        reverse_model.setSourceModel(table_model)
+        filter_model.setSourceModel(reverse_model)
 
         # Disconnect existing selection model if it exists
         if self.data_view.model() is not None:
             self.data_view.selectionModel().selectionChanged.disconnect()
 
-        self.data_view.setModel(reverse)
+        # Set the filter model as the view's model
+        self.data_view.setModel(filter_model)
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
-        self.filterLineEdit.textChanged.connect(reverse.setFilterRegExp)
-
+        # Connect filter controls to filter model
+        self.filterLineEdit.textChanged.connect(filter_model.setFilterRegExp)
         self.filterComboBox.clear()
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(
-            lambda index: reverse.setFilterKeyColumn(index)
+            lambda index: filter_model.setFilterKeyColumn(index)
         )
 
-        self.invertButton.clicked.connect(reverse.toggleInvert)
+        # Connect invert button to our handler instead
+        self.invertButton.clicked.connect(self._handle_invert)
         self.invertButton.setEnabled(True)
 
     def refresh_filters(self):
@@ -327,8 +371,15 @@ class CatalogTableView(QWidget):
             self._handling_selection = True  # Set flag before making changes
             for index in self.data_view.selectedIndexes():
                 if index.column() == 0:
-                    source_index = self.data_view.model().mapToSource(index)
-                    key = source_index.model().get_key(source_index.row())
+                    # Map through all proxy models to get source index
+                    source_index = index
+                    current_model = self.data_view.model()
+                    while hasattr(current_model, "mapToSource"):
+                        source_index = current_model.mapToSource(source_index)
+                        current_model = current_model.sourceModel()
+
+                    # Get key from source model
+                    key = current_model.get_key(source_index.row())
                     if key in item_uids:
                         selection_model.select(
                             index,
