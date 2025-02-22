@@ -39,17 +39,7 @@ class BlueskyRun(CatalogRun):
         "num_points": "Scan Points",
     }
 
-    @classmethod
-    def METADATA_KEYS(cls):
-        """
-        Define required metadata keys.
-
-        Returns
-        -------
-        list
-            List of required metadata keys
-        """
-        return list(cls._METADATA_MAP.keys())
+    METADATA_KEYS = ["scan_id", "plan_name", "num_points", "date", "uid"]
 
     def __init__(self, run, key, catalog, parent=None):
         """
@@ -182,7 +172,7 @@ class BlueskyRun(CatalogRun):
         tuple
             Values for each metadata key
         """
-        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS())
+        return tuple(getattr(self, attr, None) for attr in self.METADATA_KEYS)
 
     @classmethod
     def to_header(cls):
@@ -194,7 +184,7 @@ class BlueskyRun(CatalogRun):
         list
             Display names for metadata columns
         """
-        attrs = cls.METADATA_KEYS()
+        attrs = cls.METADATA_KEYS
         header_names = [cls.DISPLAY_KEYS.get(attr, attr) for attr in attrs]
         return header_names
 

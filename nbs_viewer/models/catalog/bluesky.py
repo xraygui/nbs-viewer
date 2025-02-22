@@ -143,3 +143,8 @@ class NBSCatalog(BlueskyCatalog):
 
     def wrap_run(self, run, uid):
         return NBSRun(run, uid, self._catalog)
+
+    @property
+    def columns(self) -> List[str]:
+        """Get column names for display."""
+        return NBSRun.to_header()  # Use NBSRun headers instead of BlueskyRun

@@ -19,6 +19,7 @@ class NBSRun(BlueskyRun):
         "edge": ["start", "edge"],
         "sample_name": ["start", "sample_name"],
         "sample_id": ["start", "sample_id"],
+        "exit_status": ["stop", "exit_status"],
         "num_points": [],
     }
 
@@ -34,17 +35,15 @@ class NBSRun(BlueskyRun):
         "num_points": "Scan Points",
     }
 
-    @classmethod
-    def METADATA_KEYS(cls):
-        """
-        Define required metadata keys.
-
-        Returns
-        -------
-        list
-            List of required metadata keys
-        """
-        return list(cls._METADATA_MAP.keys())
+    METADATA_KEYS = [
+        "scan_id",
+        "plan_name",
+        "sample_name",
+        "sample_id",
+        "date",
+        "exit_status",
+        "uid",
+    ]
 
     def __str__(self):
         """
