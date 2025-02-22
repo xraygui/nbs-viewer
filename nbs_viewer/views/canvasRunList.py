@@ -51,13 +51,16 @@ class CanvasRunList(QWidget):
 
         # Create widgets
         self.list_widget = QListWidget(self)
+        self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        self.list_widget.itemChanged.connect(self.handle_item_changed)
+
         self.canvas_controls = CanvasControlWidget(canvas_manager, plot_model, self)
-        self.remove_button = QPushButton("Remove Selected")
+        self.remove_button = QPushButton("Remove Selected Runs")
+        self.remove_button.setToolTip(
+            "Permanently remove selected runs from this canvas"
+        )
 
         # Connect signals
-        self.list_widget.selectionModel().selectionChanged.connect(
-            self._handle_selection_change
-        )
         self.remove_button.clicked.connect(self._remove_selected)
 
         # Layout
@@ -83,11 +86,12 @@ class CanvasRunList(QWidget):
         item = QListWidgetItem(label)
         item.setData(Qt.UserRole, run.uid)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-        item.setCheckState(Qt.Checked)
+        item.setCheckState(
+            Qt.Checked if run.uid in self.plot_model._visible_runs else Qt.Unchecked
+        )
         self.list_widget.addItem(item)
 
         # Connect checkbox state changes
-        self.list_widget.itemChanged.connect(self.handle_item_changed)
 
     def _on_run_added(self, run):
         """Handle new run added to model."""
@@ -122,33 +126,38 @@ class CanvasRunList(QWidget):
         self.plot_model.select_runs(selected_data)
 
     def _on_selection_changed(self, selected_runs):
-        """Update list selection to match model."""
+        """Update checkbox states to match model's visible runs."""
+        print(f"CanvasRunList _on_selection_changed: {len(selected_runs)}")
         try:
-            self._handling_selection = True
-            # Clear current selection
-            self.list_widget.clearSelection()
+            # Block itemChanged signal to prevent recursion
+            self.list_widget.blockSignals(True)
 
-            # Select items corresponding to selected runs
-            selected_uids = {run.uid for run in selected_runs}
+            # Update checkbox states based on visible runs
+            visible_uids = {run.uid for run in selected_runs}
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
-                if item.data(Qt.UserRole) in selected_uids:
-                    item.setSelected(True)
+                uid = item.data(Qt.UserRole)
+                item.setCheckState(Qt.Checked if uid in visible_uids else Qt.Unchecked)
+
         finally:
-            self._handling_selection = False
+            self.list_widget.blockSignals(False)
 
     def _remove_selected(self):
-        """Remove selected runs from the list."""
-        selected_data = []
-        for item in self.list_widget.selectedItems():
+        """Remove selected runs from both the list widget and plot model."""
+        selected_items = self.list_widget.selectedItems()
+
+        for item in selected_items:
             uid = item.data(Qt.UserRole)
             run = next(
                 (rd for rd in self.plot_model.available_runs if rd.uid == uid), None
             )
             if run:
-                selected_data.append(run)
+                # Remove from plot model first
+                self.plot_model.remove_run(run)
 
-        self.plot_model.deselect_runs(selected_data)
+                # Remove from list widget
+                row = self.list_widget.row(item)
+                self.list_widget.takeItem(row)
 
     def addPlotItem(self, plotItem):
         """

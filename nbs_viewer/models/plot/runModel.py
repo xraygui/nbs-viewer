@@ -72,9 +72,9 @@ class RunModel(QObject):
 
     def update_plot(self):
         """Emit data for current selection."""
-        x_keys = self.selected_x
-        y_keys = self.selected_y
-        norm_keys = self.selected_norm
+        x_keys = self.selected_x_keys
+        y_keys = self.selected_y_keys
+        norm_keys = self.selected_norm_keys
 
         should_draw = False
         for existing_x, existing_y in self._artists.keys():
@@ -168,19 +168,22 @@ class RunModel(QObject):
         self._selected_norm.clear()
 
     @property
-    def selected_x(self) -> List[str]:
+    def selected_x_keys(self) -> List[str]:
         """Get selected x-axis keys."""
         return self._selected_x.copy()
 
     @property
-    def selected_y(self) -> List[str]:
+    def selected_y_keys(self) -> List[str]:
         """Get selected y-axis keys."""
         return self._selected_y.copy()
 
     @property
-    def selected_norm(self) -> List[str]:
+    def selected_norm_keys(self) -> List[str]:
         """Get selected normalization keys."""
         return self._selected_norm.copy()
+
+    def get_selected_keys(self):
+        return self.selected_x_keys, self.selected_y_keys, self.selected_norm_keys
 
     def set_selection(
         self,

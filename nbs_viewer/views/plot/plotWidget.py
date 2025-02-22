@@ -283,14 +283,6 @@ class PlotWidget(QWidget):
         for run_model in self.plotModel._run_models.values():
             print(f"  - {run_model._run.display_name} (uid: {run_model._run.uid})")
 
-        print("\nPlot Model Selected Runs:")
-        for uid in self.plotModel._selected_runs:
-            if uid in self.plotModel._run_models:
-                run = self.plotModel._run_models[uid]._run
-                print(f"  - {run.display_name} (uid: {uid})")
-            else:
-                print(f"  - WARNING: Selected uid {uid} not in run models!")
-
         print("\nPlot Model Visible Runs:")
         for uid in self.plotModel._visible_runs:
             if uid in self.plotModel._run_models:

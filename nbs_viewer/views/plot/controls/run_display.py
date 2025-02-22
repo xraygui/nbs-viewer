@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QButtonGroup,
     QScrollArea,
     QSizePolicy,
+    QComboBox,
 )
 
 
@@ -47,17 +48,20 @@ class RunDisplayWidget(QWidget):
         super().__init__(parent)
         self.plotModel = plotModel
         self._show_all = False
+        self._linked_mode = True
+        self._current_run = None
 
         # UI setup
         self._setup_ui()
 
         # Connect signals
         self.plotModel.available_keys_changed.connect(self._update_display)
-        self.plotModel.run_models_changed.connect(self._update_header)
+        self.plotModel.run_models_changed.connect(self._build_header)
         self.plotModel.selection_changed.connect(self._update_checkboxes)
 
         # Initial update
         self._update_display()
+        self._build_header()
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
@@ -65,10 +69,27 @@ class RunDisplayWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Header layout
+        # Header layout with run selection controls
         header_layout = QHBoxLayout()
+
+        # Link runs checkbox
+        self._link_runs_box = QCheckBox("Link Runs")
+        self._link_runs_box.setChecked(True)
+        self._link_runs_box.clicked.connect(self._on_link_mode_changed)
+        header_layout.addWidget(self._link_runs_box)
+
+        # Run selector dropdown
+        self._run_selector = QComboBox()
+        self._run_selector.setEnabled(False)  # Disabled in linked mode
+        self._run_selector.currentIndexChanged.connect(self._on_run_selected)
+        header_layout.addWidget(self._run_selector)
+
+        header_layout.addStretch()
+
+        # Run count label
         self._header_label = QLabel("No Runs Selected")
         header_layout.addWidget(self._header_label)
+
         layout.addLayout(header_layout)
 
         # Show all checkbox
@@ -121,18 +142,48 @@ class RunDisplayWidget(QWidget):
 
         self.setLayout(layout)
 
+    def _build_header(self) -> None:
+        """Update the header label and run selector."""
+        run_models = self.plotModel.get_selected_models()
+        print(f"Building header for {len(run_models)} runs")
+        print(f"{len(self.plotModel._visible_runs)} are visible")
+        print(f"{len(self.plotModel._run_models)} are in run_models")
+        # Block signals during update
+        self._run_selector.blockSignals(True)
+        self._run_selector.clear()
+        for run in run_models:
+            self._run_selector.addItem(f"Run {run.run.scan_id}", run)
+        self._run_selector.blockSignals(False)
+        self._update_header()
+
     def _update_header(self) -> None:
-        """Update the header label with run info."""
-        # print("RunDisplayWidget update_header")
-        self._header_label.setText(self.plotModel.getHeaderLabel())
+        # Update header label
+        if self._linked_mode:
+            self._header_label.setText(self.plotModel.getHeaderLabel())
+        elif self._current_run:
+            self._header_label.setText(f"Run {self._current_run.run.scan_id}")
+        else:
+            self._header_label.setText("No Run Selected")
 
     def _update_display(self) -> None:
         """Update the key selection grid."""
-        # Clear existing grid
         self._clear_grid()
 
-        # Get common keys across controllers
-        available_keys = self.plotModel.available_keys
+        # Get keys based on mode
+        if self._linked_mode:
+            available_keys = self.plotModel.available_keys
+            selected_x, selected_y, selected_norm = self.plotModel.get_selected_keys()
+        elif self._current_run:
+            available_keys = self._current_run.available_keys
+            selected_x, selected_y, selected_norm = (
+                self._current_run.get_selected_keys()
+            )
+        else:
+            available_keys = []
+            selected_x = []
+            selected_y = []
+            selected_norm = []
+
         # Ensure "time" is first if present
         if "time" in available_keys:
             available_keys = ["time"] + [k for k in available_keys if k != "time"]
@@ -146,14 +197,11 @@ class RunDisplayWidget(QWidget):
             self._grid.addWidget(header, 0, i)
 
         # Create checkbox groups
-        self._x_group = QButtonGroup(self)
-        self._x_group.setExclusive(True)
+        self._x_group = ExclusiveCheckBoxGroup(self)  # X stays exclusive
         self._y_group = QButtonGroup(self)
-        self._y_group.setExclusive(False)
+        self._y_group.setExclusive(False)  # Allow multiple Y selections
         self._norm_group = QButtonGroup(self)
-        self._norm_group.setExclusive(False)
-
-        # Create button to key mappings
+        self._norm_group.setExclusive(False)  # Allow multiple norm selections
         self._button_key_map = {}
 
         # Add key rows
@@ -168,7 +216,7 @@ class RunDisplayWidget(QWidget):
             # X checkbox
             x_box = QCheckBox()
             x_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            x_box.setChecked(self.plotModel.is_key_selected(key, "x"))
+            x_box.setChecked(key in selected_x)
             self._grid.addWidget(x_box, i + 1, 1)
             self._x_group.addButton(x_box)
             self._button_key_map[x_box] = key
@@ -176,7 +224,7 @@ class RunDisplayWidget(QWidget):
             # Y checkbox
             y_box = QCheckBox()
             y_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            y_box.setChecked(self.plotModel.is_key_selected(key, "y"))
+            y_box.setChecked(key in selected_y)
             self._grid.addWidget(y_box, i + 1, 2)
             self._y_group.addButton(y_box)
             self._button_key_map[y_box] = key
@@ -190,7 +238,7 @@ class RunDisplayWidget(QWidget):
             # Norm checkbox
             norm_box = QCheckBox()
             norm_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
-            norm_box.setChecked(self.plotModel.is_key_selected(key, "norm"))
+            norm_box.setChecked(key in selected_norm)
             self._grid.addWidget(norm_box, i + 1, 4)
             self._norm_group.addButton(norm_box)
             self._button_key_map[norm_box] = key
@@ -238,10 +286,7 @@ class RunDisplayWidget(QWidget):
         self._on_checkbox_changed()
 
     def _on_checkbox_changed(self) -> None:
-        """Handle checkbox state changes without forcing plot updates."""
-        # Get selected keys using the button-key mapping
-        # print("RunDisplayWidget _on_checkbox_changed")
-
+        """Handle checkbox state changes."""
         x_keys = [
             self._button_key_map[button]
             for button in self._x_group.buttons()
@@ -260,11 +305,13 @@ class RunDisplayWidget(QWidget):
             if button.isChecked()
         ]
 
-        # Update the plot model with the new selection (no force update)
-        if hasattr(self.plotModel, "set_selection"):
+        if self._linked_mode:
             self.plotModel.set_selection(x_keys, y_keys, norm_keys, force_update=False)
-        else:
-            self.selection_changed.emit(x_keys, y_keys, norm_keys)
+        elif self._current_run:
+            print(f"Setting selection for current run: {x_keys}, {y_keys}, {norm_keys}")
+            self._current_run.set_selection(
+                x_keys, y_keys, norm_keys, force_update=True
+            )
 
     def _on_update_clicked(self) -> None:
         """Handle Update Selection button clicks by forcing plot update."""
@@ -294,6 +341,63 @@ class RunDisplayWidget(QWidget):
         else:
             self.selection_changed.emit(x_keys, y_keys, norm_keys)
 
+    def _on_link_mode_changed(self) -> None:
+        """Handle linking/unlinking of runs."""
+        self._linked_mode = self._link_runs_box.isChecked()
+        self._run_selector.setEnabled(not self._linked_mode)
+
+        if self._linked_mode:
+            self._synchronize_selections()
+            self._update_display()
+            self._update_header()
+        else:
+            if not self._current_run and self._run_selector.count() > 0:
+                self._run_selector.setCurrentIndex(0)
+            self._on_run_selected()
+
+    def _on_run_selected(self) -> None:
+        """Handle run selection in unlinked mode."""
+        print("RunDisplayWidget _on_run_selected")
+        if self._linked_mode:
+            print("_linked_mode is True, how did we get here?")
+            return
+
+        self._current_run = self._run_selector.currentData()
+        print(f"self._current_run: {self._current_run.run.scan_id}")
+        self._update_display()
+        self._update_header()
+
+    def _synchronize_selections(self) -> None:
+        """Find common selections across all runs and apply them."""
+        run_models = self.plotModel.get_selected_models()
+        if not run_models:
+            return
+
+        # Get selections from all runs
+        x_selections = set()
+        y_selections = set()
+        norm_selections = set()
+        first = True
+
+        for run in run_models:
+            if first:
+                x_selections = set(run.selected_x_keys)
+                y_selections = set(run.selected_y_keys)
+                norm_selections = set(run.selected_norm_keys)
+                first = False
+            else:
+                x_selections &= set(run.selected_x_keys)
+                y_selections &= set(run.selected_y_keys)
+                norm_selections &= set(run.selected_norm_keys)
+
+        # Apply common selections
+        self.plotModel.set_selection(
+            list(x_selections),
+            list(y_selections),
+            list(norm_selections),
+            force_update=True,
+        )
+
     def _update_checkboxes(self, x_keys, y_keys, norm_keys):
         """Update checkbox states from model."""
         if not hasattr(self, "_x_group"):
@@ -304,20 +408,23 @@ class RunDisplayWidget(QWidget):
             for button in group.buttons():
                 button.blockSignals(True)
 
-        # Update states
-        for button in self._x_group.buttons():
-            key = self._button_key_map[button]
-            button.setChecked(self.plotModel.is_key_selected(key, "x"))
+        try:
+            # Update states
+            for button in self._x_group.buttons():
+                key = self._button_key_map[button]
+                button.setChecked(key in x_keys)
 
-        for button in self._y_group.buttons():
-            key = self._button_key_map[button]
-            button.setChecked(self.plotModel.is_key_selected(key, "y"))
+            for button in self._y_group.buttons():
+                key = self._button_key_map[button]
+                button.setChecked(key in y_keys)
 
-        for button in self._norm_group.buttons():
-            key = self._button_key_map[button]
-            button.setChecked(self.plotModel.is_key_selected(key, "norm"))
-
-        # Unblock signals
-        for group in [self._x_group, self._y_group, self._norm_group]:
-            for button in group.buttons():
-                button.blockSignals(False)
+            for button in self._norm_group.buttons():
+                key = self._button_key_map[button]
+                button.setChecked(key in norm_keys)
+        except Exception as e:
+            print(f"Error in _update_checkboxes: {e}")
+        finally:
+            # Always unblock signals
+            for group in [self._x_group, self._y_group, self._norm_group]:
+                for button in group.buttons():
+                    button.blockSignals(False)

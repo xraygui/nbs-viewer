@@ -42,7 +42,7 @@ class PlotModel(QObject):
         """
         super().__init__()
         self._run_models = {}  # run_uid -> RunModel
-        self._selected_runs = set()  # Set of selected run UIDs
+        # self._selected_runs = set()  # Set of selected run UIDs
         self._is_main_canvas = is_main_canvas
         self._available_keys = set()
         self._current_x_keys = []
@@ -147,7 +147,7 @@ class PlotModel(QObject):
         for run in run_list:
             uid = run.uid
             if uid in self._run_models:
-                self._selected_runs.add(uid)
+                self._visible_runs.add(uid)
 
         self._update_plot_from_selection()
         self.run_selection_changed.emit(self.selected_runs)
@@ -163,8 +163,8 @@ class PlotModel(QObject):
         """
         for run in run_list:
             uid = run.uid
-            if uid in self._selected_runs:
-                self._selected_runs.remove(uid)
+            if uid in self._visible_runs:
+                self._visible_runs.remove(uid)
 
         self._update_plot_from_selection()
         self.run_selection_changed.emit(self.selected_runs)
@@ -179,7 +179,7 @@ class PlotModel(QObject):
             selected_models = [
                 model
                 for uid, model in self._run_models.items()
-                if uid in self._selected_runs
+                if uid in self._visible_runs
             ]
 
         self.run_models_changed.emit(selected_models)
@@ -190,7 +190,7 @@ class PlotModel(QObject):
         """Get list of currently selected RunData objects."""
         return [
             self._run_models[uid]._run
-            for uid in self._selected_runs
+            for uid in self._visible_runs
             if uid in self._run_models
         ]
 
@@ -301,6 +301,10 @@ class PlotModel(QObject):
             # print("PlotModel set_selection calling _update_plot")
             self._update_plot()
 
+    def get_selected_keys(self):
+        """Get selected keys from all run models."""
+        return self._current_x_keys, self._current_y_keys, self._current_norm_keys
+
     def _update_plot(self) -> None:
         """
         Update all run models and trigger plot redraw.
@@ -354,8 +358,6 @@ class PlotModel(QObject):
         run_model = RunModel(run)
         self._connect_run_model(run_model)
         self._run_models[uid] = run_model
-        self._visible_runs.add(uid)
-
         # Update available keys first
         self.update_available_keys()
 
@@ -380,10 +382,10 @@ class PlotModel(QObject):
         self.run_added.emit(run)
 
         # Handle main canvas auto-selection
-        if self._is_main_canvas:
-            self._selected_runs.add(uid)
+        if self._is_main_canvas or self._auto_add:
+            # self._selected_runs.add(uid)
+            self.update_visibility(run, True)
             self._update_plot_from_selection()
-            self.run_selection_changed.emit(self.selected_runs)
 
         # Force plot update and legend refresh
         self._update_plot()
@@ -405,8 +407,8 @@ class PlotModel(QObject):
             run_model.cleanup()
 
             # Clean up all references to this run
-            if uid in self._selected_runs:
-                self._selected_runs.remove(uid)
+            # if uid in self._selected_runs:
+            #    self._selected_runs.remove(uid)
             if uid in self._visible_runs:  # Add this cleanup
                 self._visible_runs.remove(uid)
 
@@ -436,6 +438,7 @@ class PlotModel(QObject):
             else:
                 self._visible_runs.discard(uid)
             run_model.set_visible(is_visible)
+            self.run_selection_changed.emit(self.selected_runs)
 
     @property
     def current_selection(self) -> tuple:
@@ -476,7 +479,7 @@ class PlotModel(QObject):
 
     def get_selected_runs(self):
         """
-        Get currently selected runs.
+        Get currently selected CatalogRun. Objects (not RunModels!)
 
         Returns
         -------
@@ -487,7 +490,17 @@ class PlotModel(QObject):
         return [
             model._run
             for model in self._run_models.values()
-            if model._run.uid in self._selected_runs
+            if model._run.uid in self._visible_runs
+        ]
+
+    def get_selected_models(self):
+        """
+        Get currently selected RunModels.
+        """
+        return [
+            model
+            for model in self._run_models.values()
+            if model._run.uid in self._visible_runs
         ]
 
     def cleanup_state(self):
@@ -495,4 +508,4 @@ class PlotModel(QObject):
         # Remove any visible or selected runs that aren't in run_models
         valid_uids = set(self._run_models.keys())
         self._visible_runs.intersection_update(valid_uids)
-        self._selected_runs.intersection_update(valid_uids)
+        # self._selected_runs.intersection_update(valid_uids)

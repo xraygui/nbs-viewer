@@ -12,6 +12,7 @@ from .controls.auto_add import AutoAddControl
 from .controls.dynamic_update import DynamicUpdateControl
 from .controls.transform import TransformControl
 from .controls.retain_selection import RetainSelectionControl
+from .metadataView import MetadataViewer
 
 
 class PlotControls(QWidget):
@@ -43,9 +44,8 @@ class PlotControls(QWidget):
         # Create the metadata tab
         self.metadata_tab = QWidget()
         self.metadata_layout = QVBoxLayout(self.metadata_tab)
-        self.metadata_tree = QTreeWidget()
-        self.metadata_tree.setHeaderLabels(["Key", "Value"])
-        self.metadata_layout.addWidget(self.metadata_tree)
+        self.metadata_viewer = MetadataViewer(plotModel)
+        self.metadata_layout.addWidget(self.metadata_viewer)
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.plot_control_tab, "Plot Controls")
