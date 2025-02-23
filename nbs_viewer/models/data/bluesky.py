@@ -321,7 +321,7 @@ class BlueskyRun(CatalogRun):
 
     def getRunKeys(self):
         """
-        Get the run keys without shape information initially.
+        Get the run keys, grouping related motor signals together.
 
         Returns
         -------
@@ -340,18 +340,30 @@ class BlueskyRun(CatalogRun):
             t0 = time.time()
             logging.debug(f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s")
 
-            t1 = time.time()
-            xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
-            logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
-
             # Initialize dictionaries
             xkeys = {}
-            ykeys = {1: [], 2: []}  # We'll determine actual dimensions later
+            ykeys = {1: [], 2: []}
 
             # Handle time key if present
             if "time" in all_keys:
                 xkeys[0] = ["time"]
                 all_keys.remove("time")
+
+            # Get dimension hints and try to get object keys from descriptors
+            t1 = time.time()
+            xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
+
+            # Try to get object keys from descriptors
+            object_keys = {}
+            try:
+                descriptors = self._run.primary.descriptors
+                if descriptors:
+                    object_keys = descriptors[0].get("object_keys", {})
+            except Exception as e:
+                logging.debug(f"Could not get object_keys from descriptors: {e}")
+                object_keys = {}
+
+            logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
 
             # Process dimension hints
             t2 = time.time()
@@ -359,16 +371,27 @@ class BlueskyRun(CatalogRun):
                 axlist = dimension[0]
                 xkeys[i + 1] = []
                 for ax in axlist:
+                    # Add the main key
                     if ax in all_keys:
                         all_keys.remove(ax)
                         xkeys[i + 1].append(ax)
+
+                        # Add related keys from object_keys
+                        if object_keys and ax in object_keys:
+                            for related_key in object_keys[ax]:
+                                if related_key != ax and related_key in all_keys:
+                                    all_keys.remove(related_key)
+                                    xkeys[i + 1].append(related_key)
+
                 if len(xkeys[i + 1]) == 0:
                     xkeys.pop(i + 1)
+
             logging.debug(f"Processing hints took: {time.time() - t2:.3f}s")
 
             # All remaining keys go to ykeys[1] initially
             ykeys[1] = all_keys
-
+            # print(f"xkeys: {xkeys}")
+            # print(f"ykeys: {ykeys}")
             logging.debug(f"Total getRunKeys took: {time.time() - t_start:.3f}s")
             return xkeys, ykeys
         except Exception as e:
@@ -413,14 +436,3 @@ class BlueskyRun(CatalogRun):
         """
         status = self.get_md_value(["stop", "exit_status"], "")
         return status == "success"
-
-    def getAvailableKeys(self) -> List[str]:
-        """
-        Get list of all available data keys.
-
-        Returns
-        -------
-        List[str]
-            List of available keys
-        """
-        return list(self._run["primary", "data"].keys())

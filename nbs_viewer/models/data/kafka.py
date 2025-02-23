@@ -312,10 +312,7 @@ class KafkaRun(CatalogRun):
 
     def getRunKeys(self):
         """
-        Get the x and y keys for this run.
-
-        This method organizes keys from the descriptor into x and y axes,
-        using hints from the start document to determine dimensions.
+        Get the x and y keys for this run, grouping related motor signals together.
 
         Returns
         -------
@@ -325,27 +322,49 @@ class KafkaRun(CatalogRun):
         xkeys = defaultdict(list)
         ykeys = defaultdict(list)
 
+        # Get dimension hints from start doc
         dimensions = self.hints.get("dimensions", [])
         if not dimensions and self.motors:
             dimensions = [([motor], "primary") for motor in self.motors]
         elif not dimensions:
             dimensions = [(["time"], "primary")]
 
+        # Try to get object keys from descriptors
+        object_keys = {}
+        try:
+            for desc in self._descriptors.values():
+                if desc.get("name") == "primary":
+                    object_keys = desc.get("object_keys", {})
+                    break
+        except Exception as e:
+            print(f"Could not get object_keys from descriptors: {e}")
+
+        # Process dimension hints and add related motor signals
         for fields, stream in dimensions:
             if fields:
-                xkeys[1].append(fields[0])
+                main_key = fields[0]
+                xkeys[1].append(main_key)
 
+                # Add related keys from object_keys
+                if object_keys and main_key in object_keys:
+                    for related_key in object_keys[main_key]:
+                        if related_key != main_key:
+                            xkeys[1].append(related_key)
+
+        # Always include time in dimension 0
         if "time" not in xkeys[0]:
             xkeys[0].append("time")
 
+        # Add remaining keys as y values
         for desc in self._descriptors.values():
             if desc.get("name") == "primary":
                 data_keys = desc.get("data_keys", {})
-
                 for key in data_keys:
                     if not any(key in xlist for xlist in xkeys.values()):
                         ykeys[1].append(key)
 
+        # print(f"xkeys: {dict(xkeys)}")
+        # print(f"ykeys: {dict(ykeys)}")
         return dict(xkeys), dict(ykeys)
 
     def getAxis(self, keys):
@@ -379,17 +398,6 @@ class KafkaRun(CatalogRun):
         For Kafka runs, this is a no-op as data is updated via process_event.
         """
         pass
-
-    def getAvailableKeys(self) -> List[str]:
-        """
-        Get list of all available data keys.
-
-        Returns
-        -------
-        List[str]
-            List of available keys
-        """
-        return list(self._data_buffer.keys())
 
     def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
         """

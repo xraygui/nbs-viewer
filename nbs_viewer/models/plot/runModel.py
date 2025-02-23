@@ -34,7 +34,7 @@ class RunModel(QObject):
         self._selected_norm: List[str] = []
         self._artists = {}
         self._is_visible = True  # Track overall visibility state
-        self._available_keys = set()  # Track our own copy of available keys
+        self._available_keys = list()  # Track our own copy of available keys
 
         # Initialize state
         self._update_available_keys()  # Initial key setup
@@ -49,14 +49,14 @@ class RunModel(QObject):
         return self._run
 
     @property
-    def available_keys(self) -> Set[str]:
+    def available_keys(self) -> List[str]:
         """Get the set of available keys."""
         return self._available_keys
 
     def _update_available_keys(self) -> None:
         """Update internal available keys from run."""
-        new_keys = set(self._run.available_keys)
-        if new_keys != self._available_keys:
+        new_keys = self._run.available_keys
+        if set(new_keys) != set(self._available_keys):
             self._available_keys = new_keys
             self.available_keys_changed.emit()
 

@@ -44,7 +44,7 @@ class PlotModel(QObject):
         self._run_models = {}  # run_uid -> RunModel
         # self._selected_runs = set()  # Set of selected run UIDs
         self._is_main_canvas = is_main_canvas
-        self._available_keys = set()
+        self._available_keys = list()
         self._current_x_keys = []
         self._current_y_keys = []
         self._current_norm_keys = []
@@ -63,7 +63,7 @@ class PlotModel(QObject):
             return f"Multiple Runs Selected ({len(self._run_models)})"
 
     @property
-    def available_keys(self) -> set:
+    def available_keys(self) -> list:
         """Get available data keys."""
         return self._available_keys
 
@@ -82,7 +82,7 @@ class PlotModel(QObject):
 
         # Get intersection of keys from all models
         first_model = next(iter(self._run_models.values()))
-        available_keys = list(first_model.available_keys)
+        available_keys = first_model.available_keys
         for model in self._run_models.values():
             available_keys = [
                 key for key in available_keys if key in model.available_keys

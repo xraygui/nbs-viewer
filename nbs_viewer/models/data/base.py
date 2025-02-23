@@ -207,16 +207,37 @@ class CatalogRun(QObject):
         """
         return len(self.getShape(key))
 
-    def getAvailableKeys(self) -> List[str]:
+    def getAvailableKeys(self):
         """
-        Get list of all available data keys.
+        Get available data keys sorted by dimension and type.
 
         Returns
         -------
         List[str]
-            List of available keys
+            List of available data keys, sorted as:
+            1. x keys dimension 0 (e.g. time)
+            2. x keys dimension 1 (e.g. motor positions)
+            3. y keys dimension 1 (e.g. detector signals)
+            4. y keys dimension 2+ if any
         """
-        pass
+        # Get organized keys from getRunKeys
+        xkeys, ykeys = self.getRunKeys()
+        # Initialize sorted key list
+        sorted_keys = []
+
+        # Add x keys in order of dimension
+        for dim in sorted(xkeys.keys()):
+            for key in sorted(xkeys[dim]):
+                if key not in sorted_keys:
+                    sorted_keys.append(key)
+
+        # Add y keys in order of dimension
+        for dim in sorted(ykeys.keys()):
+            for key in sorted(ykeys[dim]):
+                if key not in sorted_keys:
+                    sorted_keys.append(key)
+        # print(f"Sorted keys: {sorted_keys}")
+        return sorted_keys
 
     def getAxisHints(self) -> Dict[str, List[List[str]]]:
         """
@@ -506,21 +527,8 @@ class CatalogRun(QObject):
     def _initialize_keys(self):
         """Initialize available keys safely."""
         try:
-            # Get all keys from run
-            xkeys, ykeys = self.getRunKeys()
-
-            # Collect all keys from both dictionaries while preserving order
-            all_keys = []
-            for keys in xkeys.values():
-                for key in keys:
-                    if key not in all_keys:
-                        all_keys.append(key)
-            for keys in ykeys.values():
-                for key in keys:
-                    if key not in all_keys:
-                        all_keys.append(key)
-
-            self._available_keys = all_keys
+            self._available_keys = self.getAvailableKeys()
+            # print(f"Available keys: {self._available_keys}")
         except Exception as e:
             print(f"Error initializing keys: {e}")
             self._available_keys = []
