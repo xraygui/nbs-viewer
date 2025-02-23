@@ -150,6 +150,7 @@ class PlotModel(QObject):
                 self._visible_runs.add(uid)
 
         self._update_plot_from_selection()
+        # print(f"select_runs: {len(self.selected_runs)}")
         self.run_selection_changed.emit(self.selected_runs)
 
     def deselect_runs(self, run_list):
@@ -430,15 +431,10 @@ class PlotModel(QObject):
         is_visible : bool
             New visibility state
         """
-        uid = run.uid
-        if uid in self._run_models:
-            run_model = self._run_models[uid]
-            if is_visible:
-                self._visible_runs.add(uid)
-            else:
-                self._visible_runs.discard(uid)
-            run_model.set_visible(is_visible)
-            self.run_selection_changed.emit(self.selected_runs)
+        if is_visible:
+            self.select_runs([run])
+        else:
+            self.deselect_runs([run])
 
     @property
     def current_selection(self) -> tuple:

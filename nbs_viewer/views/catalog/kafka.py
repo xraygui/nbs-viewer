@@ -147,66 +147,70 @@ class KafkaView(CatalogTableView):
     def refresh_filters(self):
         self.setupModelAndView(self._catalog)
 
-    def _handle_new_run(self, run_uid: str):
-        """Handle new run from Kafka stream."""
-        # print("KafkaView _handle_new_run")
+    def _handle_new_run(self, run_uid):
+        """Handle a new run being added to the catalog."""
         if not self.autoPlotCheckBox.isChecked():
-            # print("Auto-plotting is not enabled")
             return
 
-        # print("Auto-plotting new run")
-        try:
-            # Store currently selected indices if we need to deselect them later
-            old_selection = (
-                self.data_view.selectionModel().selectedRows()
-                if self.autoRemoveCheckBox.isChecked()
-                else []
-            )
+        # Get the base source model by traversing proxy models
+        source_model = self.data_view.model()
+        while hasattr(source_model, "sourceModel"):
+            source_model = source_model.sourceModel()
 
-            # Get the proxy and source models
-            proxy_model = self.data_view.model()
-            source_model = proxy_model.sourceModel()
+        # Store currently selected indices
+        old_selection = (
+            self.data_view.selectionModel().selectedRows()
+            if self.autoRemoveCheckBox.isChecked()
+            else None
+        )
 
-            # Create a timer to check for the key periodically
-            timer = QTimer(self)
-            attempts = [0]
-            max_attempts = 10
+        def check_for_key():
+            for row in range(source_model.rowCount()):
+                key = source_model.get_key(row)
+                if key == run_uid:
+                    # Create source index
+                    source_index = source_model.index(row, 0)
 
-            def check_for_key():
-                # print(f"Checking for run {run_uid} (attempt {attempts[0] + 1})")
-                for row in range(source_model.rowCount()):
-                    key = source_model.get_key(row)
-                    # print(f"Got Row Key: {key}")
-                    if key == run_uid:
-                        # Found the row, select it
-                        source_index = source_model.createIndex(row, 0)
-                        proxy_index = proxy_model.mapFromSource(source_index)
+                    # Map through each proxy model in the chain
+                    proxy_index = source_index
+                    model = self.data_view.model()
+                    while hasattr(model, "sourceModel"):
+                        if model.sourceModel() == proxy_index.model():
+                            proxy_index = model.mapFromSource(proxy_index)
+                        model = model.sourceModel()
 
-                        # If auto-remove is enabled, deselect old rows first
-                        if self.autoRemoveCheckBox.isChecked() and old_selection:
-                            # Clear old selection - this will trigger on_selection_changed
-                            self.data_view.selectionModel().clearSelection()
+                    if self.autoRemoveCheckBox.isChecked() and old_selection:
+                        self.data_view.selectionModel().clearSelection()
 
-                        # Select the new run - this will trigger on_selection_changed
-                        self.data_view.selectionModel().select(
-                            proxy_index,
-                            QItemSelectionModel.Select | QItemSelectionModel.Rows,
-                        )
-                        self.data_view.scrollTo(proxy_index)
-                        # print(f"Auto-selected new run: {run_uid}")
-                        timer.stop()
-                        return
+                    self.data_view.selectionModel().select(
+                        proxy_index,
+                        QItemSelectionModel.Select | QItemSelectionModel.Rows,
+                    )
+                    self.data_view.scrollTo(proxy_index)
+                    return True
+            return False
 
-                attempts[0] += 1
-                if attempts[0] >= max_attempts:
-                    print(f"Failed to find run {run_uid} after {max_attempts} attempts")
-                    timer.stop()
+        if check_for_key():
+            # print(f"Auto-selected new run: {run_uid}")
+            return
 
-            timer.timeout.connect(check_for_key)
-            timer.start(100)  # Check every 100ms
+        # Create a timer to check for the key periodically
+        timer = QTimer(self)
+        attempts = [0]
+        max_attempts = 10
 
-        except Exception as e:
-            print(f"Error setting up auto-selection for run {run_uid}: {str(e)}")
+        def check_for_key_timer():
+            if check_for_key():
+                timer.stop()
+                return
+
+            attempts[0] += 1
+            if attempts[0] >= max_attempts:
+                print(f"Failed to find run {run_uid} after {max_attempts} attempts")
+                timer.stop()
+
+        timer.timeout.connect(check_for_key_timer)
+        timer.start(100)  # Check every 100ms
 
     def _show_remove_warning(self, count: int) -> bool:
         """Show warning dialog before removing runs.

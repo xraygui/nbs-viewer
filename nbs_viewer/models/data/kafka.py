@@ -39,17 +39,7 @@ class KafkaRun(CatalogRun):
         "sample_name": "Sample",
     }
 
-    @classmethod
-    def METADATA_KEYS(cls):
-        """
-        Define required metadata keys.
-
-        Returns
-        -------
-        list
-            List of required metadata keys
-        """
-        return list(cls._METADATA_MAP.keys())
+    METADATA_KEYS = ["scan_id", "uid", "time", "num_points", "plan_name", "sample_name"]
 
     @classmethod
     def to_header(cls):

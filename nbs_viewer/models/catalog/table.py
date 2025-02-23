@@ -120,6 +120,7 @@ class CatalogTableModel(QAbstractTableModel):
         """
         # print(f"Getting chunk {start} to {stop}")
         chunk = list(self._catalog.items_slice(slice(start, stop + 1)))
+        # print(f"Chunk: {chunk}")
         return [(key, run.to_row()) for key, run in chunk]
 
     def data(self, index, role=Qt.DisplayRole):

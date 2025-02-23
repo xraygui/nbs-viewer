@@ -8,9 +8,11 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QAbstractItemView,
     QInputDialog,
+    QMessageBox,
 )
 from qtpy.QtCore import Qt, Signal
 from .plot.canvasControl import CanvasControlWidget
+from ..models.data.combined import CombinedRun, CombinationMethod
 
 
 class CanvasRunList(QWidget):
@@ -60,6 +62,10 @@ class CanvasRunList(QWidget):
             "Permanently remove selected runs from this canvas"
         )
 
+        # Add combine button
+        self.combine_button = QPushButton("Combine Selected Runs")
+        self.combine_button.clicked.connect(self._combine_selected_runs)
+
         # Connect signals
         self.remove_button.clicked.connect(self._remove_selected)
 
@@ -67,6 +73,7 @@ class CanvasRunList(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.list_widget)
         layout.addWidget(self.remove_button)
+        layout.addWidget(self.combine_button)
         layout.addWidget(self.canvas_controls)
 
         # Connect to model signals
@@ -205,7 +212,41 @@ class CanvasRunList(QWidget):
     def handle_item_changed(self, item):
         """Handle checkbox state changes."""
         uid = item.data(Qt.UserRole)
+        print(f"handle_item_changed: {uid}")
         run = next((rd for rd in self.plot_model.available_runs if rd.uid == uid), None)
         if run:
             is_visible = item.checkState() == Qt.Checked
             self.plot_model.update_visibility(run, is_visible)
+
+    def _combine_selected_runs(self):
+        """Create a combined run from selected runs."""
+        # Get selected items from list widget
+        selected_items = self.list_widget.selectedItems()
+        if len(selected_items) < 2:
+            QMessageBox.warning(
+                self, "Cannot Combine", "Please select at least 2 runs to combine"
+            )
+            return
+
+        # Get CatalogRun objects for selected items
+        runs = []
+        for item in selected_items:
+            uid = item.data(Qt.UserRole)
+            run_model = self.plot_model._run_models.get(uid)
+            if run_model:
+                runs.append(run_model.run)
+
+        if len(runs) < 2:  # Double check we got valid runs
+            QMessageBox.warning(
+                self, "Cannot Combine", "Could not get valid runs from selection"
+            )
+            return
+
+        # Create combined run
+        combined_run = CombinedRun(runs=runs, method=CombinationMethod.AVERAGE)
+
+        # Add to plot model
+        self.plot_model.add_run(combined_run)
+
+        # Clear selection
+        self.list_widget.clearSelection()
