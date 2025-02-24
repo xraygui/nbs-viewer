@@ -54,13 +54,13 @@ class PlotModel(QObject):
         self._visible_runs = set()  # Track visible run UIDs
 
     def getHeaderLabel(self) -> str:
-        if len(self._run_models) == 0:
+        if len(self._visible_runs) == 0:
             return "No Runs Selected"
-        elif len(self._run_models) == 1:
-            run = next(iter(self._run_models.values()))._run
+        elif len(self._visible_runs) == 1:
+            run = self.get_selected_runs()[0]
             return f"Run: {run.plan_name} ({run.scan_id})"
         else:
-            return f"Multiple Runs Selected ({len(self._run_models)})"
+            return f"Multiple Runs Selected ({len(self._visible_runs)})"
 
     @property
     def available_keys(self) -> list:
@@ -73,7 +73,9 @@ class PlotModel(QObject):
 
     def update_available_keys(self) -> None:
         """Update available keys and maintain selection state."""
-        if not self._run_models:
+        # print("Updating available keys in PlotModel")
+        models = self.get_selected_models()
+        if not models:
             if not self._retain_selection:
                 self._available_keys = []
                 # Clear selection if not retaining
@@ -81,9 +83,9 @@ class PlotModel(QObject):
             return
 
         # Get intersection of keys from all models
-        first_model = next(iter(self._run_models.values()))
+        first_model = models[0]
         available_keys = first_model.available_keys
-        for model in self._run_models.values():
+        for model in models:
             available_keys = [
                 key for key in available_keys if key in model.available_keys
             ]
@@ -148,7 +150,9 @@ class PlotModel(QObject):
             uid = run.uid
             if uid in self._run_models:
                 self._visible_runs.add(uid)
+                self._run_models[uid].set_visible(True)
 
+        self.update_available_keys()
         self._update_plot_from_selection()
         # print(f"select_runs: {len(self.selected_runs)}")
         self.run_selection_changed.emit(self.selected_runs)
@@ -166,8 +170,11 @@ class PlotModel(QObject):
             uid = run.uid
             if uid in self._visible_runs:
                 self._visible_runs.remove(uid)
+                self._run_models[uid].set_visible(False)
 
+        self.update_available_keys()
         self._update_plot_from_selection()
+        # print(f"deselect_runs: {len(run_list)}")
         self.run_selection_changed.emit(self.selected_runs)
 
     def _update_plot_from_selection(self):
@@ -182,7 +189,7 @@ class PlotModel(QObject):
                 for uid, model in self._run_models.items()
                 if uid in self._visible_runs
             ]
-
+        # print("Emitting run_models_changed")
         self.run_models_changed.emit(selected_models)
         self._update_plot()
 

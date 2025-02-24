@@ -168,7 +168,6 @@ class RunDisplayWidget(QWidget):
     def _update_display(self) -> None:
         """Update the key selection grid."""
         self._clear_grid()
-
         # Get keys based on mode
         if self._linked_mode:
             available_keys = self.plotModel.available_keys

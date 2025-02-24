@@ -212,7 +212,7 @@ class CanvasRunList(QWidget):
     def handle_item_changed(self, item):
         """Handle checkbox state changes."""
         uid = item.data(Qt.UserRole)
-        print(f"handle_item_changed: {uid}")
+        # print(f"handle_item_changed: {uid}")
         run = next((rd for rd in self.plot_model.available_runs if rd.uid == uid), None)
         if run:
             is_visible = item.checkState() == Qt.Checked

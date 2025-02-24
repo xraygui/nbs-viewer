@@ -34,7 +34,7 @@ class CombinedRun(CatalogRun):
         parent=None,
     ):
         # Generate a unique ID for this combined run
-        uid = f"combined_{uuid.uuid4()}"
+        uid = str(uuid.uuid4())
         # Use first run's metadata for display but with our generated uid
         first_run = runs[0] if runs else None
         super().__init__(first_run, uid, parent=parent)
