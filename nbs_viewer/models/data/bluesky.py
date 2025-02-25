@@ -130,8 +130,18 @@ class BlueskyRun(CatalogRun):
         if not isinstance(keys, (list, tuple)):
             keys = [keys]
         value = self.metadata
+        if value is None:
+            return default
+
+        if not hasattr(value, "get"):
+            print(f"Got bad metadata in get_md_value {value}")
+            return default
+
         for key in keys:
             value = value.get(key, {})
+            if not value:
+                value = default
+                break
         if value == {}:
             value = default
         return value

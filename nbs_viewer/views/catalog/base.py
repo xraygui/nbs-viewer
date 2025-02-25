@@ -13,7 +13,6 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import (
     Qt,
-    Signal,
     QSortFilterProxyModel,
     QItemSelectionModel,
     QModelIndex,
@@ -94,7 +93,8 @@ class CustomHeaderView(QHeaderView):
 
     def getColumnName(self, column_index):
         """
-        Returns the name of the column at the specified index in the given QTableView.
+        Returns the name of the column at the specified index in the given
+        QTableView.
 
         Parameters
         ----------
@@ -241,24 +241,14 @@ class CatalogTableView(QWidget):
         if self._handling_selection:
             return
 
-        # Get the source model by traversing proxy chain
-        model = self.data_view.model()
-        while hasattr(model, "sourceModel"):
-            source_model = model.sourceModel()
-            if not hasattr(source_model, "sourceModel"):
-                break
-            model = source_model
+        # Get the source model using our utility method
+        source_model = self.get_source_model()
 
         # Handle newly selected items
         for index in selected.indexes():
             if index.column() == 0:  # Only process first column
                 # Map through all proxy models to get source index
-                source_index = index
-                current_model = self.data_view.model()
-                while hasattr(current_model, "mapToSource"):
-                    source_index = current_model.mapToSource(source_index)
-                    current_model = current_model.sourceModel()
-
+                source_index = self.map_to_source(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
                     self._catalog.select_run(key)
@@ -266,12 +256,7 @@ class CatalogTableView(QWidget):
         # Handle deselected items similarly
         for index in deselected.indexes():
             if index.column() == 0:
-                source_index = index
-                current_model = self.data_view.model()
-                while hasattr(current_model, "mapToSource"):
-                    source_index = current_model.mapToSource(source_index)
-                    current_model = current_model.sourceModel()
-
+                source_index = self.map_to_source(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
                     self._catalog.deselect_run(key)
@@ -366,20 +351,17 @@ class CatalogTableView(QWidget):
             return
 
         item_uids = [item.uid for item in items]
+        source_model = self.get_source_model()
 
         try:
             self._handling_selection = True  # Set flag before making changes
             for index in self.data_view.selectedIndexes():
                 if index.column() == 0:
                     # Map through all proxy models to get source index
-                    source_index = index
-                    current_model = self.data_view.model()
-                    while hasattr(current_model, "mapToSource"):
-                        source_index = current_model.mapToSource(source_index)
-                        current_model = current_model.sourceModel()
+                    source_index = self.map_to_source(index)
 
                     # Get key from source model
-                    key = current_model.get_key(source_index.row())
+                    key = source_model.get_key(source_index.row())
                     if key in item_uids:
                         selection_model.select(
                             index,
@@ -399,3 +381,80 @@ class CatalogTableView(QWidget):
 
         # Clear model
         self.data_view.setModel(None)
+
+    def map_to_source(self, proxy_index):
+        """
+        Map an index from the view through all proxy models to the source model.
+
+        Parameters
+        ----------
+        proxy_index : QModelIndex
+            The index in the view's model
+
+        Returns
+        -------
+        QModelIndex
+            The corresponding index in the source model
+        """
+        if not proxy_index.isValid():
+            return QModelIndex()
+
+        source_index = proxy_index
+        current_model = self.data_view.model()
+
+        while hasattr(current_model, "mapToSource"):
+            source_index = current_model.mapToSource(source_index)
+            current_model = current_model.sourceModel()
+
+        return source_index
+
+    def map_from_source(self, source_index):
+        """
+        Map an index from the source model through all proxy models to the view.
+
+        Parameters
+        ----------
+        source_index : QModelIndex
+            The index in the source model
+
+        Returns
+        -------
+        QModelIndex
+            The corresponding index in the view's model
+        """
+        if not source_index.isValid():
+            return QModelIndex()
+
+        # Get the chain of models from view to source
+        model_chain = []
+        current_model = self.data_view.model()
+
+        while hasattr(current_model, "sourceModel"):
+            model_chain.append(current_model)
+            current_model = current_model.sourceModel()
+
+        # Map from source through each proxy model in reverse order
+        proxy_index = source_index
+        for model in reversed(model_chain):
+            proxy_index = model.mapFromSource(proxy_index)
+
+        return proxy_index
+
+    def get_source_model(self):
+        """
+        Get the source model at the bottom of the proxy chain.
+
+        Returns
+        -------
+        QAbstractItemModel
+            The source model (typically CatalogTableModel)
+        """
+        model = self.data_view.model()
+
+        while hasattr(model, "sourceModel"):
+            source_model = model.sourceModel()
+            if not hasattr(source_model, "sourceModel"):
+                return source_model
+            model = source_model
+
+        return model

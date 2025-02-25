@@ -18,7 +18,7 @@ def _load_chunk(get_chunk, indexes):
         try:
             rows = get_chunk(index[0], index[1])
         except Exception as ex:
-            print("Something went wrong loading chunk", ex)
+            print("Something went wrong in _load_chunk", ex)
             continue
         fetched_ranges.append((index[0], index[1]))
         for row, i in zip(rows, range(index[0], index[1] + 1)):
@@ -118,10 +118,21 @@ class CatalogTableModel(QAbstractTableModel):
         list
             List of (key, row) tuples.
         """
-        # print(f"Getting chunk {start} to {stop}")
-        chunk = list(self._catalog.items_slice(slice(start, stop + 1)))
+        print(f"Getting chunk {start} to {stop}")
+        chunk = self._catalog.items_slice(slice(start, stop + 1))
+
         # print(f"Chunk: {chunk}")
-        return [(key, run.to_row()) for key, run in chunk]
+        def chunk_generator(chunk):
+            for key, run in chunk:
+                try:
+                    row = run.to_row()
+                except Exception as ex:
+                    print("Something went wrong in chunk_generator", ex)
+                    row = ["x"] * len(self._catalog.columns)
+                yield key, row
+
+        loaded_chunk = chunk_generator(chunk)
+        return loaded_chunk
 
     def data(self, index, role=Qt.DisplayRole):
         """Get data for display."""

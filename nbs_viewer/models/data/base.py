@@ -32,7 +32,7 @@ class CatalogRun(QObject):
         self._run = run
         self._key = key
         self._catalog = catalog
-
+        self.metadata = {}
         # Caching
         self._plot_data_cache = {}
         self._dimensions_cache = {}
