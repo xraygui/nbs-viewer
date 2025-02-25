@@ -300,6 +300,7 @@ class CatalogTableView(QWidget):
         super().__init__(parent)
         self._catalog = catalog
         self._handling_selection = False  # Flag to prevent circular updates
+        self._is_inverted = False  # Track inversion state
         self._setup_ui()
         self.refresh_filters()
 
@@ -321,6 +322,7 @@ class CatalogTableView(QWidget):
 
         self.invertButton = QPushButton("Reverse Data", self)
         self.invertButton.setEnabled(False)
+        self.invertButton.clicked.connect(self._handle_invert)
 
         self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
         self.scrollToBottomButton.clicked.connect(self.data_view.scrollToBottom)
@@ -377,13 +379,16 @@ class CatalogTableView(QWidget):
 
     def _handle_invert(self):
         """Handle inversion by clearing selection and toggling order."""
-
+        # print("_handle_invert in CatalogTableView")
         # Clear any existing selection
         selection_model = self.data_view.selectionModel()
         if selection_model:
             selection_model.clearSelection()
 
-        # Get models and toggle invert
+        # Toggle inversion state
+        self._is_inverted = not self._is_inverted
+
+        # Get models
         filter_model = self.data_view.model()
         reverse_model = filter_model.sourceModel()
         reverse_model.toggleInvert()
@@ -427,19 +432,26 @@ class CatalogTableView(QWidget):
         )
 
         # Connect invert button to our handler instead
-        self.invertButton.clicked.connect(self._handle_invert)
         self.invertButton.setEnabled(True)
+
+        # Apply inversion state if needed
+        if self._is_inverted:
+            # Set the invert property on the reverse model
+            reverse_model.toggleInvert()
+            filter_model.invalidateFilter()
+            self.data_view._update_visible_rows()
 
     def refresh_filters(self):
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
+
         self.setupModelAndView(catalog)
+
         # Reconnect the selection model's signal after setting up the new model
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
-        # print("Reconnected selectionChanged signal after refresh")
 
     def get_selected_items(self):
         """

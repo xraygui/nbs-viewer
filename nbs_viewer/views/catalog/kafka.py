@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 from qtpy.QtCore import Qt, QItemSelectionModel, QTimer
-from .base import CatalogTableView, CustomHeaderView
+from .base import CatalogTableView, LazyLoadingTableView, CustomHeaderView
 
 
 class KafkaView(CatalogTableView):
@@ -40,7 +40,7 @@ class KafkaView(CatalogTableView):
         """
         Set up the user interface components.
         """
-        self.data_view = QTableView(self)
+        self.data_view = LazyLoadingTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
@@ -144,8 +144,24 @@ class KafkaView(CatalogTableView):
         # Update button states after model setup
         self._update_button_states()
 
+        # Ensure visible rows are updated after model setup
+        self.data_view._update_visible_rows()
+
     def refresh_filters(self):
         self.setupModelAndView(self._catalog)
+
+        # Reconnect the selection model's signal after setting up the new model
+        self.data_view.selectionModel().selectionChanged.connect(
+            self.on_selection_changed
+        )
+
+        # Ensure the invert button is properly connected
+        self.invertButton.clicked.disconnect()
+        self.invertButton.clicked.connect(self._handle_invert)
+        self.invertButton.setEnabled(True)
+
+        # Update button states
+        self._update_button_states()
 
     def _handle_new_run(self, run_uid):
         """Handle a new run being added to the catalog."""
