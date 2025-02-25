@@ -130,7 +130,7 @@ class CatalogTableModel(QAbstractTableModel):
 
         if non_overlapping_chunks:
             # Debug info
-            print(f"Processing {len(non_overlapping_chunks)} chunks")
+            # print(f"Processing {len(non_overlapping_chunks)} chunks")
 
             # Prioritize chunks that contain visible rows
             if self._visible_rows:
@@ -144,7 +144,7 @@ class CatalogTableModel(QAbstractTableModel):
                     return 1  # Lower priority
 
                 non_overlapping_chunks.sort(key=chunk_priority)
-                print(f"Prioritized chunks containing visible rows")
+                # print(f"Prioritized chunks containing visible rows")
 
             # Process chunks in smaller batches (max 5 chunks per worker)
             max_chunks_per_worker = 5
@@ -171,7 +171,8 @@ class CatalogTableModel(QAbstractTableModel):
 
         elif chunks_to_load:
             # If we had chunks but none were processed, log this
-            print(f"All {len(chunks_to_load)} chunks were already being loaded")
+            # print(f"All {len(chunks_to_load)} chunks were already being loaded")
+            pass
 
         # Schedule the next processing
         self._data_loading_timer.singleShot(LOADING_LATENCY, self._process_work_queue)
@@ -232,7 +233,7 @@ class CatalogTableModel(QAbstractTableModel):
         list
             List of (key, row) tuples.
         """
-        print(f"Getting chunk {start} to {stop}")
+        # print(f"Getting chunk {start} to {stop}")
 
         # Determine if we need a forward or reverse slice
         is_reversed = start > stop
@@ -255,6 +256,7 @@ class CatalogTableModel(QAbstractTableModel):
 
             # Reverse the items if we're in inverted mode
             if is_reversed:
+                # print("Reversing items")
                 items.reverse()
 
             count = 0
@@ -267,7 +269,7 @@ class CatalogTableModel(QAbstractTableModel):
                     row = ["x"] * len(self._catalog.columns)
                 yield key, row
 
-            print(f"Generated {count} rows from chunk {start}-{stop}")
+            # print(f"Generated {count} rows from chunk {start}-{stop}")
 
         loaded_chunk = chunk_generator(chunk)
         return loaded_chunk
@@ -302,21 +304,12 @@ class CatalogTableModel(QAbstractTableModel):
             self._data[index] = LOADING_PLACEHOLDER
 
             # Calculate chunk boundaries based on the chunk size
+            # The row is already in the correct space (original or inverted)
+            # because _visible_rows has been mapped in set_visible_rows
             chunk_start = (row // self._chunk_size) * self._chunk_size
             chunk_end = min(
                 chunk_start + self._chunk_size - 1, self._catalog_length - 1
             )
-
-            # If we're in inverted mode, adjust the chunk boundaries
-            if self._invert:
-                inverted_row = self._catalog_length - 1 - row
-                chunk_start = (inverted_row // self._chunk_size) * self._chunk_size
-                chunk_end = min(
-                    chunk_start + self._chunk_size - 1, self._catalog_length - 1
-                )
-                # Convert back to original indexing
-                chunk_start = self._catalog_length - 1 - chunk_end
-                chunk_end = self._catalog_length - 1 - chunk_start
 
             # Check if this chunk is already in the work queue or is being loaded
             chunk = (chunk_start, chunk_end)
@@ -333,7 +326,7 @@ class CatalogTableModel(QAbstractTableModel):
                 return LOADING_PLACEHOLDER
 
             # Add the chunk to the work queue
-            print(f"Requesting chunk for row {row}: {chunk_start}-{chunk_end}")
+            # print(f"Requesting chunk for row {row}: {chunk_start}-{chunk_end}")
             self._work_queue.append(chunk)
 
             return LOADING_PLACEHOLDER
@@ -428,13 +421,28 @@ class CatalogTableModel(QAbstractTableModel):
         # Calculate the new visible rows set
         new_visible_rows = set(range(start_row, end_row + 1))
 
+        # If we're in inverted mode, we need to translate the visible rows
+        if self._invert:
+            # Map the visible rows to their inverted positions
+            inverted_rows = set()
+            for row in new_visible_rows:
+                # Calculate the inverted row index
+                inverted_row = self._catalog_length - 1 - row
+                inverted_rows.add(inverted_row)
+            new_visible_rows = inverted_rows
+            # print(
+            #     f"Mapped visible rows to inverted positions: {start_row}-{end_row} -> {min(inverted_rows)}-{max(inverted_rows)}"
+            # )
+
         # If the visible rows haven't changed, don't do anything
         if new_visible_rows == self._visible_rows:
             return
 
         # Update the set of visible rows
         self._visible_rows = new_visible_rows
-        print(f"Visible rows updated: {start_row} to {end_row}")
+        # print(
+        #     f"Visible rows updated: {min(new_visible_rows) if new_visible_rows else 0} to {max(new_visible_rows) if new_visible_rows else 0}"
+        # )
 
         # Clear the work queue to prioritize visible rows
         self._work_queue.clear()

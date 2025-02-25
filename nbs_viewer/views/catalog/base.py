@@ -188,7 +188,7 @@ class LazyLoadingTableView(QTableView):
     to prioritize loading those rows.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, buffer_size=50):
         """
         Initialize the lazy loading table view.
 
@@ -198,7 +198,7 @@ class LazyLoadingTableView(QTableView):
             Parent widget
         """
         super().__init__(parent)
-
+        self._buffer_size = buffer_size
         # Timer to avoid excessive updates during scrolling
         self._visible_rows_timer = QTimer(self)
         self._visible_rows_timer.setSingleShot(True)
@@ -217,6 +217,21 @@ class LazyLoadingTableView(QTableView):
         """Handle show events to update visible rows when the view becomes visible."""
         super().showEvent(event)
         # Update visible rows when the view becomes visible
+        self._update_visible_rows()
+
+    def resizeEvent(self, event):
+        """
+        Handle resize events to update visible rows when the view is resized.
+
+        Parameters
+        ----------
+        event : QResizeEvent
+            The resize event
+        """
+        # Let the base class handle the resize first
+        super().resizeEvent(event)
+
+        # Update visible rows after resize
         self._update_visible_rows()
 
     def setModel(self, model):
@@ -253,14 +268,17 @@ class LazyLoadingTableView(QTableView):
         last_visible = self.rowAt(viewport_height - 1)
         if last_visible < 0:
             if self.model().rowCount() > 0:
-                last_visible = min(first_visible + 20, self.model().rowCount() - 1)
+                last_visible = min(
+                    first_visible + self._buffer_size, self.model().rowCount() - 1
+                )
             else:
                 last_visible = 0
 
         # Add a buffer of rows above and below for smoother scrolling
-        buffer_size = 20
-        first_visible = max(0, first_visible - buffer_size)
-        last_visible = min(self.model().rowCount() - 1, last_visible + buffer_size)
+        first_visible = max(0, first_visible - self._buffer_size)
+        last_visible = min(
+            self.model().rowCount() - 1, last_visible + self._buffer_size
+        )
 
         # Find the source model (CatalogTableModel)
         source_model = self.model()
@@ -271,7 +289,7 @@ class LazyLoadingTableView(QTableView):
         if hasattr(source_model, "set_visible_rows"):
             source_model.set_visible_rows(first_visible, last_visible)
 
-        print(f"Visible rows: {first_visible} to {last_visible}")
+        # print(f"Visible rows: {first_visible} to {last_visible}")
 
 
 class CatalogTableView(QWidget):
@@ -370,6 +388,7 @@ class CatalogTableView(QWidget):
         reverse_model = filter_model.sourceModel()
         reverse_model.toggleInvert()
         filter_model.invalidateFilter()
+        self.data_view._update_visible_rows()
 
     def setupModelAndView(self, catalog):
         """
