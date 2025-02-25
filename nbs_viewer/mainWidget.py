@@ -9,7 +9,7 @@ from qtpy.QtCore import Qt
 class MainWidget(QWidget):
     """Widget managing multiple canvas views in tabs."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config_file=None):
         """
         Initialize the multi-canvas widget.
 
@@ -22,7 +22,7 @@ class MainWidget(QWidget):
         """
         super().__init__(parent)
         self.canvas_manager = CanvasManager()
-
+        self.config_file = config_file
         # Create tab widget
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)  # Enable close buttons by default
@@ -45,7 +45,9 @@ class MainWidget(QWidget):
         main_model = self.canvas_manager.canvases["main"]
 
         # Create main tab widgets
-        data_source = DataSourceSwitcher(main_model, self.canvas_manager)
+        data_source = DataSourceSwitcher(
+            main_model, self.canvas_manager, self.config_file
+        )
         plot_widget = PlotWidget(main_model)
 
         # Create main tab layout

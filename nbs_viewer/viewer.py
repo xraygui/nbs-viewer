@@ -17,7 +17,7 @@ class Viewer(QWidget):
 
         # Create a QTabWidget
 
-        self.mainWidget = MainWidget(self)
+        self.mainWidget = MainWidget(self, config_file=config_file)
         self.layout.addWidget(self.mainWidget)
         self.setLayout(self.layout)
 
