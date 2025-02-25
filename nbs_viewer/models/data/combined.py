@@ -15,6 +15,27 @@ class CombinationMethod(Enum):
     DIVIDE = "divide"  # First run / others
 
 
+def make_scan_id(scan_ids: List[int]) -> str:
+    """
+    Make a scan ID from a list of scan IDs.
+
+    Parameters
+    ----------
+    scan_ids : List[int]
+        List of scan IDs to combine
+
+    Returns
+    -------
+    str
+        Combined scan ID string, truncated if more than 3 IDs
+    """
+    sorted_ids = sorted(scan_ids)
+    if len(sorted_ids) <= 3:
+        return ", ".join(map(str, sorted_ids))
+    else:
+        return f"{sorted_ids[0]}...{sorted_ids[-1]}"
+
+
 class CombinedRun(CatalogRun):
     """
     Represents multiple runs combined into a single virtual run.
@@ -45,21 +66,23 @@ class CombinedRun(CatalogRun):
         self._available_keys = self._compute_common_keys()
 
         # Connect to source run signals
+        scan_ids = []
         for run in self._source_runs:
             run.data_changed.connect(self.data_changed)
             run.transform_changed.connect(self.transform_changed)
+            scan_ids.append(run.scan_id)
 
         # Set metadata from first run
         if first_run:
-            self.scan_id = first_run.scan_id
             self.metadata = {
                 "source_runs": [run.uid for run in runs],
                 "combination_method": method.value,
                 **first_run.metadata,
             }
         else:
-            self.scan_id = 0
             self.metadata = {"source_runs": [], "combination_method": method.value}
+        self.scan_id = make_scan_id(scan_ids)
+        self.plan_name = f"{len(scan_ids)} Combined"
 
     def _compute_common_keys(self) -> List[str]:
         """Find keys common to all source runs."""
