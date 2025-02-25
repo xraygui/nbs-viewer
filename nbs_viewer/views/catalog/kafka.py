@@ -47,6 +47,7 @@ class KafkaView(CatalogTableView):
         self.data_view.setSelectionMode(QTableView.ExtendedSelection)
 
         self.invertButton = QPushButton("Reverse Data", self)
+        self.invertButton.clicked.connect(self._handle_invert)
         self.invertButton.setEnabled(False)
 
         self.scrollToBottomButton = QPushButton("Scroll to Bottom", self)
@@ -156,8 +157,6 @@ class KafkaView(CatalogTableView):
         )
 
         # Ensure the invert button is properly connected
-        self.invertButton.clicked.disconnect()
-        self.invertButton.clicked.connect(self._handle_invert)
         self.invertButton.setEnabled(True)
 
         # Update button states
