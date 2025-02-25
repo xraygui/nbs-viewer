@@ -16,6 +16,8 @@ from qtpy.QtCore import (
     QSortFilterProxyModel,
     QItemSelectionModel,
     QModelIndex,
+    QTimer,
+    Signal,
 )
 
 from ...models.catalog.table import CatalogTableModel
@@ -178,6 +180,100 @@ class FilterModel(QSortFilterProxyModel):
         return regex.indexIn(data_str) != -1
 
 
+class LazyLoadingTableView(QTableView):
+    """
+    A custom QTableView that only loads data for visible rows.
+
+    This view tracks which rows are visible and notifies the model
+    to prioritize loading those rows.
+    """
+
+    def __init__(self, parent=None):
+        """
+        Initialize the lazy loading table view.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            Parent widget
+        """
+        super().__init__(parent)
+
+        # Timer to avoid excessive updates during scrolling
+        self._visible_rows_timer = QTimer(self)
+        self._visible_rows_timer.setSingleShot(True)
+        self._visible_rows_timer.timeout.connect(self._update_visible_rows)
+
+        # Connect to scrolling signals
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
+        # Update visible rows when the view becomes visible
+        self._init_timer = QTimer(self)
+        self._init_timer.setSingleShot(True)
+        self._init_timer.timeout.connect(self._update_visible_rows)
+        self._init_timer.start(500)  # Delay to ensure view is properly initialized
+
+    def showEvent(self, event):
+        """Handle show events to update visible rows when the view becomes visible."""
+        super().showEvent(event)
+        # Update visible rows when the view becomes visible
+        self._update_visible_rows()
+
+    def setModel(self, model):
+        """
+        Set the model for this view.
+
+        Parameters
+        ----------
+        model : QAbstractItemModel
+            The model to set
+        """
+        super().setModel(model)
+        self._update_visible_rows()
+        # Wait a bit for the view to be properly laid out before updating visible rows
+        # QTimer.singleShot(100, self._update_visible_rows)
+
+    def _on_scroll(self):
+        """Handle scroll events by scheduling an update of visible rows."""
+        # Delay the update to avoid excessive calls during rapid scrolling
+        self._visible_rows_timer.start(100)  # 100ms delay
+
+    def _update_visible_rows(self):
+        """Update the model with the current visible row range."""
+        if not self.model() or not self.isVisible():
+            return
+
+        # Get the visible row range
+        first_visible = self.rowAt(0)
+        if first_visible < 0:
+            first_visible = 0
+
+        # Get the last visible row
+        viewport_height = self.viewport().height()
+        last_visible = self.rowAt(viewport_height - 1)
+        if last_visible < 0:
+            if self.model().rowCount() > 0:
+                last_visible = min(first_visible + 20, self.model().rowCount() - 1)
+            else:
+                last_visible = 0
+
+        # Add a buffer of rows above and below for smoother scrolling
+        buffer_size = 20
+        first_visible = max(0, first_visible - buffer_size)
+        last_visible = min(self.model().rowCount() - 1, last_visible + buffer_size)
+
+        # Find the source model (CatalogTableModel)
+        source_model = self.model()
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
+
+        # If the source model has a set_visible_rows method, call it
+        if hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(first_visible, last_visible)
+
+        print(f"Visible rows: {first_visible} to {last_visible}")
+
+
 class CatalogTableView(QWidget):
     """A widget for displaying and managing catalog data in a table view."""
 
@@ -193,7 +289,7 @@ class CatalogTableView(QWidget):
         """
         Set up the user interface components.
         """
-        self.data_view = QTableView(self)
+        self.data_view = LazyLoadingTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
