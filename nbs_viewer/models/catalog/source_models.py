@@ -280,6 +280,18 @@ class ConfigSourceModel(SourceModel):
         self.catalog_config = catalog_config
         self.source_model = self._create_source_model()
 
+    @property
+    def autoload(self) -> bool:
+        """
+        Check if this catalog should be automatically loaded on startup.
+
+        Returns
+        -------
+        bool
+            True if the catalog should be automatically loaded, False otherwise
+        """
+        return self.catalog_config.get("autoload", False)
+
     def _create_source_model(self) -> SourceModel:
         """
         Create a source model based on the configuration.

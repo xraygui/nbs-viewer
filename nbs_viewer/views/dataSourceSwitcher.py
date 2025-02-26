@@ -67,6 +67,48 @@ class DataSourceSwitcher(QWidget):
         layout.addWidget(self.canvas_controls)
         self.setLayout(layout)
 
+        # Automatically load catalogs with autoload=true
+        if self.config_file:
+            self.load_autoload_catalogs()
+
+    def load_autoload_catalogs(self):
+        """
+        Automatically load catalogs with autoload=true from the config file.
+        """
+        try:
+            # Import here to avoid circular imports
+            from .dataSource import ConfigSourceView
+
+            # Read the config file
+            try:
+                import tomllib  # Python 3.11+
+            except ModuleNotFoundError:
+                import tomli as tomllib  # Python <3.11
+
+            with open(self.config_file, "rb") as f:
+                config = tomllib.load(f)
+
+            # Load catalogs with autoload=true
+            for catalog_config in config.get("catalog", []):
+                if catalog_config.get("autoload", False):
+                    config_view = ConfigSourceView(catalog_config)
+                    sourceView, catalog, label = config_view.get_source()
+
+                    if catalog is not None and label is not None:
+                        # Store catalog and connect its signals
+                        self._catalogs[label] = catalog
+                        catalog.item_selected.connect(self.plot_model.add_run)
+                        catalog.item_deselected.connect(self.plot_model.remove_run)
+
+                        # Add view to UI
+                        self.stacked_widget.addWidget(sourceView)
+                        self.dropdown.addItem(label)
+
+                        # Enable remove button when we have sources
+                        self.remove_source.setEnabled(True)
+        except Exception as e:
+            print(f"Error loading autoload catalogs: {e}")
+
     def remove_current_source(self):
         """Remove the currently selected data source."""
         current_label = self.dropdown.currentText()
