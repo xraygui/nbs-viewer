@@ -95,7 +95,7 @@ class DataSourceSwitcher(QWidget):
         """Add a new data source via picker dialog."""
         picker = DataSourcePicker(config_file=self.config_file, parent=self)
         if picker.exec_():
-            sourceView, catalog, label = picker.getSource()
+            sourceView, catalog, label = picker.get_source()
             if catalog is not None and label is not None:
                 # Store catalog and connect its signals
                 self._catalogs[label] = catalog

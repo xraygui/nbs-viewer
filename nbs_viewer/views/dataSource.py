@@ -13,16 +13,19 @@ from qtpy.QtWidgets import (
 )
 from tiled.client import from_uri, from_profile
 
-import nslsii.kafka_utils
-from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
-import uuid
 
 from .catalog.catalogTree import CatalogPicker
-from os.path import exists
 from .catalog.base import CatalogTableView
 from .catalog.kafka import KafkaView
+
+from ..models.catalog.source_models import (
+    SourceModel,
+    URISourceModel,
+    ProfileSourceModel,
+    KafkaSourceModel,
+    ConfigSourceModel,
+)
 from ..models.catalog.kafka import KafkaCatalog
-from ..models.catalog.base import load_catalog_models
 
 try:
     import tomllib  # Python 3.11+
@@ -30,38 +33,117 @@ except ModuleNotFoundError:
     import tomli as tomllib  # Python <3.11
 
 
-class ConfigSource(QWidget):
+class SourceView(QWidget):
+    """Base class for all source views."""
+
+    def __init__(self, model: SourceModel, parent=None):
+        """
+        Initialize the source view.
+
+        Parameters
+        ----------
+        model : SourceModel
+            The source model this view is connected to
+        parent : QWidget, optional
+            The parent widget
+        """
+        super().__init__(parent)
+        self.model = model
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
+        raise NotImplementedError("Subclasses must implement _setup_ui")
+
+    def update_model(self):
+        """Update the model with values from the UI."""
+        raise NotImplementedError("Subclasses must implement update_model")
+
+    def get_source(self):
+        """
+        Get a source from the model and create the appropriate view.
+
+        Returns
+        -------
+        tuple
+            Contains:
+            - QWidget : The catalog view widget
+            - CatalogBase : The catalog instance
+            - str : Label identifying the source
+        """
+        self.update_model()
+
+        if not self.model.is_configured():
+            return None, None, None
+
+        try:
+            catalog, label = self.model.get_source()
+
+            # Create the appropriate view based on the catalog type
+            if isinstance(catalog, KafkaCatalog):
+                catalog_view = KafkaView(catalog)
+            else:
+                catalog_view = CatalogTableView(catalog)
+
+            return catalog_view, catalog, label
+        except Exception as e:
+            print(f"Error getting source: {e}")
+            return None, None, None
+
+
+class ConfigSourceView(SourceView):
+    """View for configuration-based catalog sources."""
 
     def __init__(self, catalog_config, parent=None):
-        super().__init__(parent)
-        self.catalog_config = catalog_config
-        self.catalog_models = load_catalog_models()
+        """
+        Initialize the configuration source view.
 
-    def getSource(self):
-        catalog = from_uri(self.catalog_config["url"])
-        label = self.catalog_config["label"]
+        Parameters
+        ----------
+        catalog_config : dict
+            Configuration dictionary for the catalog
+        parent : QWidget, optional
+            The parent widget
+        """
+        model = ConfigSourceModel(catalog_config)
+        super().__init__(model, parent)
 
-        if self.catalog_config.get("catalog_keys"):
-            if isinstance(self.catalog_config["catalog_keys"], list):
-                for key in self.catalog_config["catalog_keys"]:
-                    catalog = catalog[key]
-            elif isinstance(self.catalog_config["catalog_keys"], str):
-                catalog = catalog[self.catalog_config["catalog_keys"]]
-            else:
-                raise ValueError("Invalid catalog_keys format in config")
+    def _setup_ui(self):
+        """Set up the user interface components."""
+        # Config source doesn't need UI components as it's pre-configured
+        layout = QVBoxLayout()
+        label = QLabel(
+            f"Configured source: {self.model.catalog_config.get('label', 'Unknown')}"
+        )
+        layout.addWidget(label)
+        self.setLayout(layout)
 
-        selected_model = self.catalog_models[self.catalog_config["catalog_model"]]
-        catalog = selected_model(catalog)
-        catalogView = CatalogTableView(catalog)
-        return catalogView, catalog, label
+    def update_model(self):
+        """Update the model with values from the UI."""
+        # No UI updates needed for config source as it's pre-configured
+        pass
 
 
-class URISource(QWidget):
+class URISourceView(SourceView):
+    """View for Tiled URI catalog sources."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
+        """
+        Initialize the URI source view.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            The parent widget
+        """
+        model = URISourceModel()
+        super().__init__(model, parent)
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
         self.uri_label = QLabel("URI", self)
         self.uri_edit = QLineEdit(self)
-        self.uri_edit.setText("http://localhost:8000")
+        self.uri_edit.setText(self.model.uri)
 
         uri_hbox = QHBoxLayout()
         uri_hbox.addWidget(self.uri_label)
@@ -69,108 +151,201 @@ class URISource(QWidget):
 
         self.profile_label = QLabel("Profile", self)
         self.profile_edit = QLineEdit(self)
+        self.profile_edit.setText(self.model.profile)
 
         profile_hbox = QHBoxLayout()
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
 
-        self.catalog_models = load_catalog_models()
+        layout = QVBoxLayout()
+        layout.addLayout(uri_hbox)
+        layout.addLayout(profile_hbox)
+        self.setLayout(layout)
 
-        uri_vstack = QVBoxLayout()
-        uri_vstack.addLayout(uri_hbox)
-        uri_vstack.addLayout(profile_hbox)
+    def update_model(self):
+        """Update the model with values from the UI."""
+        self.model.set_uri(self.uri_edit.text())
+        self.model.set_profile(self.profile_edit.text())
 
-        self.setLayout(uri_vstack)
+    def get_source(self):
+        """
+        Get a source from the model and create the appropriate view.
 
-    def getSource(self):
-        catalog = from_uri(self.uri_edit.text())
-        label = self.uri_edit.text()
-        if self.profile_edit.text() != "":
-            catalog = catalog[self.profile_edit.text()]
-            label += ":" + self.profile_edit.text()
-        test_uid = catalog.items_indexer[0][0]
-        # Awful dirty hack
-        typical_uid4_len = 36
-        if len(test_uid) < typical_uid4_len:
-            # Probably not really a UID, and we have a nested catalog
-            picker = CatalogPicker(catalog, self)
-            if picker.exec_():
-                selected_keys = picker.selected_entry
-                for key in selected_keys:
-                    catalog = catalog[key]
-                    label += ":" + key
+        This overrides the base implementation to handle nested catalogs
+        and model selection.
+
+        Returns
+        -------
+        tuple
+            Contains:
+            - QWidget : The catalog view widget
+            - CatalogBase : The catalog instance
+            - str : Label identifying the source
+        """
+        self.update_model()
+
+        if not self.model.uri:
+            return None, None, None
+
+        try:
+            # Get the initial catalog without applying a model
+            from tiled.client import from_uri
+
+            catalog = from_uri(self.model.uri)
+            label = f"Tiled: {self.model.uri}"
+
+            if self.model.profile:
+                catalog = catalog[self.model.profile]
+                label += ":" + self.model.profile
+
+            # Check if we need to navigate through a nested catalog
+            test_uid = catalog.items_indexer[0][0]
+            typical_uid4_len = 36
+            if len(test_uid) < typical_uid4_len:
+                # Probably not really a UID, and we have a nested catalog
+                picker = CatalogPicker(catalog, self)
+                if picker.exec_():
+                    selected_keys = picker.selected_entry
+                    self.model.set_selected_keys(selected_keys)
+
+                    # Update the label and catalog with selected keys
+                    for key in selected_keys:
+                        catalog = catalog[key]
+                        label += ":" + key
+                else:
+                    return None, None, None  # User cancelled the dialog
+
+            # Now that we have the final catalog, show the model selection dialog
+            model_dialog = CatalogModelPicker(self.model.catalog_models, self)
+            if model_dialog.exec_():
+                self.model.set_selected_model(model_dialog.selected_model_name)
+
+                # Now get the source with the fully configured model
+                return super().get_source()
             else:
-                return None, None, None  # User cancelled the dialog
+                return None, None, None  # User cancelled the model selection
 
-        # Now that we have the final catalog, show the model selection dialog
-        model_dialog = CatalogModelPicker(self.catalog_models, self)
-        if model_dialog.exec_():
-            selected_model = model_dialog.selected_model
-            catalog = selected_model(catalog)
-            catalogView = CatalogTableView(catalog)
-            return catalogView, catalog, label
-        else:
-            return None, None, None  # User cancelled the model selection
+        except Exception as e:
+            print(f"Error getting URI source: {e}")
+            return None, None, None
 
 
-class ProfileSource(QWidget):
+class ProfileSourceView(SourceView):
+    """View for Tiled profile catalog sources."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
+        """
+        Initialize the profile source view.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            The parent widget
+        """
+        model = ProfileSourceModel()
+        super().__init__(model, parent)
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
         self.profile_label = QLabel("Profile", self)
         self.profile_edit = QLineEdit(self)
+        self.profile_edit.setText(self.model.profile)
 
         profile_hbox = QHBoxLayout()
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
 
-        self.catalog_models = load_catalog_models()
+        layout = QVBoxLayout()
+        layout.addLayout(profile_hbox)
+        self.setLayout(layout)
 
-        profile_vstack = QVBoxLayout()
-        profile_vstack.addLayout(profile_hbox)
+    def update_model(self):
+        """Update the model with values from the UI."""
+        self.model.set_profile(self.profile_edit.text())
 
-        self.setLayout(profile_vstack)
+    def get_source(self):
+        """
+        Get a source from the model and create the appropriate view.
 
-    def getSource(self):
-        catalog = from_profile(self.profile_edit.text())
-        label = self.profile_edit.text()
-        test_uid = catalog.items_indexer[0][0]
-        # Awful dirty hack
-        typical_uid4_len = 36
-        if len(test_uid) < typical_uid4_len:
-            # Probably not really a UID, and we have a nested catalog
-            picker = CatalogPicker(catalog, self)
-            if picker.exec_():
-                selected_keys = picker.selected_entry
-                for key in selected_keys:
-                    catalog = catalog[key]
-                    label += ":" + key
+        This overrides the base implementation to handle nested catalogs
+        and model selection.
+
+        Returns
+        -------
+        tuple
+            Contains:
+            - QWidget : The catalog view widget
+            - CatalogBase : The catalog instance
+            - str : Label identifying the source
+        """
+        self.update_model()
+
+        if not self.model.profile:
+            return None, None, None
+
+        try:
+            # Get the initial catalog without applying a model
+            from tiled.client import from_profile
+
+            catalog = from_profile(self.model.profile)
+            label = f"Profile: {self.model.profile}"
+
+            # Check if we need to navigate through a nested catalog
+            test_uid = catalog.items_indexer[0][0]
+            typical_uid4_len = 36
+            if len(test_uid) < typical_uid4_len:
+                # Probably not really a UID, and we have a nested catalog
+                picker = CatalogPicker(catalog, self)
+                if picker.exec_():
+                    selected_keys = picker.selected_entry
+                    self.model.set_selected_keys(selected_keys)
+
+                    # Update the label and catalog with selected keys
+                    for key in selected_keys:
+                        catalog = catalog[key]
+                        label += ":" + key
+                else:
+                    return None, None, None  # User cancelled the dialog
+
+            # Now that we have the final catalog, show the model selection dialog
+            model_dialog = CatalogModelPicker(self.model.catalog_models, self)
+            if model_dialog.exec_():
+                self.model.set_selected_model(model_dialog.selected_model_name)
+
+                # Now get the source with the fully configured model
+                return super().get_source()
             else:
-                return None, None, None  # User cancelled the dialog
+                return None, None, None  # User cancelled the model selection
 
-        # Now that we have the final catalog, show the model selection dialog
-        model_dialog = CatalogModelPicker(self.catalog_models, self)
-        if model_dialog.exec_():
-            selected_model = model_dialog.selected_model
-            catalog = selected_model(catalog)
-            catalogView = CatalogTableView(catalog)
-            return catalogView, catalog, label
-        else:
-            return None, None, None  # User cancelled the model selection
+        except Exception as e:
+            print(f"Error getting profile source: {e}")
+            return None, None, None
 
 
-class KafkaSource(QWidget):
+class KafkaSourceView(SourceView):
+    """View for Kafka catalog sources."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        default_file = "/etc/bluesky/kafka.yml"
+        """
+        Initialize the Kafka source view.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            The parent widget
+        """
+        model = KafkaSourceModel()
+        super().__init__(model, parent)
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
         self.config = QPushButton("Pick Kafka Config File")
-        if exists(default_file):
-            self.selected_file = default_file
-        else:
-            self.selected_file = None
-        self.file_label = QLabel(f"Current file: {self.selected_file}")
+        self.file_label = QLabel(f"Current file: {self.model.config_file or 'None'}")
         self.bl_label = QLabel("Beamline Acronym")
         self.bl_input = QLineEdit()
-        layout = QVBoxLayout(self)
+        self.bl_input.setText(self.model.beamline_acronym)
+
+        layout = QVBoxLayout()
         bl_layout = QHBoxLayout()
         bl_layout.addWidget(self.bl_label)
         bl_layout.addWidget(self.bl_input)
@@ -178,88 +353,114 @@ class KafkaSource(QWidget):
         layout.addWidget(self.file_label)
         layout.addLayout(bl_layout)
         self.setLayout(layout)
-        self.config.clicked.connect(self.makeFilePicker)
 
-    def makeFilePicker(self):
+        self.config.clicked.connect(self.make_file_picker)
+
+    def make_file_picker(self):
+        """Open a file dialog to select the Kafka configuration file."""
         file_dialog = QFileDialog()
         if file_dialog.exec_():
-            self.selected_file = file_dialog.selectedFiles()[0]
-            self.file_label.setText(f"Current file: {self.selected_file}")
+            selected_file = file_dialog.selectedFiles()[0]
+            self.model.set_config_file(selected_file)
+            self.file_label.setText(f"Current file: {selected_file}")
 
-    def getSource(self):
-        config_file = self.selected_file
-        beamline_acronym = self.bl_input.text()
-
-        kafka_config = nslsii.kafka_utils._read_bluesky_kafka_config_file(
-            config_file_path=config_file
-        )
-
-        # this consumer should not be in a group with other consumers
-        #   so generate a unique consumer group id for it
-        unique_group_id = f"echo-{beamline_acronym}-{str(uuid.uuid4())[:8]}"
-        topics = [f"{beamline_acronym}.bluesky.runengine.documents"]
-        kafka_dispatcher = QtRemoteDispatcher(
-            topics,
-            ",".join(kafka_config["bootstrap_servers"]),
-            unique_group_id,
-            consumer_config=kafka_config["runengine_producer_config"],
-        )
-        catalog = KafkaCatalog(kafka_dispatcher)
-        kafka_widget = KafkaView(catalog)
-        return kafka_widget, catalog, beamline_acronym
+    def update_model(self):
+        """Update the model with values from the UI."""
+        self.model.set_beamline_acronym(self.bl_input.text())
 
 
 class DataSourcePicker(QDialog):
+    """Dialog for selecting a data source."""
+
     def __init__(self, config_file=None, parent=None):
+        """
+        Initialize the data source picker dialog.
+
+        Parameters
+        ----------
+        config_file : str, optional
+            Path to a configuration file
+        parent : QWidget, optional
+            The parent widget
+        """
         super().__init__(parent)
+        self.setWindowTitle("Select Data Source")
+
         self.source_type = QComboBox(self)
         self.layout_switcher = QStackedWidget(self)
-        self.data_sources = {}
+        self.source_views = {}
 
+        # Add config sources if a config file is provided
         if config_file:
-            with open(config_file, "rb") as f:  # Open in binary mode for tomllib
+            with open(config_file, "rb") as f:
                 config = tomllib.load(f)
             for catalog in config.get("catalog", []):
                 source_name = f"Config: {catalog['label']}"
-                config_source = ConfigSource(catalog)
-                self.data_sources[source_name] = config_source
+                config_view = ConfigSourceView(catalog)
+                self.source_views[source_name] = config_view
 
-        self.data_sources["Tiled URI"] = URISource()
-        self.data_sources["Tiled Profile"] = ProfileSource()
-        self.data_sources["Kafka"] = KafkaSource()
+        # Add standard source types
+        self.source_views["Tiled URI"] = URISourceView()
+        self.source_views["Tiled Profile"] = ProfileSourceView()
+        self.source_views["Kafka"] = KafkaSourceView()
 
-        for k, s in self.data_sources.items():
-            self.source_type.addItem(k)
-            self.layout_switcher.addWidget(s)
+        # Add all views to the UI
+        for name, view in self.source_views.items():
+            self.source_type.addItem(name)
+            self.layout_switcher.addWidget(view)
 
         self.source_type.currentIndexChanged.connect(self.switch_widget)
 
-        self.button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self
-        )
+        # Add buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-
+        # Set up layout
         layout = QVBoxLayout()
         layout.addWidget(self.source_type)
         layout.addWidget(self.layout_switcher)
-        layout.addWidget(self.button_box)
+        layout.addWidget(buttons)
         self.setLayout(layout)
 
     def switch_widget(self):
+        """Switch the current widget based on the selected source type."""
         self.layout_switcher.setCurrentIndex(self.source_type.currentIndex())
 
-    def getSource(self):
-        return self.layout_switcher.currentWidget().getSource()
+    def get_source(self):
+        """
+        Get a source from the currently selected view.
+
+        Returns
+        -------
+        tuple
+            Contains:
+            - QWidget : The catalog view widget
+            - CatalogBase : The catalog instance
+            - str : Label identifying the source
+        """
+        return self.layout_switcher.currentWidget().get_source()
 
 
 class CatalogModelPicker(QDialog):
+    """Dialog for selecting a catalog model."""
+
     def __init__(self, catalog_models, parent=None):
+        """
+        Initialize the catalog model picker dialog.
+
+        Parameters
+        ----------
+        catalog_models : dict
+            Dictionary of available catalog models
+        parent : QWidget, optional
+            The parent widget
+        """
         super().__init__(parent)
         self.setWindowTitle("Select Catalog Model")
         self.catalog_models = catalog_models
         self.selected_model = None
+        self.selected_model_name = None
 
         layout = QVBoxLayout(self)
 
@@ -276,5 +477,7 @@ class CatalogModelPicker(QDialog):
         self.setLayout(layout)
 
     def accept(self):
-        self.selected_model = self.catalog_models[self.model_combo.currentText()]
+        """Handle dialog acceptance."""
+        self.selected_model_name = self.model_combo.currentText()
+        self.selected_model = self.catalog_models[self.selected_model_name]
         super().accept()
