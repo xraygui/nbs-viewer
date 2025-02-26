@@ -22,12 +22,14 @@ class KafkaRun(CatalogRun):
     """
 
     _METADATA_MAP = {
-        "scan_id": ["scan_id"],
-        "uid": ["uid"],
-        "time": ["time"],
-        "num_points": ["num_points"],
-        "plan_name": ["plan_name"],
-        "sample_name": ["sample_name"],
+        "scan_id": ["start", "scan_id"],
+        "uid": ["start", "uid"],
+        "time": ["start", "time"],
+        "num_points": ["start", "num_points"],
+        "plan_name": ["start", "plan_name"],
+        "group_name": ["start", "group_name"],
+        "sample_name": ["start", "sample_name"],
+        "motors": ["start", "motors"],
     }
 
     DISPLAY_KEYS = {
@@ -36,10 +38,19 @@ class KafkaRun(CatalogRun):
         "time": "Time",
         "num_points": "Points",
         "plan_name": "Plan",
+        "group_name": "Group",
         "sample_name": "Sample",
     }
 
-    METADATA_KEYS = ["scan_id", "uid", "time", "num_points", "plan_name", "sample_name"]
+    METADATA_KEYS = [
+        "scan_id",
+        "uid",
+        "time",
+        "num_points",
+        "plan_name",
+        "group_name",
+        "sample_name",
+    ]
 
     @classmethod
     def to_header(cls):
@@ -51,7 +62,7 @@ class KafkaRun(CatalogRun):
         list
             List of display names for metadata columns
         """
-        return [cls.DISPLAY_KEYS.get(attr, attr) for attr in cls._METADATA_MAP]
+        return [cls.DISPLAY_KEYS.get(attr, attr) for attr in cls.METADATA_KEYS]
 
     def __init__(
         self,
@@ -59,6 +70,7 @@ class KafkaRun(CatalogRun):
         key=None,
         catalog=None,
     ):
+        super().__init__(None, key, catalog, parent=None)
         self._start_doc = start_doc
         self.setup()
         self._stop_doc = {}
@@ -66,21 +78,17 @@ class KafkaRun(CatalogRun):
         self._descriptors = {}
         self._plot_hints = {}
         # Initialize with basic keys, will update when descriptors arrive
-        super().__init__(None, key, catalog, parent=None)
         # print("New KafkaRun")
 
     def setup(self):
         """Set up the run object by extracting metadata from start document."""
-        self.time = self._start_doc.get("time")
-        self.uid = self._start_doc.get("uid")
-        self.scan_id = self._start_doc.get("scan_id")
-        self.plan_name = self._start_doc.get("plan_name", "")
-        self.sample_name = self._start_doc.get("sample_name", "")
+        self.metadata = self._start_doc
+
+        for key, keylist in self._METADATA_MAP.items():
+            setattr(self, key, self.get_md_value(keylist))
+
         self._plot_hints = self._start_doc.get("plot_hints", {})
         self.hints = self._start_doc.get("hints", {})
-        self.motors = self._start_doc.get("motors", [])
-        self.num_points = self._start_doc.get("num_points")
-        self.metadata = self._start_doc
 
     def __str__(self):
         """

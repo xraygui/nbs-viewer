@@ -16,6 +16,7 @@ class NBSRun(BlueskyRun):
         "scan_id": ["start", "scan_id"],
         "scantype": ["start", "scantype"],
         "plan_name": ["start", "plan_name"],
+        "group_name": ["start", "group_name"],
         "edge": ["start", "edge"],
         "sample_name": ["start", "sample_name"],
         "sample_id": ["start", "sample_id"],
@@ -29,6 +30,7 @@ class NBSRun(BlueskyRun):
         "scan_id": "Scan ID",
         "scantype": "Scan Type",
         "plan_name": "Plan Name",
+        "group_name": "Group Name",
         "edge": "Edge",
         "sample_name": "Sample Name",
         "sample_id": "Sample ID",
@@ -38,6 +40,7 @@ class NBSRun(BlueskyRun):
     METADATA_KEYS = [
         "scan_id",
         "plan_name",
+        "group_name",
         "sample_name",
         "sample_id",
         "date",
