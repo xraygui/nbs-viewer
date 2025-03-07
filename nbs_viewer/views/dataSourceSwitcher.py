@@ -154,4 +154,15 @@ class DataSourceSwitcher(QWidget):
 
     def switch_table(self):
         """Switch the visible source view."""
-        self.stacked_widget.setCurrentIndex(self.dropdown.currentIndex())
+        # Get the target catalog label
+        target_label = self.dropdown.currentText()
+        target_index = self.dropdown.currentIndex()
+
+        # Clear selections from all other catalogs
+        for i in range(self.stacked_widget.count()):
+            if i != target_index:
+                view = self.stacked_widget.widget(i)
+                view.deselect_all()
+
+        # Switch to the new view
+        self.stacked_widget.setCurrentIndex(target_index)

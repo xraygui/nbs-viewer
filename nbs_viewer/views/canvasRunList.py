@@ -79,7 +79,7 @@ class CanvasRunList(QWidget):
         # Connect to model signals
         self.plot_model.run_added.connect(self._on_run_added)
         self.plot_model.run_removed.connect(self._on_run_removed)
-        self.plot_model.run_selection_changed.connect(self._on_selection_changed)
+        self.plot_model.visible_runs_changed.connect(self._on_selection_changed)
 
         # Initialize with current runs
         for run in self.plot_model.available_runs:
@@ -140,11 +140,11 @@ class CanvasRunList(QWidget):
             self.list_widget.blockSignals(True)
 
             # Update checkbox states based on visible runs
-            visible_uids = {run.uid for run in selected_runs}
+
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
                 uid = item.data(Qt.UserRole)
-                item.setCheckState(Qt.Checked if uid in visible_uids else Qt.Unchecked)
+                item.setCheckState(Qt.Checked if uid in selected_runs else Qt.Unchecked)
 
         finally:
             self.list_widget.blockSignals(False)

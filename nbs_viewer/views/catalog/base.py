@@ -497,10 +497,24 @@ class CatalogTableView(QWidget):
         finally:
             self._handling_selection = False  # Always reset flag
 
+    def deselect_all(self):
+        """
+        Deselect all items in both the view and catalog.
+
+        This ensures synchronization between the view's selection state
+        and the catalog's internal selection state.
+        """
+        # Clear the view's selection first
+        all_items = self.get_selected_items()
+        self.deselect_items(all_items)
+        # Then clear the catalog's selection
+        # This will trigger item_deselected signals for each selected run
+        self._catalog.clear_selection()
+
     def cleanup(self):
         """Clean up resources before removal."""
-        # Clear all selections first
-        self._catalog.clear_selection()
+        # Clear all selections using our synchronized method
+        self.deselect_all()
 
         # Disconnect signals
         if self.data_view.model() is not None:

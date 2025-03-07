@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 import logging
 from .base import CatalogRun
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any, Optional, Union
 import numpy as np
 
 
@@ -56,9 +56,17 @@ class BlueskyRun(CatalogRun):
         """
         super().__init__(run, key, catalog, parent)
         self._data_cache = {}
+        self._nd_data_cache = {}
         self._axis_cache = {}
         self._shape_cache = {}
-        self._has_data = False  # Track if run has valid data
+        self._has_data = False
+        self._metadata = None
+        self._start_doc = None
+        self._stop_doc = None
+        self._descriptors = None
+        self._stream = "primary"
+        self._max_1d_cache_items = 100
+        self._max_nd_cache_items = 10
 
         # Setup metadata first since it's always available
         self.setup()
@@ -90,7 +98,11 @@ class BlueskyRun(CatalogRun):
         """
         self._data_cache.clear()
         self._axis_cache.clear()
+        self._nd_data_cache.clear()
         self._shape_cache.clear()
+        self._start_doc = None
+        self._stop_doc = None
+        self._descriptors = None
         super().refresh()
 
     def setup(self):
@@ -217,7 +229,7 @@ class BlueskyRun(CatalogRun):
             logging.debug(f"Getting shape for key {key}")
             try:
                 # Try to get shape from metadata first
-                shape = self._run["primary", "data", key].metadata["shape"]
+                shape = self._run["primary", "data", key].shape
                 self._shape_cache[key] = shape
                 logging.debug("Got shape from metadata")
             except (KeyError, AttributeError):
@@ -282,7 +294,7 @@ class BlueskyRun(CatalogRun):
         plotHints = self.get_md_value(["start", "plot_hints"], {})
         return plotHints
 
-    def getData(self, key):
+    def getData(self, key, slice_info=None):
         """
         Get data for a given key, using cache if available.
 
@@ -290,22 +302,106 @@ class BlueskyRun(CatalogRun):
         ----------
         key : str
             The key to get data for
+        slice_info : tuple, optional
+            Tuple of slice objects or indices for each dimension
 
         Returns
         -------
         array-like
-            The data for the given key
+            The data for the given key, potentially sliced
         """
         if not self._has_data:
             return np.array([])  # Return empty array if no data
 
-        if key not in self._data_cache:
+        # First check if we have the full data in the regular cache
+        if key in self._data_cache:
+            if slice_info is not None:
+                # If we have full data, just slice it directly
+                return self._data_cache[key][slice_info]
+            return self._data_cache[key]
+
+        # Determine dimensionality from shape
+        shape = self.getShape(key)
+        is_1d = len(shape) == 1
+
+        # For 1D data, always fetch the full dataset
+        if is_1d:
             try:
-                self._data_cache[key] = self._run["primary", "data", key].read()
+                data_accessor = self._run["primary", "data", key]
+                data = data_accessor.read()
+                self._data_cache[key] = data
+                self._manage_cache(self._data_cache, self._max_1d_cache_items)
+
+                # Return sliced data if requested
+                if slice_info is not None:
+                    return np.array(data[slice_info])
+                return data
             except Exception as e:
-                print(f"Error reading data for key {key}: {e}")
+                logging.error(f"Error reading 1D data for key {key}: {e}")
                 return np.array([])
-        return self._data_cache[key]
+
+        # For N-D data, proceed with slice-aware fetching
+        if slice_info is not None:
+            # Use N-D data cache for sliced data
+            cache = self._nd_data_cache
+            # Convert slice objects to tuples of (start, stop, step)
+            slice_key = tuple(
+                (s.start, s.stop, s.step) if isinstance(s, slice) else s
+                for s in slice_info
+            )
+            cache_key = (key, slice_key)
+            max_cache_items = self._max_nd_cache_items
+
+            if cache_key in cache:
+                return cache[cache_key]
+        else:
+            # Use regular data cache for full data
+            cache = self._data_cache
+            cache_key = key
+            max_cache_items = self._max_1d_cache_items
+
+        try:
+            # Get the data accessor
+            data_accessor = self._run["primary", "data", key]
+
+            if slice_info is not None:
+                # Request only the slice we need from Tiled
+                # This avoids calling read() on the entire dataset
+                data = data_accessor[slice_info]
+                if not np.isscalar(data):
+                    cache[cache_key] = data
+                else:
+                    data = np.array(data)
+            else:
+                # For full data requests
+                data = data_accessor.read()
+                cache[cache_key] = data
+
+            # Manage cache size
+            self._manage_cache(cache, max_cache_items)
+
+        except Exception as e:
+            logging.error(f"Error reading data for key {key}: {e}")
+            return np.array([])
+
+        return data
+
+    def _manage_cache(self, cache, max_items):
+        """
+        Limit cache size by removing least recently used items.
+
+        Parameters
+        ----------
+        cache : dict
+            The cache to manage
+        max_items : int
+            Maximum number of items to keep in cache
+        """
+        if len(cache) > max_items:
+            # Simple LRU implementation - remove oldest items first
+            keys_to_remove = list(cache.keys())[:-max_items]
+            for key in keys_to_remove:
+                del cache[key]
 
     def getAxis(self, keys):
         """
@@ -446,3 +542,122 @@ class BlueskyRun(CatalogRun):
         """
         status = self.get_md_value(["stop", "exit_status"], "")
         return status == "success"
+
+    @property
+    def start(self):
+        """Get the run's start document."""
+        if self._start_doc is None:
+            try:
+                self._start_doc = self._run.metadata["start"]
+            except (KeyError, AttributeError):
+                try:
+                    self._start_doc = self._run.start
+                except AttributeError:
+                    self._start_doc = {}
+        return self._start_doc
+
+    @property
+    def stop(self):
+        """Get the run's stop document."""
+        if self._stop_doc is None:
+            try:
+                self._stop_doc = self._run.metadata["stop"]
+            except (KeyError, AttributeError):
+                try:
+                    self._stop_doc = self._run.stop
+                except AttributeError:
+                    self._stop_doc = {}
+        return self._stop_doc
+
+    @property
+    def descriptors(self):
+        """Get the run's descriptors."""
+        if self._descriptors is None:
+            try:
+                self._descriptors = list(self._run.metadata["descriptors"])
+            except (KeyError, AttributeError):
+                try:
+                    self._descriptors = list(self._run.descriptors)
+                except AttributeError:
+                    self._descriptors = []
+        return self._descriptors
+
+    def get_dimension_data(self, key, indices, plot_dims):
+        """
+        Get data for a specific key, sliced according to indices and plot dimensions.
+
+        Parameters
+        ----------
+        key : str
+            The data key
+        indices : tuple
+            Indices for non-plotted dimensions
+        plot_dims : int or tuple
+            Dimensions to include in the plot (1 for line plot, 2 for 2D plot)
+
+        Returns
+        -------
+        array-like
+            The sliced data ready for plotting
+        """
+        # Get the full shape
+        shape = self.getShape(key)
+        if not shape:
+            return np.array([])
+
+        # Prepare slice information
+        slice_info = [slice(None)] * len(shape)
+
+        # Handle 1D plotting
+        if plot_dims == 1:
+            # Set all non-plotted dimensions to the specified indices
+            for i, idx in enumerate(indices):
+                if i < len(shape) - 1:  # All except the last dimension
+                    slice_info[i] = idx
+
+        # Handle 2D plotting
+        elif plot_dims == 2:
+            # Set all dimensions except the last two to the specified indices
+            for i, idx in enumerate(indices):
+                if i < len(shape) - 2:  # All except the last two dimensions
+                    slice_info[i] = idx
+
+        # Get the sliced data
+        return self.getData(key, tuple(slice_info))
+
+    def clear_cache(self, clear_1d=True, clear_nd=True):
+        """
+        Clear the data caches.
+
+        Parameters
+        ----------
+        clear_1d : bool, optional
+            Whether to clear the 1D data cache, by default True
+        clear_nd : bool, optional
+            Whether to clear the N-D data cache, by default True
+        """
+        if clear_1d:
+            self._data_cache.clear()
+        if clear_nd:
+            self._nd_data_cache.clear()
+
+    def get_cache_size(self):
+        """
+        Get the approximate size of the data caches in bytes.
+
+        Returns
+        -------
+        dict
+            Dictionary with sizes of 1D and N-D caches
+        """
+        size_1d = 0
+        for data in self._data_cache.values():
+            if hasattr(data, "nbytes"):
+                size_1d += data.nbytes
+
+        size_nd = 0
+        for data in self._nd_data_cache.values():
+            if hasattr(data, "nbytes"):
+                size_nd += data.nbytes
+
+        return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}

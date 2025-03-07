@@ -1,26 +1,26 @@
+import matplotlib
+
+matplotlib.use("Qt5Agg")
+import numpy as np
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg,
+    NavigationToolbar2QT as NavigationToolbar2QT,
+)
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from qtpy.QtCore import Qt, QSize, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QVBoxLayout,
     QHBoxLayout,
     QWidget,
-    QSlider,
-    QLabel,
-    QSpinBox,
     QSizePolicy,
     QSplitter,
     QPushButton,
+    QMessageBox,
 )
-from qtpy.QtCore import Qt, Signal, Slot, QSize, QTimer
 
-import matplotlib
-import numpy as np
-
-matplotlib.use("Qt5Agg")
-
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-
+from ...models.plot.plotDataModel import PlotDataModel
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 
@@ -54,31 +54,27 @@ class MplCanvas(FigureCanvasQTAgg):
 
         # Create axes with explicit spacing from edges
         self.axes = self.fig.add_subplot(111)
-        self.fig.subplots_adjust(left=0.15, right=0.95, top=0.95, bottom=0.15)
 
         # Initialize canvas
         super().__init__(self.fig)
+        self.setParent(parent)
 
-        self.currentDim = 1
-        self._autoscale = True
+        # Store plot model
+        self.plotModel = plotModel
+        self.plotArtists = {}
+
+        # Initialize properties
         self._artist_count = 0
+        self._autoscale = True
         self._draw_pending = False
+        self._dimension = 1  # Default to 1D plotting
+        self._slice = None
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
 
-        # Connect plot model signals
-        self.plotModel = plotModel
-        self.plotModel.artist_needed.connect(self.create_artist)
-        self.plotModel.draw_requested.connect(self.draw)
-        self.plotModel.autoscale_requested.connect(self.autoscale)
-        self.plotModel.visibility_changed.connect(self._on_visibility_changed)
-        self.plotModel.legend_update_requested.connect(self.updateLegend)
-
-    def _on_visibility_changed(self, plot_data, is_visible):
-        """Handle visibility changes by updating the legend."""
-        self.updateLegend()
-        self.autoscale()
+        # Connect signals
+        self.plotModel.request_plot_update.connect(self.updatePlot)
 
     def sizeHint(self):
         width = self.width()
@@ -88,16 +84,90 @@ class MplCanvas(FigureCanvasQTAgg):
     def heightForWidth(self, width):
         return int(width / self.aspect_ratio)
 
-    def create_artist(self, plotData):
-        x = plotData._xplot
-        y = plotData._yplot
+    def update_view_state(self, indices, dimension, validate=False):
+        """Update the plot dimension and validate the change."""
+
+        if dimension == 2 and validate:
+            # Count visible plot data models
+            # print("Updating dimension to 2")
+            visible_count = 0
+            for model in self.plotArtists.values():
+                # print(f"Model: {model.label}")
+                if model.artist is not None and model.artist.get_visible():
+                    # print("Visible")
+                    visible_count += 1
+
+            print(f"Visible count: {visible_count}")
+            if visible_count > 1:
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Warning)
+                msg.setText("Cannot switch to 2D mode with multiple datasets")
+                msg.setInformativeText(
+                    "Please select only one dataset for 2D plotting."
+                )
+                msg.setWindowTitle("Invalid Plot Configuration")
+                msg.exec_()
+                return False
+
+        if self._dimension != dimension or self._slice != indices:
+            self.clear()
+            self._dimension = dimension
+            self._slice = indices
+            self.updatePlot()
+        return True
+
+    def updatePlotData(self, runModel, xkey, ykey, norm_keys=None):
+        key = (xkey, ykey, runModel.uid)
+        if key not in self.plotArtists:
+            plotData = PlotDataModel(
+                runModel,
+                xkey,
+                ykey,
+                norm_keys=norm_keys,
+                indices=self._slice,
+                dimension=self._dimension,
+            )
+            plotData.data_changed.connect(self.plot_data)
+            plotData.draw_requested.connect(self.draw)
+            self.plotArtists[key] = plotData
+            self.plot_data(plotData)
+        else:
+            self.plotArtists[key].update_data_info(
+                norm_keys=norm_keys, indices=self._slice, dimension=self._dimension
+            )
+
+    def updatePlot(self):
+        """
+        Update the plot with current data, using a timer to batch rapid updates.
+        """
+        if hasattr(self, "_update_timer_active") and self._update_timer_active:
+            return
+
+        self._update_timer_active = True
+        QTimer.singleShot(100, self._do_update_plot)
+
+    def _do_update_plot(self):
+        """
+        Actually perform the plot update.
+        """
+        print("Updating MplCanvas")
         try:
-            artist = self.plot(x, y, None, label=plotData._label)
-        except Exception as e:
-            print(f"Error creating artist for {plotData._label}: {e}")
-            artist = None
-        plotData.set_artist(artist)
-        return artist
+            xkeys, ykeys, normkeys = self.plotModel.get_selected_keys()
+            visible_keys = set()
+            for runModel in self.plotModel.visible_models:
+                for xkey in xkeys:
+                    for ykey in ykeys:
+                        visible_keys.add((xkey, ykey, runModel.uid))
+                        self.updatePlotData(runModel, xkey, ykey, normkeys)
+
+            for key, plotDataModel in self.plotArtists.items():
+                if key not in visible_keys:
+                    plotDataModel.set_visible(False)
+                else:
+                    plotDataModel.set_visible(True)
+            self.draw()
+        finally:
+            self._update_timer_active = False
 
     def resizeEvent(self, event):
         """Handle resize events to maintain proper layout."""
@@ -110,60 +180,130 @@ class MplCanvas(FigureCanvasQTAgg):
         self.fig.tight_layout()
         self.draw()
 
-    def plot(self, xlist, y, artist=None, **kwargs):
-        """Plot data on the canvas."""
-        label = kwargs.get("label", "no label")
+    def plot_data(self, plotData):
+        """
+        Plot data from a PlotDataModel on the canvas.
 
+        Parameters
+        ----------
+        plotData : PlotDataModel
+            The plot data model containing the data to plot
+
+        Returns
+        -------
+        Artist
+            The matplotlib artist representing the plotted data
+        """
+        # print(f"Plotting Data with slice {self._slice} and dimension {self._dimension}")
+        x, y = plotData.get_plot_data(self._slice, self._dimension)
+        artist = plotData.artist
+
+        # Handle 1D data (line plots)
         if len(y.shape) == 1:
+            print(f"Plotting 1D data for {plotData.label}")
             if isinstance(artist, Line2D):
-                # print(f"Updating existing artist: {label}")
-                artist.set_data(xlist[0], y)
+                artist.set_data(x[0], y)
             else:
-                # print(f"Creating new artist #{self._artist_count}: {label}")
-                # Create artist with clipping enabled
-                artist = self.axes.plot(xlist[0], y, clip_on=True, **kwargs)[0]
+                artist = self.axes.plot(x[0], y, clip_on=True, label=plotData.label)[0]
                 self._artist_count += 1
-
-            # Ensure proper layout after adding/updating artists
             self.fig.tight_layout()
-
             if self._autoscale:
                 self.autoscale()
             self.updateLegend()
+            self.currentDim = 1
 
-        elif len(y.shape) == 2 and len(xlist) > 1:
-            # Only clear for 2D plots or dimension changes
-            if self.currentDim != 2:
-                # Properly clean up old axes
-                old_axes = self.axes
-                self.fig.delaxes(old_axes)
-                self.axes = self.fig.add_subplot(111)
-                artist = self.axes.contourf(xlist[-1], xlist[-2], y)
-                self.currentDim = 2
+        # Handle 2D data (heatmap/image plots)
+        elif len(y.shape) == 2 and len(x) >= 2:
+            print(f"Plotting 2D data for {plotData.label}")
+            try:
+                if self.currentDim != 2:
+                    if hasattr(self, "colorbar"):
+                        try:
+                            self.colorbar.remove()
+                        except Exception as e:
+                            print(f"Error removing colorbar: {e}")
+                    old_axes = self.axes
+                    self.fig.delaxes(old_axes)
+                    self.axes = self.fig.add_subplot(111)
+
+                    # Transpose the data and create meshgrid with swapped coordinates
+                    y = y.T  # Transpose the data
+                    X, Y = np.meshgrid(x[-2], x[-1])  # Swap x[-1] and x[-2]
+
+                    mesh = self.axes.pcolormesh(
+                        X, Y, y, shading="nearest", label=plotData.label
+                    )
+                    self.colorbar = self.fig.colorbar(mesh, ax=self.axes)
+                    self.colorbar.set_label(plotData.label)
+                    artist = mesh
+                    self.currentDim = 2
+                else:
+                    if (
+                        hasattr(self.axes, "collections")
+                        and len(self.axes.collections) > 0
+                    ):
+                        y = y.T  # Transpose the data
+                        X, Y = np.meshgrid(x[-2], x[-1])  # Swap x[-1] and x[-2]
+                        self.axes.collections[0].set_array(y.ravel())
+                        artist = self.axes.collections[0]
+                    else:
+                        y = y.T  # Transpose the data
+                        X, Y = np.meshgrid(x[-2], x[-1])  # Swap x[-1] and x[-2]
+                        mesh = self.axes.pcolormesh(
+                            X, Y, y, shading="nearest", label=plotData.label
+                        )
+                        if hasattr(self, "colorbar"):
+                            try:
+                                self.colorbar.remove()
+                            except Exception as e:
+                                print(f"Error removing colorbar: {e}")
+                        self.colorbar = self.fig.colorbar(mesh, ax=self.axes)
+                        self.colorbar.set_label(plotData.label)
+                        artist = mesh
+            except Exception as e:
+                print(f"Error in 2D plotting: {e}")
+                artist = None
         else:
-            print(f"Unsupported dimensionality! {y.shape}, {len(xlist)}")
+            print(f"Unsupported dimensionality! {y.shape}, {len(x)}")
             artist = None
-
+        plotData.set_artist(artist)
         self.draw()
         return artist
 
     def clear(self):
-        """Clear all artists from the axes and reset state."""
-        # print("\nClearing canvas...")
-        # print(f"Before clear: {len(self.axes.get_lines())} artists")
+        """Clear all visual artists from the axes but keep plotDataModel references."""
+        # Remove line artists
         for line in self.axes.get_lines():
-            # print(f"  Removing {line.get_label()}")
             line.remove()
+
+        # Remove mesh/collection artists (for 2D plots)
+        for collection in self.axes.collections:
+            try:
+                collection.remove()
+            except Exception as e:
+                print(f"Error cleaning up collection: {e}")
+
+        # Remove colorbar if it exists
+        if hasattr(self, "colorbar"):
+            try:
+                self.colorbar.remove()
+                delattr(self, "colorbar")
+            except Exception as e:
+                print(f"Error removing colorbar: {e}")
 
         # Clear the figure and axes
         self.axes.cla()
         self.fig.clear()
         self.axes = self.fig.add_subplot(111)
-        # print(f"After clear: {len(self.axes.get_lines())} artists")
 
-        # Reset states
+        # Reset states but keep plotArtists
         self.currentDim = 1
         self._artist_count = 0
+
+        # Clear artist references in plotDataModels but keep the models
+        for model in self.plotArtists.values():
+            model.artist = None
+
         self.draw()
 
     def autoscale(self):
@@ -225,8 +365,76 @@ class MplCanvas(FigureCanvasQTAgg):
     def _do_draw(self):
         """Actually perform the draw operation."""
         self._draw_pending = False
+        print("Drawing MplCanvas")
         # Call parent class draw
         super().draw()
+
+    def remove_run_data(self, run_uid):
+        """
+        Remove all PlotDataModels associated with a specific run.
+
+        Parameters
+        ----------
+        run_uid : str
+            The unique identifier of the run to remove
+        """
+        print(f"Removing PlotDataModels for run {run_uid}")
+        # Find all keys associated with this run
+        keys_to_remove = [key for key in self.plotArtists.keys() if key[2] == run_uid]
+
+        # Remove each PlotDataModel
+        for key in keys_to_remove:
+            print(f"  Removing PlotDataModel for {key}")
+            plot_data = self.plotArtists[key]
+
+            # Disconnect signals
+            plot_data.data_changed.disconnect(self.plot_data)
+            plot_data.draw_requested.disconnect(self.draw)
+
+            # Remove the artist from the axes
+            plot_data.clear()
+
+            # Remove from our dictionary
+            del self.plotArtists[key]
+
+        # Update legend and redraw if we removed anything
+        if keys_to_remove:
+            self.updateLegend()
+            self.draw()
+
+    def _debug_plot_state(self):
+        """Print debug information about canvas state."""
+        print("\n=== MplCanvas Debug Info ===")
+        print(f"Current Dimension: {self._dimension}")
+        print(f"Current Slice: {self._slice}")
+        print(f"Artist Count: {self._artist_count}")
+        print(f"Autoscale Enabled: {self._autoscale}")
+        print("\nPlot Data Models:")
+        for key, model in self.plotArtists.items():
+            print(f"\n  Model: {key}")
+            print(f"    Label: {model.label}")
+            print(f"    Has Artist: {model.artist is not None}")
+            if model.artist is not None:
+                print(f"    Artist Type: {type(model.artist).__name__}")
+                print(f"    Artist Visible: {model.artist.get_visible()}")
+
+                # Matplotlib State
+        print("\nMatplotlib State:")
+        print(f"  Number of Lines: {len(self.axes.get_lines())}")
+        print(f"  Number of Collections: {len(self.axes.collections)}")
+        print("  Artists:")
+        for artist in self.axes.get_lines():
+            print(f"    - Line: {artist.get_label()} (visible: {artist.get_visible()})")
+        for artist in self.axes.collections:
+            print(
+                f"    - Collection: {artist.get_label()} (visible: {artist.get_visible()})"
+            )
+        if hasattr(self, "colorbar"):
+            print("  Colorbar: Present")
+        else:
+            print("  Colorbar: None")
+
+        print("\n=== End MplCanvas Debug Info ===")
 
 
 class PlotWidget(QWidget):
@@ -258,9 +466,13 @@ class PlotWidget(QWidget):
         self.plot_layout.addWidget(self.plot)
 
         # Add debug button
-        # self.debug_button = QPushButton("Debug Plot State")
-        # self.debug_button.clicked.connect(self._debug_plot_state)
-        # self.plot_layout.addWidget(self.debug_button)
+        self.debug_button = QPushButton("Debug Plot State")
+        self.debug_button.clicked.connect(self._debug_plot_state)
+        self.plot_layout.addWidget(self.debug_button)
+
+        # Add dimension control widget
+        self.dimension_control = PlotDimensionControl(self.plotModel, self.plot, self)
+        self.plot_layout.addWidget(self.dimension_control)
 
         # Create plot controls
         self.plotControls = PlotControls(self.plotModel)
@@ -274,32 +486,39 @@ class PlotWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.layout)
 
+        # Connect to model signals for cleanup
+        self.plotModel.run_removed.connect(self._on_run_removed)
+
+    def _on_run_removed(self, run):
+        """Handle run removal by cleaning up associated PlotDataModels."""
+        self.plot.remove_run_data(run.uid)
+
     def _debug_plot_state(self):
         """Print debug information about plot state."""
         print("\n=== Plot State Debug Info ===")
 
-        # Plot Model Runs
-        print("\nPlot Model Available Runs:")
-        for run_model in self.plotModel._run_models.values():
-            print(f"  - {run_model._run.display_name} (uid: {run_model._run.uid})")
+        # Canvas State
+        print("\nMplCanvas State:")
+        self.plot._debug_plot_state()
 
-        print("\nPlot Model Visible Runs:")
+        # Plot Model State
+        print("\nPlot Model State:")
+        print("  Available Runs:")
+        for run_model in self.plotModel._run_models.values():
+            print(f"    - {run_model._run.display_name} (uid: {run_model._run.uid})")
+
+        print("\n  Visible Runs:")
         for uid in self.plotModel._visible_runs:
             if uid in self.plotModel._run_models:
                 run = self.plotModel._run_models[uid]._run
-                print(f"  - {run.display_name} (uid: {uid})")
+                print(f"    - {run.display_name} (uid: {uid})")
             else:
-                print(f"  - WARNING: Visible uid {uid} not in run models!")
+                print(f"    - WARNING: Visible uid {uid} not in run models!")
 
-        # Canvas Artists
-        print("\nMplCanvas Artists:")
-        for artist in self.plot.axes.get_lines():
-            print(f"  - {artist.get_label()} (visible: {artist.get_visible()})")
-
-        print("\nCurrent Selection:")
-        print(f"  X keys: {self.plotModel._current_x_keys}")
-        print(f"  Y keys: {self.plotModel._current_y_keys}")
-        print(f"  Norm keys: {self.plotModel._current_norm_keys}")
+        print("\n  Current Selection:")
+        print(f"    X keys: {self.plotModel._current_x_keys}")
+        print(f"    Y keys: {self.plotModel._current_y_keys}")
+        print(f"    Norm keys: {self.plotModel._current_norm_keys}")
 
         print("\n=== End Debug Info ===\n")
 

@@ -18,11 +18,10 @@ class RunModel(QObject):
     """
 
     available_keys_changed = Signal()
-    plot_data_changed = Signal(object)
-    artist_needed = Signal(object)
-    draw_requested = Signal()
-    autoscale_requested = Signal()
-    visibility_changed = Signal(object, bool)  # (artist, is_visible)
+    selected_keys_changed = Signal(list, list, list)
+    transform_changed = Signal(dict)
+    data_changed = Signal()
+    visibility_changed = Signal(bool)  # (artist, is_visible)
 
     def __init__(self, run: CatalogRun):
         super().__init__()
@@ -32,7 +31,7 @@ class RunModel(QObject):
         self._selected_x: List[str] = []
         self._selected_y: List[str] = []
         self._selected_norm: List[str] = []
-        self._artists = {}
+        # self._artists = {}
         self._is_visible = True  # Track overall visibility state
         self._available_keys = list()  # Track our own copy of available keys
 
@@ -49,6 +48,21 @@ class RunModel(QObject):
         return self._run
 
     @property
+    def uid(self) -> str:
+        """Get the unique identifier for the run."""
+        return self._run.uid
+
+    @property
+    def scan_id(self) -> str:
+        """Get the scan ID for the run."""
+        return self._run.scan_id
+
+    @property
+    def plan_name(self) -> str:
+        """Get the plan name for the run."""
+        return self._run.plan_name
+
+    @property
     def available_keys(self) -> List[str]:
         """Get the set of available keys."""
         return self._available_keys
@@ -63,13 +77,14 @@ class RunModel(QObject):
     def _set_default_selection(self) -> None:
         """Set default key selection based on run hints."""
         x_keys, y_keys, norm_keys = self.run.get_default_selection()
-        self.set_selection(x_keys, y_keys, norm_keys)
+        self.set_selected_keys(x_keys, y_keys, norm_keys)
 
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
         self._update_available_keys()
-        self.update_plot()
+        self.data_changed.emit()
 
+    '''
     def update_plot(self):
         """Emit data for current selection."""
         x_keys = self.selected_x_keys
@@ -103,7 +118,10 @@ class RunModel(QObject):
                 else:
                     # Create label with y_key and scan_id
                     label = f"{y_key}.{self.run.scan_id}"
-                    artist = PlotDataModel(x_data, y_data, x_key, label)
+                    # Create PlotDataModel with current plot dimensions
+                    artist = PlotDataModel(
+                        x_data, y_data, x_key, label, dimension=self._plot_dimensions
+                    )
                     artist.artist_needed.connect(self.artist_needed)
                     artist.autoscale_requested.connect(self.autoscale_requested)
                     artist.draw_requested.connect(self.draw_requested)
@@ -114,6 +132,7 @@ class RunModel(QObject):
 
         if should_draw:
             self.draw_requested.emit()
+    '''
 
     def set_transform(self, transform_state) -> None:
         """
@@ -139,23 +158,7 @@ class RunModel(QObject):
         self._run.set_dynamic(enabled)
 
     def cleanup(self):
-        """Clean up resources and remove all artists."""
-        # Clean up all artists
-        for artist in list(self._artists.values()):  # Make copy of values
-            try:
-                # Clear the artist
-                artist.clear()
-                # Disconnect all signals
-                artist.artist_needed.disconnect(self.artist_needed)
-                artist.autoscale_requested.disconnect(self.autoscale_requested)
-                artist.draw_requested.disconnect(self.draw_requested)
-                artist.visibility_changed.disconnect(self.visibility_changed)
-            except Exception as e:
-                print(f"Warning: Error cleaning up artist signals: {e}")
-
-        # Clear artist dictionary
-        self._artists.clear()
-
+        """Clean up resources and disconnect signals."""
         # Disconnect RunData signals
         try:
             self._run.data_changed.disconnect(self._on_data_changed)
@@ -167,25 +170,14 @@ class RunModel(QObject):
         self._selected_y.clear()
         self._selected_norm.clear()
 
-    @property
-    def selected_x_keys(self) -> List[str]:
-        """Get selected x-axis keys."""
-        return self._selected_x.copy()
-
-    @property
-    def selected_y_keys(self) -> List[str]:
-        """Get selected y-axis keys."""
-        return self._selected_y.copy()
-
-    @property
-    def selected_norm_keys(self) -> List[str]:
-        """Get selected normalization keys."""
-        return self._selected_norm.copy()
+        # Emit a final signal to ensure any remaining references are cleaned up
+        self.data_changed.emit()
+        self.visibility_changed.emit(False)
 
     def get_selected_keys(self):
-        return self.selected_x_keys, self.selected_y_keys, self.selected_norm_keys
+        return self._selected_x, self._selected_y, self._selected_norm
 
-    def set_selection(
+    def set_selected_keys(
         self,
         x_keys: List[str],
         y_keys: List[str],
@@ -228,5 +220,6 @@ class RunModel(QObject):
         is_visible : bool
             New visibility state
         """
-        self._is_visible = is_visible  # Save visibility state
-        self.update_plot()
+        if is_visible != self._is_visible:
+            self._is_visible = is_visible  # Save visibility state
+            self.visibility_changed.emit(is_visible)

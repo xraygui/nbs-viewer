@@ -321,7 +321,7 @@ class CatalogRun(QObject):
 
         return filtered
 
-    def get_plot_data(self, xkeys, ykeys, norm_keys=None):
+    def get_plot_data(self, xkeys, ykeys, norm_keys=None, slice_info=None):
         """
         Get transformed and cached plot data.
 
@@ -344,25 +344,42 @@ class CatalogRun(QObject):
                 return [], [], []
             # Cache key includes all input keys
             cache_key = (tuple(xkeys), tuple(ykeys), tuple(norm_keys or []))
-
+            all_keys = cache_key[0] + cache_key[1] + cache_key[2]
             # Try to get raw data from cache
-            if not self._dynamic and cache_key in self._plot_data_cache:
+            if (
+                not self._dynamic
+                and cache_key in self._plot_data_cache
+                and slice_info is None
+            ):
                 xlist, ylist, norm = self._plot_data_cache[cache_key]
             else:
                 # Get raw data
-                xlist = [self.getData(key) for key in xkeys]
-                ylist = [self.getData(key) for key in ykeys]
+                slice_dict = self.analyze_slice_request(all_keys, slice_info)
+
+                xlist = [
+                    self.getData(key, slice_dict["keys"][key]["effective_slice"])
+                    for key in xkeys
+                ]
+                ylist = [
+                    self.getData(key, slice_dict["keys"][key]["effective_slice"])
+                    for key in ykeys
+                ]
 
                 # Handle normalization
                 if norm_keys:
-                    norm = self.getData(norm_keys[0])
+                    norm = self.getData(
+                        norm_keys[0],
+                        slice_dict["keys"][norm_keys[0]]["effective_slice"],
+                    )
                     for key in norm_keys[1:]:
-                        norm = norm * self.getData(key)
+                        norm = norm * self.getData(
+                            key, slice_dict["keys"][key]["effective_slice"]
+                        )
                 else:
                     norm = None
 
                 # Cache raw data if not dynamic
-                if not self._dynamic:
+                if not self._dynamic and slice_info is None:
                     self._plot_data_cache[cache_key] = (xlist, ylist, norm)
 
             # Transform data
@@ -375,7 +392,7 @@ class CatalogRun(QObject):
                 x_transformed, y_transformed = self.transform_data(xlist, y, norm)
 
                 # Handle axis hints and reordering
-                x_reordered, xkeys, y_reordered = self._reorder_dimensions(
+                x_reordered, xkeys, y_reordered = self._add_x_dimensions(
                     key, x_transformed, y_transformed, xkeys
                 )
 
@@ -451,7 +468,7 @@ class CatalogRun(QObject):
 
         return xlist, yfinal
 
-    def _reorder_dimensions(
+    def _add_x_dimensions(
         self, key: str, xlist: List[np.ndarray], y: np.ndarray, xkeys: List[str]
     ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
         """
@@ -474,7 +491,7 @@ class CatalogRun(QObject):
             Reordered (x_data_list, x_keys_list, y_data)
         """
         # Get dimension info
-        xdim = len(xlist)
+        xdim = sum(len(x.shape) for x in xlist)
         axis_hints = self.getAxisHints()
 
         # Get axis additions from hints
@@ -493,14 +510,10 @@ class CatalogRun(QObject):
                 xadditional_keys.append(f"Dimension {n}")
 
         # Reorder based on number of additions
-        if len(xadditions) == 1:
-            xlist_reordered = xlist[:-1] + xadditions + [xlist[-1]]
-            xkeys_reordered = xkeys[:-1] + xadditional_keys + [xkeys[-1]]
-            y_reordered = np.swapaxes(y, -2, -1)
-        else:
-            xlist_reordered = xlist + xadditions
-            xkeys_reordered = xkeys + xadditional_keys
-            y_reordered = y
+
+        xlist_reordered = xlist + xadditions
+        xkeys_reordered = xkeys + xadditional_keys
+        y_reordered = y
 
         return xlist_reordered, xkeys_reordered, y_reordered
 
@@ -544,3 +557,87 @@ class CatalogRun(QObject):
     def display_name(self) -> str:
         """Get the display name of the run."""
         return str(self)
+
+    def analyze_slice_request(
+        self, keys: List[str], slice_info: Optional[tuple] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze shapes and determine appropriate slicing for each key.
+
+        Parameters
+        ----------
+        keys : List[str]
+            List of keys to analyze
+        slice_info : tuple
+            The requested slice information, e.g. (slice(None), 0, slice(None))
+
+        Returns
+        -------
+        Dict[str, Any]
+            {
+                'plot_dims': int,  # Number of non-integer slice dimensions
+                'keys': {
+                    key_name: {
+                        'shape': tuple,  # Original shape of the data
+                        'getData_slice': tuple,  # Slice to pass to getData
+                        'effective_shape': tuple,  # Shape with broadcasting
+                        'output_shape': tuple  # Final shape after slicing
+                    }
+                    for key_name in keys
+                }
+            }
+        """
+        # Calculate plot dimensions from slice_info
+        if slice_info is not None:
+            plot_dims = sum(1 for s in slice_info if isinstance(s, slice))
+        else:
+            plot_dims = max(len(self.getShape(key)) for key in keys)
+
+        result = {"plot_dims": plot_dims, "keys": {}}
+
+        # Process each key
+        for key in keys:
+            shape = self.getShape(key)
+            key_info = {"shape": shape}
+
+            if slice_info is not None:
+                # Generate getData slice - only include indices up to the data's dimensionality
+                getData_slice = tuple(
+                    s for i, s in enumerate(slice_info) if i < len(shape)
+                )
+                key_info["effective_slice"] = getData_slice
+
+                # Calculate effective shape (with broadcasting)
+                """
+                if len(shape) == 1:
+                    effective_shape = shape + (1,) * (max(0, plot_dims - 1))
+                else:
+                    effective_shape = shape
+                key_info["effective_shape"] = effective_shape
+                """
+
+                # Calculate output shape
+                # First get shape after getData slice
+                sliced_shape = tuple(
+                    1 if isinstance(s, int) else dim
+                    for s, dim in zip(getData_slice, shape)
+                )
+                # Then add broadcasting dimensions if needed
+                if len(shape) == 1 and plot_dims > 1:
+                    output_shape = sliced_shape + (1,) * (plot_dims - 1)
+                else:
+                    output_shape = sliced_shape
+                key_info["output_shape"] = output_shape
+
+            else:
+                # No slicing
+                key_info.update(
+                    {
+                        "effective_slice": None,
+                        "output_shape": shape,
+                    }
+                )
+
+            result["keys"][key] = key_info
+
+        return result

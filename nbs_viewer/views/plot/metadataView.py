@@ -95,14 +95,15 @@ class MetadataViewer(QWidget):
         self.setLayout(layout)
 
         # Connect signals
-        self.plot_model.run_selection_changed.connect(self._update_metadata)
+        self.plot_model.visible_runs_changed.connect(self._update_metadata)
 
     def _update_metadata(self, selected_runs):
         """Update displayed metadata when selection changes."""
-        self.metadata_model.update_metadata(selected_runs)
+        runs = [run._run for run in self.plot_model.visible_models]
+        self.metadata_model.update_metadata(runs)
 
         # Expand top-level items if multiple runs
-        if len(selected_runs) > 1:
+        if len(runs) > 1:
             for row in range(self.metadata_model.rowCount()):
                 index = self.metadata_model.index(row, 0)
                 self.tree_view.expand(index)
