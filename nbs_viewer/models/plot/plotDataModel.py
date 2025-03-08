@@ -208,14 +208,26 @@ class PlotDataModel(QWidget):
         print(f"Setting {self.label} artist to {artist}")
 
     def clear(self):
-        """Remove artist from plot and clean up."""
+        """
+        Remove artist from plot and clean up.
+
+        Handles both Line2D and QuadMesh artists appropriately.
+        """
         if self.artist is not None:
             try:
                 if self.artist.axes is not None:
+                    # Remove from axes
                     self.artist.remove()
-                self.artist.set_data([], [])
+
+                # Clear data based on artist type
+                if hasattr(self.artist, "set_data"):
+                    # Line2D case
+                    self.artist.set_data([], [])
+                elif hasattr(self.artist, "set_array"):
+                    # QuadMesh case
+                    self.artist.set_array([])
             except Exception as e:
-                print(f"Error cleaning up artist: {e}")
+                print(f"[PlotDataModel.clear] Error cleaning up artist: {e}")
             finally:
                 self.artist = None
                 self.draw_requested.emit()

@@ -194,7 +194,6 @@ class MplCanvas(FigureCanvasQTAgg):
         Artist
             The matplotlib artist representing the plotted data
         """
-        # print(f"Plotting Data with slice {self._slice} and dimension {self._dimension}")
         x, y = plotData.get_plot_data(self._slice, self._dimension)
         artist = plotData.artist
 
@@ -217,11 +216,14 @@ class MplCanvas(FigureCanvasQTAgg):
             print(f"Plotting 2D data for {plotData.label}")
             try:
                 if self.currentDim != 2:
-                    if hasattr(self, "colorbar"):
+                    # Clean up old colorbar if it exists
+                    if hasattr(self, "colorbar") and self.colorbar is not None:
                         try:
                             self.colorbar.remove()
                         except Exception as e:
-                            print(f"Error removing colorbar: {e}")
+                            print(f"[MplCanvas.plot_data] Error removing colorbar: {e}")
+                        self.colorbar = None
+
                     old_axes = self.axes
                     self.fig.delaxes(old_axes)
                     self.axes = self.fig.add_subplot(111)
@@ -252,19 +254,25 @@ class MplCanvas(FigureCanvasQTAgg):
                         mesh = self.axes.pcolormesh(
                             X, Y, y, shading="nearest", label=plotData.label
                         )
-                        if hasattr(self, "colorbar"):
+                        # Clean up old colorbar if it exists
+                        if hasattr(self, "colorbar") and self.colorbar is not None:
                             try:
                                 self.colorbar.remove()
                             except Exception as e:
-                                print(f"Error removing colorbar: {e}")
+                                print(
+                                    f"[MplCanvas.plot_data] Error removing colorbar: {e}"
+                                )
+                            self.colorbar = None
                         self.colorbar = self.fig.colorbar(mesh, ax=self.axes)
                         self.colorbar.set_label(plotData.label)
                         artist = mesh
             except Exception as e:
-                print(f"Error in 2D plotting: {e}")
+                print(f"[MplCanvas.plot_data] Error in 2D plotting: {e}")
                 artist = None
         else:
-            print(f"Unsupported dimensionality! {y.shape}, {len(x)}")
+            print(
+                f"[MplCanvas.plot_data] Unsupported dimensionality! {y.shape}, {len(x)}"
+            )
             artist = None
         plotData.set_artist(artist)
         self.draw()
@@ -281,15 +289,16 @@ class MplCanvas(FigureCanvasQTAgg):
             try:
                 collection.remove()
             except Exception as e:
-                print(f"Error cleaning up collection: {e}")
+                print(f"[MplCanvas.clear] Error cleaning up collection: {e}")
 
         # Remove colorbar if it exists
         if hasattr(self, "colorbar"):
             try:
-                self.colorbar.remove()
-                delattr(self, "colorbar")
+                if self.colorbar is not None:
+                    self.colorbar.remove()
             except Exception as e:
-                print(f"Error removing colorbar: {e}")
+                print(f"[MplCanvas.clear] Error removing colorbar: {e}")
+            self.colorbar = None
 
         # Clear the figure and axes
         self.axes.cla()

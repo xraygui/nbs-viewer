@@ -641,3 +641,292 @@ class CatalogRun(QObject):
             result["keys"][key] = key_info
 
         return result
+
+    def analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
+        """
+        Analyze dimensions for a given y-key and set of x-keys, synthesizing information
+        from both data shapes and metadata.
+
+        This function handles complex cases where dimensions in the data may be:
+        1. Direct dimensions in the data array (e.g. dim_0, dim_1)
+        2. Associated motor positions for each time point
+        3. Described in metadata (e.g. hints about gridding and dimensions)
+        4. Defined by axis hints (e.g. tes_mca_energies)
+
+        Parameters
+        ----------
+        ykey : str
+            The key for the y-data to analyze
+        xkeys : List[str]
+            List of keys for x-axes
+
+        Returns
+        -------
+        Dict[str, Any]
+            Dictionary containing:
+            - ordered_dims: List[str] - Properly ordered dimension names
+            - effective_shape: Tuple[int] - Shape after considering metadata
+            - dim_metadata: Dict - Additional metadata about each dimension
+            - original_dims: Dict - Original dimension info from the data
+            - grid_mapping: Dict - How original dims map to effective dims
+            - axis_hints: Dict - Mapping of dimensions to axis hint paths
+            - associated_axes: Dict - Motors or other axes associated with dimensions
+        """
+        result = {
+            "ordered_dims": [],
+            "effective_shape": None,
+            "dim_metadata": {},
+            "original_dims": {},
+            "grid_mapping": {},
+            "axis_hints": {},
+            "associated_axes": {},
+        }
+
+        # Get shapes and dimension info for all keys
+        yshape = list(self.getShape(ykey))  # Convert to list for mutability
+
+        # Get dimension names from the data
+        try:
+            # Try to get dimension names from the data object
+            y_dims = self._run["primary", "data", ykey].dims
+            result["original_dims"][ykey] = y_dims
+            for key in xkeys:
+                x_dims = self._run["primary", "data", key].dims
+                result["original_dims"][key] = x_dims
+        except Exception as e:
+            print(f"Could not get dimension names from data: {e}")
+            # Fall back to generic names
+            y_dims = tuple(f"dim_{i}" for i in range(len(yshape)))
+            result["original_dims"][ykey] = y_dims
+
+        # Get axis hints for the y-key
+        axis_hints = self.getAxisHints()
+        y_axis_hints = axis_hints.get(ykey, [])
+
+        # Check metadata for dimension hints
+        try:
+            start_doc = self._run.start
+            hints = start_doc.get("hints", {})
+            dimensions = hints.get("dimensions", [])
+            gridding = hints.get("gridding", None)
+            shape = start_doc.get("shape", None)
+        except Exception as e:
+            print(f"Error accessing metadata: {e}")
+            start_doc = {}
+            dimensions = []
+            gridding = None
+            shape = None
+
+        if not xkeys:
+            xkeys = start_doc.get("motors", [])
+
+        # Initialize dimension tracking
+        ordered_dims = []
+        dim_metadata = {}
+        time_replaced = False  # Track if time has been replaced by a motor
+
+        # First, handle any metadata-defined dimensions
+        if dimensions:
+            # Check if we should grid the data
+            should_grid = gridding == "rectilinear" and shape is not None
+
+            # Collect motors associated with time dimension
+            time_motors = []
+            for dim_info in dimensions:
+                if len(dim_info) >= 2:
+                    motor_list = dim_info[0]
+                    if isinstance(motor_list, list):
+                        for motor in motor_list:
+                            if motor in xkeys:
+                                time_motors.append(motor)
+
+            if should_grid and time_motors:
+                # Handle gridded case - reshape data into grid
+                time_mapping = {}
+                new_shape = []
+
+                for motor in time_motors:
+                    motor_shape = shape[len(time_mapping)]
+                    time_mapping[motor] = {
+                        "stream": "primary",
+                        "shape": motor_shape,
+                    }
+                    new_shape.append(motor_shape)
+                    ordered_dims.append(motor)
+                    dim_metadata[motor] = {
+                        "type": "motor",
+                        "original_dim": "time",
+                    }
+
+                # Replace time dimension with motor dimensions
+                yshape = new_shape + yshape[1:]
+                result["grid_mapping"]["time"] = time_mapping
+                time_replaced = True
+
+            else:
+                # Non-gridded case
+                # If we have exactly one motor in xkeys, use it as the primary dimension
+                if len(time_motors) == 1:
+                    motor = time_motors[0]
+                    ordered_dims.append(motor)
+                    dim_metadata[motor] = {
+                        "type": "motor",
+                        "original_dim": "time",
+                    }
+                    time_replaced = True
+                else:
+                    # Multiple motors or no motors - keep time as primary dimension
+                    ordered_dims.append("time")
+                    dim_metadata["time"] = {
+                        "type": "independent",
+                        "original_dim": "time",
+                    }
+                    # Add motors as associated axes if we have multiple
+                    if len(time_motors) > 1:
+                        result["associated_axes"]["time"] = time_motors
+
+        # Add remaining x dimensions that weren't part of the grid mapping
+        # Only add if they're not already in ordered_dims or associated_axes
+        for key in xkeys:
+            if (
+                key not in ordered_dims
+                and key != "time"
+                and not any(key in axes for axes in result["associated_axes"].values())
+            ):
+                ordered_dims.append(key)
+                dim_metadata[key] = {
+                    "type": "independent",
+                    "original_dim": result["original_dims"].get(key, (key,))[0],
+                }
+
+        # Add remaining y dimensions, checking axis hints
+        y_dims_list = list(y_dims)
+        if "time" in y_dims_list and "time" not in ordered_dims and not time_replaced:
+            ordered_dims.append("time")
+            dim_metadata["time"] = {
+                "type": "independent",
+                "original_dim": "time",
+            }
+        if "time" in y_dims_list:
+            y_dims_list.remove("time")
+
+        # Process remaining dimensions with axis hints
+        for i, dim in enumerate(y_dims_list):
+            if dim not in ordered_dims:
+                ordered_dims.append(dim)
+                # Check if we have an axis hint for this dimension
+                if i < len(y_axis_hints):
+                    hint_path = y_axis_hints[i]
+                    result["axis_hints"][dim] = hint_path
+                    dim_metadata[dim] = {
+                        "type": "dependent_with_axis",
+                        "original_dim": dim,
+                        "axis_hint": hint_path,
+                    }
+                else:
+                    dim_metadata[dim] = {"type": "dependent", "original_dim": dim}
+
+        # Update result
+        result["ordered_dims"] = ordered_dims
+        result["effective_shape"] = tuple(yshape)
+        result["dim_metadata"] = dim_metadata
+
+        return result
+
+    def get_dimension_axes(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
+        """
+        Get axis data for each dimension of the data.
+
+        This function uses analyze_dimensions to determine the dimensions and their
+        types, then generates appropriate axis data for each:
+        - For motor dimensions: uses the motor position data
+        - For dimensions with axis hints: uses the specified axis data
+        - For other dimensions: generates index arrays using np.arange
+        - For dummy dimensions (length 1): returns empty array
+
+        Parameters
+        ----------
+        ykey : str
+            The key for the y-data to analyze
+        xkeys : List[str]
+            List of keys for x-axes
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]
+            Tuple of:
+            - axis_arrays: list of numpy arrays for each dimension
+            - axis_names: list of strings naming each dimension
+            - associated_data: dict mapping dimension names to dict containing:
+                - arrays: List[np.ndarray] - associated data arrays
+                - names: List[str] - names of the associated axes
+        """
+        # First get dimension analysis
+        dim_info = self.analyze_dimensions(ykey, xkeys)
+
+        # Initialize output lists
+        axis_arrays = []
+        axis_names = []
+        associated_data = {}
+
+        # Get the shape for reference
+        effective_shape = dim_info["effective_shape"]
+
+        # Process each dimension in order
+        for i, dim_name in enumerate(dim_info["ordered_dims"]):
+            dim_meta = dim_info["dim_metadata"][dim_name]
+            dim_type = dim_meta["type"]
+
+            # Get dimension size - default to 1 if beyond effective_shape
+            dim_size = effective_shape[i] if i < len(effective_shape) else 1
+
+            if dim_type == "motor":
+                # For motor dimensions in a grid, use the motor position data
+                axis_data = self.getData(dim_name)
+                if dim_meta["original_dim"] == "time":
+                    # Reshape motor data according to grid mapping
+                    if "time" in dim_info["grid_mapping"]:
+                        grid_info = dim_info["grid_mapping"]["time"][dim_name]
+                        axis_data = axis_data[: grid_info["shape"]]
+
+            elif dim_type == "independent":
+                # For independent dimensions (like time), use the data directly
+                axis_data = self.getData(dim_name)
+
+                # Check for associated axes
+                if dim_name in dim_info["associated_axes"]:
+                    associated = []
+                    motor_names = dim_info["associated_axes"][dim_name]
+                    for motor in motor_names:
+                        motor_data = self.getData(motor)
+                        associated.append(motor_data)
+                    associated_data[dim_name] = {
+                        "arrays": associated,
+                        "names": motor_names,
+                    }
+
+            elif dim_type == "dependent_with_axis":
+                # Use the axis hint path to get the axis data
+                try:
+                    hint_path = dim_info["axis_hints"][dim_name]
+                    axis_data = self.getAxis(hint_path)
+                except Exception as e:
+                    print(f"Error getting axis data from hint: {e}")
+                    # Fall back to index array
+                    axis_data = np.arange(dim_size)
+
+            else:
+                # For dimensions without hints, use index arrays
+                if dim_size == 1:
+                    # Dummy dimension
+                    axis_data = np.array([])
+                else:
+                    # Regular index array
+                    axis_data = np.arange(dim_size)
+
+            axis_arrays.append(axis_data)
+            axis_names.append(dim_name)
+
+        return axis_arrays, axis_names, associated_data

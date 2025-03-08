@@ -168,8 +168,9 @@ class PlotDimensionControl(QWidget):
             print("No visible run models")
             return None
 
-        # Collect shape information from all visible run models
+        # Collect shape and key information from all visible run models
         shapes_by_dim = {}  # Dictionary to group shapes by dimensionality
+        keys_by_dim = {}  # Dictionary to store x keys by dimensionality
 
         for run_model in run_models:
             try:
@@ -196,6 +197,9 @@ class PlotDimensionControl(QWidget):
                             dim = len(shape)
                             if dim not in shapes_by_dim:
                                 shapes_by_dim[dim] = []
+                                keys_by_dim[dim] = (
+                                    x_keys[-dim:] if len(x_keys) >= dim else []
+                                )
                             shapes_by_dim[dim].append(shape)
                     except Exception as e:
                         print(f"Error getting shape for {key}: {e}")
@@ -203,6 +207,7 @@ class PlotDimensionControl(QWidget):
                 print(f"Error processing run model {run_model}: {e}")
 
         print(f"Shapes by dimension: {shapes_by_dim}")
+        print(f"Keys by dimension: {keys_by_dim}")
 
         if not shapes_by_dim:
             print("No shape information found")
@@ -230,9 +235,19 @@ class PlotDimensionControl(QWidget):
 
         print(f"Maximum shape: {max_shape}")
 
-        # Create dimension names
-        dim_names = [f"Dimension {i+1}" for i in range(len(max_shape))]
+        # Create dimension names, using x keys when available
+        dim_names = []
+        x_keys = keys_by_dim.get(max_dim, [])
 
+        for i in range(len(max_shape)):
+            if i < len(x_keys) and x_keys[i]:
+                # Use the x key name if available
+                dim_names.append(x_keys[i])
+            else:
+                # Fall back to generic name
+                dim_names.append(f"Dimension {i+1}")
+
+        print(f"Dimension names: {dim_names}")
         return max_shape, dim_names
 
     def get_dimension_name(self, dim_index):
