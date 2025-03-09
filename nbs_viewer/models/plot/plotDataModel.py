@@ -88,17 +88,19 @@ class PlotDataModel(QWidget):
 
     def get_plot_data(self, indices=None, dimension=None):
         """
-        Plots the given x, y data on the associated MplCanvas instance.
+        Gets plot data and dimension information.
 
         Parameters
         ----------
         indices : tuple, optional
-            Indices for slicing multidimensional data, by default None.
+            Indices for slicing multidimensional data, by default None
+        dimension : int, optional
+            Number of dimensions to plot, by default None
 
         Returns
         -------
-        Artist
-            The matplotlib artist representing the plotted data.
+        Tuple[List[np.ndarray], np.ndarray]
+            The x and y data arrays for plotting
         """
         norm_keys = self._norm_keys
         xlist, y, xkeylist = self._run._run.get_plot_data(
@@ -106,52 +108,20 @@ class PlotDataModel(QWidget):
         )
         y = y[0]
         xlist = xlist[0]
-        """
-        # Update indices if provided
-        if indices is not None:
-            self._indices = indices
-        else:
-            indices = self._indices
 
-        # Create default indices if none provided
-        if indices is None:
-            # Default to first index for each dimension except the plot dimensions
-            indices = tuple([0 for _ in range(len(y.shape) - dimension)])
+        # Get dimension names from dimension analysis
+        dim_info = self._run._run.analyze_dimensions(self._ykey, [self._xkey])
+        self.dimension_names = dim_info["ordered_dims"]
 
-        # Process x data
-
-        xlistmod = []
-        for x in xlist:
-            if len(x.shape) > 1:
-                # Slice multidimensional x data
-                xlistmod.append(x[indices])
-            else:
-                # Keep 1D x data as is
-                xlistmod.append(x)
-
-        # Get y data with appropriate slicing
-        if dimension == 1:
-            # For 1D plots, slice to get a 1D array
-            if len(y.shape) > 1:
-                y = y[indices]
-
-        elif dimension == 2:
-            # For 2D plots, slice to get a 2D array
-            if len(y.shape) > 2:
-                # Need to slice off all but the last 2 dimensions
-                y = y[indices]
-
-        else:
-            # Unsupported dimensions
-            print(f"Unsupported plot dimensions: {dimension}")
-            return None
-        """
         # Select x dimensions based on plot dimensions
-        x = xlist[-dimension:]
+        x = xlist[-dimension:] if dimension else xlist
         return x, y
 
     def update_data_info(self, norm_keys=None, indices=None, dimension=None):
+        # print(f"Updating data info for {self.label}")
         changed = False
+        if self.artist is None:
+            changed = True
         if norm_keys is not None and set(norm_keys) != set(self._norm_keys):
             self._norm_keys = norm_keys
             changed = True
@@ -162,6 +132,7 @@ class PlotDataModel(QWidget):
             self._dimension = dimension
             changed = True
         if changed:
+            # print(f"Data info changed for {self.label}")
             self.data_changed.emit(self)
 
     def set_norm_keys(self, norm_keys):
@@ -179,7 +150,7 @@ class PlotDataModel(QWidget):
             Whether to show or hide the artist
         """
         if self.artist is not None:
-            print(f"Setting {self.label} visible to {visible}")
+            # print(f"Setting {self.label} visible to {visible}")
             was_visible = self.artist.get_visible()
             if was_visible != visible:
                 self.artist.set_visible(visible)
@@ -187,7 +158,8 @@ class PlotDataModel(QWidget):
                 self.autoscale_requested.emit()
                 self.draw_requested.emit()
         else:
-            print(f"{self.label} has no artist")
+            # print(f"{self.label} has no artist")
+            pass
 
     def _on_data_changed(self):
         """
@@ -205,7 +177,7 @@ class PlotDataModel(QWidget):
             The matplotlib artist
         """
         self.artist = artist
-        print(f"Setting {self.label} artist to {artist}")
+        # print(f"Setting {self.label} artist to {artist}")
 
     def clear(self):
         """

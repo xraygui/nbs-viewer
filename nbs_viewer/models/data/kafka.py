@@ -1,7 +1,7 @@
 from collections import defaultdict
 import numpy as np
 from .base import CatalogRun
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 
 class KafkaRun(CatalogRun):
@@ -71,7 +71,7 @@ class KafkaRun(CatalogRun):
         catalog=None,
     ):
         super().__init__(None, key, catalog, parent=None)
-        self._start_doc = start_doc
+        self.start = start_doc
         self.setup()
         self._stop_doc = {}
         self._data_buffer = defaultdict(list)
@@ -82,13 +82,13 @@ class KafkaRun(CatalogRun):
 
     def setup(self):
         """Set up the run object by extracting metadata from start document."""
-        self.metadata = self._start_doc
+        self.metadata = self.start
 
         for key, keylist in self._METADATA_MAP.items():
             setattr(self, key, self.get_md_value(keylist))
 
-        self._plot_hints = self._start_doc.get("plot_hints", {})
-        self.hints = self._start_doc.get("hints", {})
+        self._plot_hints = self.start.get("plot_hints", {})
+        self.hints = self.start.get("hints", {})
 
     def __str__(self):
         """
@@ -112,7 +112,7 @@ class KafkaRun(CatalogRun):
         """
         doc_name = path[0]
         if doc_name == "start":
-            doc = self._start_doc
+            doc = self.start
         elif doc_name == "stop":
             doc = self._stop_doc
         else:
@@ -124,7 +124,7 @@ class KafkaRun(CatalogRun):
             doc = default
         return doc
 
-    def getData(self, key):
+    def getData(self, key, slice_info=None):
         """
         Get data for a specific key from the buffer.
 
@@ -140,8 +140,10 @@ class KafkaRun(CatalogRun):
         """
         # print(f"Getting data for key: {key}")
         data = np.array(self._data_buffer.get(key, []))
-        # print(f"Data for key {key}: has shape {data.shape}")
-        return data
+        if slice_info is not None:
+            return data[slice_info]
+        else:
+            return data
 
     def getShape(self, key):
         """
@@ -449,3 +451,40 @@ class KafkaRun(CatalogRun):
                 selected_y = []
             selected_norm = []
         return selected_x, selected_y, selected_norm
+
+    def get_dims(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]:
+        """
+        Get dimension names from the data buffer.
+
+        For Kafka runs, we generate dimension names based on the shape of the data
+        since we don't have access to the underlying data object's dimension names.
+
+        Parameters
+        ----------
+        ykey : str
+            The key for the y-data
+        xkeys : List[str]
+            List of keys for x-axes
+
+        Returns
+        -------
+        Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]
+            A tuple containing:
+            - y_dims: Tuple of dimension names for y-data
+            - x_dims: Dict mapping xkeys to their dimension names
+        """
+        # For Kafka runs, we generate dimension names based on shape
+        yshape = list(self.getShape(ykey))
+        y_dims = ("time",) + tuple(f"dim_{i}" for i in range(1, len(yshape)))
+
+        x_dims = {}
+        for key in xkeys:
+            shape = list(self.getShape(key))
+            x_dims[key] = ("time",) + tuple(f"dim_{i}" for i in range(1, len(shape)))
+
+        print(f"Kafka get_dims with xkeys: {xkeys}, ykey: {ykey}")
+        print(f"y_dims: {y_dims}")
+        print(f"x_dims: {x_dims}")
+        return y_dims, x_dims

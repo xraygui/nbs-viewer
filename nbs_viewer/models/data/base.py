@@ -83,7 +83,9 @@ class CatalogRun(QObject):
         self._run = self._catalog[self._key]
         self.setup()
 
-    def getData(self, key: str) -> np.ndarray:
+    def getData(
+        self, key: str, indices: Optional[Tuple[int, ...]] = None
+    ) -> np.ndarray:
         """
         Get data for a given key.
 
@@ -685,19 +687,10 @@ class CatalogRun(QObject):
         # Get shapes and dimension info for all keys
         yshape = list(self.getShape(ykey))  # Convert to list for mutability
 
-        # Get dimension names from the data
-        try:
-            # Try to get dimension names from the data object
-            y_dims = self._run["primary", "data", ykey].dims
-            result["original_dims"][ykey] = y_dims
-            for key in xkeys:
-                x_dims = self._run["primary", "data", key].dims
-                result["original_dims"][key] = x_dims
-        except Exception as e:
-            print(f"Could not get dimension names from data: {e}")
-            # Fall back to generic names
-            y_dims = tuple(f"dim_{i}" for i in range(len(yshape)))
-            result["original_dims"][ykey] = y_dims
+        # Get dimension names from the data using get_dims
+        y_dims, x_dims = self.get_dims(ykey, xkeys)
+        result["original_dims"][ykey] = y_dims
+        result["original_dims"].update(x_dims)
 
         # Get axis hints for the y-key
         axis_hints = self.getAxisHints()
@@ -705,17 +698,13 @@ class CatalogRun(QObject):
 
         # Check metadata for dimension hints
         try:
-            start_doc = self._run.start
+            start_doc = self.start
             hints = start_doc.get("hints", {})
             dimensions = hints.get("dimensions", [])
-            gridding = hints.get("gridding", None)
-            shape = start_doc.get("shape", None)
         except Exception as e:
             print(f"Error accessing metadata: {e}")
             start_doc = {}
             dimensions = []
-            gridding = None
-            shape = None
 
         if not xkeys:
             xkeys = start_doc.get("motors", [])
@@ -723,69 +712,42 @@ class CatalogRun(QObject):
         # Initialize dimension tracking
         ordered_dims = []
         dim_metadata = {}
-        time_replaced = False  # Track if time has been replaced by a motor
 
-        # First, handle any metadata-defined dimensions
-        if dimensions:
-            # Check if we should grid the data
-            should_grid = gridding == "rectilinear" and shape is not None
+        # First, check if we have a time dimension
+        if "time" in y_dims:
+            ordered_dims.append("time")
+            dim_metadata["time"] = {
+                "type": "independent",
+                "original_dim": "time",
+            }
 
-            # Collect motors associated with time dimension
+            # Collect any motors associated with time
             time_motors = []
-            for dim_info in dimensions:
-                if len(dim_info) >= 2:
-                    motor_list = dim_info[0]
-                    if isinstance(motor_list, list):
-                        for motor in motor_list:
-                            if motor in xkeys:
-                                time_motors.append(motor)
 
-            if should_grid and time_motors:
-                # Handle gridded case - reshape data into grid
-                time_mapping = {}
-                new_shape = []
+            # First check dimensions metadata
+            if dimensions:
+                # print(f"Found dimensions in metadata: {dimensions}")
+                for dim_info in dimensions:
+                    if len(dim_info) >= 2:
+                        motor_list = dim_info[0]
+                        if isinstance(motor_list, list):
+                            for motor in motor_list:
+                                if motor in xkeys:
+                                    time_motors.append(motor)
 
-                for motor in time_motors:
-                    motor_shape = shape[len(time_mapping)]
-                    time_mapping[motor] = {
-                        "stream": "primary",
-                        "shape": motor_shape,
-                    }
-                    new_shape.append(motor_shape)
-                    ordered_dims.append(motor)
-                    dim_metadata[motor] = {
-                        "type": "motor",
-                        "original_dim": "time",
-                    }
+            # Then check x_dims for any keys that share the time dimension
+            for key in xkeys:
+                if key in x_dims and x_dims[key] == ("time",):
+                    if key not in time_motors:
+                        time_motors.append(key)
+                        # print(f"Added {key} to time_motors based on dimension")
 
-                # Replace time dimension with motor dimensions
-                yshape = new_shape + yshape[1:]
-                result["grid_mapping"]["time"] = time_mapping
-                time_replaced = True
+            # Add motors as associated axes if we have any
+            if time_motors:
+                # print(f"Setting time associated axes: {time_motors}")
+                result["associated_axes"]["time"] = time_motors
 
-            else:
-                # Non-gridded case
-                # If we have exactly one motor in xkeys, use it as the primary dimension
-                if len(time_motors) == 1:
-                    motor = time_motors[0]
-                    ordered_dims.append(motor)
-                    dim_metadata[motor] = {
-                        "type": "motor",
-                        "original_dim": "time",
-                    }
-                    time_replaced = True
-                else:
-                    # Multiple motors or no motors - keep time as primary dimension
-                    ordered_dims.append("time")
-                    dim_metadata["time"] = {
-                        "type": "independent",
-                        "original_dim": "time",
-                    }
-                    # Add motors as associated axes if we have multiple
-                    if len(time_motors) > 1:
-                        result["associated_axes"]["time"] = time_motors
-
-        # Add remaining x dimensions that weren't part of the grid mapping
+        # Add remaining x dimensions
         # Only add if they're not already in ordered_dims or associated_axes
         for key in xkeys:
             if (
@@ -801,12 +763,6 @@ class CatalogRun(QObject):
 
         # Add remaining y dimensions, checking axis hints
         y_dims_list = list(y_dims)
-        if "time" in y_dims_list and "time" not in ordered_dims and not time_replaced:
-            ordered_dims.append("time")
-            dim_metadata["time"] = {
-                "type": "independent",
-                "original_dim": "time",
-            }
         if "time" in y_dims_list:
             y_dims_list.remove("time")
 
@@ -831,6 +787,30 @@ class CatalogRun(QObject):
         result["effective_shape"] = tuple(yshape)
         result["dim_metadata"] = dim_metadata
 
+        # Final step: Replace dimensions with their single associated axis when appropriate
+        dims_to_replace = []
+        for dim, associated in result["associated_axes"].items():
+            if len(associated) == 1:
+                motor = associated[0]
+                # print(f"Replacing dimension {dim} with single associated axis {motor}")
+                dims_to_replace.append((dim, motor))
+
+        for old_dim, new_dim in dims_to_replace:
+            # Update ordered_dims
+            if old_dim == new_dim:
+                del result["associated_axes"][new_dim]
+                continue
+            idx = result["ordered_dims"].index(old_dim)
+            result["ordered_dims"][idx] = new_dim
+
+            # Transfer metadata
+            result["dim_metadata"][new_dim] = result["dim_metadata"][old_dim].copy()
+            result["dim_metadata"][new_dim]["original_dim"] = old_dim
+            del result["dim_metadata"][old_dim]
+
+            # Update associated_axes
+
+        # print(f"Analyze dimensions result: {result}")
         return result
 
     def get_dimension_axes(

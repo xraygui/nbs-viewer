@@ -661,3 +661,41 @@ class BlueskyRun(CatalogRun):
                 size_nd += data.nbytes
 
         return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}
+
+    def get_dims(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]:
+        """
+        Get dimension names from the data object.
+
+        Parameters
+        ----------
+        ykey : str
+            The key for the y-data
+        xkeys : List[str]
+            List of keys for x-axes
+
+        Returns
+        -------
+        Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]
+            A tuple containing:
+            - y_dims: Tuple of dimension names for y-data
+            - x_dims: Dict mapping xkeys to their dimension names
+        """
+        try:
+            # Try to get dimension names from the data object
+            y_dims = self._run["primary", "data", ykey].dims
+            x_dims = {}
+            for key in xkeys:
+                x_dims[key] = self._run["primary", "data", key].dims
+            return y_dims, x_dims
+        except Exception as e:
+            print(f"Could not get dimension names from data: {e}")
+            # Fall back to generic names
+            yshape = list(self.getShape(ykey))
+            y_dims = tuple(f"dim_{i}" for i in range(len(yshape)))
+            x_dims = {}
+            for key in xkeys:
+                shape = list(self.getShape(key))
+                x_dims[key] = tuple(f"dim_{i}" for i in range(len(shape)))
+            return y_dims, x_dims

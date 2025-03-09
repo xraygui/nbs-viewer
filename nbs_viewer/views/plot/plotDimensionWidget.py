@@ -4,6 +4,8 @@ from qtpy.QtWidgets import (
     QSlider,
     QLabel,
     QSpinBox,
+    QHBoxLayout,
+    QDoubleSpinBox,
 )
 from qtpy.QtCore import Qt, Signal
 
@@ -36,7 +38,7 @@ class PlotDimensionControl(QWidget):
         self.sliders = []
         self.labels = []
         self._indices = tuple()
-
+        self._nsliders = 0
         # Connect signals
         # Connect to model signals
         self.plotModel.run_added.connect(self.on_run_added)
@@ -52,7 +54,8 @@ class PlotDimensionControl(QWidget):
         self.layout = QVBoxLayout()
 
         # Dimension selection spinbox
-        dimension_layout = QVBoxLayout()
+        self.dimension_container = QWidget()
+        dimension_layout = QVBoxLayout(self.dimension_container)
         dimension_label = QLabel("Plot Dimensions:")
         self.dimension_spinbox = QSpinBox()
         self.dimension_spinbox.setMinimum(1)
@@ -62,7 +65,8 @@ class PlotDimensionControl(QWidget):
 
         dimension_layout.addWidget(dimension_label)
         dimension_layout.addWidget(self.dimension_spinbox)
-        self.layout.addLayout(dimension_layout)
+        self.layout.addWidget(self.dimension_container)
+        self.dimension_container.hide()  # Hide by default
 
         # Create sliders container
         self.sliders_container = QWidget()
@@ -78,10 +82,11 @@ class PlotDimensionControl(QWidget):
         """
         Create sliders based on the dimensions of the data.
         Clears existing sliders and creates new ones based on current data.
+        Uses dimension analysis to get proper axis data and labels.
         """
-        print("\nDebugging create_sliders:")
+        # print("\nDebugging create_sliders:")
 
-        # Clear existing sliders
+        # Clear existing sliders and reset state
         for slider in self.sliders:
             slider.deleteLater()
         self.sliders = []
@@ -90,165 +95,227 @@ class PlotDimensionControl(QWidget):
             label.deleteLater()
         self.labels = []
 
+        # Reset indices when clearing sliders
+        self._indices = tuple()
+
+        # Track which dimensions have sliders
+        self._slider_dimensions = []
+
         # Get shape information from the model
         shape_info = self.get_shape_info()
-        print(f"  Shape info: {shape_info}")
+        # print(f"  Shape info: {shape_info}")
 
         if not shape_info:
-            print("  No shape info available, not creating sliders")
+            # print("  No shape info available, not creating sliders")
+            # Hide dimension control for 1D data
+            self.dimension_container.hide()
+            # Force update with empty indices when no sliders
+            self.canvas.update_view_state(self._indices, 1, validate=False)
             return
+
+        # Unpack shape info
+        y_shape, dim_names, axis_arrays, associated_data = shape_info
+        # print(f"  Y shape: {y_shape}, Dimension names: {dim_names}")
+        # print(f"  Associated data: {associated_data}")
+
+        # Show/hide dimension control based on data dimensionality
+        if len(y_shape) > 1:
+            self.dimension_container.show()
+        else:
+            self.dimension_container.hide()
+            # Force 1D mode for 1D data
+            if self.dimension_spinbox.value() != 1:
+                self.dimension_spinbox.setValue(1)
 
         # Determine how many sliders we need based on dimension setting
         plot_dims = self.dimension_spinbox.value()
-        print(f"  Plot dimensions: {plot_dims}")
-
-        y_shape, dim_names = shape_info
-        print(f"  Y shape: {y_shape}, Dimension names: {dim_names}")
+        # print(f"  Plot dimensions: {plot_dims}")
 
         # Create a slider for each dimension except the ones being plotted
         nsliders = len(y_shape) - plot_dims
-        print(f"  Number of sliders needed: {nsliders}")
+        self._nsliders = nsliders
+
+        # print(f"  Number of sliders needed: {nsliders}")
 
         if nsliders <= 0:
-            print("  No sliders needed (nsliders <= 0)")
+            # print("  No sliders needed (nsliders <= 0)")
+            # Force update with empty indices when no sliders needed
+            self.canvas.update_view_state(self._indices, plot_dims, validate=False)
             return
+        # Initialize full indices list with zeros
+        full_indices = [0] * nsliders
 
         for dim in range(nsliders):
-            print(f"  Creating slider for dimension {dim}")
+            # print(f"  Creating slider for dimension {dim}")
+
+            # Get dimension name and axis data
+            dim_name = dim_names[dim]
+            axis_data = axis_arrays[dim]
+            slider_max = y_shape[dim] - 1
+
+            # Skip dimensions with no points
+            if slider_max <= 0:
+                # print(f"  {dim_name} is a dummy dimension, skipping")
+                continue
+
+            # Create horizontal layout for this dimension
+            dim_layout = QHBoxLayout()
+
+            # Create label for dimension name
+            name_label = QLabel(f"{dim_name}:")
+            dim_layout.addWidget(name_label)
+            self.labels.append(name_label)
+
+            # Create slider
             slider = QSlider(Qt.Horizontal)
             slider.setMinimum(0)
-            slider.setMaximum(y_shape[dim] - 1)
-            print(f"  Slider range: 0-{y_shape[dim] - 1}")
+            slider.setMaximum(slider_max)
+            # print(f"  Slider range: 0-{slider_max}")
 
-            # Get dimension name
-            dim_name = self.get_dimension_name(dim)
-            print(f"  Dimension name: {dim_name}")
-            label = QLabel(f"{dim_name} index: {slider.value()}")
-
-            # Connect signals
-            slider.valueChanged.connect(
-                lambda value, lbl=label, d=dim: lbl.setText(
-                    f"{self.get_dimension_name(d)} index: {value}"
+            # Create value label if we have axis data
+            if len(axis_data) > 0:
+                value_label = QLabel(f"({axis_data[slider.value()]:g})")
+                # Update value label when slider changes
+                slider.valueChanged.connect(
+                    lambda v, lbl=value_label, data=axis_data: lbl.setText(
+                        f"({data[v]:g})"
+                    )
                 )
-            )
+                dim_layout.addWidget(value_label)
+                self.labels.append(value_label)
+
+            # Add associated axis info if available
+            if dim_name in associated_data:
+                assoc_info = associated_data[dim_name]
+                assoc_arrays = assoc_info["arrays"]
+                assoc_names = assoc_info["names"]
+
+                # Create labels for associated axes
+                for arr, name in zip(assoc_arrays, assoc_names):
+                    assoc_label = QLabel(f"{name}: {arr[slider.value()]:g}")
+                    # Connect signal to update associated value
+                    slider.valueChanged.connect(
+                        lambda v, lbl=assoc_label, data=arr, name=name: lbl.setText(
+                            f"{name}: {data[v]:g}"
+                        )
+                    )
+                    dim_layout.addWidget(assoc_label)
+                    self.labels.append(assoc_label)
+
+            # Store the dimension index this slider corresponds to
+            slider.dimension_index = dim
+            self._slider_dimensions.append(dim)
+
+            # Connect to update plot
             slider.valueChanged.connect(self.sliders_changed)
 
             # Add to layout
-            self.sliders_layout.addWidget(label)
-            self.sliders_layout.addWidget(slider)
+            dim_layout.addWidget(slider)
+            self.sliders_layout.addLayout(dim_layout)
 
             # Store references
             self.sliders.append(slider)
-            self.labels.append(label)
 
-        print(f"  Created {len(self.sliders)} sliders")
+        # print(f"  Created {len(self.sliders)} sliders")
+        # print(f"  Slider dimensions: {self._slider_dimensions}")
 
         # Emit initial indices
         self.sliders_changed()
 
     def get_shape_info(self):
         """
-        Get shape information from the plot model.
+        Get shape and dimension information from the plot model.
+
+        Uses the new dimension analysis code to get proper dimension information
+        including axis data for each dimension.
 
         Returns
         -------
         tuple or None
-            Tuple of (shape, dimension_names) or None if no shape info available
+            Tuple of:
+            - shape: tuple of dimension sizes
+            - dimension_names: list of dimension names
+            - axis_arrays: list of arrays for each dimension
+            - associated_data: dict mapping dimensions to associated motor data
+            Returns None if no shape info available
         """
-        print("Getting shape info...")
+        # print("Getting shape info...")
         if not self.plotModel:
             print("No plot model available")
             return None
 
         # Get all visible run models
         run_models = self.plotModel.visible_models
-        print(f"Visible run models: {run_models}")
+        # print(f"Visible run models: {run_models}")
 
         if not run_models:
-            print("No visible run models")
+            # print("No visible run models")
             return None
 
-        # Collect shape and key information from all visible run models
-        shapes_by_dim = {}  # Dictionary to group shapes by dimensionality
-        keys_by_dim = {}  # Dictionary to store x keys by dimensionality
+        # Get dimension info from each visible run
+        max_shape = None
+        max_dim_info = None
+        max_axes = None
+        max_names = None
+        max_associated = None
 
         for run_model in run_models:
             try:
                 # Get selected keys for this run model
                 x_keys, y_keys, norm_keys = run_model.get_selected_keys()
-                print(
-                    f"Selected keys for {run_model}: "
-                    f"x={x_keys}, y={y_keys}, norm={norm_keys}"
-                )
+                # print(
+                #     f"Selected keys for {run_model}: "
+                #     f"x={x_keys}, y={y_keys}, norm={norm_keys}"
+                # )
 
                 # We're primarily interested in y_keys for shape information
                 if not y_keys:
                     continue
 
-                # Get shape for each y key
-                for key in y_keys:
+                # Get dimension info for each y key
+                for ykey in y_keys:
                     try:
-                        # Get shape from the run object
-                        shape = run_model._run.getShape(key)
-                        print(f"Shape for {key}: {shape}")
+                        # Get dimension analysis
+                        axis_arrays, axis_names, associated_data = (
+                            run_model._run.get_dimension_axes(ykey, x_keys)
+                        )
+                        shape = tuple(
+                            len(arr) if len(arr) > 0 else 1 for arr in axis_arrays
+                        )
 
-                        if shape:
-                            # Group by dimensionality
-                            dim = len(shape)
-                            if dim not in shapes_by_dim:
-                                shapes_by_dim[dim] = []
-                                keys_by_dim[dim] = (
-                                    x_keys[-dim:] if len(x_keys) >= dim else []
-                                )
-                            shapes_by_dim[dim].append(shape)
+                        # Update max shape if this is larger
+                        if (
+                            max_shape is None
+                            or len(shape) > len(max_shape)
+                            or (
+                                len(shape) == len(max_shape)
+                                and any(s > m for s, m in zip(shape, max_shape))
+                            )
+                        ):
+                            max_shape = shape
+                            max_axes = axis_arrays
+                            max_names = axis_names
+                            max_associated = associated_data
+
                     except Exception as e:
-                        print(f"Error getting shape for {key}: {e}")
+                        print(f"Error getting dimension info for {ykey}: {e}")
+
             except Exception as e:
                 print(f"Error processing run model {run_model}: {e}")
 
-        print(f"Shapes by dimension: {shapes_by_dim}")
-        print(f"Keys by dimension: {keys_by_dim}")
-
-        if not shapes_by_dim:
-            print("No shape information found")
+        if max_shape is None:
+            # print("No shape information found")
             return None
 
-        # Find the maximum dimensionality
-        max_dim = max(shapes_by_dim.keys()) if shapes_by_dim else 0
-        print(f"Maximum dimensionality: {max_dim}")
-
-        if max_dim <= 1:
-            print("Data is 1D or less, no need for sliders")
+        if len(max_shape) <= 1:
+            # print("Data is 1D or less, no need for sliders")
             return None
 
-        # Get the maximum shape for the maximum dimensionality
-        max_shape = None
-        for shape in shapes_by_dim[max_dim]:
-            if max_shape is None:
-                max_shape = shape
-            else:
-                # Take the maximum size for each dimension
-                new_shape = []
-                for a, b in zip(max_shape, shape):
-                    new_shape.append(max(a, b))
-                max_shape = tuple(new_shape)
+        # print(f"Maximum shape: {max_shape}")
+        # print(f"Dimension names: {max_names}")
+        # print(f"Associated data: {max_associated}")
 
-        print(f"Maximum shape: {max_shape}")
-
-        # Create dimension names, using x keys when available
-        dim_names = []
-        x_keys = keys_by_dim.get(max_dim, [])
-
-        for i in range(len(max_shape)):
-            if i < len(x_keys) and x_keys[i]:
-                # Use the x key name if available
-                dim_names.append(x_keys[i])
-            else:
-                # Fall back to generic name
-                dim_names.append(f"Dimension {i+1}")
-
-        print(f"Dimension names: {dim_names}")
-        return max_shape, dim_names
+        return max_shape, max_names, max_axes, max_associated
 
     def get_dimension_name(self, dim_index):
         """
@@ -278,17 +345,17 @@ class PlotDimensionControl(QWidget):
         Handle changes to the dimension spinbox.
         Updates the plot dimensions in the model and recreates sliders.
         """
-        print("\nDebugging dimension_changed:")
+        # print("\nDebugging dimension_changed:")
         # Update the dimension in the model
         old_dim = self.canvas._dimension
         new_dim = self.dimension_spinbox.value()
-        print(f"  New dimension value: {new_dim}")
+        # print(f"  New dimension value: {new_dim}")
 
         # Recreate the sliders
         self.create_sliders()
-        print("  Calling sliders_changed")
+        # print("  Calling sliders_changed")
         self.sliders_changed()
-        print("  Recreating sliders")
+        # print("  Recreating sliders")
         update_accepted = self.canvas.update_view_state(
             self._indices, new_dim, validate=True
         )
@@ -296,7 +363,7 @@ class PlotDimensionControl(QWidget):
         if not update_accepted:
             self.dimension_spinbox.setValue(old_dim)
             self.create_sliders()
-            print("  Calling sliders_changed")
+            # print("  Calling sliders_changed")
             self.sliders_changed()
             return
 
@@ -307,15 +374,20 @@ class PlotDimensionControl(QWidget):
         Handle slider value changes.
         Collects current indices and emits the indicesUpdated signal.
         """
-        print("\nDebugging sliders_changed:")
-        indices = []
+        # print("\nDebugging sliders_changed:")
+
+        # Initialize all indices to 0
+        full_indices = [0] * self._nsliders
+
+        # Update indices for dimensions that have sliders
         for slider in self.sliders:
-            indices.append(slider.value())
-            print(f"  Slider value: {slider.value()}")
+            dim_index = slider.dimension_index
+            full_indices[dim_index] = slider.value()
+            # print(f"  Slider value for dim {dim_index}: {slider.value()}")
 
         # Convert to tuple for consistent handling
-        self._indices = tuple(indices)
-        print(f"  Emitting indicesUpdated with indices: {self._indices}")
+        self._indices = tuple(full_indices)
+        # print(f"  Emitting indicesUpdated with indices: {self._indices}")
 
         # Emit signal to update the plot
         self.canvas.update_view_state(

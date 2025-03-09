@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
 from ...models.plot.plotDataModel import PlotDataModel
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
+from functools import partial
 
 
 class NavigationToolbar(NavigationToolbar2QT):
@@ -42,8 +43,10 @@ class NavigationToolbar(NavigationToolbar2QT):
         legend = self.canvas.axes.get_legend()
         if legend is None or not legend.get_visible():
             self.canvas.updateLegend()
+            self.canvas._legend_visible = True
         else:
             legend.set_visible(False)
+            self.canvas._legend_visible = False
             self.canvas.draw()
 
 
@@ -69,6 +72,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._draw_pending = False
         self._dimension = 1  # Default to 1D plotting
         self._slice = None
+        self._legend_visible = True
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
@@ -86,18 +90,14 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def update_view_state(self, indices, dimension, validate=False):
         """Update the plot dimension and validate the change."""
-
+        # print("Update_view_state")
         if dimension == 2 and validate:
-            # Count visible plot data models
-            # print("Updating dimension to 2")
             visible_count = 0
             for model in self.plotArtists.values():
-                # print(f"Model: {model.label}")
                 if model.artist is not None and model.artist.get_visible():
-                    # print("Visible")
                     visible_count += 1
 
-            print(f"Visible count: {visible_count}")
+            # print(f"Visible count: {visible_count}")
             if visible_count > 1:
                 msg = QMessageBox()
                 msg.setIcon(QMessageBox.Warning)
@@ -114,6 +114,8 @@ class MplCanvas(FigureCanvasQTAgg):
             self._dimension = dimension
             self._slice = indices
             self.updatePlot()
+            # Force autoscale and legend update after dimension change
+
         return True
 
     def updatePlotData(self, runModel, xkey, ykey, norm_keys=None):
@@ -129,6 +131,8 @@ class MplCanvas(FigureCanvasQTAgg):
             )
             plotData.data_changed.connect(self.plot_data)
             plotData.draw_requested.connect(self.draw)
+            plotData.autoscale_requested.connect(self.autoscale)
+            plotData.visibility_changed.connect(lambda visible: self.updateLegend())
             self.plotArtists[key] = plotData
             self.plot_data(plotData)
         else:
@@ -150,7 +154,8 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Actually perform the plot update.
         """
-        print("Updating MplCanvas")
+        if self._dimension > 1:
+            self.clear()
         try:
             xkeys, ykeys, normkeys = self.plotModel.get_selected_keys()
             visible_keys = set()
@@ -165,6 +170,8 @@ class MplCanvas(FigureCanvasQTAgg):
                     plotDataModel.set_visible(False)
                 else:
                     plotDataModel.set_visible(True)
+            if self._autoscale:
+                self.autoscale()
             self.draw()
         finally:
             self._update_timer_active = False
@@ -196,15 +203,20 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         x, y = plotData.get_plot_data(self._slice, self._dimension)
         artist = plotData.artist
-
+        # print(f"Plotting data for {plotData.label}")
         # Handle 1D data (line plots)
         if len(y.shape) == 1:
-            print(f"Plotting 1D data for {plotData.label}")
+            # print(f"Plotting 1D data for {plotData.label}")
             if isinstance(artist, Line2D):
                 artist.set_data(x[0], y)
             else:
                 artist = self.axes.plot(x[0], y, clip_on=True, label=plotData.label)[0]
                 self._artist_count += 1
+
+            # Set axis labels if we have them
+            if len(x) > 0 and hasattr(plotData, "dimension_names"):
+                self.axes.set_xlabel(plotData.dimension_names[0])
+
             self.fig.tight_layout()
             if self._autoscale:
                 self.autoscale()
@@ -213,7 +225,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
         # Handle 2D data (heatmap/image plots)
         elif len(y.shape) == 2 and len(x) >= 2:
-            print(f"Plotting 2D data for {plotData.label}")
+            # print(f"Plotting 2D data for {plotData.label}")
             try:
                 if self.currentDim != 2:
                     # Clean up old colorbar if it exists
@@ -237,6 +249,12 @@ class MplCanvas(FigureCanvasQTAgg):
                     )
                     self.colorbar = self.fig.colorbar(mesh, ax=self.axes)
                     self.colorbar.set_label(plotData.label)
+
+                    # Set axis labels if we have them
+                    if hasattr(plotData, "dimension_names"):
+                        self.axes.set_xlabel(plotData.dimension_names[-2])
+                        self.axes.set_ylabel(plotData.dimension_names[-1])
+
                     artist = mesh
                     self.currentDim = 2
                 else:
@@ -265,6 +283,12 @@ class MplCanvas(FigureCanvasQTAgg):
                             self.colorbar = None
                         self.colorbar = self.fig.colorbar(mesh, ax=self.axes)
                         self.colorbar.set_label(plotData.label)
+
+                        # Set axis labels if we have them
+                        if hasattr(plotData, "dimension_names"):
+                            self.axes.set_xlabel(plotData.dimension_names[-2])
+                            self.axes.set_ylabel(plotData.dimension_names[-1])
+
                         artist = mesh
             except Exception as e:
                 print(f"[MplCanvas.plot_data] Error in 2D plotting: {e}")
@@ -315,7 +339,33 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self.draw()
 
+    def updateLegend(self):
+        """Update the plot legend to show only visible lines."""
+        # Clear existing legend first
+        legend = self.axes.get_legend()
+        if legend is None or not legend.get_visible():
+            if not self._legend_visible:
+                return
+
+        if self.axes.get_legend():
+            self.axes.get_legend().remove()
+        # Get visible lines and their labels, filtering out empty labels
+        visible_lines = [
+            line
+            for line in self.axes.get_lines()
+            if line.get_visible()
+            and line.get_label()
+            and not line.get_label().startswith("_")
+        ]
+
+        if visible_lines:
+            labels = [line.get_label() for line in visible_lines]
+            self.axes.legend(visible_lines, labels)
+
+        self.draw()
+
     def autoscale(self):
+        """Autoscale the plot based on visible data."""
         # Get only visible lines
         visible_lines = [line for line in self.axes.get_lines() if line.get_visible()]
         if not visible_lines:
@@ -329,10 +379,14 @@ class MplCanvas(FigureCanvasQTAgg):
             ydata = line.get_ydata()
             xdata = line.get_xdata()
             if len(ydata) > 0 and len(xdata) > 0:
-                y_min.append(ydata.min())
-                y_max.append(ydata.max())
-                x_min.append(xdata.min())
-                x_max.append(xdata.max())
+                # Filter out inf/nan values
+                valid_y = ydata[np.isfinite(ydata)]
+                valid_x = xdata[np.isfinite(xdata)]
+                if len(valid_y) > 0 and len(valid_x) > 0:
+                    y_min.append(np.min(valid_y))
+                    y_max.append(np.max(valid_y))
+                    x_min.append(np.min(valid_x))
+                    x_max.append(np.max(valid_x))
 
         if len(y_min) > 0:
             y_min = min(y_min)
@@ -340,7 +394,7 @@ class MplCanvas(FigureCanvasQTAgg):
             x_min = min(x_min)
             x_max = max(x_max)
         else:
-            print("No visible lines to autoscale")
+            print("No valid data to autoscale")
             return
 
         yspan = y_max - y_min
@@ -350,18 +404,6 @@ class MplCanvas(FigureCanvasQTAgg):
         xspan = x_max - x_min
         if xspan > 0:
             self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
-
-    def updateLegend(self):
-        """Update the plot legend to show only visible lines."""
-        # Clear existing legend first
-        if self.axes.get_legend():
-            self.axes.get_legend().remove()
-
-        # Get visible lines and their labels
-        visible_lines = [line for line in self.axes.get_lines() if line.get_visible()]
-        if visible_lines:
-            labels = [line.get_label() for line in visible_lines]
-            self.axes.legend(visible_lines, labels)
 
         self.draw()
 
@@ -374,7 +416,7 @@ class MplCanvas(FigureCanvasQTAgg):
     def _do_draw(self):
         """Actually perform the draw operation."""
         self._draw_pending = False
-        print("Drawing MplCanvas")
+        # print("Drawing MplCanvas")
         # Call parent class draw
         super().draw()
 
@@ -387,18 +429,19 @@ class MplCanvas(FigureCanvasQTAgg):
         run_uid : str
             The unique identifier of the run to remove
         """
-        print(f"Removing PlotDataModels for run {run_uid}")
+        # print(f"Removing PlotDataModels for run {run_uid}")
         # Find all keys associated with this run
         keys_to_remove = [key for key in self.plotArtists.keys() if key[2] == run_uid]
 
         # Remove each PlotDataModel
         for key in keys_to_remove:
-            print(f"  Removing PlotDataModel for {key}")
+            # print(f"  Removing PlotDataModel for {key}")
             plot_data = self.plotArtists[key]
 
             # Disconnect signals
             plot_data.data_changed.disconnect(self.plot_data)
             plot_data.draw_requested.disconnect(self.draw)
+            plot_data.autoscale_requested.disconnect(self.autoscale)
 
             # Remove the artist from the axes
             plot_data.clear()
