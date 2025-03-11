@@ -71,7 +71,7 @@ class CanvasControlWidget(QWidget):
 
     def _on_new_canvas(self):
         """Create new canvas with current selection."""
-        selected_runs = self.plot_model.get_selected_runs()
+        selected_runs = [model._run for model in self.plot_model.visible_models]
         if selected_runs:
             # Create new canvas and add runs
             canvas_id = self.canvas_manager.create_canvas()
@@ -79,7 +79,7 @@ class CanvasControlWidget(QWidget):
 
     def _on_canvas_selected(self, canvas_id):
         """Add current selection to existing canvas."""
-        selected_runs = self.plot_model.get_selected_runs()
+        selected_runs = [model._run for model in self.plot_model.visible_models]
         if selected_runs:
             # Add runs to selected canvas
             self.canvas_manager.add_runs_to_canvas(selected_runs, canvas_id)

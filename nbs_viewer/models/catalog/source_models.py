@@ -7,7 +7,7 @@ from os.path import exists
 from tiled.client import from_uri, from_profile
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
-
+from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher as QtZMQRemoteDispatcher
 from .base import CatalogBase
 from .kafka import KafkaCatalog
 from .base import load_catalog_models
@@ -197,6 +197,25 @@ class ProfileSourceModel(SourceModel):
         selected_model = self.catalog_models[self.selected_model_name]
         catalog = selected_model(catalog)
 
+        return catalog, label
+
+
+class ZMQSourceModel(SourceModel):
+    """Model for Kafka catalog sources."""
+
+    def __init__(self):
+        """Initialize the Kafka source model."""
+        super().__init__()
+
+    def is_configured(self) -> bool:
+        """Check if the model is fully configured."""
+        return True
+
+    def get_source(self) -> Tuple[CatalogBase, str]:
+        zmq_dispatcher = QtZMQRemoteDispatcher("localhost:5578")
+        label = "ZMQ: localhost:5578"
+        # Create the Kafka catalog
+        catalog = KafkaCatalog(zmq_dispatcher)
         return catalog, label
 
 

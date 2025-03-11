@@ -24,6 +24,7 @@ from ..models.catalog.source_models import (
     ProfileSourceModel,
     KafkaSourceModel,
     ConfigSourceModel,
+    ZMQSourceModel,
 )
 from ..models.catalog.kafka import KafkaCatalog
 
@@ -369,6 +370,34 @@ class KafkaSourceView(SourceView):
         self.model.set_beamline_acronym(self.bl_input.text())
 
 
+class ZMQSourceView(SourceView):
+    """View for ZMQ catalog sources."""
+
+    def __init__(self, parent=None):
+        """
+        Initialize the ZMQ source view.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            The parent widget
+        """
+        model = ZMQSourceModel()
+        super().__init__(model, parent)
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
+        layout = QVBoxLayout()
+        label = QLabel("ZMQ Source: localhost:5578")
+        layout.addWidget(label)
+        self.setLayout(layout)
+
+    def update_model(self):
+        """Update the model with values from the UI."""
+        # No UI updates needed for ZMQ source as it's pre-configured
+        pass
+
+
 class DataSourcePicker(QDialog):
     """Dialog for selecting a data source."""
 
@@ -403,6 +432,7 @@ class DataSourcePicker(QDialog):
         self.source_views["Tiled URI"] = URISourceView()
         self.source_views["Tiled Profile"] = ProfileSourceView()
         self.source_views["Kafka"] = KafkaSourceView()
+        self.source_views["ZMQ"] = ZMQSourceView()
 
         # Add all views to the UI
         for name, view in self.source_views.items():

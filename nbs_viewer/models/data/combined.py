@@ -83,6 +83,7 @@ class CombinedRun(CatalogRun):
             self.metadata = {"source_runs": [], "combination_method": method.value}
         self.scan_id = make_scan_id(scan_ids)
         self.plan_name = f"{len(scan_ids)} Combined"
+        self.start = self._source_runs[0].start
 
     def _compute_common_keys(self) -> List[str]:
         """Find keys common to all source runs."""
@@ -98,7 +99,13 @@ class CombinedRun(CatalogRun):
 
         return sorted(list(common_keys))
 
-    def getData(self, key: str) -> np.ndarray:
+    def get_dims(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]:
+        """Get dimensions of a given key."""
+        return self._source_runs[0].get_dims(ykey, xkeys)
+
+    def getData(self, key: str, slice_info=None) -> np.ndarray:
         """
         Get combined data for a given key.
 
@@ -112,7 +119,7 @@ class CombinedRun(CatalogRun):
         np.ndarray
             The combined data for the given key
         """
-        data_list = [run.getData(key) for run in self._source_runs]
+        data_list = [run.getData(key, slice_info) for run in self._source_runs]
         if not data_list:
             return np.array([])
 
@@ -139,7 +146,9 @@ class CombinedRun(CatalogRun):
             return self._source_runs[0].getRunKeys()
         return {}, {}
 
-    def get_plot_data(self, x_keys, y_keys, norm_keys=None):
+    def get_plot_data(
+        self, x_keys, y_keys, norm_keys=None, slice_info=None
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
         """
         Get combined plot data from source runs.
 
@@ -165,7 +174,7 @@ class CombinedRun(CatalogRun):
         for run in self._source_runs:
             try:
                 x_data, y_data, x_key_list = run.get_plot_data(
-                    x_keys, y_keys, norm_keys
+                    x_keys, y_keys, norm_keys, slice_info
                 )
                 if y_data:  # Only add if we got y data
                     run_data.append((x_data, y_data))

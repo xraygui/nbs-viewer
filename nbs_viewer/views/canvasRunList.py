@@ -130,7 +130,7 @@ class CanvasRunList(QWidget):
                 selected_data.append(run)
 
         # Update model selection
-        self.plot_model.select_runs(selected_data)
+        # self.plot_model.select_runs(selected_data)
 
     def _on_selection_changed(self, selected_runs):
         """Update checkbox states to match model's visible runs."""
@@ -216,7 +216,7 @@ class CanvasRunList(QWidget):
         run = next((rd for rd in self.plot_model.available_runs if rd.uid == uid), None)
         if run:
             is_visible = item.checkState() == Qt.Checked
-            self.plot_model.update_visibility(run, is_visible)
+            self.plot_model.set_run_visible(run, is_visible)
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
