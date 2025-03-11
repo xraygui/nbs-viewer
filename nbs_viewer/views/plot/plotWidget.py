@@ -1,4 +1,5 @@
 import matplotlib
+import time as ttime
 
 matplotlib.use("Qt5Agg")
 import numpy as np
@@ -24,7 +25,7 @@ from ...models.plot.plotDataModel import PlotDataModel
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from functools import partial
-from nbs_viewer.utils import print_debug
+from nbs_viewer.utils import print_debug, time_function
 
 
 class PlotWorker(QThread):
@@ -38,14 +39,26 @@ class PlotWorker(QThread):
         self.plotData = plotData
         self.slice_info = slice_info
         self.dimension = dimension
+        print_debug("PlotWorker", "Created new worker", category="DEBUG_PLOTS")
 
+    @time_function(function_name="PlotWorker.run", category="DEBUG_PLOTS")
     def run(self):
         """Fetch and prepare the plot data."""
         try:
+            print_debug("PlotWorker", "Starting data fetch", category="DEBUG_PLOTS")
+            t1 = ttime.time()
             x, y = self.plotData.get_plot_data(self.slice_info, self.dimension)
+            t2 = ttime.time()
+            print_debug(
+                "PlotWorker",
+                f"Data fetch complete - x shape: {[xi.shape for xi in x]}, y shape: {y.shape}, time: {t2 - t1:.2f} seconds",
+                category="DEBUG_PLOTS",
+            )
             self.data_ready.emit(x, y, self.plotData)
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            error_msg = f"Error fetching plot data: {str(e)}"
+            print_debug("PlotWorker", error_msg, category="DEBUG_PLOTS")
+            self.error_occurred.emit(error_msg)
 
 
 class NavigationToolbar(NavigationToolbar2QT):
@@ -235,6 +248,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.workers[plotData] = worker
         worker.start()
 
+    @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
     def _handle_plot_data(self, x, y, plotData):
         """Handle the plotting once data is ready."""
         artist = plotData.artist
@@ -497,38 +511,44 @@ class MplCanvas(FigureCanvasQTAgg):
         run_uid : str
             The unique identifier of the run to remove
         """
-        # First stop any active workers for this run
         print_debug(
             "MplCanvas.remove_run_data",
             f"Removing run {run_uid}",
             category="DEBUG_PLOTS",
         )
+
+        # First find all keys associated with this run
+        keys_to_remove = [key for key in self.plotArtists.keys() if key[2] == run_uid]
+
+        # Stop any active workers for this run
         worker_keys = [
             plotData for plotData in self.workers.keys() if plotData._key[2] == run_uid
         ]
         for plotData in worker_keys:
             worker = self.workers.pop(plotData)
+            # Disconnect all signals
+            worker.data_ready.disconnect()
+            worker.error_occurred.disconnect()
             worker.quit()
             worker.wait()
             worker.deleteLater()
-
-        # Then find all keys associated with this run
-        keys_to_remove = [key for key in self.plotArtists.keys() if key[2] == run_uid]
 
         # Remove each PlotDataModel
         for key in keys_to_remove:
             plot_data = self.plotArtists[key]
 
-            # Disconnect signals
+            # First disconnect all signals to prevent any callbacks during cleanup
             plot_data.data_changed.disconnect(self.plot_data)
             plot_data.draw_requested.disconnect(self.draw)
             plot_data.autoscale_requested.disconnect(self.autoscale)
+            plot_data.visibility_changed.disconnect()
 
-            # Remove the artist from the axes
-            plot_data.clear()
-
-            # Remove from our dictionary
+            # Remove from our dictionary before clearing the artist
+            # to prevent any redraw attempts during cleanup
             del self.plotArtists[key]
+
+            # Now clear the artist
+            plot_data.clear()
 
         # Update legend and redraw if we removed anything
         if keys_to_remove:

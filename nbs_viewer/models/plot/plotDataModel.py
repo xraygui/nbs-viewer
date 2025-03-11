@@ -116,10 +116,14 @@ class PlotDataModel(QWidget):
             "PlotDataModel.get_plot_data",
             f"got plot data in {ttime.time() - time} seconds",
         )
+        t2 = ttime.time()
         # Get dimension names from dimension analysis
         dim_info = self._run._run.analyze_dimensions(self._ykey, [self._xkey])
         self.dimension_names = dim_info["ordered_dims"]
-
+        print_debug(
+            "PlotDataModel.get_plot_data",
+            f"got dimension names in {ttime.time() - t2} seconds",
+        )
         # Select x dimensions based on plot dimensions
         x = xlist[-dimension:] if dimension else xlist
         return x, y

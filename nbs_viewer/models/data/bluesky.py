@@ -65,6 +65,7 @@ class BlueskyRun(CatalogRun):
         self._chunk_cache = chunk_cache
         self._axis_cache = {}
         self._shape_cache = {}
+        self._dim_cache = {}  # New cache for dimensions
         self._has_data = None
         self._metadata = None
         self._start_doc = None
@@ -106,6 +107,7 @@ class BlueskyRun(CatalogRun):
         if self._chunk_cache is not None:
             self._chunk_cache.clear_run(self.start["uid"])
         self._shape_cache.clear()
+        self._dim_cache.clear()
         self._start_doc = None
         self._stop_doc = None
         self._descriptors = None
@@ -345,12 +347,11 @@ class BlueskyRun(CatalogRun):
                     return np.array(data[slice_info])
                 return data
             except Exception as e:
-                logging.error(f"Error reading 1D data for key {key}: {e}")
+                print(f"Error reading 1D data for key {key}: {e}")
                 return np.array([])
 
         # For N-D data, use chunk-aware caching
         if self._chunk_cache is None:
-            print("No chunk cache available")
             # Fallback to loading full data if no chunk cache available
             try:
                 data_accessor = self._run["primary", "data", key]
@@ -359,15 +360,17 @@ class BlueskyRun(CatalogRun):
                     return data[slice_info]
                 return data
             except Exception as e:
-                logging.error(f"Error reading N-D data for key {key}: {e}")
+                print(f"Error reading N-D data for key {key}: {e}")
                 return np.array([])
 
         # Use chunk-aware caching
         try:
-            print("Loading from chunk cache")
+            print_debug(
+                "BlueskyRun.getData", "Loading from chunk cache", category="cache"
+            )
             return self._chunk_cache.get_data(self._run, key, slice_info)
         except Exception as e:
-            logging.error(f"Error reading chunked data for key {key}: {e}")
+            print(f"Error reading chunked data for key {key}: {e}")
             return np.array([])
 
     # @time_function(category="DEBUG_CATALOG")
@@ -648,6 +651,8 @@ class BlueskyRun(CatalogRun):
         """
         if clear_1d:
             self._data_cache.clear()
+            self._shape_cache.clear()
+            self._dim_cache.clear()  # Clear dimension cache as well
         if clear_nd:
             self._chunk_cache.clear_run(self.start["uid"])
 
@@ -691,20 +696,29 @@ class BlueskyRun(CatalogRun):
             - y_dims: Tuple of dimension names for y-data
             - x_dims: Dict mapping xkeys to their dimension names
         """
-        try:
-            # Try to get dimension names from the data object
-            y_dims = self._run["primary", "data", ykey].dims
-            x_dims = {}
-            for key in xkeys:
-                x_dims[key] = self._run["primary", "data", key].dims
-            return y_dims, x_dims
-        except Exception as e:
-            print(f"Could not get dimension names from data: {e}")
-            # Fall back to generic names
-            yshape = list(self.getShape(ykey))
-            y_dims = tuple(f"dim_{i}" for i in range(len(yshape)))
-            x_dims = {}
-            for key in xkeys:
-                shape = list(self.getShape(key))
-                x_dims[key] = tuple(f"dim_{i}" for i in range(len(shape)))
-            return y_dims, x_dims
+        # Get y dimensions from cache or fetch
+        if ykey not in self._dim_cache:
+            try:
+                self._dim_cache[ykey] = self._run["primary", "data", ykey].dims
+            except Exception as e:
+                print(f"Could not get dimension names for {ykey}: {e}")
+                # Fallback to generating dimension names from shape
+                shape = self.getShape(ykey)
+                self._dim_cache[ykey] = tuple(f"dim_{i}" for i in range(len(shape)))
+
+        y_dims = self._dim_cache[ykey]
+
+        # Get x dimensions from cache or fetch
+        x_dims = {}
+        for key in xkeys:
+            if key not in self._dim_cache:
+                try:
+                    self._dim_cache[key] = self._run["primary", "data", key].dims
+                except Exception as e:
+                    print(f"Could not get dimension names for {key}: {e}")
+                    # Fallback to generating dimension names from shape
+                    shape = self.getShape(key)
+                    self._dim_cache[key] = tuple(f"dim_{i}" for i in range(len(shape)))
+            x_dims[key] = self._dim_cache[key]
+
+        return y_dims, x_dims

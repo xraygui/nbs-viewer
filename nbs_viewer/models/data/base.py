@@ -3,6 +3,7 @@ from qtpy.QtCore import QObject, Signal
 import numpy as np
 from asteval import Interpreter
 from nbs_viewer.utils import time_function
+import time
 
 
 class CatalogRun(QObject):
@@ -648,6 +649,7 @@ class CatalogRun(QObject):
 
         return result
 
+    @time_function(function_name="CatalogRun.analyze_dimensions")
     def analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
         """
         Analyze dimensions for a given y-key and set of x-keys, synthesizing information
@@ -691,15 +693,12 @@ class CatalogRun(QObject):
         # Get shapes and dimension info for all keys
         yshape = list(self.getShape(ykey))  # Convert to list for mutability
 
-        # Get dimension names from the data using get_dims
         y_dims, x_dims = self.get_dims(ykey, xkeys)
         result["original_dims"][ykey] = y_dims
         result["original_dims"].update(x_dims)
 
-        # Get axis hints for the y-key
         axis_hints = self.getAxisHints()
         y_axis_hints = axis_hints.get(ykey, [])
-
         # Check metadata for dimension hints
         try:
             start_doc = self.start
@@ -717,7 +716,7 @@ class CatalogRun(QObject):
         ordered_dims = []
         dim_metadata = {}
 
-        # First, check if we have a time dimension
+        # Process time dimension
         if "time" in y_dims:
             ordered_dims.append("time")
             dim_metadata["time"] = {
@@ -730,7 +729,6 @@ class CatalogRun(QObject):
 
             # First check dimensions metadata
             if dimensions:
-                # print(f"Found dimensions in metadata: {dimensions}")
                 for dim_info in dimensions:
                     if len(dim_info) >= 2:
                         motor_list = dim_info[0]
@@ -744,15 +742,12 @@ class CatalogRun(QObject):
                 if key in x_dims and x_dims[key] == ("time",):
                     if key not in time_motors:
                         time_motors.append(key)
-                        # print(f"Added {key} to time_motors based on dimension")
 
             # Add motors as associated axes if we have any
             if time_motors:
-                # print(f"Setting time associated axes: {time_motors}")
                 result["associated_axes"]["time"] = time_motors
 
         # Add remaining x dimensions
-        # Only add if they're not already in ordered_dims or associated_axes
         for key in xkeys:
             if (
                 key not in ordered_dims
@@ -786,7 +781,7 @@ class CatalogRun(QObject):
                 else:
                     dim_metadata[dim] = {"type": "dependent", "original_dim": dim}
 
-        # Update result
+        # Update result and handle dimension replacement
         result["ordered_dims"] = ordered_dims
         result["effective_shape"] = tuple(yshape)
         result["dim_metadata"] = dim_metadata
@@ -796,11 +791,9 @@ class CatalogRun(QObject):
         for dim, associated in result["associated_axes"].items():
             if len(associated) == 1:
                 motor = associated[0]
-                # print(f"Replacing dimension {dim} with single associated axis {motor}")
                 dims_to_replace.append((dim, motor))
 
         for old_dim, new_dim in dims_to_replace:
-            # Update ordered_dims
             if old_dim == new_dim:
                 del result["associated_axes"][new_dim]
                 continue
@@ -811,10 +804,6 @@ class CatalogRun(QObject):
             result["dim_metadata"][new_dim] = result["dim_metadata"][old_dim].copy()
             result["dim_metadata"][new_dim]["original_dim"] = old_dim
             del result["dim_metadata"][old_dim]
-
-            # Update associated_axes
-
-        # print(f"Analyze dimensions result: {result}")
         return result
 
     def get_dimension_axes(

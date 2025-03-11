@@ -77,10 +77,8 @@ class ChunkCache:
                 chunks_needed, full_shape = self.get_chunk_indices(
                     run.start["uid"], key, slice_info
                 )
-                print_debug(
-                    "ChunkCache",
-                    f"Chunk indices: {chunks_needed}, full shape: {full_shape}",
-                )
+                msg = f"Chunk indices: {chunks_needed}, full shape: {full_shape}"
+                print_debug("ChunkCache", msg, category="cache")
             except Exception as e:
                 raise ValueError(f"Error converting slice to chunks: {str(e)}")
 
@@ -220,10 +218,10 @@ class ChunkCache:
             raise KeyError(f"No chunk info found for {run_uid}:{key}")
 
         shape, chunks = self.chunk_info[(run_uid, key)]
-        print("\nSlice conversion debugging:")
-        print(f"Input slice_info: {slice_info}")
-        print(f"Data shape: {shape}")
-        print(f"Chunk sizes: {chunks}")
+        print_debug("ChunkCache", f"\nSlice conversion debugging:", category="cache")
+        print_debug("ChunkCache", f"Input slice_info: {slice_info}", category="cache")
+        print_debug("ChunkCache", f"Data shape: {shape}", category="cache")
+        print_debug("ChunkCache", f"Chunk sizes: {chunks}", category="cache")
 
         # Ensure slice_info matches the data dimensionality
         if len(slice_info) != len(shape):
@@ -239,7 +237,9 @@ class ChunkCache:
         for dim, (s, dim_size, chunk_sizes) in enumerate(
             zip(slice_info, shape, chunks)
         ):
-            print(f"\nProcessing dimension {dim}:")
+            print_debug(
+                "ChunkCache", f"\nProcessing dimension {dim}:", category="cache"
+            )
             # Calculate cumulative positions for chunk boundaries
             positions = [0]
             for size in chunk_sizes:
@@ -250,7 +250,9 @@ class ChunkCache:
                 # Handle slice request
                 start = s.start if s.start is not None else 0
                 stop = s.stop if s.stop is not None else dim_size
-                print(f"  Slice request {start}:{stop}")
+                print_debug(
+                    "ChunkCache", f"  Slice request {start}:{stop}", category="cache"
+                )
 
                 # Find chunks that overlap with request
                 for chunk_idx, (chunk_start, chunk_end) in enumerate(
@@ -258,7 +260,11 @@ class ChunkCache:
                 ):
                     if chunk_start < stop and chunk_end > start:
                         dim_chunks.append(chunk_idx)
-                        print(f"  Chunk {chunk_idx}: pos {chunk_start}:{chunk_end}")
+                        print_debug(
+                            "ChunkCache",
+                            f"  Chunk {chunk_idx}: pos {chunk_start}:{chunk_end}",
+                            category="cache",
+                        )
             else:
                 # Handle integer index
                 pos = 0
@@ -266,9 +272,10 @@ class ChunkCache:
                     if pos <= s < pos + size:
                         internal_idx = s - pos
                         dim_chunks.append(chunk_idx)
-                        print(
-                            f"  Index {s} in chunk {chunk_idx} "
-                            f"at internal position {internal_idx}"
+                        print_debug(
+                            "ChunkCache",
+                            f"  Index {s} in chunk {chunk_idx} at internal position {internal_idx}",
+                            category="cache",
                         )
                         break
                     pos += size
@@ -278,7 +285,11 @@ class ChunkCache:
         # Generate all combinations of chunk indices
         from itertools import product
 
-        print(f"\nGenerating chunk combinations from: {base_chunk_indices}")
+        print_debug(
+            "ChunkCache",
+            f"\nGenerating chunk combinations from: {base_chunk_indices}",
+            category="cache",
+        )
 
         for chunk_indices in product(*base_chunk_indices):
             # Calculate the shape and internal slices for this chunk
@@ -313,9 +324,12 @@ class ChunkCache:
                     "internal_slices": tuple(internal_slices),
                 }
             )
-            print(f"\nChunk {chunk_indices}:")
-            print(f"  Shape: {tuple(chunk_shape)}")
-            print(f"  Internal slices: {tuple(internal_slices)}")
+            print_debug("ChunkCache", f"\nChunk {chunk_indices}:", category="cache")
+            print_debug(
+                "ChunkCache", f"  Shape: {tuple(chunk_shape)}", category="cache"
+            )
+            msg = f"  Internal slices: {tuple(internal_slices)}"
+            print_debug("ChunkCache", msg, category="cache")
 
         return chunks_needed, shape
 
@@ -447,7 +461,8 @@ class ChunkCache:
         # Check memory limits
         chunk_size = data.nbytes
         if chunk_size > self.max_size:
-            print_debug("ChunkCache", f"Chunk too large to cache: {chunk_size} bytes")
+            msg = f"Chunk too large to cache: {chunk_size} bytes"
+            print_debug("ChunkCache", msg, category="cache")
             return
 
         # Ensure we have enough memory
@@ -456,7 +471,8 @@ class ChunkCache:
             or psutil.virtual_memory().percent > (1 - self.min_free_memory) * 100
         ):
             if not self._evict_lru():
-                print_debug("ChunkCache", "Cannot free enough memory to cache chunk")
+                msg = "Cannot free enough memory to cache chunk"
+                print_debug("ChunkCache", msg, category="cache")
                 return
 
         # Store the chunk
