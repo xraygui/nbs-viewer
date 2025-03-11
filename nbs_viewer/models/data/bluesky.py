@@ -4,6 +4,7 @@ import logging
 from .base import CatalogRun
 from typing import Dict, List, Tuple, Any, Optional, Union
 import numpy as np
+from nbs_viewer.utils import print_debug, time_function
 
 
 class BlueskyRun(CatalogRun):
@@ -21,6 +22,8 @@ class BlueskyRun(CatalogRun):
         The key for this run
     catalog : Catalog
         The catalog containing the run
+    chunk_cache : ChunkCache, optional
+        Cache for chunked array data
     """
 
     _METADATA_MAP = {
@@ -41,7 +44,8 @@ class BlueskyRun(CatalogRun):
 
     METADATA_KEYS = ["scan_id", "plan_name", "num_points", "date", "uid"]
 
-    def __init__(self, run, key, catalog, parent=None):
+    @time_function(function_name="BlueskyRun.__init__", category="DEBUG_CATALOG")
+    def __init__(self, run, key, catalog, parent=None, chunk_cache=None):
         """
         Initialize the BlueskyRun.
 
@@ -53,32 +57,33 @@ class BlueskyRun(CatalogRun):
             The key for this run
         catalog : Catalog
             The catalog containing the run
+        chunk_cache : ChunkCache, optional
+            Cache for chunked array data
         """
         super().__init__(run, key, catalog, parent)
-        self._data_cache = {}
-        self._nd_data_cache = {}
+        self._data_cache = {}  # For 1D data only
+        self._chunk_cache = chunk_cache
         self._axis_cache = {}
         self._shape_cache = {}
-        self._has_data = False
+        self._has_data = None
         self._metadata = None
         self._start_doc = None
         self._stop_doc = None
         self._descriptors = None
         self._stream = "primary"
         self._max_1d_cache_items = 100
-        self._max_nd_cache_items = 10
 
         # Setup metadata first since it's always available
         self.setup()
 
         # Try to initialize data access, but don't fail if unavailable
         try:
-            self._check_data_access()
             self._initialize_keys()
         except Exception as e:
             print(f"Warning: Could not initialize data for run {key}: {e}")
             self._available_keys = []
 
+    @time_function(category="DEBUG_CATALOG")
     def _check_data_access(self):
         """Check if run has accessible data."""
         try:
@@ -98,7 +103,8 @@ class BlueskyRun(CatalogRun):
         """
         self._data_cache.clear()
         self._axis_cache.clear()
-        self._nd_data_cache.clear()
+        if self._chunk_cache is not None:
+            self._chunk_cache.clear_run(self.start["uid"])
         self._shape_cache.clear()
         self._start_doc = None
         self._stop_doc = None
@@ -310,29 +316,31 @@ class BlueskyRun(CatalogRun):
         array-like
             The data for the given key, potentially sliced
         """
+        print_debug(
+            "BlueskyRun.getData",
+            f"getting data for {key}, slice_info={slice_info}",
+            category="DEBUG_CATALOG",
+        )
         if not self._has_data:
             return np.array([])  # Return empty array if no data
-
-        # First check if we have the full data in the regular cache
-        if key in self._data_cache:
-            if slice_info is not None:
-                # If we have full data, just slice it directly
-                return self._data_cache[key][slice_info]
-            return self._data_cache[key]
 
         # Determine dimensionality from shape
         shape = self.getShape(key)
         is_1d = len(shape) == 1
 
-        # For 1D data, always fetch the full dataset
+        # For 1D data, use simple caching
         if is_1d:
+            if key in self._data_cache:
+                if slice_info is not None:
+                    return self._data_cache[key][slice_info]
+                return self._data_cache[key]
+
             try:
                 data_accessor = self._run["primary", "data", key]
                 data = data_accessor.read()
                 self._data_cache[key] = data
                 self._manage_cache(self._data_cache, self._max_1d_cache_items)
 
-                # Return sliced data if requested
                 if slice_info is not None:
                     return np.array(data[slice_info])
                 return data
@@ -340,52 +348,29 @@ class BlueskyRun(CatalogRun):
                 logging.error(f"Error reading 1D data for key {key}: {e}")
                 return np.array([])
 
-        # For N-D data, proceed with slice-aware fetching
-        if slice_info is not None:
-            # Use N-D data cache for sliced data
-            cache = self._nd_data_cache
-            # Convert slice objects to tuples of (start, stop, step)
-            slice_key = tuple(
-                (s.start, s.stop, s.step) if isinstance(s, slice) else s
-                for s in slice_info
-            )
-            cache_key = (key, slice_key)
-            max_cache_items = self._max_nd_cache_items
-
-            if cache_key in cache:
-                return cache[cache_key]
-        else:
-            # Use regular data cache for full data
-            cache = self._data_cache
-            cache_key = key
-            max_cache_items = self._max_1d_cache_items
-
-        try:
-            # Get the data accessor
-            data_accessor = self._run["primary", "data", key]
-
-            if slice_info is not None:
-                # Request only the slice we need from Tiled
-                # This avoids calling read() on the entire dataset
-                data = data_accessor[slice_info]
-                if not np.isscalar(data):
-                    cache[cache_key] = data
-                else:
-                    data = np.array(data)
-            else:
-                # For full data requests
+        # For N-D data, use chunk-aware caching
+        if self._chunk_cache is None:
+            print("No chunk cache available")
+            # Fallback to loading full data if no chunk cache available
+            try:
+                data_accessor = self._run["primary", "data", key]
                 data = data_accessor.read()
-                cache[cache_key] = data
+                if slice_info is not None:
+                    return data[slice_info]
+                return data
+            except Exception as e:
+                logging.error(f"Error reading N-D data for key {key}: {e}")
+                return np.array([])
 
-            # Manage cache size
-            self._manage_cache(cache, max_cache_items)
-
+        # Use chunk-aware caching
+        try:
+            print("Loading from chunk cache")
+            return self._chunk_cache.get_data(self._run, key, slice_info)
         except Exception as e:
-            logging.error(f"Error reading data for key {key}: {e}")
+            logging.error(f"Error reading chunked data for key {key}: {e}")
             return np.array([])
 
-        return data
-
+    # @time_function(category="DEBUG_CATALOG")
     def _manage_cache(self, cache, max_items):
         """
         Limit cache size by removing least recently used items.
@@ -434,75 +419,100 @@ class BlueskyRun(CatalogRun):
         tuple
             A tuple of (xkeys, ykeys) dictionaries
         """
-        if not self._has_data:
+        if self._has_data is False:
             return {}, {}  # Return empty key sets if no data
 
+        t_start = time.time()
+
+        # Get all available keys
+        print_debug(
+            "BlueskyRun.getRunKeys",
+            "Getting run['primary', 'data'].keys()",
+            category="DEBUG_CATALOG",
+        )
         try:
-            t_start = time.time()
-
-            # Get all available keys
-            logging.debug("Getting available keys")
             all_keys = list(self._run["primary", "data"].keys())
-            t0 = time.time()
-            logging.debug(f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s")
-
-            # Initialize dictionaries
-            xkeys = {}
-            ykeys = {1: [], 2: []}
-
-            # Handle time key if present
-            if "time" in all_keys:
-                xkeys[0] = ["time"]
-                all_keys.remove("time")
-
-            # Get dimension hints and try to get object keys from descriptors
-            t1 = time.time()
-            xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
-
-            # Try to get object keys from descriptors
-            object_keys = {}
-            try:
-                descriptors = self._run.primary.descriptors
-                if descriptors:
-                    object_keys = descriptors[0].get("object_keys", {})
-            except Exception as e:
-                logging.debug(f"Could not get object_keys from descriptors: {e}")
-                object_keys = {}
-
-            logging.debug(f"Getting dimension hints took: {time.time() - t1:.3f}s")
-
-            # Process dimension hints
-            t2 = time.time()
-            for i, dimension in enumerate(xkeyhints):
-                axlist = dimension[0]
-                xkeys[i + 1] = []
-                for ax in axlist:
-                    # Add the main key
-                    if ax in all_keys:
-                        all_keys.remove(ax)
-                        xkeys[i + 1].append(ax)
-
-                        # Add related keys from object_keys
-                        if object_keys and ax in object_keys:
-                            for related_key in object_keys[ax]:
-                                if related_key != ax and related_key in all_keys:
-                                    all_keys.remove(related_key)
-                                    xkeys[i + 1].append(related_key)
-
-                if len(xkeys[i + 1]) == 0:
-                    xkeys.pop(i + 1)
-
-            logging.debug(f"Processing hints took: {time.time() - t2:.3f}s")
-
-            # All remaining keys go to ykeys[1] initially
-            ykeys[1] = all_keys
-            # print(f"xkeys: {xkeys}")
-            # print(f"ykeys: {ykeys}")
-            logging.debug(f"Total getRunKeys took: {time.time() - t_start:.3f}s")
-            return xkeys, ykeys
+            self._has_data = True
         except Exception as e:
-            print(f"Error getting run keys for {self._key}: {e}")
+            print(
+                f"[BlueskyRun.getRunKeys] Could not get keys from run['primary', 'data']: {e}"
+            )
+            self._has_data = False
             return {}, {}
+        t0 = time.time()
+        print_debug(
+            "BlueskyRun.getRunKeys",
+            f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s",
+            category="DEBUG_CATALOG",
+        )
+
+        # Initialize dictionaries
+        xkeys = {}
+        ykeys = {1: [], 2: []}
+
+        # Handle time key if present
+        if "time" in all_keys:
+            xkeys[0] = ["time"]
+            all_keys.remove("time")
+
+        # Get dimension hints and try to get object keys from descriptors
+        t1 = time.time()
+
+        xkeyhints = self.get_md_value(["start", "hints", "dimensions"], [])
+        print_debug(
+            "BlueskyRun.getRunKeys",
+            f"Getting dimension hints took: {time.time() - t1:.3f}s",
+            category="DEBUG_CATALOG",
+        )
+        t2 = time.time()
+        # Try to get object keys from descriptors
+        object_keys = {}
+        try:
+            descriptors = self._run.primary.descriptors
+            if descriptors:
+                object_keys = descriptors[0].get("object_keys", {})
+        except Exception as e:
+            print(
+                f"[BlueskyRun.getRunKeys] Could not get object_keys from descriptors: {e}"
+            )
+            object_keys = {}
+
+        print_debug(
+            "BlueskyRun.getRunKeys",
+            f"Getting dimension hints from descriptors took: {time.time() - t1:.3f}s",
+            category="DEBUG_CATALOG",
+        )
+
+        # Process dimension hints
+        for i, dimension in enumerate(xkeyhints):
+            axlist = dimension[0]
+            xkeys[i + 1] = []
+            for ax in axlist:
+                # Add the main key
+                if ax in all_keys:
+                    all_keys.remove(ax)
+                    xkeys[i + 1].append(ax)
+
+                    # Add related keys from object_keys
+                    if object_keys and ax in object_keys:
+                        for related_key in object_keys[ax]:
+                            if related_key != ax and related_key in all_keys:
+                                all_keys.remove(related_key)
+                                xkeys[i + 1].append(related_key)
+
+            if len(xkeys[i + 1]) == 0:
+                xkeys.pop(i + 1)
+
+        # All remaining keys go to ykeys[1] initially
+        ykeys[1] = all_keys
+        # print(f"xkeys: {xkeys}")
+        # print(f"ykeys: {ykeys}")
+        print_debug(
+            "BlueskyRun.getRunKeys",
+            f"Total getRunKeys took: {time.time() - t_start:.3f}s",
+            category="DEBUG_CATALOG",
+        )
+        return xkeys, ykeys
 
     def __str__(self):
         """
@@ -639,7 +649,7 @@ class BlueskyRun(CatalogRun):
         if clear_1d:
             self._data_cache.clear()
         if clear_nd:
-            self._nd_data_cache.clear()
+            self._chunk_cache.clear_run(self.start["uid"])
 
     def get_cache_size(self):
         """
@@ -656,9 +666,8 @@ class BlueskyRun(CatalogRun):
                 size_1d += data.nbytes
 
         size_nd = 0
-        for data in self._nd_data_cache.values():
-            if hasattr(data, "nbytes"):
-                size_nd += data.nbytes
+        if self._chunk_cache is not None:
+            size_nd = self._chunk_cache.get_size()
 
         return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}
 

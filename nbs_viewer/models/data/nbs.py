@@ -1,5 +1,5 @@
 from .bluesky import BlueskyRun
-from typing import List
+from typing import List, Tuple, Dict
 
 
 class NBSRun(BlueskyRun):
@@ -8,6 +8,17 @@ class NBSRun(BlueskyRun):
 
     This class extends BlueskyRun with additional metadata fields specific
     to NBS data collection, such as edge and sample information.
+
+    Parameters
+    ----------
+    run : BlueskyRun
+        The run object
+    key : str
+        The key for this run
+    catalog : Catalog
+        The catalog containing the run
+    chunk_cache : ChunkCache, optional
+        Cache for chunked array data
     """
 
     _METADATA_MAP = {
@@ -47,6 +58,23 @@ class NBSRun(BlueskyRun):
         "exit_status",
         "uid",
     ]
+
+    def __init__(self, run, key, catalog, parent=None, chunk_cache=None):
+        """
+        Initialize the NBSRun.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            The run object
+        key : str
+            The key for this run
+        catalog : Catalog
+            The catalog containing the run
+        chunk_cache : ChunkCache, optional
+            Cache for chunked array data
+        """
+        super().__init__(run, key, catalog, parent=parent, chunk_cache=chunk_cache)
 
     def __str__(self):
         """

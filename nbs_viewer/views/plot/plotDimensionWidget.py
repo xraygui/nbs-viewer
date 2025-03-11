@@ -354,7 +354,7 @@ class PlotDimensionControl(QWidget):
         # Recreate the sliders
         self.create_sliders()
         # print("  Calling sliders_changed")
-        self.sliders_changed()
+        self.sliders_changed(update_plot=False)
         # print("  Recreating sliders")
         update_accepted = self.canvas.update_view_state(
             self._indices, new_dim, validate=True
@@ -369,13 +369,12 @@ class PlotDimensionControl(QWidget):
 
         self.dimensionChanged.emit(new_dim)
 
-    def sliders_changed(self):
+    def sliders_changed(self, update_plot=True):
         """
         Handle slider value changes.
         Collects current indices and emits the indicesUpdated signal.
+        Creates a complete slice tuple including slice(None) for fully sliced dimensions.
         """
-        # print("\nDebugging sliders_changed:")
-
         # Initialize all indices to 0
         full_indices = [0] * self._nsliders
 
@@ -383,16 +382,30 @@ class PlotDimensionControl(QWidget):
         for slider in self.sliders:
             dim_index = slider.dimension_index
             full_indices[dim_index] = slider.value()
-            # print(f"  Slider value for dim {dim_index}: {slider.value()}")
+
+        # Convert indices to slice objects based on plot dimensions
+        plot_dims = self.dimension_spinbox.value()
+        slice_info = []
+
+        # For each dimension up to the total number of dimensions
+        for i in range(self._nsliders + plot_dims):
+            if i >= len(full_indices):
+                # Last plot_dims dimensions get full slice
+                slice_info.append(slice(None))
+            else:
+                # Other dimensions get integer index from full_indices
+                slice_info.append(full_indices[i])
 
         # Convert to tuple for consistent handling
-        self._indices = tuple(full_indices)
-        # print(f"  Emitting indicesUpdated with indices: {self._indices}")
+        self._indices = tuple(slice_info)
 
         # Emit signal to update the plot
-        self.canvas.update_view_state(
-            self._indices, self.canvas._dimension, validate=False
-        )
+        if update_plot:
+            dim = self.dimension_spinbox.value()
+            print(
+                f"[PlotDimensionControl] Updating plot for indices: {self._indices}, dimension: {dim}"
+            )
+            self.canvas.update_view_state(self._indices, dim, validate=False)
         self.indicesUpdated.emit(self._indices)
 
     def on_run_added(self, run_model):

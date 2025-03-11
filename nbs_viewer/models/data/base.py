@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from qtpy.QtCore import QObject, Signal
 import numpy as np
 from asteval import Interpreter
+from nbs_viewer.utils import time_function
 
 
 class CatalogRun(QObject):
@@ -539,6 +540,9 @@ class CatalogRun(QObject):
             self._transform_text = transform_text
             self.transform_changed.emit()
 
+    @time_function(
+        function_name="CatalogRun._initialize_keys", category="DEBUG_CATALOG"
+    )
     def _initialize_keys(self):
         """Initialize available keys safely."""
         try:

@@ -2,6 +2,8 @@ from typing import Tuple
 from qtpy.QtCore import Signal, Slot
 from qtpy.QtWidgets import QWidget
 import numpy as np
+import time as ttime
+from nbs_viewer.utils import print_debug
 
 
 class PlotDataModel(QWidget):
@@ -103,12 +105,17 @@ class PlotDataModel(QWidget):
             The x and y data arrays for plotting
         """
         norm_keys = self._norm_keys
+        print_debug("PlotDataModel.get_plot_data", "getting plot data")
+        time = ttime.time()
         xlist, y, xkeylist = self._run._run.get_plot_data(
             [self._xkey], [self._ykey], norm_keys, indices
         )
         y = y[0]
         xlist = xlist[0]
-
+        print_debug(
+            "PlotDataModel.get_plot_data",
+            f"got plot data in {ttime.time() - time} seconds",
+        )
         # Get dimension names from dimension analysis
         dim_info = self._run._run.analyze_dimensions(self._ykey, [self._xkey])
         self.dimension_names = dim_info["ordered_dims"]
@@ -185,6 +192,11 @@ class PlotDataModel(QWidget):
 
         Handles both Line2D and QuadMesh artists appropriately.
         """
+        print_debug(
+            "PlotDataModel.clear",
+            f"Clearing artist for {self.label}",
+            category="DEBUG_PLOTS",
+        )
         if self.artist is not None:
             try:
                 if self.artist.axes is not None:

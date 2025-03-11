@@ -2,6 +2,7 @@ import argparse
 from qtpy.QtWidgets import QApplication, QVBoxLayout, QWidget, QTabWidget
 from qtpy.QtCore import Qt
 from .mainWidget import MainWidget
+from .utils import turn_on_debugging, turn_off_debugging
 
 # import logging
 
@@ -25,7 +26,13 @@ class Viewer(QWidget):
 def main():
     parser = argparse.ArgumentParser(description="NBS Viewer")
     parser.add_argument("-f", "--config", help="Path to the catalog config file")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
+    if args.debug:
+        print("Debug statements on")
+        turn_on_debugging()
+    else:
+        turn_off_debugging()
     print("Starting Viewer Main")
     app = QApplication([])
     viewer = Viewer(config_file=args.config)

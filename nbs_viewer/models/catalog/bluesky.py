@@ -7,6 +7,7 @@ from databroker.queries import TimeRange
 from .base import CatalogBase
 from .table import CatalogTableModel
 from ..data import BlueskyRun, NBSRun
+from .chunkCache import ChunkCache
 
 
 class BlueskyCatalog(CatalogBase):
@@ -31,6 +32,7 @@ class BlueskyCatalog(CatalogBase):
         super().__init__(parent)
         self._catalog = catalog
         self._wrapped_runs = {}
+        self._chunk_cache = ChunkCache()
 
     def __len__(self):
         return len(self._catalog)
@@ -53,7 +55,7 @@ class BlueskyCatalog(CatalogBase):
         return runs
 
     def wrap_run(self, run, uid):
-        return BlueskyRun(run, uid, self._catalog)
+        return BlueskyRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
 
     def get_run(self, uid: str) -> BlueskyRun:
         """
@@ -142,7 +144,7 @@ class NBSCatalog(BlueskyCatalog):
     """Catalog implementation for NBS data."""
 
     def wrap_run(self, run, uid):
-        return NBSRun(run, uid, self._catalog)
+        return NBSRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
 
     @property
     def columns(self) -> List[str]:
