@@ -1,21 +1,20 @@
+"""Widget for managing canvas assignments and creation."""
+
 from qtpy.QtWidgets import (
     QWidget,
-    QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QComboBox,
     QMenu,
     QAction,
 )
-from qtpy.QtCore import Signal
 
 
 class CanvasControlWidget(QWidget):
     """
     Widget for managing canvas assignments and creation.
 
-    Provides a consistent interface for adding runs to new or existing canvases.
-    Used by both CanvasRunList and DataSourceManager.
+    Provides a consistent interface for adding runs to new or existing
+    canvases. Used by both CanvasRunList and DataSourceManager.
     """
 
     def __init__(self, canvas_manager, plot_model, parent=None):
@@ -38,6 +37,7 @@ class CanvasControlWidget(QWidget):
         # Create UI elements
         self.add_to_new_canvas_btn = QPushButton("New Canvas", self)
         self.add_to_canvas_btn = QPushButton("Add to Canvas", self)
+        self.clear_canvas_btn = QPushButton("Clear Canvas", self)
         self.canvas_menu = QMenu(self)
         self.add_to_canvas_btn.setMenu(self.canvas_menu)
 
@@ -45,10 +45,12 @@ class CanvasControlWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.addWidget(self.add_to_new_canvas_btn)
         layout.addWidget(self.add_to_canvas_btn)
+        layout.addWidget(self.clear_canvas_btn)
         self.setLayout(layout)
 
         # Connect signals
         self.add_to_new_canvas_btn.clicked.connect(self._on_new_canvas)
+        self.clear_canvas_btn.clicked.connect(self._on_clear_canvas)
         self.canvas_manager.canvas_added.connect(self._update_canvas_menu)
         self.canvas_manager.canvas_removed.connect(self._update_canvas_menu)
 
@@ -67,11 +69,13 @@ class CanvasControlWidget(QWidget):
                 )
                 self.canvas_menu.addAction(action)
 
-        self.add_to_canvas_btn.setEnabled(len(self.canvas_menu.actions()) > 0)
+        has_actions = len(self.canvas_menu.actions()) > 0
+        self.add_to_canvas_btn.setEnabled(has_actions)
 
     def _on_new_canvas(self):
         """Create new canvas with current selection."""
-        selected_runs = [model._run for model in self.plot_model.visible_models]
+        visible_models = self.plot_model.visible_models
+        selected_runs = [model._run for model in visible_models]
         if selected_runs:
             # Create new canvas and add runs
             canvas_id = self.canvas_manager.create_canvas()
@@ -79,7 +83,18 @@ class CanvasControlWidget(QWidget):
 
     def _on_canvas_selected(self, canvas_id):
         """Add current selection to existing canvas."""
-        selected_runs = [model._run for model in self.plot_model.visible_models]
+        visible_models = self.plot_model.visible_models
+        selected_runs = [model._run for model in visible_models]
         if selected_runs:
             # Add runs to selected canvas
             self.canvas_manager.add_runs_to_canvas(selected_runs, canvas_id)
+
+    def _on_clear_canvas(self):
+        """Clear the current plot model and deselect all runs."""
+        # Clear visible runs from the plot model
+        visible_models = self.plot_model.visible_models
+        visible_runs = [model._run for model in visible_models]
+        if visible_runs:
+            self.plot_model.set_runs_visible(visible_runs, False)
+            # Reset key selection
+            self.plot_model.set_selected_keys([], [], [], force_update=True)
