@@ -4,7 +4,7 @@ DEBUG_VARIABLES = {
     "PRINT_DEBUG": False,
     "DEBUG_CATALOG": False,
     "DEBUG_PLOTS": True,
-    "cache": False,
+    "cache": True,
 }
 
 
