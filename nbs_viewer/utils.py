@@ -5,6 +5,7 @@ DEBUG_VARIABLES = {
     "DEBUG_CATALOG": False,
     "DEBUG_PLOTS": True,
     "cache": True,
+    "dimension": False,
 }
 
 

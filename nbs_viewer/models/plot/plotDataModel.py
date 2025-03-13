@@ -107,9 +107,13 @@ class PlotDataModel(QWidget):
         norm_keys = self._norm_keys
         xkeys = [self._xkey]
         ykeys = self._ykey
+        print_debug(
+            "PlotDataModel.get_plot_data",
+            f"getting plot data for {self.label} with keys: {xkeys} and {ykeys}",
+        )
+
         xlist, ylist = self._run.get_plot_data(xkeys, ykeys, norm_keys, indices)
         """
-        print_debug("PlotDataModel.get_plot_data", "getting plot data")
         time = ttime.time()
         xlist, y, xkeylist = self._run._run.get_plot_data(
             [self._xkey], [self._ykey], norm_keys, indices

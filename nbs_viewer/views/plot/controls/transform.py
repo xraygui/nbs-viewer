@@ -31,13 +31,14 @@ class TransformControl(PlotControlWidget):
 
     DEFAULT_TRANSFORMS = {
         "No Transform": "",
-        "Invert (1/y)": "1/y",
-        "Normalize to Max": "y/max(y)",
-        "Normalize to Min": "y/min(y)",
+        "Peak-to-Peak": "(y - min(y))/(max(y) - min(y))",
         "Normalize to Pre/Post edge": (
             "(y - mean(y[:10]))/(mean(y[-10:]) - mean(y[:10]))"
         ),
+        "Divide by Max": "y/max(y)",
+        "Divide by Min": "y/min(y)",
         "Normalize to Sum": "y/sum(y)",
+        "Invert (1/y)": "1/y",
         "Log Scale": "log(y)",
         "Log(1/y)": "log(1/y)",
     }
