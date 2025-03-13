@@ -1,8 +1,10 @@
 from typing import List, Optional, Set
 from qtpy.QtCore import QObject, Signal
+from typing import Dict, List, Tuple, Any, Optional
 
 from ..data.base import CatalogRun
-from .plotDataModel import PlotDataModel
+from asteval import Interpreter
+import numpy as np
 
 
 class RunModel(QObject):
@@ -35,6 +37,8 @@ class RunModel(QObject):
         self._is_visible = True  # Track overall visibility state
         self._available_keys = list()  # Track our own copy of available keys
 
+        self._transform_text = ""
+        self._transform = Interpreter()
         # Initialize state
         self._update_available_keys()  # Initial key setup
         self._set_default_selection()
@@ -84,66 +88,77 @@ class RunModel(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    '''
-    def update_plot(self):
-        """Emit data for current selection."""
-        x_keys = self.selected_x_keys
-        y_keys = self.selected_y_keys
-        norm_keys = self.selected_norm_keys
+    def get_plot_data(self, xkeys, ykey, norm_keys=None, slice_info=None):
+        xlist, xnames, extra = self._run.get_dimension_axes(ykey, xkeys, slice_info)
+        xlist = [x for x in xlist if x.size > 1]  # omit empty dimensions
+        ylist = self._run.getData(ykey, slice_info)
+        normlist = self._run.getData(norm_keys, slice_info) if norm_keys else None
+        if normlist is not None:
+            norm = np.prod(normlist, axis=0)
+        else:
+            norm = None
+        xlist, ylist = self.transform_data(xlist, ylist, norm)
+        return xlist, ylist
 
-        should_draw = False
-        for existing_x, existing_y in self._artists.keys():
-            if existing_x in x_keys and existing_y in y_keys:
-                pass
-            else:
-                self._artists[(existing_x, existing_y)].set_visible(False)
-                should_draw = True
+    def transform_data(
+        self, xlist: List[np.ndarray], y: np.ndarray, norm: Optional[np.ndarray] = None
+    ) -> Tuple[List[np.ndarray], np.ndarray]:
+        """
+        Transform data using normalization and custom transformations.
 
-        if not x_keys or not y_keys:
-            return
+        Parameters
+        ----------
+        xlist : List[np.ndarray]
+            List of x-axis data arrays
+        y : np.ndarray
+            Y-axis data array
+        norm : Optional[np.ndarray]
+            Optional normalization data
 
-        xdatalist, ydatalist, xkeylist = self._run.get_plot_data(
-            x_keys, y_keys, norm_keys
-        )
-        for n, y_key in enumerate(y_keys):
-            x_data = xdatalist[n]
-            y_data = ydatalist[n]
-            x_key = xkeylist[n][0]
-            if x_data is not None and y_data is not None:
-                should_draw = True
-                artist = self._artists.get((x_key, y_key), None)
-                if artist is not None:
-                    artist.update_data(x_data, y_data)
-                    artist.set_visible(self._is_visible)  # Use saved visibility state
-                else:
-                    # Create label with y_key and scan_id
-                    label = f"{y_key}.{self.run.scan_id}"
-                    # Create PlotDataModel with current plot dimensions
-                    artist = PlotDataModel(
-                        x_data, y_data, x_key, label, dimension=self._plot_dimensions
-                    )
-                    artist.artist_needed.connect(self.artist_needed)
-                    artist.autoscale_requested.connect(self.autoscale_requested)
-                    artist.draw_requested.connect(self.draw_requested)
-                    artist.visibility_changed.connect(self.visibility_changed)
-                    self._artists[(x_key, y_key)] = artist
-                    artist.plot_data()
-                    artist.set_visible(self._is_visible)  # Set initial visibility
+        Returns
+        -------
+        Tuple[List[np.ndarray], np.ndarray]
+            Transformed (x_data_list, y_data)
+        """
+        # Apply normalization if provided
+        if norm is None:
+            yfinal = y
+        elif np.isscalar(norm):
+            yfinal = y / norm
+        else:
+            temp_norm = norm
+            while temp_norm.ndim < y.ndim:
+                temp_norm = np.expand_dims(temp_norm, axis=-1)
+            yfinal = y / temp_norm
 
-        if should_draw:
-            self.draw_requested.emit()
-    '''
+        # Apply custom transformation
+        if self._transform_text:
+            self._transform.symtable["y"] = yfinal
+            self._transform.symtable["x"] = xlist
+            self._transform.symtable["norm"] = norm
+            yfinal = self._transform(self._transform_text)
 
-    def set_transform(self, transform_state) -> None:
+        return xlist, yfinal
+
+    def set_transform(self, transform_state: Dict[str, Any]) -> None:
         """
         Set the transformation expression.
 
         Parameters
         ----------
-        transform_state : dict
-            Python expression for data transformation
+        transform_state : Dict[str, Any]
+            Dictionary with transform settings:
+            - enabled: bool, whether transform is enabled
+            - text: str, Python expression for data transformation
         """
-        self._run.set_transform(transform_state)
+        if transform_state["enabled"]:
+            transform_text = transform_state["text"]
+        else:
+            transform_text = ""
+
+        if transform_text != self._transform_text:
+            self._transform_text = transform_text
+            self.transform_changed.emit(transform_state)
 
     def set_dynamic(self, enabled: bool) -> None:
         """

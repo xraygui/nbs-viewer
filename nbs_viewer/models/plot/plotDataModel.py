@@ -105,6 +105,10 @@ class PlotDataModel(QWidget):
             The x and y data arrays for plotting
         """
         norm_keys = self._norm_keys
+        xkeys = [self._xkey]
+        ykeys = self._ykey
+        xlist, ylist = self._run.get_plot_data(xkeys, ykeys, norm_keys, indices)
+        """
         print_debug("PlotDataModel.get_plot_data", "getting plot data")
         time = ttime.time()
         xlist, y, xkeylist = self._run._run.get_plot_data(
@@ -126,7 +130,8 @@ class PlotDataModel(QWidget):
         )
         # Select x dimensions based on plot dimensions
         x = xlist[-dimension:] if dimension else xlist
-        return x, y
+        """
+        return xlist, ylist
 
     def update_data_info(self, norm_keys=None, indices=None, dimension=None):
         # print(f"Updating data info for {self.label}")

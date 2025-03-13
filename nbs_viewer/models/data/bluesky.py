@@ -329,7 +329,8 @@ class BlueskyRun(CatalogRun):
         # Determine dimensionality from shape
         shape = self.getShape(key)
         is_1d = len(shape) == 1
-
+        if slice_info is not None:
+            slice_info = slice_info[: len(shape)]
         # For 1D data, use simple caching
         if is_1d:
             if key in self._data_cache:
@@ -391,7 +392,7 @@ class BlueskyRun(CatalogRun):
             for key in keys_to_remove:
                 del cache[key]
 
-    def getAxis(self, keys):
+    def getAxis(self, keys, slice_info=None):
         """
         Get axis data for given keys, using cache if available.
 
@@ -399,6 +400,10 @@ class BlueskyRun(CatalogRun):
         ----------
         keys : list
             The keys to get axis data for
+        slice_info : tuple, optional
+            Tuple of slice objects or indices for each dimension.
+            If provided, the axis data will be sliced using the last n indices
+            of slice_info, where n is the number of dimensions in the data.
 
         Returns
         -------
@@ -410,7 +415,12 @@ class BlueskyRun(CatalogRun):
             data = self._run["primary"]
             for key in keys:
                 data = data[key]
-            self._axis_cache[cache_key] = data.read().squeeze()
+            # Config data always comes with a dummy time axis, squeeze it
+            data = data.read().squeeze()
+            #
+            if slice_info is not None:
+                data = data[slice_info[-len(data.shape) :]]
+            self._axis_cache[cache_key] = data
         return self._axis_cache[cache_key]
 
     def getRunKeys(self):

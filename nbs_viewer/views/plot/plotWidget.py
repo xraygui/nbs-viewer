@@ -279,7 +279,8 @@ class MplCanvas(FigureCanvasQTAgg):
         elif len(y.shape) == 2 and len(x) >= 2:
             try:
                 y = y.T  # Transpose the data
-                X, Y = np.meshgrid(x[-2], x[-1])  # Swap x[-1] and x[-2]
+                X = x[-2].T
+                Y = x[-1].T  # Swap x[-1] and x[-2]
 
                 if self.currentDim != 2:
                     # First time showing 2D plot, need full setup

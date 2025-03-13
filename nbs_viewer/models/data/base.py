@@ -807,7 +807,7 @@ class CatalogRun(QObject):
         return result
 
     def get_dimension_axes(
-        self, ykey: str, xkeys: List[str]
+        self, ykey: str, xkeys: List[str], slice_info: Optional[tuple] = None
     ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
         """
         Get axis data for each dimension of the data.
@@ -846,6 +846,8 @@ class CatalogRun(QObject):
 
         # Get the shape for reference
         effective_shape = dim_info["effective_shape"]
+        if slice_info is None:
+            slice_info = tuple([slice(None)] * len(dim_info["ordered_dims"]))
 
         # Process each dimension in order
         for i, dim_name in enumerate(dim_info["ordered_dims"]):
@@ -854,10 +856,11 @@ class CatalogRun(QObject):
 
             # Get dimension size - default to 1 if beyond effective_shape
             dim_size = effective_shape[i] if i < len(effective_shape) else 1
+            effective_slice = slice_info[: i + 1]
 
             if dim_type == "motor":
                 # For motor dimensions in a grid, use the motor position data
-                axis_data = self.getData(dim_name)
+                axis_data = self.getData(dim_name, effective_slice)
                 if dim_meta["original_dim"] == "time":
                     # Reshape motor data according to grid mapping
                     if "time" in dim_info["grid_mapping"]:
@@ -866,14 +869,14 @@ class CatalogRun(QObject):
 
             elif dim_type == "independent":
                 # For independent dimensions (like time), use the data directly
-                axis_data = self.getData(dim_name)
+                axis_data = self.getData(dim_name, effective_slice)
 
                 # Check for associated axes
                 if dim_name in dim_info["associated_axes"]:
                     associated = []
                     motor_names = dim_info["associated_axes"][dim_name]
                     for motor in motor_names:
-                        motor_data = self.getData(motor)
+                        motor_data = self.getData(motor, effective_slice)
                         associated.append(motor_data)
                     associated_data[dim_name] = {
                         "arrays": associated,
@@ -884,11 +887,11 @@ class CatalogRun(QObject):
                 # Use the axis hint path to get the axis data
                 try:
                     hint_path = dim_info["axis_hints"][dim_name]
-                    axis_data = self.getAxis(hint_path)
+                    axis_data = self.getAxis(hint_path, effective_slice)
                 except Exception as e:
                     print(f"Error getting axis data from hint: {e}")
                     # Fall back to index array
-                    axis_data = np.arange(dim_size)
+                    axis_data = np.arange(dim_size)[effective_slice[-1]]
 
             else:
                 # For dimensions without hints, use index arrays
@@ -897,7 +900,7 @@ class CatalogRun(QObject):
                     axis_data = np.array([])
                 else:
                     # Regular index array
-                    axis_data = np.arange(dim_size)
+                    axis_data = np.arange(dim_size)[effective_slice[-1]]
 
             axis_arrays.append(axis_data)
             axis_names.append(dim_name)

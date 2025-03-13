@@ -102,12 +102,6 @@ class PlotDimensionControl(QWidget):
 
         # Initialize indices based on plot dimensions
         plot_dims = self.dimension_spinbox.value()
-        self._indices = tuple([slice(None)] * plot_dims)
-        print_debug(
-            "PlotDimensionControl.create_sliders",
-            f"Reset indices to: {self._indices}",
-            category="dimension",
-        )
 
         # Track which dimensions have sliders
         self._slider_dimensions = []
@@ -116,10 +110,15 @@ class PlotDimensionControl(QWidget):
         shape_info = self.get_shape_info()
 
         if not shape_info:
-            # print("  No shape info available, not creating sliders")
+            print_debug(
+                "PlotDimensionControl.create_sliders",
+                "No shape info available, not creating sliders",
+                category="dimension",
+            )
             # Hide dimension control for 1D data
             self.dimension_container.hide()
             # Force update with empty indices when no sliders
+            self._indices = None
             self.canvas.update_view_state(self._indices, 1, validate=False)
             return
 
@@ -145,6 +144,24 @@ class PlotDimensionControl(QWidget):
         nsliders = len(y_shape) - plot_dims
         self._nsliders = nsliders
 
+        slice_info = []
+
+        # For each dimension up to the total number of dimensions
+        for i in range(self._nsliders + plot_dims):
+            if i >= self._nsliders:
+                # Last plot_dims dimensions get full slice
+                slice_info.append(slice(None))
+            else:
+                # Other dimensions get integer index from full_indices
+                slice_info.append(0)
+
+        # Convert to tuple for consistent handling
+        self._indices = tuple(slice_info)
+        print_debug(
+            "PlotDimensionControl.create_sliders",
+            f"Reset indices to: {self._indices}",
+            category="dimension",
+        )
         # print(f"  Number of sliders needed: {nsliders}")
 
         if nsliders <= 0:
@@ -215,7 +232,7 @@ class PlotDimensionControl(QWidget):
             self._slider_dimensions.append(dim)
 
             # Connect to update plot
-            slider.valueChanged.connect(self.sliders_changed)
+            slider.valueChanged.connect(lambda x: self.sliders_changed())
 
             # Add to layout
             dim_layout.addWidget(slider)
@@ -446,14 +463,21 @@ class PlotDimensionControl(QWidget):
         )
 
         # Emit signal to update the plot
+        dim = self.dimension_spinbox.value()
+
         if update_plot:
-            dim = self.dimension_spinbox.value()
             print_debug(
                 "PlotDimensionControl",
                 f"Updating plot with indices: {self._indices}, dimension: {dim}",
                 category="dimension",
             )
             self.canvas.update_view_state(self._indices, dim, validate=False)
+        else:
+            print_debug(
+                "PlotDimensionControl",
+                f"Not updating plot with indices: {self._indices}, dimension: {dim}",
+                category="dimension",
+            )
         self.indicesUpdated.emit(self._indices)
 
     def on_run_added(self, run_model):
