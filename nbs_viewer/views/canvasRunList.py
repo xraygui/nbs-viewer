@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal
 from .plot.canvasControl import CanvasControlWidget
-from ..models.data.combined import CombinedRun, CombinationMethod
+from ..models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 
 
 class CanvasRunList(QWidget):
@@ -243,7 +243,7 @@ class CanvasRunList(QWidget):
             return
 
         # Create combined run
-        combined_run = CombinedRun(runs=runs, method=CombinationMethod.AVERAGE)
+        combined_run = CombinedRunModel(runs=runs, method=CombinationMethod.AVERAGE)
 
         # Add to plot model
         self.plot_model.add_run(combined_run)

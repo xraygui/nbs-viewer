@@ -274,7 +274,10 @@ class PlotModel(QObject):
                 continue
 
             # Create and connect new run model
-            run_model = RunModel(run)
+            if not isinstance(run, RunModel):
+                run_model = RunModel(run)
+            else:
+                run_model = run
             self._connect_run_model(run_model)
             self._run_models[uid] = run_model
             self.run_added.emit(run)

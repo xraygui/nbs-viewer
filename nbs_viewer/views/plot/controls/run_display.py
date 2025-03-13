@@ -152,7 +152,7 @@ class RunDisplayWidget(QWidget):
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
         for run in run_models:
-            self._run_selector.addItem(f"Run {run.run.scan_id}", run)
+            self._run_selector.addItem(f"Run {run.scan_id}", run)
         self._run_selector.blockSignals(False)
         self._update_header()
 

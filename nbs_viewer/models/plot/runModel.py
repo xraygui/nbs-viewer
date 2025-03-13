@@ -42,9 +42,14 @@ class RunModel(QObject):
         # Initialize state
         self._update_available_keys()  # Initial key setup
         self._set_default_selection()
+        self._connect_run()
 
-        # Connect to run signals
+    def _connect_run(self):
         self._run.data_changed.connect(self._on_data_changed)
+
+    def _disconnect_run(self):
+        """Disconnect RunData signals."""
+        self._run.data_changed.disconnect(self._on_data_changed)
 
     @property
     def run(self) -> CatalogRun:
@@ -52,19 +57,23 @@ class RunModel(QObject):
         return self._run
 
     @property
+    def metadata(self):
+        return self.run.metadata
+
+    @property
     def uid(self) -> str:
         """Get the unique identifier for the run."""
-        return self._run.uid
+        return self.run.uid
 
     @property
     def scan_id(self) -> str:
         """Get the scan ID for the run."""
-        return self._run.scan_id
+        return self.run.scan_id
 
     @property
     def plan_name(self) -> str:
         """Get the plan name for the run."""
-        return self._run.plan_name
+        return self.run.plan_name
 
     @property
     def available_keys(self) -> List[str]:
@@ -80,7 +89,7 @@ class RunModel(QObject):
 
     def _set_default_selection(self) -> None:
         """Set default key selection based on run hints."""
-        x_keys, y_keys, norm_keys = self.run.get_default_selection()
+        x_keys, y_keys, norm_keys = self._run.get_default_selection()
         self.set_selected_keys(x_keys, y_keys, norm_keys)
 
     def _on_data_changed(self) -> None:
@@ -92,8 +101,10 @@ class RunModel(QObject):
         xlist, xnames, extra = self._run.get_dimension_axes(ykey, xkeys, slice_info)
         xlist = [x for x in xlist if x.size > 1]  # omit empty dimensions
         ylist = self._run.getData(ykey, slice_info)
-        normlist = self._run.getData(norm_keys, slice_info) if norm_keys else None
-        if normlist is not None:
+        if norm_keys is not None:
+            normlist = [
+                self._run.getData(norm_key, slice_info) for norm_key in norm_keys
+            ]
             norm = np.prod(normlist, axis=0)
         else:
             norm = None
@@ -176,7 +187,7 @@ class RunModel(QObject):
         """Clean up resources and disconnect signals."""
         # Disconnect RunData signals
         try:
-            self._run.data_changed.disconnect(self._on_data_changed)
+            self._disconnect_run()
         except Exception as e:
             print(f"Warning: Error disconnecting run signals: {e}")
 
