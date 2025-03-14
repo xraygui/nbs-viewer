@@ -15,6 +15,8 @@ dependencies = [
 "matplotlib",
 "tiled >= 0.1.0a105",
 "bluesky-widgets >= 0.0.15",
+"pyzmq",
+"bluesky-kafka",
 "nslsii",
 "databroker[client,server,back-compat] >= 2.0.0a105",
 "asteval",

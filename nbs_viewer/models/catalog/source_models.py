@@ -214,7 +214,7 @@ class ZMQSourceModel(SourceModel):
     def get_source(self) -> Tuple[CatalogBase, str]:
         zmq_dispatcher = QtZMQRemoteDispatcher("localhost:5578")
         label = "ZMQ: localhost:5578"
-        # Create the Kafka catalog
+        # Create the Kafka catalog (poorly named -- really a live catalog)
         catalog = KafkaCatalog(zmq_dispatcher)
         return catalog, label
 
