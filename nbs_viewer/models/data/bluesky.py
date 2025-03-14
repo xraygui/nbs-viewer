@@ -605,49 +605,6 @@ class BlueskyRun(CatalogRun):
                     self._descriptors = []
         return self._descriptors
 
-    def get_dimension_data(self, key, indices, plot_dims):
-        """
-        Get data for a specific key, sliced according to indices and plot dimensions.
-
-        Parameters
-        ----------
-        key : str
-            The data key
-        indices : tuple
-            Indices for non-plotted dimensions
-        plot_dims : int or tuple
-            Dimensions to include in the plot (1 for line plot, 2 for 2D plot)
-
-        Returns
-        -------
-        array-like
-            The sliced data ready for plotting
-        """
-        # Get the full shape
-        shape = self.getShape(key)
-        if not shape:
-            return np.array([])
-
-        # Prepare slice information
-        slice_info = [slice(None)] * len(shape)
-
-        # Handle 1D plotting
-        if plot_dims == 1:
-            # Set all non-plotted dimensions to the specified indices
-            for i, idx in enumerate(indices):
-                if i < len(shape) - 1:  # All except the last dimension
-                    slice_info[i] = idx
-
-        # Handle 2D plotting
-        elif plot_dims == 2:
-            # Set all dimensions except the last two to the specified indices
-            for i, idx in enumerate(indices):
-                if i < len(shape) - 2:  # All except the last two dimensions
-                    slice_info[i] = idx
-
-        # Get the sliced data
-        return self.getData(key, tuple(slice_info))
-
     def clear_cache(self, clear_1d=True, clear_nd=True):
         """
         Clear the data caches.
