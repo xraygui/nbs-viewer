@@ -92,9 +92,8 @@ class CanvasControlWidget(QWidget):
     def _on_clear_canvas(self):
         """Clear the current plot model and deselect all runs."""
         # Clear visible runs from the plot model
-        visible_models = self.plot_model.visible_models
-        visible_runs = [model._run for model in visible_models]
-        if visible_runs:
-            self.plot_model.set_runs_visible(visible_runs, False)
+        visible_uids = self.plot_model.visible_runs
+        if visible_uids:
+            self.plot_model.set_uids_visible(visible_uids, False)
             # Reset key selection
             self.plot_model.set_selected_keys([], [], [], force_update=True)

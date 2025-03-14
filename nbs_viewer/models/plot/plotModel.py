@@ -91,16 +91,10 @@ class PlotModel(QObject):
                 or valid_norm != self._current_norm_keys
             ):
                 # Update selection if keys were removed
-                self.set_selected_keys(valid_x, valid_y, valid_norm, force_update=False)
+                self.set_selected_keys(valid_x, valid_y, valid_norm)
 
             self.available_keys_changed.emit()
         # print(f"Available keys changed {self._available_keys}")
-
-    def _update_plot_from_selection(self):
-        """Update plot based on current run selection."""
-
-        self.visible_runs_changed.emit(self.visible_runs)
-        self.request_plot_update.emit()
 
     def set_retain_selection(self, enabled: bool) -> None:
         """
@@ -119,6 +113,16 @@ class PlotModel(QObject):
         return [model._run for model in self._run_models.values()]
 
     @property
+    def available_models(self):
+        """Get list of all available RunModels."""
+        return list(self._run_models.values())
+
+    @property
+    def available_uids(self):
+        """Get list of all available CatalogRun UIDs."""
+        return list(self._run_models.keys())
+
+    @property
     def auto_add(self) -> bool:
         """Whether auto-add is enabled."""
         return self._auto_add
@@ -133,9 +137,11 @@ class PlotModel(QObject):
             Whether to automatically add new selections
         """
         self._auto_add = enabled
-        if enabled and (self._current_x_keys or self._current_y_keys):
+        if enabled and (self._current_x_keys and self._current_y_keys):
             # If enabling auto_add with existing selection, update all plots
-            self.request_plot_update.emit()
+            self.selected_keys_changed.emit(
+                self._current_x_keys, self._current_y_keys, self._current_norm_keys
+            )
 
     def set_dynamic_update(self, enabled: bool) -> None:
         """
@@ -165,7 +171,7 @@ class PlotModel(QObject):
             model.set_transform(self._transform)
 
         # Force plot update
-        self.request_plot_update.emit()
+        # self.request_plot_update.emit()
 
     @property
     def transform(self) -> dict:
@@ -235,7 +241,7 @@ class PlotModel(QObject):
 
         # Update selection in all run models (without triggering plot updates)
         for model in self._run_models.values():
-            model.set_selected_keys(x_keys, y_keys, norm_keys, force_update=False)
+            model.set_selected_keys(x_keys, y_keys, norm_keys)
 
         # Notify views of selection change
         self.selected_keys_changed.emit(
@@ -243,9 +249,9 @@ class PlotModel(QObject):
         )
 
         # Update plot if auto_add is enabled or force_update is True
-        if self._auto_add or force_update:
-            # print("PlotModel set_selection calling _update_plot")
-            self.request_plot_update.emit()
+        # if self._auto_add or force_update:
+        #     print("PlotModel set_selection calling _update_plot")
+        #     self.request_plot_update.emit()
 
     def get_selected_keys(self):
         """Get selected keys from all run models."""
@@ -268,8 +274,10 @@ class PlotModel(QObject):
         run : CatalogRun
             Run to add to the model
         """
+        uid_list = []
         for run in run_list:
             uid = run.uid
+            uid_list.append(uid)
             if uid in self._run_models:
                 continue
 
@@ -285,36 +293,32 @@ class PlotModel(QObject):
             # Update available keys first
         self.update_available_keys()
 
+        if self._is_main_canvas or self._auto_add:
+            self.set_uids_visible(uid_list, True)
         # Determine key selection
         if len(self._run_models) == 1 and not self._retain_selection:
             # First run, get default selection
             x_keys, y_keys, norm_keys = run.get_default_selection()
-            self.set_selected_keys(x_keys, y_keys, norm_keys, force_update=False)
+            self.set_selected_keys(x_keys, y_keys, norm_keys)
         else:
             # Apply current selection and transform to new run
             self.set_selected_keys(
-                self._current_x_keys,
-                self._current_y_keys,
-                self._current_norm_keys,
-                force_update=False,
+                self._current_x_keys, self._current_y_keys, self._current_norm_keys
             )
 
         # Emit signals in correct order
 
         # Handle main canvas auto-selection
-        if self._is_main_canvas or self._auto_add:
-            self.set_runs_visible(run_list, True)
-            self._update_plot_from_selection()
 
         # Force plot update and legend refresh
         self.available_runs_changed.emit(self.available_runs)
-        self.request_plot_update.emit()
+        # self.request_plot_update.emit()
 
     def add_run(self, run):
         """Add a single CatalogRun to the model."""
         self.add_runs([run])
 
-    def remove_runs(self, run_list):
+    def remove_uids(self, uid_list):
         """
         Remove a list of runs from the model.
 
@@ -323,27 +327,26 @@ class PlotModel(QObject):
         run_list : List[CatalogRun]
             Runs to remove from the model
         """
-        for run in run_list:
-            uid = run.uid
+        for uid in uid_list:
             if uid in self._run_models:
                 run_model = self._run_models.pop(uid)
                 self._disconnect_run_model(run_model)
                 run_model.cleanup()
                 # Update plot and notify views
-                self.run_removed.emit(run)
+                self.run_removed.emit(run_model)
 
             if uid in self._visible_runs:
                 self._visible_runs.remove(uid)
 
-        self._update_plot_from_selection()
+        # self._update_plot_from_selection()
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
         self.available_runs_changed.emit(self.available_runs)
-        self.request_plot_update.emit()
+        # self.request_plot_update.emit()
 
     def remove_run(self, run):
-        """Remove a single CatalogRun from the model."""
-        self.remove_runs([run])
+        """Remove a single CatalogRun from the model via UID."""
+        self.remove_uids([run.uid])
 
     def set_runs(self, run_list, canvas_id="main"):
         """Update the complete selection state.
@@ -354,17 +357,15 @@ class PlotModel(QObject):
         existing_uids = set(self._run_models.keys())
 
         # Remove RunModels that are no longer in list
-        runs_to_remove = [
-            self._run_models.get(uid)._run for uid in existing_uids - current_uids
-        ]
-        self.remove_runs(runs_to_remove)
+        uids_to_remove = list(existing_uids - current_uids)
+        self.remove_uids(uids_to_remove)
 
         # Add new RunModels
         self.add_runs(run_list)
         # Clean up any inconsistent state
         self.cleanup_state()
 
-    def set_runs_visible(self, run_list, is_visible: bool):
+    def set_uids_visible(self, uids, is_visible: bool):
         """
         Select specific runs for plotting.
 
@@ -373,8 +374,7 @@ class PlotModel(QObject):
         run_list : List[CatalogRun]
             Runs to select
         """
-        for run in run_list:
-            uid = run.uid
+        for uid in uids:
             if uid in self._run_models:
                 if is_visible:
                     self._visible_runs.add(uid)
@@ -383,9 +383,8 @@ class PlotModel(QObject):
                 self._run_models[uid].set_visible(is_visible)
 
         self.update_available_keys()
-        self._update_plot_from_selection()
         self.visible_runs_changed.emit(self.visible_runs)
-        self.request_plot_update.emit()
+        # self.request_plot_update.emit()
 
     def set_run_visible(self, run, is_visible):
         """
@@ -398,7 +397,7 @@ class PlotModel(QObject):
         is_visible : bool
             New visibility state
         """
-        self.set_runs_visible([run], is_visible)
+        self.set_uids_visible([run.uid], is_visible)
 
     @property
     def visible_models(self):
@@ -408,7 +407,7 @@ class PlotModel(QObject):
         return [
             model
             for model in self._run_models.values()
-            if model._run.uid in self._visible_runs
+            if model.uid in self._visible_runs
         ]
 
     @property

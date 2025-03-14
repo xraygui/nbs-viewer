@@ -223,19 +223,21 @@ class RunModel(QObject):
             Keys to select for normalization, by default None
         """
         # Check if any selections have changed
+        x_keys = [key for key in x_keys if key in self.available_keys]
+        y_keys = [key for key in y_keys if key in self.available_keys]
+        norm_keys = [key for key in norm_keys if key in self.available_keys]
         if (
             x_keys != self._selected_x
             or y_keys != self._selected_y
-            or (norm_keys or []) != self._selected_norm
+            or norm_keys != self._selected_norm
         ):
 
-            self._selected_x = [key for key in x_keys if key in self.available_keys]
-            self._selected_y = [key for key in y_keys if key in self.available_keys]
-            self._selected_norm = [
-                key for key in norm_keys if key in self.available_keys
-            ]
-            if force_update:
-                self.update_plot()
+            self._selected_x = x_keys
+            self._selected_y = y_keys
+            self._selected_norm = norm_keys
+            self.selected_keys_changed.emit(
+                self._selected_x, self._selected_y, self._selected_norm
+            )
 
     def set_visible(self, is_visible):
         """

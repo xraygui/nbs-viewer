@@ -562,6 +562,7 @@ class ChunkCache:
             if not self._evict_lru():
                 msg = "Cannot free enough memory to cache chunk"
                 print_debug("ChunkCache", msg, category="cache")
+                print_debug("ChunkCache", self.get_stats(), category="cache")
                 return
 
         # Store the chunk

@@ -80,7 +80,9 @@ class PlotDataModel(QWidget):
         self._indices = indices
         self._dimension = dimension
         self.artist = None
+        self._visible = self._run._is_visible
         self._run.visibility_changed.connect(self.set_visible)
+        self._run.selected_keys_changed.connect(self._on_keys_changed)
         self._run.transform_changed.connect(self._on_data_changed)
         self._run.data_changed.connect(self._on_data_changed)
 
@@ -151,9 +153,21 @@ class PlotDataModel(QWidget):
         if dimension is not None and dimension != self._dimension:
             self._dimension = dimension
             changed = True
+        if not self._run._is_visible:
+            changed = False
         if changed:
-            # print(f"Data info changed for {self.label}")
+            print_debug(
+                "PlotDataModel.update_data_info",
+                f"Data info changed for {self.label}",
+                category="DEBUG_PLOTS",
+            )
             self.data_changed.emit(self)
+        else:
+            print_debug(
+                "PlotDataModel.update_data_info",
+                f"Data info not changed for {self.label}, visible: {self._visible}",
+                category="DEBUG_PLOTS",
+            )
 
     def set_norm_keys(self, norm_keys):
         if set(norm_keys) != set(self._norm_keys):
@@ -169,23 +183,67 @@ class PlotDataModel(QWidget):
         visible : bool
             Whether to show or hide the artist
         """
+        visible = visible and self._run._is_visible
         if self.artist is not None:
+            print_debug(
+                "PlotDataModel.set_visible",
+                f"Setting {self.label} visible to {visible}",
+                category="DEBUG_PLOTS",
+            )
             # print(f"Setting {self.label} visible to {visible}")
             was_visible = self.artist.get_visible()
             if was_visible != visible:
+                self._visible = visible
                 self.artist.set_visible(visible)
                 self.visibility_changed.emit(self, visible)
                 self.autoscale_requested.emit()
                 self.draw_requested.emit()
         else:
+            print_debug(
+                "PlotDataModel.set_visible",
+                f"{self.label} has no artist",
+                category="DEBUG_PLOTS",
+            )
             # print(f"{self.label} has no artist")
             pass
 
-    def _on_data_changed(self):
+    def _on_keys_changed(self, xkeys, ykeys, normkeys):
+        """
+        Handle changes in selected keys.
+        """
+
+        if self._xkey not in xkeys or self._ykey not in ykeys:
+            print_debug(
+                "PlotDataModel._on_keys_changed",
+                f"Keys changed for {self.label}: {self._xkey}, {self._ykey} not visible",
+                category="DEBUG_PLOTS",
+            )
+            self.set_visible(False)
+        else:
+            print_debug(
+                "PlotDataModel._on_keys_changed",
+                f"Keys changed for {self.label}: {self._xkey}, {self._ykey} visible",
+                category="DEBUG_PLOTS",
+            )
+            self.set_visible(True)
+
+    def _on_data_changed(self, *args):
         """
         Handle data changes from the RunModel.
         """
-        self.data_changed.emit(self)
+        if self._visible:
+            print_debug(
+                "PlotDataModel._on_data_changed",
+                f"Emitting data changed for {self.label}",
+                category="DEBUG_PLOTS",
+            )
+            self.data_changed.emit(self)
+        else:
+            print_debug(
+                "PlotDataModel._on_data_changed",
+                f"Not emitting data changed for {self.label} because it is not visible",
+                category="DEBUG_PLOTS",
+            )
 
     def set_artist(self, artist):
         """

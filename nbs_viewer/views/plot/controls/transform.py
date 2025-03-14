@@ -37,7 +37,7 @@ class TransformControl(PlotControlWidget):
         ),
         "Divide by Max": "y/max(y)",
         "Divide by Min": "y/min(y)",
-        "Normalize to Sum": "y/sum(y)",
+        "Normalize to Sum": "(y - min(y))/(sum(y) - min(y))",
         "Invert (1/y)": "1/y",
         "Log Scale": "log(y)",
         "Log(1/y)": "log(1/y)",

@@ -25,7 +25,7 @@ from ...models.plot.plotDataModel import PlotDataModel
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from functools import partial
-from nbs_viewer.utils import print_debug, time_function
+from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 
 
 class PlotWorker(QThread):
@@ -114,7 +114,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self.aspect_ratio = width / height
 
         # Connect signals
-        self.plotModel.request_plot_update.connect(self.updatePlot)
+        self.plotModel.selected_keys_changed.connect(self._on_selected_keys_changed)
+        self.plotModel.run_removed.connect(self._on_run_removed)
 
     def sizeHint(self):
         width = self.width()
@@ -163,6 +164,11 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def updatePlotData(self, runModel, xkey, ykey, norm_keys=None):
         key = (xkey, ykey, runModel.uid)
+        print_debug(
+            "MplCanvas.updatePlotData",
+            f"Updating plot with {xkey} and {ykey}",
+            category="DEBUG_PLOTS",
+        )
         if key not in self.plotArtists:
             plotData = PlotDataModel(
                 runModel,
@@ -176,12 +182,30 @@ class MplCanvas(FigureCanvasQTAgg):
             plotData.draw_requested.connect(self.draw)
             plotData.autoscale_requested.connect(self.autoscale)
             plotData.visibility_changed.connect(lambda visible: self.updateLegend())
+            print_debug(
+                "MplCanvas.updatePlotData",
+                f"Adding plotData {plotData.label} to plotArtists",
+                category="DEBUG_PLOTS",
+            )
             self.plotArtists[key] = plotData
             self.plot_data(plotData)
         else:
+            print_debug(
+                "MplCanvas.updatePlotData",
+                f"Updating plotData {self.plotArtists[key].label}",
+                category="DEBUG_PLOTS",
+            )
             self.plotArtists[key].update_data_info(
                 norm_keys=norm_keys, indices=self._slice, dimension=self._dimension
             )
+
+    def _on_selected_keys_changed(self, xkeys, ykeys, normkeys):
+        """Handle changes in selected keys."""
+        self.updatePlot()
+
+    def _on_run_removed(self, run):
+        """Handle removal of a run."""
+        self.remove_run_data(run.uid)
 
     def updatePlot(self):
         """
@@ -200,6 +224,7 @@ class MplCanvas(FigureCanvasQTAgg):
         try:
             xkeys, ykeys, normkeys = self.plotModel.get_selected_keys()
             visible_keys = set()
+
             for runModel in self.plotModel.visible_models:
                 for xkey in xkeys:
                     for ykey in ykeys:
@@ -630,9 +655,10 @@ class PlotWidget(QWidget):
         self.plot_layout.addWidget(self.plot)
 
         # Add debug button
-        self.debug_button = QPushButton("Debug Plot State")
-        self.debug_button.clicked.connect(self._debug_plot_state)
-        self.plot_layout.addWidget(self.debug_button)
+        if DEBUG_VARIABLES["PRINT_DEBUG"]:
+            self.debug_button = QPushButton("Debug Plot State")
+            self.debug_button.clicked.connect(self._debug_plot_state)
+            self.plot_layout.addWidget(self.debug_button)
 
         # Add dimension control widget
         self.dimension_control = PlotDimensionControl(self.plotModel, self.plot, self)

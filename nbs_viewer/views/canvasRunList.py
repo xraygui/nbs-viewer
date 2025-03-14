@@ -114,24 +114,6 @@ class CanvasRunList(QWidget):
             if item.data(Qt.UserRole) == run.uid:
                 self.list_widget.takeItem(self.list_widget.row(item))
 
-    def _handle_selection_change(self, selected, deselected):
-        """Handle selection changes in the list widget."""
-        if self._handling_selection:
-            return
-
-        # Get currently selected runs
-        selected_data = []
-        for index in self.list_widget.selectedIndexes():
-            uid = self.list_widget.item(index.row()).data(Qt.UserRole)
-            run = next(
-                (rd for rd in self.plot_model.available_runs if rd.uid == uid), None
-            )
-            if run:
-                selected_data.append(run)
-
-        # Update model selection
-        # self.plot_model.select_runs(selected_data)
-
     def _on_selection_changed(self, selected_runs):
         """Update checkbox states to match model's visible runs."""
         # print(f"CanvasRunList _on_selection_changed: {len(selected_runs)}")
@@ -155,16 +137,12 @@ class CanvasRunList(QWidget):
 
         for item in selected_items:
             uid = item.data(Qt.UserRole)
-            run = next(
-                (rd for rd in self.plot_model.available_runs if rd.uid == uid), None
-            )
-            if run:
-                # Remove from plot model first
-                self.plot_model.remove_run(run)
+            # Remove from plot model first
+            self.plot_model.remove_uids([uid])
 
-                # Remove from list widget
-                row = self.list_widget.row(item)
-                self.list_widget.takeItem(row)
+            # Remove from list widget
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
 
     def addPlotItem(self, plotItem):
         """
@@ -213,10 +191,10 @@ class CanvasRunList(QWidget):
         """Handle checkbox state changes."""
         uid = item.data(Qt.UserRole)
         # print(f"handle_item_changed: {uid}")
-        run = next((rd for rd in self.plot_model.available_runs if rd.uid == uid), None)
-        if run:
+        if uid in self.plot_model.available_uids:
             is_visible = item.checkState() == Qt.Checked
-            self.plot_model.set_run_visible(run, is_visible)
+            # print(f"Found Run, setting {uid} to {is_visible}")
+            self.plot_model.set_uids_visible([uid], is_visible)
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""

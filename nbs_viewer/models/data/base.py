@@ -27,7 +27,6 @@ class CatalogRun(QObject):
     """
 
     data_changed = Signal()
-    transform_changed = Signal()
 
     def __init__(self, run, key, catalog=None, dynamic=False, parent=None):
         super().__init__(parent)
@@ -38,10 +37,6 @@ class CatalogRun(QObject):
         # Caching
         self._plot_data_cache = {}
         self._dimensions_cache = {}
-
-        # Transform state
-        self._transform_text = ""
-        self._transform = Interpreter()
 
         # Dynamic updates
         self._dynamic = False
@@ -432,46 +427,6 @@ class CatalogRun(QObject):
         self._dimensions_cache.clear()
         self.data_changed.emit()
 
-    def transform_data(
-        self, xlist: List[np.ndarray], y: np.ndarray, norm: Optional[np.ndarray] = None
-    ) -> Tuple[List[np.ndarray], np.ndarray]:
-        """
-        Transform data using normalization and custom transformations.
-
-        Parameters
-        ----------
-        xlist : List[np.ndarray]
-            List of x-axis data arrays
-        y : np.ndarray
-            Y-axis data array
-        norm : Optional[np.ndarray]
-            Optional normalization data
-
-        Returns
-        -------
-        Tuple[List[np.ndarray], np.ndarray]
-            Transformed (x_data_list, y_data)
-        """
-        # Apply normalization if provided
-        if norm is None:
-            yfinal = y
-        elif np.isscalar(norm):
-            yfinal = y / norm
-        else:
-            temp_norm = norm
-            while temp_norm.ndim < y.ndim:
-                temp_norm = np.expand_dims(temp_norm, axis=-1)
-            yfinal = y / temp_norm
-
-        # Apply custom transformation
-        if self._transform_text:
-            self._transform.symtable["y"] = yfinal
-            self._transform.symtable["x"] = xlist
-            self._transform.symtable["norm"] = norm
-            yfinal = self._transform(self._transform_text)
-
-        return xlist, yfinal
-
     def _add_x_dimensions(
         self, key: str, xlist: List[np.ndarray], y: np.ndarray, xkeys: List[str]
     ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
@@ -520,26 +475,6 @@ class CatalogRun(QObject):
         y_reordered = y
 
         return xlist_reordered, xkeys_reordered, y_reordered
-
-    def set_transform(self, transform_state: Dict[str, Any]) -> None:
-        """
-        Set the transformation expression.
-
-        Parameters
-        ----------
-        transform_state : Dict[str, Any]
-            Dictionary with transform settings:
-            - enabled: bool, whether transform is enabled
-            - text: str, Python expression for data transformation
-        """
-        if transform_state["enabled"]:
-            transform_text = transform_state["text"]
-        else:
-            transform_text = ""
-
-        if transform_text != self._transform_text:
-            self._transform_text = transform_text
-            self.transform_changed.emit()
 
     @time_function(
         function_name="CatalogRun._initialize_keys", category="DEBUG_CATALOG"
