@@ -99,8 +99,10 @@ class RunModel(QObject):
 
     def get_plot_data(self, xkeys, ykey, norm_keys=None, slice_info=None):
         xlist, xnames, extra = self._run.get_dimension_axes(ykey, xkeys, slice_info)
-        xlist = [x for x in xlist if x.size > 1]  # omit empty dimensions
         ylist = self._run.getData(ykey, slice_info)
+        # We want to omit "empty" dimensions that have size 1, but not if we only have one data point
+        if ylist.size > 1:
+            xlist = [x for x in xlist if x.size > 1]
         if norm_keys is not None:
             normlist = [
                 self._run.getData(norm_key, slice_info) for norm_key in norm_keys

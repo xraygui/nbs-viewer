@@ -115,28 +115,6 @@ class PlotDataModel(QWidget):
         )
 
         xlist, ylist = self._run.get_plot_data(xkeys, ykeys, norm_keys, indices)
-        """
-        time = ttime.time()
-        xlist, y, xkeylist = self._run._run.get_plot_data(
-            [self._xkey], [self._ykey], norm_keys, indices
-        )
-        y = y[0]
-        xlist = xlist[0]
-        print_debug(
-            "PlotDataModel.get_plot_data",
-            f"got plot data in {ttime.time() - time} seconds",
-        )
-        t2 = ttime.time()
-        # Get dimension names from dimension analysis
-        dim_info = self._run._run.analyze_dimensions(self._ykey, [self._xkey])
-        self.dimension_names = dim_info["ordered_dims"]
-        print_debug(
-            "PlotDataModel.get_plot_data",
-            f"got dimension names in {ttime.time() - t2} seconds",
-        )
-        # Select x dimensions based on plot dimensions
-        x = xlist[-dimension:] if dimension else xlist
-        """
         return xlist, ylist
 
     def update_data_info(self, norm_keys=None, indices=None, dimension=None):
