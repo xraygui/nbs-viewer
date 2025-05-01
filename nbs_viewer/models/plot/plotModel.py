@@ -241,13 +241,13 @@ class PlotModel(QObject):
 
         # Update selection in all run models (without triggering plot updates)
         for model in self._run_models.values():
-            model.set_selected_keys(x_keys, y_keys, norm_keys)
+            model.set_selected_keys(x_keys, y_keys, norm_keys, force_update=False)
 
         # Notify views of selection change
         self.selected_keys_changed.emit(
             self._current_x_keys, self._current_y_keys, self._current_norm_keys
         )
-
+        self.request_plot_update.emit()
         # Update plot if auto_add is enabled or force_update is True
         # if self._auto_add or force_update:
         #     print("PlotModel set_selection calling _update_plot")
@@ -260,10 +260,12 @@ class PlotModel(QObject):
     def _connect_run_model(self, run_model):
         """Connect signals from a RunModel."""
         run_model.available_keys_changed.connect(self.update_available_keys)
+        run_model.plot_update_needed.connect(self.request_plot_update)
 
     def _disconnect_run_model(self, run_model):
         """Disconnect signals from a RunModel."""
         run_model.available_keys_changed.disconnect(self.update_available_keys)
+        run_model.plot_update_needed.disconnect(self.request_plot_update)
 
     def add_runs(self, run_list):
         """

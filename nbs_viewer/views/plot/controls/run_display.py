@@ -372,7 +372,7 @@ class RunDisplayWidget(QWidget):
 
     def _synchronize_selections(self) -> None:
         """Find common selections across all runs and apply them."""
-        run_models = self.plotModel.get_selected_models()
+        run_models = self.plotModel.visible_models
         if not run_models:
             return
 

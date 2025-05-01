@@ -114,8 +114,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self.aspect_ratio = width / height
 
         # Connect signals
-        self.plotModel.selected_keys_changed.connect(self._on_selected_keys_changed)
+        # self.plotModel.selected_keys_changed.connect(self._on_selected_keys_changed)
         self.plotModel.run_removed.connect(self._on_run_removed)
+        self.plotModel.request_plot_update.connect(self.updatePlot)
 
     def sizeHint(self):
         width = self.width()
@@ -222,10 +223,10 @@ class MplCanvas(FigureCanvasQTAgg):
         Actually perform the plot update.
         """
         try:
-            xkeys, ykeys, normkeys = self.plotModel.get_selected_keys()
             visible_keys = set()
 
             for runModel in self.plotModel.visible_models:
+                xkeys, ykeys, normkeys = runModel.get_selected_keys()
                 for xkey in xkeys:
                     for ykey in ykeys:
                         visible_keys.add((xkey, ykey, runModel.uid))
