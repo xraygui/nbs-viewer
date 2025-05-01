@@ -26,6 +26,7 @@ from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from functools import partial
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
+import uuid
 
 
 class PlotWorker(QThread):
@@ -265,13 +266,14 @@ class MplCanvas(FigureCanvasQTAgg):
             The plot data model containing the data to plot
         """
         # Create worker for this plot
+        key = str(uuid.uuid4())
         worker = PlotWorker(plotData, self._slice, self._dimension)
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
-        worker.finished.connect(lambda: self._cleanup_worker(plotData))
+        worker.finished.connect(lambda: self._cleanup_worker(key))
 
         # Store worker reference and start it
-        self.workers[plotData] = worker
+        self.workers[key] = worker
         worker.start()
 
     @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
@@ -374,16 +376,19 @@ class MplCanvas(FigureCanvasQTAgg):
         """Handle errors that occur during plotting."""
         print(f"[MplCanvas] Plot error: {error_msg}")
 
-    def _cleanup_worker(self, plotData):
+    def _cleanup_worker(self, key):
         """Clean up the worker thread."""
-        if plotData in self.workers:
-            worker = self.workers.pop(plotData)
-            # Disconnect all signals
-            worker.data_ready.disconnect()
-            worker.error_occurred.disconnect()
-            worker.quit()
-            worker.wait()
-            worker.deleteLater()
+        if key in self.workers:
+            worker = self.workers.pop(key)
+            try:
+                # Disconnect all signals
+                worker.data_ready.disconnect()
+                worker.error_occurred.disconnect()
+                worker.quit()
+                worker.wait()
+                worker.deleteLater()
+            except Exception as e:
+                print(f"[MplCanvas._cleanup_worker] Error: {e}")
 
     def clear(self):
         """Clear all visual artists from the axes but keep plotDataModel references."""
