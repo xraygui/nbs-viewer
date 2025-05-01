@@ -24,6 +24,7 @@ class RunModel(QObject):
     transform_changed = Signal(dict)
     data_changed = Signal()
     visibility_changed = Signal(bool)  # (artist, is_visible)
+    plot_update_needed = Signal()  # Signal to trigger plot refresh
 
     def __init__(self, run: CatalogRun):
         super().__init__()
@@ -223,6 +224,8 @@ class RunModel(QObject):
             Keys to select for y-axis
         norm_keys : Optional[List[str]], optional
             Keys to select for normalization, by default None
+        force_update : bool, optional
+            Whether to force update the plot regardless of auto_add setting
         """
         # Check if any selections have changed
         x_keys = [key for key in x_keys if key in self.available_keys]
@@ -240,6 +243,8 @@ class RunModel(QObject):
             self.selected_keys_changed.emit(
                 self._selected_x, self._selected_y, self._selected_norm
             )
+            if force_update:
+                self.plot_update_needed.emit()
 
     def set_visible(self, is_visible):
         """
