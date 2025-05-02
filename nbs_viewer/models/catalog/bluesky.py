@@ -5,9 +5,9 @@ from qtpy.QtCore import QObject
 from databroker.queries import TimeRange
 
 from .base import CatalogBase
-from .table import CatalogTableModel
 from ..data import BlueskyRun, NBSRun
 from .chunkCache import ChunkCache
+from nbs_viewer.utils import print_debug
 
 
 class BlueskyCatalog(CatalogBase):
@@ -96,12 +96,24 @@ class BlueskyCatalog(CatalogBase):
         Tuple[Any, RUN_WRAPPER]
             Key-value pairs where the value is wrapped in a RUN_WRAPPER.
         """
+        print_debug(
+            "BlueskyCatalog.items_slice",
+            f"Getting slice {slice_obj}",
+            category="DEBUG_RUNLIST",
+        )
         sliced_items = (
             self._catalog.items()[slice_obj] if slice_obj else self._catalog.items()
         )
         for key, value in sliced_items:
             # print(f"Wrapping run {key}")
-            yield key, self.wrap_run(value, key)
+            try:
+                yield key, self.wrap_run(value, key)
+            except Exception as ex:
+                print_debug(
+                    "BlueskyCatalog.items_slice",
+                    f"Error wrapping run {key}: {ex}",
+                    category="DEBUG_RUNLIST",
+                )
 
     def search(self, query: Dict) -> "BlueskyCatalog":
         """

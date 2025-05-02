@@ -289,8 +289,6 @@ class LazyLoadingTableView(QTableView):
         if hasattr(source_model, "set_visible_rows"):
             source_model.set_visible_rows(first_visible, last_visible)
 
-        # print(f"Visible rows: {first_visible} to {last_visible}")
-
 
 class CatalogTableView(QWidget):
     """A widget for displaying and managing catalog data in a table view."""

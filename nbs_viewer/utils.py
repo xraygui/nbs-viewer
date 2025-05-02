@@ -4,6 +4,7 @@ DEBUG_VARIABLES = {
     "PRINT_DEBUG": False,
     "DEBUG_CATALOG": False,
     "DEBUG_PLOTS": True,
+    "DEBUG_RUNLIST": False,
     "cache": True,
     "dimension": False,
 }
