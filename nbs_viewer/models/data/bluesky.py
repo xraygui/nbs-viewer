@@ -84,7 +84,7 @@ class BlueskyRun(CatalogRun):
             print(f"Warning: Could not initialize data for run {key}: {e}")
             self._available_keys = []
 
-    @time_function(category="DEBUG_CATALOG")
+    @time_function(category="DEBUG_RUN")
     def _check_data_access(self):
         """Check if run has accessible data."""
         try:

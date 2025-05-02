@@ -3,6 +3,8 @@
 from qtpy.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QTimer, Signal
 from bluesky_widgets.qt.threading import create_worker
 import collections
+from nbs_viewer.utils import print_debug
+
 
 LOADING_PLACEHOLDER = "..."
 LOADING_LATENCY = 100  # ms
@@ -43,7 +45,11 @@ def _load_chunk(get_chunk, indexes):
                 yield i, row
 
         except Exception as ex:
-            print(f"Error loading chunk {start}-{end}: {ex}")
+            print_debug(
+                "CatalogTableModel",
+                f"Error loading chunk {start}-{end}: {ex}",
+                category="DEBUG_RUNLIST",
+            )
 
 
 class CatalogTableModel(QAbstractTableModel):
@@ -165,14 +171,22 @@ class CatalogTableModel(QAbstractTableModel):
                     for remaining_chunk in non_overlapping_chunks[
                         i + max_chunks_per_worker :
                     ]:
+                        print_debug(
+                            "CatalogTableModel._process_work_queue",
+                            f"Adding remaining chunk to work queue: {remaining_chunk}",
+                            category="DEBUG_RUNLIST",
+                        )
                         self._work_queue.append(remaining_chunk)
                         self._loading_chunks.remove(remaining_chunk)
                     break
 
         elif chunks_to_load:
             # If we had chunks but none were processed, log this
-            # print(f"All {len(chunks_to_load)} chunks were already being loaded")
-            pass
+            print_debug(
+                "CatalogTableModel._process_work_queue",
+                f"All {len(chunks_to_load)} chunks were already being loaded",
+                category="DEBUG_RUNLIST",
+            )
 
         # Schedule the next processing
         self._data_loading_timer.singleShot(LOADING_LATENCY, self._process_work_queue)
@@ -193,6 +207,11 @@ class CatalogTableModel(QAbstractTableModel):
 
         # Remove chunks from loading set
         for chunk in chunks:
+            print_debug(
+                "CatalogTableModel._handle_worker_finished",
+                f"Removing chunk from loading set: {chunk}",
+                category="DEBUG_RUNLIST",
+            )
             self._loading_chunks.discard(chunk)
 
     def on_item_loaded(self, payload):
@@ -233,7 +252,11 @@ class CatalogTableModel(QAbstractTableModel):
         list
             List of (key, row) tuples.
         """
-        # print(f"Getting chunk {start} to {stop}")
+        print_debug(
+            "CatalogTableModel.get_chunk",
+            f"Getting chunk {start} to {stop}",
+            category="DEBUG_RUNLIST",
+        )
 
         # Determine if we need a forward or reverse slice
         is_reversed = start > stop
@@ -265,7 +288,11 @@ class CatalogTableModel(QAbstractTableModel):
                 try:
                     row = run.to_row()
                 except Exception as ex:
-                    print(f"Error in chunk_generator: {ex}")
+                    print_debug(
+                        "CatalogTableModel.get_chunk",
+                        f"Error in chunk_generator: {ex}",
+                        category="DEBUG_RUNLIST",
+                    )
                     row = ["x"] * len(self._catalog.columns)
                 yield key, row
 
@@ -284,7 +311,8 @@ class CatalogTableModel(QAbstractTableModel):
 
         if role == Qt.DisplayRole:
             if index in self._data:
-                return self._data[index]
+                if self._data[index] != LOADING_PLACEHOLDER:
+                    return self._data[index]
 
             row = index.row()
 
@@ -314,6 +342,11 @@ class CatalogTableModel(QAbstractTableModel):
             # Check if this chunk is already in the work queue or is being loaded
             chunk = (chunk_start, chunk_end)
             if chunk in self._loading_chunks:
+                print_debug(
+                    "CatalogTableModel.data",
+                    f"Chunk {chunk} is already being loaded",
+                    category="DEBUG_RUNLIST",
+                )
                 # This chunk is already being loaded, no need to request it again
                 return LOADING_PLACEHOLDER
 
@@ -322,11 +355,20 @@ class CatalogTableModel(QAbstractTableModel):
                 start == chunk_start and end == chunk_end
                 for start, end in self._work_queue
             ):
+                print_debug(
+                    "CatalogTableModel.data",
+                    f"Chunk {chunk} is already in the work queue",
+                    category="DEBUG_RUNLIST",
+                )
                 # This chunk is already in the work queue, no need to add it again
                 return LOADING_PLACEHOLDER
 
             # Add the chunk to the work queue
-            # print(f"Requesting chunk for row {row}: {chunk_start}-{chunk_end}")
+            print_debug(
+                "CatalogTableModel.data",
+                f"Requesting chunk for row {row}: {chunk_start}-{chunk_end}",
+                category="DEBUG_RUNLIST",
+            )
             self._work_queue.append(chunk)
 
             return LOADING_PLACEHOLDER
@@ -421,6 +463,11 @@ class CatalogTableModel(QAbstractTableModel):
         # Calculate the new visible rows set
         new_visible_rows = set(range(start_row, end_row + 1))
 
+        print_debug(
+            "CatalogTableModel.set_visible_rows",
+            f"Visible rows updated: {min(new_visible_rows)} to {max(new_visible_rows)}",
+            category="DEBUG_RUNLIST",
+        )
         # If we're in inverted mode, we need to translate the visible rows
         if self._invert:
             # Map the visible rows to their inverted positions
@@ -436,13 +483,15 @@ class CatalogTableModel(QAbstractTableModel):
 
         # If the visible rows haven't changed, don't do anything
         if new_visible_rows == self._visible_rows:
+            print_debug(
+                "CatalogTableModel.set_visible_rows",
+                "Visible rows haven't changed",
+                category="DEBUG_RUNLIST",
+            )
             return
 
         # Update the set of visible rows
         self._visible_rows = new_visible_rows
-        # print(
-        #     f"Visible rows updated: {min(new_visible_rows) if new_visible_rows else 0} to {max(new_visible_rows) if new_visible_rows else 0}"
-        # )
 
         # Clear the work queue to prioritize visible rows
         self._work_queue.clear()
