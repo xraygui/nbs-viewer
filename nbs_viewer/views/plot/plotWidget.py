@@ -266,14 +266,15 @@ class MplCanvas(FigureCanvasQTAgg):
             The plot data model containing the data to plot
         """
         # Create worker for this plot
-        key = str(uuid.uuid4())
+        worker_key = str(uuid.uuid4())
+        model_key = plotData._key
         worker = PlotWorker(plotData, self._slice, self._dimension)
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
-        worker.finished.connect(lambda: self._cleanup_worker(key))
+        worker.finished.connect(lambda: self._cleanup_worker((model_key, worker_key)))
 
         # Store worker reference and start it
-        self.workers[key] = worker
+        self.workers[(model_key, worker_key)] = worker
         worker.start()
 
     @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
@@ -394,16 +395,9 @@ class MplCanvas(FigureCanvasQTAgg):
         """Clear all visual artists from the axes but keep plotDataModel references."""
         # Stop any active workers
         print_debug("MplCanvas.clear", "Starting Clear", category="DEBUG_PLOTS")
-        for plotData, worker in list(
-            self.workers.items()
-        ):  # Create a copy of items to avoid modification during iteration
+        for key in list(self.workers.keys()):
             # Disconnect all signals
-            worker.data_ready.disconnect()
-            worker.error_occurred.disconnect()
-            worker.quit()
-            worker.wait()
-            worker.deleteLater()
-            del self.workers[plotData]
+            self._cleanup_worker(key)
 
         # First remove the colorbar if it exists
         if hasattr(self, "colorbar") and self.colorbar is not None:
@@ -553,17 +547,9 @@ class MplCanvas(FigureCanvasQTAgg):
         keys_to_remove = [key for key in self.plotArtists.keys() if key[2] == run_uid]
 
         # Stop any active workers for this run
-        worker_keys = [
-            plotData for plotData in self.workers.keys() if plotData._key[2] == run_uid
-        ]
-        for plotData in worker_keys:
-            worker = self.workers.pop(plotData)
-            # Disconnect all signals
-            worker.data_ready.disconnect()
-            worker.error_occurred.disconnect()
-            worker.quit()
-            worker.wait()
-            worker.deleteLater()
+        worker_keys = [key for key in self.workers.keys() if key[0][2] == run_uid]
+        for key in worker_keys:
+            self._cleanup_worker(key)
 
         # Remove each PlotDataModel
         for key in keys_to_remove:
@@ -597,7 +583,8 @@ class MplCanvas(FigureCanvasQTAgg):
 
         print("\nActive Workers:")
         print(f"  Total Active Workers: {len(self.workers)}")
-        for plotData, worker in self.workers.items():
+        for key, worker in self.workers.items():
+            plotData = self.plotArtists[key[0]]
             print(f"  Worker for {plotData.label}:")
             print(f"    Thread ID: {worker.currentThreadId()}")
             print(f"    Is Running: {worker.isRunning()}")
@@ -608,7 +595,12 @@ class MplCanvas(FigureCanvasQTAgg):
             print(f"\n  Model: {key}")
             print(f"    Label: {model.label}")
             print(f"    Has Artist: {model.artist is not None}")
-            print(f"    Has Active Worker: {model in self.workers}")
+            hasWorker = False
+            for worker_key in self.workers.keys():
+                if worker_key[0] == key:
+                    hasWorker = True
+                    break
+            print(f"    Has Active Worker: {hasWorker}")
             if model.artist is not None:
                 print(f"    Artist Type: {type(model.artist).__name__}")
                 print(f"    Artist Visible: {model.artist.get_visible()}")
