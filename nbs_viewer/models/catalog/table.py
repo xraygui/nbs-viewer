@@ -462,12 +462,19 @@ class CatalogTableModel(QAbstractTableModel):
         """
         # Calculate the new visible rows set
         new_visible_rows = set(range(start_row, end_row + 1))
+        if new_visible_rows:
+            print_debug(
+                "CatalogTableModel.set_visible_rows",
+                f"Visible rows updated: {min(new_visible_rows)} to {max(new_visible_rows)}",
+                category="DEBUG_RUNLIST",
+            )
+        else:
+            print_debug(
+                "CatalogTableModel.set_visible_rows",
+                "No visible rows",
+                category="DEBUG_RUNLIST",
+            )
 
-        print_debug(
-            "CatalogTableModel.set_visible_rows",
-            f"Visible rows updated: {min(new_visible_rows)} to {max(new_visible_rows)}",
-            category="DEBUG_RUNLIST",
-        )
         # If we're in inverted mode, we need to translate the visible rows
         if self._invert:
             # Map the visible rows to their inverted positions
