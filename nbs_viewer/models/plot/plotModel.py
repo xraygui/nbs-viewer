@@ -380,7 +380,7 @@ class PlotModel(QObject):
             if uid in self._run_models:
                 if is_visible:
                     self._visible_runs.add(uid)
-                else:
+                elif uid in self._visible_runs:
                     self._visible_runs.remove(uid)
                 self._run_models[uid].set_visible(is_visible)
 
