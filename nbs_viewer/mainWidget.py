@@ -2,8 +2,15 @@ from .views.dataSourceSwitcher import DataSourceSwitcher
 from .models.plot.canvasManager import CanvasManager
 from .views.plot.canvasTab import CanvasTab
 from .views.plot.plotWidget import PlotWidget
+from .views.plot.widget_registry import PlotWidgetRegistry
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QSplitter, QTabBar
 from qtpy.QtCore import Qt
+import os
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # Python <3.11
 
 
 class MainWidget(QWidget):
@@ -23,6 +30,14 @@ class MainWidget(QWidget):
         super().__init__(parent)
         self.canvas_manager = CanvasManager()
         self.config_file = config_file
+
+        # Initialize widget registry
+        self.widget_registry = PlotWidgetRegistry()
+        self.canvas_manager.set_widget_registry(self.widget_registry)
+
+        # Load widget configuration
+        self._load_widget_config(config_file)
+
         # Create tab widget
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)  # Enable close buttons by default
@@ -39,6 +54,20 @@ class MainWidget(QWidget):
 
         # Create main tab
         self._create_main_tab()
+
+    def _load_widget_config(self, config_file: str):
+        """Load widget configuration from file."""
+        if config_file and os.path.exists(config_file):
+            try:
+                config = tomllib.load(open(config_file, "rb"))
+                if "plot_widgets" in config:
+                    widget_config = config["plot_widgets"]
+                    if "default_widget" in widget_config:
+                        self.widget_registry.set_default_widget(
+                            widget_config["default_widget"]
+                        )
+            except Exception as e:
+                print(f"Failed to load widget config: {e}")
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""

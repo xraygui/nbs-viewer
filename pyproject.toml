@@ -45,5 +45,8 @@ packages = ["nbs_viewer"]
 blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
 nbscatalog = "nbs_viewer.models.catalog.bluesky:NBSCatalog"
 
+[project.entry-points."nbs_viewer.plot_widgets"]
+matplotlib = "nbs_viewer.views.plot.plotWidget:PlotWidget"
+
 [project.entry-points."nbs_gui.tabs"]
 nbs-viewer-kafka = "nbs_viewer.widgets.kafkaViewerTab:KafkaViewerTab"
