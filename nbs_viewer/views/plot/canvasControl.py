@@ -3,6 +3,7 @@
 from qtpy.QtWidgets import (
     QWidget,
     QHBoxLayout,
+    QVBoxLayout,
     QPushButton,
     QMenu,
     QAction,
@@ -53,11 +54,15 @@ class CanvasControlWidget(QWidget):
 
         # Layout - add widget selector before the New Canvas button
         layout = QHBoxLayout(self)
-        layout.addWidget(QLabel("Widget:"))
-        layout.addWidget(self.widget_selector)
-        layout.addWidget(self.add_to_new_canvas_btn)
-        layout.addWidget(self.add_to_canvas_btn)
-        layout.addWidget(self.clear_canvas_btn)
+        l1 = QVBoxLayout()
+        l2 = QVBoxLayout()
+        # layout.addWidget(QLabel("Widget:"))
+        l1.addWidget(self.widget_selector)
+        l1.addWidget(self.add_to_new_canvas_btn)
+        l2.addWidget(self.add_to_canvas_btn)
+        l2.addWidget(self.clear_canvas_btn)
+        layout.addLayout(l1)
+        layout.addLayout(l2)
         self.setLayout(layout)
 
         # Connect signals

@@ -79,11 +79,24 @@ class MainWidget(QWidget):
         )
         plot_widget = PlotWidget(main_model)
 
-        # Create main tab layout
+        # Create main tab layout with three panels
         main_tab = QWidget()
+
+        # Create horizontal splitter for the three panels
         splitter = QSplitter(Qt.Horizontal)
+
+        # Left panel: Data source
         splitter.addWidget(data_source)
+
+        # Center panel: Plot widget
         splitter.addWidget(plot_widget)
+
+        # Right panel: Plot controls
+        if hasattr(plot_widget, "plot_controls"):
+            splitter.addWidget(plot_widget.plot_controls)
+
+        # Set initial splitter sizes (data source: 30%, plot: 50%, controls: 20%)
+        splitter.setSizes([300, 500, 200])
 
         layout = QVBoxLayout(main_tab)
         layout.addWidget(splitter)

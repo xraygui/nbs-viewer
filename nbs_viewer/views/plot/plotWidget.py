@@ -639,47 +639,50 @@ class PlotWidget(QWidget):
         super().__init__(parent)
         self.plotModel = plotModel
 
-        # Create main splitter
-        self.layout = QSplitter(Qt.Horizontal)
+        # Create plot canvas
+        self.plot_canvas = MplCanvas(self.plotModel, self, 5, 4, 100)
 
-        # Create and setup plot container widget
-        self.plot_container = QWidget()
-        self.plot_layout = QVBoxLayout(self.plot_container)
+        # Create toolbar
+        self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
 
-        # Add plot widgets to container
-        self.plot = MplCanvas(self.plotModel, self, 5, 4, 100)
-        self.toolbar = NavigationToolbar(self.plot, self)
-        self.plot_layout.addWidget(self.toolbar)
-        self.plot_layout.addWidget(self.plot)
+        # Create dimension control widget
+        self.dimension_control = PlotDimensionControl(
+            self.plotModel, self.plot_canvas, self
+        )
 
-        # Add debug button
+        # Create plot controls (for data selection)
+        self.plot_controls = PlotControls(self.plotModel)
+
+        # Add debug button if needed
         if DEBUG_VARIABLES["PRINT_DEBUG"]:
             self.debug_button = QPushButton("Debug Plot State")
             self.debug_button.clicked.connect(self._debug_plot_state)
-            self.plot_layout.addWidget(self.debug_button)
+        else:
+            self.debug_button = None
 
-        # Add dimension control widget
-        self.dimension_control = PlotDimensionControl(self.plotModel, self.plot, self)
-        self.plot_layout.addWidget(self.dimension_control)
+        # Create plot-specific layout (canvas + toolbar + dimension controls)
+        plot_layout = QVBoxLayout(self)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create plot controls
-        self.plotControls = PlotControls(self.plotModel)
+        # Add toolbar
+        plot_layout.addWidget(self.plot_toolbar)
 
-        # Add widgets to splitter
-        self.layout.addWidget(self.plot_container)
-        self.layout.addWidget(self.plotControls)
+        # Add canvas
+        plot_layout.addWidget(self.plot_canvas)
 
-        # Create main layout and add splitter
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(self.layout)
+        # Add dimension control
+        plot_layout.addWidget(self.dimension_control)
+
+        # Add debug button if available
+        if self.debug_button:
+            plot_layout.addWidget(self.debug_button)
 
         # Connect to model signals for cleanup
         self.plotModel.run_removed.connect(self._on_run_removed)
 
     def _on_run_removed(self, run):
         """Handle run removal by cleaning up associated PlotDataModels."""
-        self.plot.remove_run_data(run.uid)
+        self.plot_canvas.remove_run_data(run.uid)
 
     def _debug_plot_state(self):
         """Print debug information about plot state."""
@@ -687,7 +690,7 @@ class PlotWidget(QWidget):
 
         # Canvas State
         print("\nMplCanvas State:")
-        self.plot._debug_plot_state()
+        self.plot_canvas._debug_plot_state()
 
         # Plot Model State
         print("\nPlot Model State:")

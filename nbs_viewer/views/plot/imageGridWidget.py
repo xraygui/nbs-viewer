@@ -7,17 +7,17 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QGridLayout,
     QSizePolicy,
-    QSplitter,
     QSpinBox,
     QLabel,
-    QPushButton,
 )
-from qtpy.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from ...utils import print_debug
-from .plotControl import PlotControls
 from ...models.plot.plotDataModel import PlotDataModel
+from .plotControl import PlotControls
+from .plotWidget import PlotWorker
+
+
 import numpy as np
 import uuid
 
@@ -47,27 +47,24 @@ class ImageGridWidget(QWidget):
         Parameters
         ----------
         plotModel : PlotModel
-            The plot model containing the data
+            Model managing the canvas data
         parent : QWidget, optional
-            Parent widget
+            Parent widget, by default None
         """
         super().__init__(parent)
         self.plotModel = plotModel
 
-        # Data management (similar to MplCanvas)
-        self.plotArtists = {}  # key -> PlotDataModel
-        self.workers = {}  # (model_key, worker_key) -> PlotWorker
-        self._update_timer_active = False
-
-        # Grid management
-        self._current_page = 0
-        self._images_per_page = 9  # Default limit
+        # Initialize state
+        self.plotArtists = {}
+        self.workers = {}
+        self._image_canvases = {}
+        self._current_page = 1
+        self._images_per_page = 9  # Start with 9 for testing
         self._total_images = 0
-        self._image_shape = None
-        self._full_shape = None
 
-        # UI setup
-        self._setup_ui()
+        # Create plot controls (for data selection)
+
+        self.plot_controls = PlotControls(self.plotModel)
 
         # Connect to model signals
         self.plotModel.selected_keys_changed.connect(self._on_selection_changed)
@@ -75,16 +72,14 @@ class ImageGridWidget(QWidget):
         self.plotModel.request_plot_update.connect(self._update_grid)
 
         # Initial update
+        self._setup_ui()
         self._update_grid()
 
     def _setup_ui(self):
         """Set up the user interface."""
-        # Main layout
-        main_layout = QHBoxLayout(self)  # Changed to horizontal for sidebars
-
-        # Center area with grid and paging controls
-        center_widget = QWidget()
-        center_layout = QVBoxLayout(center_widget)
+        # Main layout - grid and paging controls
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # Grid area (takes most space)
         self.scroll_area = QScrollArea()
@@ -97,7 +92,15 @@ class ImageGridWidget(QWidget):
         self.grid_layout.setSpacing(10)
         self.scroll_area.setWidget(self.grid_container)
 
-        # Paging controls (at bottom)
+        # Create paging controls
+        self._create_paging_controls()
+
+        # Add widgets to main layout
+        main_layout.addWidget(self.scroll_area)  # Grid takes most space
+        main_layout.addWidget(self.paging_controls)  # Paging at bottom
+
+    def _create_paging_controls(self):
+        """Create paging controls as a separate component."""
         paging_widget = QWidget()
         paging_layout = QHBoxLayout(paging_widget)
 
@@ -106,9 +109,7 @@ class ImageGridWidget(QWidget):
         self.images_per_page_spinbox = QSpinBox()
         self.images_per_page_spinbox.setMinimum(1)
         self.images_per_page_spinbox.setMaximum(100)
-        self.images_per_page_spinbox.setValue(
-            self._images_per_page
-        )  # Start with 9 for testing
+        self.images_per_page_spinbox.setValue(self._images_per_page)
         self.images_per_page_spinbox.valueChanged.connect(
             self._on_images_per_page_changed
         )
@@ -128,20 +129,8 @@ class ImageGridWidget(QWidget):
 
         paging_layout.addStretch()
 
-        # Add widgets to center layout
-        center_layout.addWidget(self.scroll_area)  # Grid takes most space
-        center_layout.addWidget(paging_widget)  # Paging at bottom
-
-        # Right sidebar (plot controls)
-        self.plotControls = PlotControls(self.plotModel)
-
-        # Add all widgets to main layout
-        main_layout.addWidget(center_widget)  # Center area first
-        main_layout.addWidget(self.plotControls)  # Right sidebar
-
-        # Set layout proportions (center: 70%, right sidebar: 30%)
-        main_layout.setStretch(0, 70)  # center_widget
-        main_layout.setStretch(1, 30)  # plotControls
+        # Store as a component
+        self.paging_controls = paging_widget
 
     def _get_shape_info(self):
         """
@@ -459,7 +448,6 @@ class ImageGridWidget(QWidget):
         key : tuple
             Unique key for this image
         """
-        from .plotWidget import PlotWorker
 
         print_debug("ImageGridWidget", f"Starting worker for image {plot_data.label}")
 
