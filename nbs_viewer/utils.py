@@ -1,12 +1,12 @@
 import time as ttime
 
 DEBUG_VARIABLES = {
-    "PRINT_DEBUG": False,
-    "DEBUG_CATALOG": False,
-    "DEBUG_PLOTS": True,
+    "PRINT_DEBUG": True,
+    "DEBUG_CATALOG": True,
+    "DEBUG_PLOTS": False,
     "DEBUG_RUNLIST": False,
     "cache": True,
-    "dimension": False,
+    "dimension": True,
 }
 
 

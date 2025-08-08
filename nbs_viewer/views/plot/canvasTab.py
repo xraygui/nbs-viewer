@@ -30,7 +30,11 @@ class CanvasTab(QWidget):
 
         # Create widgets
         self.run_list = CanvasRunList(plot_model, canvas_manager, canvas_id)
-        self.plot_widget = PlotWidget(plot_model)
+
+        # Create plot widget based on canvas widget type
+        self.plot_widget = self._create_plot_widget(
+            plot_model, canvas_manager, canvas_id
+        )
 
         # Create splitter for resizable panels
         self.splitter = QSplitter(Qt.Horizontal)
@@ -41,3 +45,35 @@ class CanvasTab(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.splitter)
         self.setLayout(layout)
+
+    def _create_plot_widget(self, plot_model, canvas_manager, canvas_id):
+        """
+        Create the appropriate plot widget based on canvas widget type.
+
+        Parameters
+        ----------
+        plot_model : PlotModel
+            The plot model for this canvas
+        canvas_manager : CanvasManager
+            The canvas manager
+        canvas_id : str
+            The canvas identifier
+
+        Returns
+        -------
+        QWidget
+            The created plot widget
+        """
+        # Get widget type for this canvas
+        widget_type = canvas_manager.get_canvas_widget_type(canvas_id)
+
+        # Get widget registry from canvas manager
+        widget_registry = canvas_manager._widget_registry
+
+        if widget_registry and widget_type in widget_registry.get_available_widgets():
+            # Create widget using registry
+            widget_class = widget_registry.get_widget(widget_type)
+            return widget_class(plot_model)
+        else:
+            # Fallback to default PlotWidget
+            return PlotWidget(plot_model)
