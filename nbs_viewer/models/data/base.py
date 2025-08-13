@@ -1,9 +1,11 @@
 from typing import Dict, List, Tuple, Any, Optional
-from qtpy.QtCore import QObject, Signal
+from qtpy.QtCore import QObject, Signal, Slot
+import logging
 import numpy as np
 from asteval import Interpreter
 from nbs_viewer.utils import time_function
 import time
+from nbs_viewer.utils import print_debug
 
 
 class CatalogRun(QObject):
@@ -27,6 +29,9 @@ class CatalogRun(QObject):
     """
 
     data_changed = Signal()
+    keys_loading = Signal()
+    keys_ready = Signal(object)
+    keys_error = Signal(object)
 
     def __init__(self, run, key, catalog=None, dynamic=False, parent=None):
         super().__init__(parent)
@@ -43,9 +48,16 @@ class CatalogRun(QObject):
 
         # Initialize empty key list - subclasses can update later
         self._available_keys = []
+        # Async key init state
+        self._keys_init_started = False
+        self._keys_initialized = False
 
         # Connect data_changed to cache clearing
         self.data_changed.connect(self._on_data_changed)
+
+        # Connect async key init signals to state updates (queued across threads)
+        self.keys_ready.connect(self._on_keys_ready)
+        self.keys_error.connect(self._on_keys_error)
 
         # Set dynamic state last since it may trigger signals
         self.set_dynamic(dynamic)
@@ -235,7 +247,11 @@ class CatalogRun(QObject):
             for key in sorted(ykeys[dim]):
                 if key not in sorted_keys:
                     sorted_keys.append(key)
-        # print(f"Sorted keys: {sorted_keys}")
+        print_debug(
+            "CatalogRun.getAvailableKeys",
+            f"Sorted keys: {sorted_keys} for run {self.uid}: {id(self)}",
+            "run",
+        )
         return sorted_keys
 
     def getAxisHints(self) -> Dict[str, List[List[str]]]:
@@ -343,19 +359,45 @@ class CatalogRun(QObject):
         self._dimensions_cache.clear()
         self.data_changed.emit()
 
+    def _compute_available_keys(self) -> list:
+        """Compute available keys (no signals, safe for background thread)."""
+        return self.getAvailableKeys() or []
+
     @time_function(
         function_name="CatalogRun._initialize_keys", category="DEBUG_CATALOG"
     )
     def _initialize_keys(self):
-        """Initialize available keys safely."""
+        """Initialize available keys synchronously on the calling thread."""
+        # Mark as started and notify listeners
+        self._keys_init_started = True
+        self.keys_loading.emit()
         try:
-            self._available_keys = self.getAvailableKeys()
-            # print(f"Available keys: {self._available_keys}")
+            self._available_keys = self._compute_available_keys()
+            self.keys_ready.emit(self._available_keys)
         except Exception as e:
-            print(f"Error initializing keys: {e}")
+            logging.getLogger("nbs_viewer.catalog").exception("Error initializing keys")
             self._available_keys = []
+            self.keys_error.emit(str(e))
         finally:
-            self.data_changed.emit()  # Always notify of key changes
+            self.data_changed.emit()
+
+    @Slot(object)
+    def _on_keys_ready(self, keys) -> None:
+        """Apply computed keys on the main thread and notify listeners."""
+        print_debug(
+            "CatalogRun._on_keys_ready",
+            f"Keys ready for {self.uid}: {keys}",
+            "run",
+        )
+        self._available_keys = keys or []
+        self._keys_initialized = True
+        self.data_changed.emit()
+
+    @Slot(object)
+    def _on_keys_error(self, message) -> None:
+        logging.getLogger("nbs_viewer.catalog").warning(
+            "Key initialization error for %s: %s", self._key, message
+        )
 
     @property
     def available_keys(self) -> List[str]:

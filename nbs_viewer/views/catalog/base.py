@@ -22,6 +22,7 @@ from qtpy.QtCore import (
 
 from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
+from nbs_viewer.utils import print_debug
 
 
 class CustomHeaderView(QHeaderView):
@@ -352,6 +353,11 @@ class CatalogTableView(QWidget):
 
     def on_selection_changed(self, selected, deselected):
         """Handle changes in the selection state of table rows."""
+        print_debug(
+            "CatalogTableView.on_selection_changed",
+            f"Selection changed, selected: {len(selected.indexes())}, deselected: {len(deselected.indexes())}",
+            "catalog",
+        )
         if self._handling_selection:
             return
 
@@ -460,6 +466,9 @@ class CatalogTableView(QWidget):
         list
             List of currently selected CatalogRun instances
         """
+        print_debug(
+            "CatalogTableView.get_selected_items", "Getting selected items", "catalog"
+        )
         return self._catalog.get_selected_runs()
 
     def deselect_items(self, items):

@@ -8,6 +8,7 @@ from .base import CatalogBase
 from ..data import BlueskyRun, NBSRun
 from .chunkCache import ChunkCache
 from nbs_viewer.utils import print_debug
+from .worker_pool import CatalogWorkerPool
 
 
 class BlueskyCatalog(CatalogBase):
@@ -30,9 +31,15 @@ class BlueskyCatalog(CatalogBase):
             Parent object, by default None.
         """
         super().__init__(parent)
+        self._base_catalog = catalog
         self._catalog = catalog
         self._wrapped_runs = {}
         self._chunk_cache = ChunkCache()
+        # Enable async key discovery by default for Bluesky-based catalogs
+        try:
+            self._worker_pool: CatalogWorkerPool | None = CatalogWorkerPool(self)
+        except Exception:
+            self._worker_pool = None
 
     def __len__(self):
         return len(self._catalog)
@@ -50,12 +57,36 @@ class BlueskyCatalog(CatalogBase):
         runs = []
         for uid, run in self._catalog.items():
             if uid not in self._wrapped_runs:
+                print_debug(
+                    "BlueskyCatalog.get_runs",
+                    f"Wrapping run {uid}",
+                    "run",
+                )
                 self._wrapped_runs[uid] = self.wrap_run(run, uid)
             runs.append(self._wrapped_runs[uid])
         return runs
 
     def wrap_run(self, run, uid):
-        return BlueskyRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
+        # Reuse existing wrapper
+        print_debug("BlueskyCatalog.wrap_run", f"Wrapping run {uid}", "run")
+
+        br = BlueskyRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
+        self._wrapped_runs[uid] = br
+        print_debug(
+            "BlueskyCatalog.wrap_run",
+            f"wrapped_runs has len {len(self._wrapped_runs)}",
+            "run",
+        )
+        # If a worker pool exists, start async key initialization once
+        if self._worker_pool is not None and not getattr(
+            br, "_keys_init_started", False
+        ):
+            br.keys_loading.emit()
+            self._worker_pool.submit_key_init(br)
+        elif self._worker_pool is None and not getattr(br, "_keys_initialized", False):
+            # Fallback to synchronous initialization if no pool and not done yet
+            br._initialize_keys()
+        return br
 
     def get_run(self, uid: str) -> BlueskyRun:
         """
@@ -77,9 +108,24 @@ class BlueskyCatalog(CatalogBase):
             If run not found.
         """
         if uid not in self._wrapped_runs:
+            print_debug(
+                "BlueskyCatalog.get_run",
+                f"Wrapping run {uid}",
+                "run",
+            )
+            print_debug(
+                "BlueskyCatalog.get_run",
+                f"wrapped_runs has len {len(self._wrapped_runs)}",
+                "run",
+            )
             if uid not in self._catalog:
                 raise KeyError(f"No run found with UID {uid}")
             self._wrapped_runs[uid] = self.wrap_run(self._catalog[uid], uid)
+        print_debug(
+            "BlueskyCatalog.get_run",
+            f"returning wrapped run for {uid}",
+            "run",
+        )
         return self._wrapped_runs[uid]
 
     def items_slice(self, slice_obj: Optional[slice] = None):
@@ -107,7 +153,14 @@ class BlueskyCatalog(CatalogBase):
         for key, value in sliced_items:
             # print(f"Wrapping run {key}")
             try:
-                yield key, self.wrap_run(value, key)
+                if key not in self._wrapped_runs:
+                    print_debug(
+                        "BlueskyCatalog.items_slice",
+                        f"Wrapping run {key}",
+                        "run",
+                    )
+                    self._wrapped_runs[key] = self.wrap_run(value, key)
+                yield key, self._wrapped_runs[key]
             except Exception as ex:
                 print_debug(
                     "BlueskyCatalog.items_slice",
@@ -129,7 +182,8 @@ class BlueskyCatalog(CatalogBase):
         BlueskyCatalog
             New catalog containing matching runs.
         """
-        return self.__class__(self._catalog.search(query), self)
+        self._catalog = self._base_catalog.search(query)
+        return self
 
     def filter_by_time(
         self, since: Optional[str] = None, until: Optional[str] = None
@@ -156,7 +210,23 @@ class NBSCatalog(BlueskyCatalog):
     """Catalog implementation for NBS data."""
 
     def wrap_run(self, run, uid):
-        return NBSRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
+        print_debug("NBSCatalog.wrap_run", f"Wrapping run {uid}", "run")
+        br = NBSRun(run, uid, self._catalog, chunk_cache=self._chunk_cache)
+        print_debug("NBSRun", f"NBSRun for run {uid}: {id(br)}", "run")
+        self._wrapped_runs[uid] = br
+        print_debug(
+            "NBSCatalog.wrap_run",
+            f"wrapped_runs has len {len(self._wrapped_runs)}",
+            "run",
+        )
+        if self._worker_pool is not None and not getattr(
+            br, "_keys_init_started", False
+        ):
+            br.keys_loading.emit()
+            self._worker_pool.submit_key_init(br)
+        elif self._worker_pool is None and not getattr(br, "_keys_initialized", False):
+            br._initialize_keys()
+        return br
 
     @property
     def columns(self) -> List[str]:

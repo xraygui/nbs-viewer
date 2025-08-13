@@ -172,6 +172,7 @@ class AppModel(QObject):
         return self._active_canvas_id
 
     # Catalog selection routing -------------------------------------------
+
     def _get_plot_model(self, canvas_id: Optional[str] = None):
         cid = canvas_id or self._active_canvas_id
         models = self.canvases.canvases

@@ -14,7 +14,7 @@ import logging
 from .dataSource import DataSourcePicker, URISourceView
 from .plot.canvasControl import CanvasControlWidget
 from ..models.app_model import AppModel
-
+from nbs_viewer.utils import print_debug
 
 """
 This is now the primary thing to refactor -- very poorly named, this is really
@@ -83,6 +83,8 @@ class DataSourceSwitcher(QWidget):
         # Automatically load catalogs with autoload=true
         if self.config_file:
             self.load_autoload_catalogs()
+
+        # Catalogs now manage their own async state; nothing to wire here
 
     def load_autoload_catalogs(self):
         """

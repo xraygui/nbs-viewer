@@ -4,6 +4,7 @@ from typing import List, Optional
 from qtpy.QtCore import QObject, Signal
 import numpy as np
 from .runModel import RunModel
+from nbs_viewer.utils import print_debug
 
 
 class PlotModel(QObject):
@@ -70,6 +71,11 @@ class PlotModel(QObject):
 
         # Get intersection of keys from all models
         first_run = runs[0]
+        print_debug(
+            "PlotModel.update_available_keys",
+            f"available_keys from first_run.uid {first_run.uid}: {first_run.available_keys}",
+            "run",
+        )
         available_keys = first_run.available_keys
         for run in runs:
             available_keys = [
@@ -276,6 +282,7 @@ class PlotModel(QObject):
         run : CatalogRun
             Run to add to the model
         """
+        print_debug("PlotModel.add_runs", f"Adding runs {len(run_list)}", "run")
         uid_list = []
         for run in run_list:
             uid = run.uid
