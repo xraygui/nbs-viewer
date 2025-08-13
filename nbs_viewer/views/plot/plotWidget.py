@@ -32,14 +32,15 @@ import uuid
 class PlotWorker(QThread):
     """Worker thread for fetching and preparing plot data."""
 
-    data_ready = Signal(object, object, object)  # (x, y, plotData)
+    data_ready = Signal(object, object, object, object)  # (x, y, plotData, artist)
     error_occurred = Signal(str)
 
-    def __init__(self, plotData, slice_info, dimension):
+    def __init__(self, plotData, slice_info, dimension, artist=None):
         super().__init__()
         self.plotData = plotData
         self.slice_info = slice_info
         self.dimension = dimension
+        self.artist = artist
         print_debug("PlotWorker", "Created new worker", category="DEBUG_PLOTS")
 
     @time_function(function_name="PlotWorker.run", category="DEBUG_PLOTS")
@@ -55,7 +56,7 @@ class PlotWorker(QThread):
                 f"Data fetch complete - x shape: {[xi.shape for xi in x]}, y shape: {y.shape}, time: {t2 - t1:.2f} seconds",
                 category="DEBUG_PLOTS",
             )
-            self.data_ready.emit(x, y, self.plotData)
+            self.data_ready.emit(x, y, self.plotData, self.artist)
         except Exception as e:
             error_msg = f"Error fetching plot data: {str(e)}"
             print_debug("PlotWorker", error_msg, category="DEBUG_PLOTS")
@@ -278,9 +279,10 @@ class MplCanvas(FigureCanvasQTAgg):
         worker.start()
 
     @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
-    def _handle_plot_data(self, x, y, plotData):
+    def _handle_plot_data(self, x, y, plotData, artist=None):
         """Handle the plotting once data is ready."""
-        artist = plotData.artist
+        if artist is None:
+            artist = plotData.artist
         print_debug(
             "MplCanvas._handle_plot_data",
             f"Plotting {plotData.label}",
