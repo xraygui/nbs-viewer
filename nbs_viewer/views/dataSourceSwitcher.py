@@ -6,8 +6,10 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QStackedWidget,
+    QDialog,
+    QDialogButtonBox,
 )
-from .dataSource import DataSourcePicker
+from .dataSource import DataSourcePicker, URISourceView
 from .plot.canvasControl import CanvasControlWidget
 
 
@@ -111,6 +113,10 @@ class DataSourceSwitcher(QWidget):
         except Exception as e:
             print(f"Error loading autoload catalogs: {e}")
 
+    def get_catalog_labels(self):
+        """Get the labels of all catalogs."""
+        return list(self._catalogs.keys())
+
     def remove_current_source(self):
         """Remove the currently selected data source."""
         current_label = self.dropdown.currentText()
@@ -135,8 +141,22 @@ class DataSourceSwitcher(QWidget):
             # Update button state
             self.remove_source.setEnabled(len(self._catalogs) > 0)
 
+    def get_current_catalog(self):
+        """Get the currently selected catalog."""
+        current_label = self.dropdown.currentText()
+        if current_label in self._catalogs:
+            return self._catalogs[current_label]
+        else:
+            return None
+
+    def refresh_catalog(self):
+        catalogView = self.stacked_widget.currentWidget()
+        if catalogView is not None:
+            catalogView.refresh_filters()
+
     def add_new_source(self):
         """Add a new data source via picker dialog."""
+        print("Adding new source")
         picker = DataSourcePicker(config_file=self.config_file, parent=self)
         if picker.exec_():
             sourceView, catalog, label = picker.get_source()
@@ -153,6 +173,31 @@ class DataSourceSwitcher(QWidget):
 
                 # Enable remove button when we have sources
                 self.remove_source.setEnabled(True)
+
+    def add_uri_source(self):
+        """Add a new URI data source."""
+        URIDialog = QDialog()
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(URIDialog.accept)
+        buttons.rejected.connect(URIDialog.reject)
+        layout = QVBoxLayout()
+        layout.addWidget(URISourceView())
+        layout.addWidget(buttons)
+        URIDialog.setLayout(layout)
+        URIDialog.exec_()
+        if URIDialog.result() == QDialog.Accepted:
+            sourceView, catalog, label = URIDialog.get_source()
+            if catalog is not None and label is not None:
+                # Store catalog and connect its signals
+                self._catalogs[label] = catalog
+                catalog.item_selected.connect(self.plot_model.add_run)
+                catalog.item_deselected.connect(self.plot_model.remove_run)
+            self.stacked_widget.addWidget(sourceView)
+            self.dropdown.addItem(label)
+            self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
+
+            # Enable remove button when we have sources
+            self.remove_source.setEnabled(True)
 
     def switch_table(self):
         """Switch the visible source view."""
