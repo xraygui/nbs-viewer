@@ -8,19 +8,22 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QDialog,
     QDialogButtonBox,
+    QMessageBox,
 )
+import logging
 from .dataSource import DataSourcePicker, URISourceView
 from .plot.canvasControl import CanvasControlWidget
+from ..models.app_model import AppModel
 
 
 """
-This is now the primary thing to refactor -- very poorly named, this is really 
+This is now the primary thing to refactor -- very poorly named, this is really
 the central widget that controls the data sources and the plot list. It is what
 controls adding and removing runs from the temporary plot.
 
-We probably need to combine this with plotManager, or at least make it a lot more obvious
-what is going on. The connections to the plotControl also need to be more obvious.
-Possibly we need to separate out a model from the view.
+We probably need to combine this with plotManager, or at least make it a lot
+more obvious what is going on. The connections to the plotControl also need to
+be more obvious. Possibly we need to separate out a model from the view.
 """
 
 
@@ -32,11 +35,19 @@ class DataSourceSwitcher(QWidget):
     adding/removing data sources.
     """
 
-    def __init__(self, plot_model, canvas_manager, config_file=None, parent=None):
+    def __init__(
+        self,
+        plot_model,
+        canvas_manager,
+        config_file=None,
+        app_model: AppModel = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.plot_model = plot_model
         self.canvas_controls = CanvasControlWidget(canvas_manager, plot_model, self)
         self.config_file = config_file
+        self.app_model = app_model
         self._catalogs = {}  # label -> catalog
 
         # Create UI elements
@@ -99,10 +110,11 @@ class DataSourceSwitcher(QWidget):
                     )
 
                     if catalog is not None and label is not None:
-                        # Store catalog and connect its signals
+                        # Store catalog locally for view management
                         self._catalogs[label] = catalog
-                        catalog.item_selected.connect(self.plot_model.add_run)
-                        catalog.item_deselected.connect(self.plot_model.remove_run)
+                        # Register catalog with app-level model (routes selections)
+                        if self.app_model is not None:
+                            self.app_model.catalogs.register_catalog(label, catalog)
 
                         # Add view to UI
                         self.stacked_widget.addWidget(sourceView)
@@ -111,10 +123,17 @@ class DataSourceSwitcher(QWidget):
                         # Enable remove button when we have sources
                         self.remove_source.setEnabled(True)
         except Exception as e:
-            print(f"Error loading autoload catalogs: {e}")
+            logging.getLogger("nbs_viewer.catalog").exception(
+                "Error loading autoload catalogs"
+            )
+            QMessageBox.critical(
+                self, "Error Loading Catalogs", f"Failed to load config: {e}"
+            )
 
     def get_catalog_labels(self):
         """Get the labels of all catalogs."""
+        if self.app_model is not None:
+            return self.app_model.catalogs.get_catalog_labels()
         return list(self._catalogs.keys())
 
     def remove_current_source(self):
@@ -124,12 +143,11 @@ class DataSourceSwitcher(QWidget):
             # Get current view and catalog
             current_index = self.dropdown.currentIndex()
             view = self.stacked_widget.widget(current_index)
-            catalog = self._catalogs[current_label]
 
             # Clean up view and catalog
             view.cleanup()  # This will clear selections
-            catalog.item_selected.disconnect(self.plot_model.add_run)
-            catalog.item_deselected.disconnect(self.plot_model.remove_run)
+            if self.app_model is not None:
+                self.app_model.catalogs.unregister_catalog(current_label)
 
             # Remove from UI
             self.stacked_widget.removeWidget(view)
@@ -143,16 +161,76 @@ class DataSourceSwitcher(QWidget):
 
     def get_current_catalog(self):
         """Get the currently selected catalog."""
+        if self.app_model is not None:
+            return self.app_model.catalogs.get_current_catalog()
         current_label = self.dropdown.currentText()
-        if current_label in self._catalogs:
-            return self._catalogs[current_label]
-        else:
-            return None
+        return self._catalogs.get(current_label)
 
     def refresh_catalog(self):
+        if self.app_model is not None:
+            self.app_model.catalogs.refresh_current()
+            return
         catalogView = self.stacked_widget.currentWidget()
         if catalogView is not None:
             catalogView.refresh_filters()
+
+    def deselect_all(self):
+        """Deselect all items in the current catalog view."""
+        view = self.stacked_widget.currentWidget()
+        if view is not None:
+            view.deselect_all()
+
+    def get_selected_runs(self):
+        """Return selected runs from the current catalog view."""
+        view = self.stacked_widget.currentWidget()
+        if view is not None and hasattr(view, "get_selected_items"):
+            return view.get_selected_items()
+        return []
+
+    def load_catalog_config(self, path: str):
+        """Load a catalog configuration TOML file at runtime."""
+        try:
+            # Import here to avoid circular imports
+            from .dataSource import ConfigSourceView
+
+            try:
+                import tomllib  # Python 3.11+
+            except ModuleNotFoundError:
+                import tomli as tomllib  # Python <3.11
+
+            with open(path, "rb") as f:
+                config = tomllib.load(f)
+
+            # Load all catalogs in the file (not only autoload)
+            for catalog_config in config.get("catalog", []):
+                config_view = ConfigSourceView(catalog_config)
+                sourceView, catalog, label = config_view.get_source()
+                if catalog is None or label is None:
+                    continue
+                # Store catalog locally and register with the app model
+                self._catalogs[label] = catalog
+                if self.app_model is not None:
+                    self.app_model.catalogs.register_catalog(label, catalog)
+                # Add to UI
+                self.stacked_widget.addWidget(sourceView)
+                self.dropdown.addItem(label)
+                self.remove_source.setEnabled(True)
+        except Exception as e:
+            logging.getLogger("nbs_viewer.catalog").exception(
+                "Error loading catalog config '%s'", path
+            )
+            QMessageBox.critical(
+                self,
+                "Error Loading Catalogs",
+                f"Failed to load config '{path}': {e}",
+            )
+
+    def switch_to_label(self, label: str):
+        """Switch to a catalog view by its label (used by menu)."""
+        for i in range(self.dropdown.count()):
+            if self.dropdown.itemText(i) == label:
+                self.dropdown.setCurrentIndex(i)
+                return
 
     def add_new_source(self):
         """Add a new data source via picker dialog."""
@@ -161,10 +239,11 @@ class DataSourceSwitcher(QWidget):
         if picker.exec_():
             sourceView, catalog, label = picker.get_source()
             if catalog is not None and label is not None:
-                # Store catalog and connect its signals
+                # Store catalog locally for view management
                 self._catalogs[label] = catalog
-                catalog.item_selected.connect(self.plot_model.add_run)
-                catalog.item_deselected.connect(self.plot_model.remove_run)
+                # Register with app model
+                if self.app_model is not None:
+                    self.app_model.catalogs.register_catalog(label, catalog)
 
                 # Add view to UI
                 self.stacked_widget.addWidget(sourceView)
@@ -188,10 +267,11 @@ class DataSourceSwitcher(QWidget):
         if URIDialog.result() == QDialog.Accepted:
             sourceView, catalog, label = URIDialog.get_source()
             if catalog is not None and label is not None:
-                # Store catalog and connect its signals
+                # Store catalog locally for view management
                 self._catalogs[label] = catalog
-                catalog.item_selected.connect(self.plot_model.add_run)
-                catalog.item_deselected.connect(self.plot_model.remove_run)
+                # Register with app model
+                if self.app_model is not None:
+                    self.app_model.catalogs.register_catalog(label, catalog)
             self.stacked_widget.addWidget(sourceView)
             self.dropdown.addItem(label)
             self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
@@ -213,3 +293,6 @@ class DataSourceSwitcher(QWidget):
 
         # Switch to the new view
         self.stacked_widget.setCurrentIndex(target_index)
+        # Inform model about current catalog
+        if self.app_model is not None and target_label:
+            self.app_model.catalogs.set_current_catalog(target_label)

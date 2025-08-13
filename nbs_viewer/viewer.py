@@ -3,15 +3,13 @@ from qtpy.QtWidgets import (
     QApplication,
     QVBoxLayout,
     QWidget,
-    QTabWidget,
     QMainWindow,
-    QMenuBar,
-    QMenu,
     QAction,
 )
-from qtpy.QtCore import Qt
 from .mainWidget import MainWidget
+from .models.app_model import AppModel
 from .utils import turn_on_debugging, turn_off_debugging
+from .logging_setup import setup_logging
 
 # import logging
 
@@ -28,8 +26,11 @@ class Viewer(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.layout = QVBoxLayout(central_widget)
-        # Create a QTabWidget
-        self.mainWidget = MainWidget(central_widget, config_file=config_file)
+        # Create app-level model and pass into MainWidget
+        self.app_model = AppModel(config_file)
+        self.mainWidget = MainWidget(
+            central_widget, config_file=config_file, app_model=self.app_model
+        )
         self.layout.addWidget(self.mainWidget)
         central_widget.setLayout(self.layout)
         self._create_menu_bar()
@@ -177,42 +178,40 @@ class Viewer(QMainWindow):
         close_canvas_action.triggered.connect(self._on_close_canvas)
         canvas_menu.addAction(close_canvas_action)
 
-        # Duplicate Canvas
-        duplicate_canvas_action = QAction("&Duplicate Canvas", self)
-        duplicate_canvas_action.setShortcut("Ctrl+D")
-        duplicate_canvas_action.setStatusTip("Duplicate the current canvas")
-        duplicate_canvas_action.triggered.connect(self._on_duplicate_canvas)
-        canvas_menu.addAction(duplicate_canvas_action)
+        # Keep duplicate for potential quick copy; no-op for now
 
         canvas_menu.addSeparator()
 
-        # Canvas Settings
-        canvas_settings_action = QAction("Canvas &Settings...", self)
-        canvas_settings_action.setShortcut("Ctrl+Shift+E")
-        canvas_settings_action.setStatusTip("Configure canvas settings")
-        canvas_settings_action.triggered.connect(self._on_canvas_settings)
-        canvas_menu.addAction(canvas_settings_action)
+        # Remove unused canvas actions for now
 
-        # Save Canvas Layout
-        save_layout_action = QAction("Save Canvas &Layout...", self)
-        save_layout_action.setShortcut("Ctrl+Shift+L")
-        save_layout_action.setStatusTip("Save the current canvas layout")
-        save_layout_action.triggered.connect(self._on_save_canvas_layout)
-        canvas_menu.addAction(save_layout_action)
+        # Remove unused canvas actions for now
 
     def _update_switch_catalog_menu(self):
         """Update the switch catalog submenu with available catalogs."""
         # Clear existing items
         self.switch_catalog_menu.clear()
-
-        for label in self.mainWidget.data_source.get_catalog_labels():
-            self.switch_catalog_menu.addAction(QAction(label, self))
+        labels = self.mainWidget.data_source.get_catalog_labels()
+        for label in labels:
+            action = QAction(label, self)
+            action.triggered.connect(
+                lambda checked=False, lbl=label: self._on_switch_catalog(lbl)
+            )
+            self.switch_catalog_menu.addAction(action)
 
     # File menu action handlers
     def _on_open_catalog_config(self):
         """Handle opening a catalog configuration file."""
-        # TODO: Implement file dialog and catalog loading
-        print("Open catalog config - not implemented yet")
+        from qtpy.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Catalog Configuration",
+            "",
+            "TOML files (*.toml);;All files (*)",
+        )
+        if path:
+            self.mainWidget.data_source.load_catalog_config(path)
+            self._update_switch_catalog_menu()
 
     def _on_save_plot(self):
         """Handle saving the current plot."""
@@ -248,9 +247,7 @@ class Viewer(QMainWindow):
 
     def _on_clear_selected_run(self):
         """Handle clearing selected run."""
-        catalog = self.mainWidget.data_source.get_current_catalog()
-        if catalog is not None:
-            catalog.deselect_all()
+        self.mainWidget.data_source.deselect_all()
 
     def _on_clear_cache(self):
         """Handle clearing cache."""
@@ -261,6 +258,12 @@ class Viewer(QMainWindow):
         """Handle catalog settings."""
         # TODO: Implement catalog settings dialog
         print("Catalog settings - not implemented yet")
+
+    def _on_switch_catalog(self, label: str):
+        """Switch active catalog by label from submenu."""
+        self.mainWidget.data_source.switch_to_label(label)
+        if self.app_model is not None:
+            self.app_model.catalogs.set_current_catalog(label)
 
     # Canvas menu action handlers
     def _on_new_canvas(self):
@@ -301,10 +304,28 @@ class Viewer(QMainWindow):
 def main():
     parser = argparse.ArgumentParser(description="NBS Viewer")
     parser.add_argument("-f", "--config", help="Path to the catalog config file")
-    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="Enable debug mode (equivalent to --log-level DEBUG)",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=[
+            "CRITICAL",
+            "ERROR",
+            "WARNING",
+            "INFO",
+            "DEBUG",
+            "NOTSET",
+        ],
+        help="Set logging verbosity (overrides --debug if provided)",
+    )
     args = parser.parse_args()
-    if args.debug:
-        print("Debug statements on")
+    effective_level = args.log_level or ("DEBUG" if args.debug else "INFO")
+    setup_logging(level=effective_level, http_to_file="http_debug.log")
+    if effective_level == "DEBUG":
         turn_on_debugging()
     else:
         turn_off_debugging()

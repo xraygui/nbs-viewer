@@ -1,8 +1,7 @@
 from .views.dataSourceSwitcher import DataSourceSwitcher
-from .models.plot.canvasManager import CanvasManager
+from .models.app_model import AppModel
 from .views.plot.canvasTab import CanvasTab
 from .views.plot.plotWidget import PlotWidget
-from .views.plot.widget_registry import PlotWidgetRegistry
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -12,18 +11,17 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 from qtpy.QtCore import Qt
-import os
 
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:
-    import tomli as tomllib  # Python <3.11
+    tomllib = None  # Python <3.11 (we read via AppModel)
 
 
 class MainWidget(QWidget):
     """Widget managing multiple canvas views in tabs."""
 
-    def __init__(self, parent=None, config_file=None):
+    def __init__(self, parent=None, config_file=None, app_model: AppModel = None):
         """
         Initialize the multi-canvas widget.
 
@@ -36,9 +34,15 @@ class MainWidget(QWidget):
         """
         super().__init__(parent)
         self.config_file = config_file
+        self.app_model = app_model
+        # Fallback for direct use in tests
+        if self.app_model is None:
+            from .models.app_model import AppModel as _AM
 
-        # Setup controller logic (business logic)
-        self._setup_controllers()
+            self.app_model = _AM(config_file)
+
+        # Setup models before UI/signals
+        self._setup_models()
 
         # Setup UI components
         self._setup_ui()
@@ -49,17 +53,13 @@ class MainWidget(QWidget):
         # Create main tab
         self._create_main_tab()
 
-    def _setup_controllers(self):
-        """Setup controller logic and business logic components."""
-        # Canvas management
-        self.canvas_manager = CanvasManager()
-
-        # Widget registry
-        self.widget_registry = PlotWidgetRegistry()
-        self.canvas_manager.set_widget_registry(self.widget_registry)
-
-        # Load widget configuration
-        self._load_widget_config(self.config_file)
+    def _setup_models(self):
+        """Setup models"""
+        # Use app-level model components
+        self.canvas_manager = self.app_model.canvases
+        self.widget_registry = self.app_model.widgets
+        # Apply config defaults (e.g., default widget)
+        self._apply_config_defaults()
 
     def _setup_ui(self):
         """Setup UI components and layout."""
@@ -81,19 +81,14 @@ class MainWidget(QWidget):
         # Connect tab close signal
         self.tab_widget.tabCloseRequested.connect(self._on_tab_close)
 
-    def _load_widget_config(self, config_file: str):
-        """Load widget configuration from file."""
-        if config_file and os.path.exists(config_file):
-            try:
-                config = tomllib.load(open(config_file, "rb"))
-                if "plot_widgets" in config:
-                    widget_config = config["plot_widgets"]
-                    if "default_widget" in widget_config:
-                        self.widget_registry.set_default_widget(
-                            widget_config["default_widget"]
-                        )
-            except Exception as e:
-                print(f"Failed to load widget config: {e}")
+    def _apply_config_defaults(self):
+        """Apply defaults from config to registry."""
+        try:
+            default_widget = self.app_model.config.get("plot_widgets.default_widget")
+            if default_widget:
+                self.widget_registry.set_default_widget(default_widget)
+        except Exception as e:
+            print(f"Failed to apply widget defaults: {e}")
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""
@@ -101,7 +96,10 @@ class MainWidget(QWidget):
 
         # Create main tab widgets
         self.data_source = DataSourceSwitcher(
-            main_model, self.canvas_manager, self.config_file
+            main_model,
+            self.canvas_manager,
+            self.config_file,
+            self.app_model,
         )
         self.plot_widget = PlotWidget(main_model)
 
@@ -121,7 +119,7 @@ class MainWidget(QWidget):
         if hasattr(self.plot_widget, "plot_controls"):
             splitter.addWidget(self.plot_widget.plot_controls)
 
-        # Set initial splitter sizes (data source: 30%, plot: 50%, controls: 20%)
+        # Set initial sizes (data:30%, plot:50%, controls:20%)
         splitter.setSizes([300, 500, 200])
 
         layout = QVBoxLayout(main_tab)
@@ -135,7 +133,13 @@ class MainWidget(QWidget):
     # Controller methods for menu actions
     def create_canvas(self, widget_type=None):
         """Create a new canvas with optional widget type."""
-        return self.canvas_manager.create_canvas(widget_type)
+        canvas_id = self.canvas_manager.create_canvas(widget_type)
+        # Auto-add selected runs from current catalog view
+        if hasattr(self, "data_source") and self.data_source is not None:
+            runs = self.data_source.get_selected_runs()
+            if runs:
+                self.canvas_manager.add_runs_to_canvas(runs, canvas_id)
+        return canvas_id
 
     def create_matplotlib_canvas(self):
         """Create a new matplotlib canvas."""
@@ -179,7 +183,7 @@ class MainWidget(QWidget):
     def apply_canvas_settings(self, settings):
         """Apply settings to the current canvas."""
         # TODO: Implement settings application
-        print(f"Apply canvas settings - not implemented yet")
+        print("Apply canvas settings - not implemented yet")
 
     # Signal handlers
     def _on_canvas_added(self, canvas_id, plot_model):
