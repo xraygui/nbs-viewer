@@ -41,28 +41,28 @@ class CanvasControlWidget(QWidget):
         # Initialize widget registry
         self.widget_registry = PlotWidgetRegistry()
 
-        # Create UI elements
-        self.widget_selector = QComboBox(self)
-        self.widget_selector.setToolTip("Select plot widget type for new canvas")
-        self.widget_selector.setMinimumWidth(120)
-
         self.add_to_new_canvas_btn = QPushButton("New Canvas", self)
+        self.add_to_new_canvas_btn.setToolTip(
+            "Create a new canvas with the current selection"
+        )
         self.add_to_canvas_btn = QPushButton("Add to Canvas", self)
+        self.add_to_canvas_btn.setToolTip(
+            "Add the current selection to an existing canvas"
+        )
         self.clear_canvas_btn = QPushButton("Clear Canvas", self)
+        self.clear_canvas_btn.setToolTip("Clear the current canvas")
         self.canvas_menu = QMenu(self)
         self.add_to_canvas_btn.setMenu(self.canvas_menu)
+        self.widget_menu = QMenu(self)
+        self.add_to_new_canvas_btn.setMenu(self.widget_menu)
 
         # Layout - add widget selector before the New Canvas button
         layout = QHBoxLayout(self)
-        l1 = QVBoxLayout()
-        l2 = QVBoxLayout()
+
         # layout.addWidget(QLabel("Widget:"))
-        l1.addWidget(self.widget_selector)
-        l1.addWidget(self.add_to_new_canvas_btn)
-        l2.addWidget(self.add_to_canvas_btn)
-        l2.addWidget(self.clear_canvas_btn)
-        layout.addLayout(l1)
-        layout.addLayout(l2)
+        layout.addWidget(self.add_to_new_canvas_btn)
+        layout.addWidget(self.add_to_canvas_btn)
+        layout.addWidget(self.clear_canvas_btn)
         self.setLayout(layout)
 
         # Connect signals
@@ -79,19 +79,20 @@ class CanvasControlWidget(QWidget):
 
     def _populate_widget_selector(self):
         """Populate the widget selector ComboBox."""
-        self.widget_selector.clear()
+        self.widget_menu.clear()
 
         available_widgets = self.widget_registry.get_available_widgets()
         for widget_id in available_widgets:
             metadata = self.widget_registry.get_widget_metadata(widget_id)
             display_name = metadata.get("name", widget_id)
-            self.widget_selector.addItem(display_name, widget_id)
-
-        # Set default selection
-        default_widget = self.widget_registry.get_default_widget()
-        index = self.widget_selector.findData(default_widget)
-        if index >= 0:
-            self.widget_selector.setCurrentIndex(index)
+            action = QAction(display_name, self)
+            action.setData(widget_id)
+            action.triggered.connect(
+                lambda checked, wid=widget_id: self._on_new_canvas(wid)
+            )
+            self.widget_menu.addAction(action)
+        has_actions = len(self.widget_menu.actions()) > 0
+        self.add_to_new_canvas_btn.setEnabled(has_actions)
 
     def _update_canvas_menu(self):
         """Update the canvas menu with current canvases."""
@@ -108,13 +109,13 @@ class CanvasControlWidget(QWidget):
         has_actions = len(self.canvas_menu.actions()) > 0
         self.add_to_canvas_btn.setEnabled(has_actions)
 
-    def _on_new_canvas(self):
+    def _on_new_canvas(self, widget_id):
         """Create new canvas with current selection and selected widget type."""
         visible_models = self.plot_model.visible_models
         selected_runs = [model._run for model in visible_models]
         if selected_runs:
             # Get selected widget type
-            selected_widget = self.widget_selector.currentData()
+            selected_widget = widget_id
 
             # Create new canvas with specified widget type
             canvas_id = self.canvas_manager.create_canvas(widget_type=selected_widget)
@@ -131,7 +132,7 @@ class CanvasControlWidget(QWidget):
     def _on_clear_canvas(self):
         """Clear the current plot model and deselect all runs."""
         # Clear visible runs from the plot model
-        visible_uids = self.plot_model.visible_runs
+        visible_uids = set(self.plot_model.visible_runs)
         if visible_uids:
             self.plot_model.set_uids_visible(visible_uids, False)
             # Reset key selection

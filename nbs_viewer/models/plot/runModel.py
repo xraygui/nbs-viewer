@@ -68,6 +68,11 @@ class RunModel(QObject):
         self._run.data_changed.disconnect(self._on_data_changed)
 
     @property
+    def display_name(self) -> str:
+        """Get descriptive name for the run."""
+        return self.run.display_name
+
+    @property
     def run(self) -> CatalogRun:
         """Get the underlying run object."""
         return self._run

@@ -55,19 +55,19 @@ class DataSourceSwitcher(QWidget):
         self.dropdown = QComboBox(self)
         self.dropdown.currentIndexChanged.connect(self.switch_table)
 
-        # Add source management buttons
-        self.new_source = QPushButton("New Data Source")
-        self.new_source.clicked.connect(self.add_new_source)
-        self.remove_source = QPushButton("Remove Data Source")
-        self.remove_source.clicked.connect(self.remove_current_source)
-        self.remove_source.setEnabled(False)  # Disabled until source added
+        # # Add source management buttons
+        # self.new_source = QPushButton("New Data Source")
+        # self.new_source.clicked.connect(self.add_new_source)
+        # self.remove_source = QPushButton("Remove Data Source")
+        # self.remove_source.clicked.connect(self.remove_current_source)
+        # self.remove_source.setEnabled(False)  # Disabled until source added
 
         self.stacked_widget = QStackedWidget()
 
         # Layout
-        source_buttons = QHBoxLayout()
-        source_buttons.addWidget(self.new_source)
-        source_buttons.addWidget(self.remove_source)
+        # source_buttons = QHBoxLayout()
+        # source_buttons.addWidget(self.new_source)
+        # source_buttons.addWidget(self.remove_source)
 
         header = QHBoxLayout()
         header.addWidget(self.label)
@@ -75,7 +75,7 @@ class DataSourceSwitcher(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(header)
-        layout.addLayout(source_buttons)
+        # layout.addLayout(source_buttons)
         layout.addWidget(self.stacked_widget)
         layout.addWidget(self.canvas_controls)
         self.setLayout(layout)
@@ -123,7 +123,7 @@ class DataSourceSwitcher(QWidget):
                         self.dropdown.addItem(label)
 
                         # Enable remove button when we have sources
-                        self.remove_source.setEnabled(True)
+                        # self.remove_source.setEnabled(True)
         except Exception as e:
             logging.getLogger("nbs_viewer.catalog").exception(
                 "Error loading autoload catalogs"
@@ -159,7 +159,7 @@ class DataSourceSwitcher(QWidget):
             del self._catalogs[current_label]
 
             # Update button state
-            self.remove_source.setEnabled(len(self._catalogs) > 0)
+            # self.remove_source.setEnabled(len(self._catalogs) > 0)
 
     def get_current_catalog(self):
         """Get the currently selected catalog."""
@@ -216,7 +216,7 @@ class DataSourceSwitcher(QWidget):
                 # Add to UI
                 self.stacked_widget.addWidget(sourceView)
                 self.dropdown.addItem(label)
-                self.remove_source.setEnabled(True)
+                # self.remove_source.setEnabled(True)
         except Exception as e:
             logging.getLogger("nbs_viewer.catalog").exception(
                 "Error loading catalog config '%s'", path
@@ -253,7 +253,7 @@ class DataSourceSwitcher(QWidget):
                 self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
 
                 # Enable remove button when we have sources
-                self.remove_source.setEnabled(True)
+                # self.remove_source.setEnabled(True)
 
     def add_uri_source(self):
         """Add a new URI data source."""
@@ -279,7 +279,7 @@ class DataSourceSwitcher(QWidget):
             self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
 
             # Enable remove button when we have sources
-            self.remove_source.setEnabled(True)
+            # self.remove_source.setEnabled(True)
 
     def switch_table(self):
         """Switch the visible source view."""
