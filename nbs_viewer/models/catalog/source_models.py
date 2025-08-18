@@ -2,9 +2,10 @@
 
 from typing import Dict, Any, Tuple, List
 import uuid
+import os
 from os.path import exists
 
-from tiled.client import from_uri, from_profile
+from tiled.client import from_profile, Context, from_context
 import nslsii.kafka_utils
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher as QtZMQRemoteDispatcher
@@ -25,7 +26,7 @@ class SourceModel:
         """Initialize the source model."""
         self.catalog_models = load_catalog_models()
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
+    def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         """
         Get a catalog source from the model.
 
@@ -53,13 +54,28 @@ class SourceModel:
 class URISourceModel(SourceModel):
     """Model for Tiled URI catalog sources."""
 
-    def __init__(self):
-        """Initialize the URI source model."""
+    def __init__(self, auth_callback=None):
+        """
+        Initialize the URI source model.
+
+        Parameters
+        ----------
+        auth_callback : callable, optional
+            Callback function for handling interactive authentication.
+            Should take a Context object and return authentication tokens.
+        """
         super().__init__()
         self.uri = "http://localhost:8000"
         self.profile = ""
         self.selected_keys = []
         self.selected_model_name = None
+        self.api_key = None
+        self.use_cached_tokens = True
+        self.remember_me = True
+        # New authentication properties
+        self.username = ""
+        self.password = ""
+        self.auth_callback = auth_callback
 
     def set_uri(self, uri: str) -> None:
         """
@@ -105,30 +121,214 @@ class URISourceModel(SourceModel):
         """
         self.selected_model_name = model_name
 
+    def set_api_key(self, api_key: str) -> None:
+        """
+        Set the API key for the catalog.
+        """
+        self.api_key = api_key
+
+    def set_credentials(self, username: str, password: str) -> None:
+        """
+        Set the username and password for interactive authentication.
+
+        Parameters
+        ----------
+        username : str
+            The username for authentication
+        password : str
+            The password for authentication
+        """
+        self.username = username
+        self.password = password
+
+    def _create_context(self) -> Tuple[Context, List[str]]:
+        """
+        Create a Tiled context using Context.from_any_uri.
+
+        Returns
+        -------
+        Tuple[Context, List[str]]
+            A tuple containing the context and node path parts
+        """
+        return Context.from_any_uri(self.uri)
+
+    def _check_auth_required(self, context: Context) -> bool:
+        """
+        Check if the server requires authentication.
+
+        Parameters
+        ----------
+        context : Context
+            The Tiled context to check
+
+        Returns
+        -------
+        bool
+            True if authentication is required, False otherwise
+        """
+        return context.server_info.authentication.required
+
+    def _handle_authentication(self, context: Context, interactive_auth=True) -> None:
+        """
+        Handle the authentication flow for the context.
+
+        Parameters
+        ----------
+        context : Context
+            The Tiled context to authenticate
+        """
+        # Check for environment variable first
+        api_key = os.environ.get("TILED_API_KEY")
+        if api_key:
+            context.configure_auth({"api_key": api_key})
+            return
+
+        # Check for manual API key
+        if self.api_key:
+            context.configure_auth({"api_key": self.api_key})
+            return
+
+        # Check if we have cached tokens and remember_me is True
+        if self.use_cached_tokens:
+            found_valid_tokens = context.use_cached_tokens()
+            if found_valid_tokens:
+                return
+
+        # Try interactive authentication via callback
+        if self.auth_callback and interactive_auth:
+            try:
+                tokens = self.auth_callback(context)
+                if tokens:
+                    context.configure_auth(tokens, remember_me=self.remember_me)
+                    return
+            except Exception:
+                # If callback fails, we'll fall through to the exception below
+                pass
+
+        # If we get here, authentication failed
+        raise RuntimeError(
+            "Authentication required but no valid credentials found and no "
+            "interactive authentication callback provided"
+        )
+
     def is_configured(self) -> bool:
-        """Check if the model is fully configured."""
+        """Check if the model has the minimum required configuration."""
+        return bool(self.uri)
+
+    def is_fully_configured(self) -> bool:
+        """Check if the model is fully configured for all stages."""
         return bool(self.uri and self.selected_model_name)
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
-        """Get a catalog source from the URI."""
-        if not self.is_configured():
-            raise ValueError("URI source model is not fully configured")
+    def connect_and_authenticate(
+        self, interactive_auth=True
+    ) -> Tuple[Context, List[str]]:
+        """
+        Stage 1: Connect to the server and handle authentication.
 
-        catalog = from_uri(self.uri)
+        Returns
+        -------
+        Tuple[Context, List[str]]
+            A tuple containing:
+            - The authenticated context
+            - The node path parts
+        """
+        if not self.uri:
+            raise ValueError("URI is required")
+
+        # Create context using new approach
+        context, node_path_parts = self._create_context()
+
+        # Check if authentication is required and handle it
+        auth_is_required = context.server_info.authentication.required
+
+        if auth_is_required:
+            self._handle_authentication(context, interactive_auth)
+
+        return context, node_path_parts
+
+    def navigate_catalog_tree(
+        self, context: Context, node_path_parts: List[str]
+    ) -> Tuple[Any, str]:
+        """
+        Stage 2: Navigate through the catalog tree to get the final catalog.
+
+        Parameters
+        ----------
+        context : Context
+            The authenticated context
+        node_path_parts : List[str]
+            The node path parts
+
+        Returns
+        -------
+        Tuple[Any, str]
+            A tuple containing:
+            - The catalog client
+            - The label for the catalog
+        """
+        # Create client from context
+        client = from_context(context, node_path_parts=node_path_parts)
+
         label = f"Tiled: {self.uri}"
 
         if self.profile:
-            catalog = catalog[self.profile]
+            client = client[self.profile]
             label += ":" + self.profile
 
         # Navigate through selected keys
         for key in self.selected_keys:
-            catalog = catalog[key]
+            client = client[key]
             label += ":" + key
+
+        return client, label
+
+    def select_catalog_model(self, client: Any) -> CatalogBase:
+        """
+        Stage 3: Apply the selected catalog model to the client.
+
+        Parameters
+        ----------
+        client : Any
+            The catalog client
+
+        Returns
+        -------
+        CatalogBase
+            The catalog with the model applied
+        """
+        if not self.selected_model_name:
+            raise ValueError("Catalog model must be selected")
 
         # Create the catalog with the selected model
         selected_model = self.catalog_models[self.selected_model_name]
-        catalog = selected_model(catalog)
+        catalog = selected_model(client)
+
+        return catalog
+
+    def get_source(self, interactive_auth=True, **kwargs) -> Tuple[CatalogBase, str]:
+        """
+        Get a catalog source from the URI (all stages combined).
+
+        This method combines all three stages for backward compatibility.
+
+        Returns
+        -------
+        Tuple[CatalogBase, str]
+            A tuple containing:
+            - The catalog instance
+            - A label describing the source
+        """
+        if not self.is_fully_configured():
+            raise ValueError("URI source model is not fully configured")
+
+        # Stage 1: Connect and authenticate
+        context, node_path_parts = self.connect_and_authenticate(interactive_auth)
+
+        # Stage 2: Navigate catalog tree
+        client, label = self.navigate_catalog_tree(context, node_path_parts)
+
+        # Stage 3: Select catalog model
+        catalog = self.select_catalog_model(client)
 
         return catalog, label
 
@@ -180,7 +380,7 @@ class ProfileSourceModel(SourceModel):
         """Check if the model is fully configured."""
         return bool(self.profile and self.selected_model_name)
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
+    def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         """Get a catalog source from the profile."""
         if not self.is_configured():
             raise ValueError("Profile source model is not fully configured")
@@ -211,7 +411,7 @@ class ZMQSourceModel(SourceModel):
         """Check if the model is fully configured."""
         return True
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
+    def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         zmq_dispatcher = QtZMQRemoteDispatcher("localhost:5578")
         label = "ZMQ: localhost:5578"
         # Create the Kafka catalog (poorly named -- really a live catalog)
@@ -256,7 +456,7 @@ class KafkaSourceModel(SourceModel):
         """Check if the model is fully configured."""
         return bool(self.config_file and self.beamline_acronym)
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
+    def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         """Get a catalog source from Kafka."""
         if not self.is_configured():
             raise ValueError("Kafka source model is not fully configured")
@@ -286,7 +486,7 @@ class KafkaSourceModel(SourceModel):
 class ConfigSourceModel(SourceModel):
     """Model for configuration-based catalog sources."""
 
-    def __init__(self, catalog_config: Dict[str, Any]):
+    def __init__(self, catalog_config: Dict[str, Any], auth_callback=None):
         """
         Initialize the configuration source model.
 
@@ -297,6 +497,7 @@ class ConfigSourceModel(SourceModel):
         """
         super().__init__()
         self.catalog_config = catalog_config
+        self.auth_callback = auth_callback
         self.source_model = self._create_source_model()
 
     @property
@@ -323,7 +524,7 @@ class ConfigSourceModel(SourceModel):
         source_type = self.catalog_config.get("source_type", "uri")
 
         if source_type == "uri":
-            model = URISourceModel()
+            model = URISourceModel(auth_callback=self.auth_callback)
             model.set_uri(self.catalog_config["url"])
 
             if self.catalog_config.get("catalog_keys"):
@@ -333,6 +534,17 @@ class ConfigSourceModel(SourceModel):
                     model.set_selected_keys([self.catalog_config["catalog_keys"]])
 
             model.set_selected_model(self.catalog_config["catalog_model"])
+
+            # Handle authentication options
+            if self.catalog_config.get("api_key"):
+                model.set_api_key(self.catalog_config["api_key"])
+
+            if self.catalog_config.get("remember_me") is not None:
+                model.remember_me = self.catalog_config["remember_me"]
+
+            if self.catalog_config.get("username"):
+                model.username = self.catalog_config["username"]
+
             return model
 
         elif source_type == "profile":
@@ -361,6 +573,6 @@ class ConfigSourceModel(SourceModel):
         """Check if the model is fully configured."""
         return self.source_model.is_configured()
 
-    def get_source(self) -> Tuple[CatalogBase, str]:
+    def get_source(self, interactive_auth=True) -> Tuple[CatalogBase, str]:
         """Get a catalog source from the configuration."""
-        return self.source_model.get_source()
+        return self.source_model.get_source(interactive_auth)

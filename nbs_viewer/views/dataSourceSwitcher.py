@@ -92,7 +92,9 @@ class DataSourceSwitcher(QWidget):
             for catalog_config in config.get("catalog", []):
                 if catalog_config.get("autoload", False):
                     config_view = ConfigSourceView(catalog_config)
-                    sourceView, catalog, label = config_view.get_source()
+                    sourceView, catalog, label = config_view.get_source(
+                        interactive_auth=False
+                    )
 
                     if catalog is not None and label is not None:
                         # Store catalog and connect its signals
