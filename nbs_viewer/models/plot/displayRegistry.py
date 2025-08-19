@@ -19,7 +19,7 @@ class DisplayInfo:
     author: Optional[str] = None
 
 
-class PlotDisplayRegistry:
+class DisplayRegistry:
     """Registry for managing available plot displays."""
 
     def __init__(self):

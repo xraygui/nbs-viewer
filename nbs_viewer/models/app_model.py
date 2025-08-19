@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 from qtpy.QtCore import QObject, Signal
 
 from .plot.displayManager import DisplayManager
-from ..views.display.displayRegistry import PlotDisplayRegistry
+from .plot.displayRegistry import DisplayRegistry
 
 
 class ConfigModel(QObject):
@@ -152,9 +152,7 @@ class AppModel(QObject):
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
         self.config = ConfigModel(config_path)
-        self.display_registry = PlotDisplayRegistry()
-        self.displays = DisplayManager()
-        self.displays.set_display_registry(self.display_registry)
+        self.display_manager = DisplayManager()
         self.catalogs = CatalogManagerModel(self.config)
 
         self._active_display_id = "main"
@@ -174,9 +172,9 @@ class AppModel(QObject):
     # Catalog selection routing -------------------------------------------
 
     def _get_plot_model(self, display_id: Optional[str] = None):
-        cid = display_id or self._active_display_id
-        models = self.displays.canvases
-        return models.get(cid)
+        display_id = display_id or self._active_display_id
+        models = self.display_manager.canvases
+        return models.get(display_id)
 
     def _on_run_selected(self, run) -> None:
         plot_model = self._get_plot_model()
@@ -190,7 +188,7 @@ class AppModel(QObject):
 
     # Convenience actions for menus ---------------------------------------
     def new_display(self, widget_type: Optional[str] = None) -> str:
-        return self.displays.create_display(widget_type)
+        return self.display_manager.create_display(widget_type)
 
     def close_display(self, display_id: str) -> None:
-        self.displays.remove_display(canvas_id)
+        self.display_manager.remove_display(display_id)

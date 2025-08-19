@@ -2,6 +2,7 @@ from typing import List, Optional
 from qtpy.QtCore import QObject, Signal
 from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
+from .displayRegistry import DisplayRegistry
 
 
 # TODO: Remove plot_models from this class
@@ -28,14 +29,10 @@ class DisplayManager(QObject):
         self._plot_models = {}  # display_id -> PlotModel
         self._run_assignments = {}  # run_uid -> display_id
         self._display_types = {}  # display_id -> display_type
-        self._display_registry = None  # Will be set by MainWidget
+        self._display_registry = DisplayRegistry()  # Will be set by MainWidget
 
         # Create main display with auto-selection enabled
         self._create_new_display("main", is_main_display=True)
-
-    def set_display_registry(self, registry):
-        """Set the display registry for this display manager."""
-        self._display_registry = registry
 
     def add_run_to_display(self, run: CatalogRun, display_id: str) -> None:
         """

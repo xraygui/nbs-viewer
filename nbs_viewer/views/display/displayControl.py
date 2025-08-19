@@ -10,7 +10,6 @@ from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
 )
-from ..display.displayRegistry import PlotDisplayRegistry
 
 
 class DisplayControlWidget(QWidget):
@@ -37,9 +36,6 @@ class DisplayControlWidget(QWidget):
         super().__init__(parent)
         self.display_manager = display_manager
         self.run_list_model = run_list_model
-
-        # Initialize display registry
-        self.display_registry = PlotDisplayRegistry()
 
         self.add_to_new_display_btn = QPushButton("New Display", self)
         self.add_to_new_display_btn.setToolTip(
@@ -81,9 +77,9 @@ class DisplayControlWidget(QWidget):
         """Populate the widget selector ComboBox."""
         self.display_creation_menu.clear()
 
-        available_displays = self.display_registry.get_available_displays()
+        available_displays = self.display_manager.get_available_display_types()
         for display_id in available_displays:
-            metadata = self.display_registry.get_display_metadata(display_id)
+            metadata = self.display_manager.get_display_metadata(display_id)
             display_name = metadata.get("name", display_id)
             action = QAction(display_name, self)
             action.setData(display_id)

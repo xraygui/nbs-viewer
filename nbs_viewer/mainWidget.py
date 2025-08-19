@@ -56,10 +56,7 @@ class MainWidget(QWidget):
     def _setup_models(self):
         """Setup models"""
         # Use app-level model components
-        self.display_manager = self.app_model.displays
-        self.display_registry = self.app_model.display_registry
-        # Apply config defaults (e.g., default widget)
-        self._apply_config_defaults()
+        self.display_manager = self.app_model.display_manager
 
     def _setup_ui(self):
         """Setup UI components and layout."""
@@ -80,15 +77,6 @@ class MainWidget(QWidget):
 
         # Connect tab close signal
         self.tab_widget.tabCloseRequested.connect(self._on_tab_close)
-
-    def _apply_config_defaults(self):
-        """Apply defaults from config to registry."""
-        try:
-            default_display = self.app_model.config.get("plot_displays.default_display")
-            if default_display:
-                self.display_registry.set_default_display(default_display)
-        except Exception as e:
-            print(f"Failed to apply display defaults: {e}")
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""
