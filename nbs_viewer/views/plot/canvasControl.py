@@ -18,7 +18,7 @@ class CanvasControlWidget(QWidget):
     Widget for managing canvas assignments and creation.
 
     Provides a consistent interface for adding runs to new or existing
-    canvases. Used by both CanvasRunList and DataSourceManager.
+    canvases. Used by both runListView and DataSourceManager.
     """
 
     def __init__(self, canvas_manager, run_list_model, parent=None):

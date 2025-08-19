@@ -15,7 +15,7 @@ from .plot.canvasControl import CanvasControlWidget
 from ..models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 
 
-class CanvasRunList(QWidget):
+class RunListView(QWidget):
     """
     Widget for managing run selection for a canvas.
 
@@ -33,18 +33,19 @@ class CanvasRunList(QWidget):
 
     def __init__(self, run_list_model, canvas_manager, canvas_id: str, parent=None):
         """
-        Initialize the CanvasRunList.
+            Initialize the RunListView
+        .
 
-        Parameters
-        ----------
-        run_list_model : RunListModel
-            Model to display and manage runs for
-        canvas_manager : CanvasManager
-            Model managing available canvases
-        canvas_id : str
-            Identifier for the canvas this list manages
-        parent : QWidget, optional
-            Parent widget, by default None
+            Parameters
+            ----------
+            run_list_model : RunListModel
+                Model to display and manage runs for
+            canvas_manager : CanvasManager
+                Model managing available canvases
+            canvas_id : str
+                Identifier for the canvas this list manages
+            parent : QWidget, optional
+                Parent widget, by default None
         """
         super().__init__(parent)
         self.run_list_model = run_list_model
@@ -116,7 +117,8 @@ class CanvasRunList(QWidget):
 
     def _on_selection_changed(self, selected_runs):
         """Update checkbox states to match model's visible runs."""
-        # print(f"CanvasRunList _on_selection_changed: {len(selected_runs)}")
+        # print(f"RunListView
+        # _on_selection_changed: {len(selected_runs)}")
         try:
             # Block itemChanged signal to prevent recursion
             self.list_widget.blockSignals(True)

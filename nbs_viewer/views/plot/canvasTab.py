@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QIcon
-from ..canvasRunList import CanvasRunList
+from ..runListView import RunListView
 from .plotWidget import PlotWidget
 
 
@@ -194,7 +194,7 @@ class CanvasTab(QWidget):
         super().__init__(parent)
 
         # Create widgets
-        self.run_list = CanvasRunList(run_list_model, canvas_manager, canvas_id)
+        self.run_list = RunListView(run_list_model, canvas_manager, canvas_id)
 
         # Create plot widget based on canvas widget type
         self.plot_widget = self._create_plot_widget(
