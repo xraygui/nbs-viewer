@@ -98,14 +98,14 @@ class PlotWidgetRegistry:
         if not issubclass(widget_class, QWidget):
             return False
 
-        # Check constructor signature - should accept plotModel as first parameter
+        # Check constructor signature - should accept run_list_model as first parameter
         import inspect
 
         sig = inspect.signature(widget_class.__init__)
         params = list(sig.parameters.keys())
 
         # Skip 'self' parameter
-        if len(params) > 1 and params[1] == "plotModel":
+        if len(params) > 1 and params[1] == "run_list_model":
             return True
 
         return False

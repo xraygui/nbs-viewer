@@ -1,24 +1,25 @@
 from typing import List, Optional
 from qtpy.QtCore import QObject, Signal
-from ...models.plot.plotModel import PlotModel
+from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
 
 
+# TODO: Remove plot_models from this class
 class CanvasManager(QObject):
     """
-    Model managing multiple plot canvases and their associated PlotModels.
+    Model managing multiple plot canvases and their associated RunListModels.
 
     Signals
     -------
     canvas_added : Signal
-        Emitted when a new canvas is created (canvas_id, plot_model)
+        Emitted when a new canvas is created (canvas_id, run_list_model)
     canvas_removed : Signal
         Emitted when a canvas is removed (canvas_id)
     widget_type_changed : Signal
         Emitted when widget type changes (canvas_id, widget_type)
     """
 
-    canvas_added = Signal(str, object)  # canvas_id, plot_model
+    canvas_added = Signal(str, object)  # canvas_id, run_list_model
     canvas_removed = Signal(str)  # canvas_id
     widget_type_changed = Signal(str, str)  # canvas_id, widget_type
 
@@ -131,10 +132,10 @@ class CanvasManager(QObject):
         widget_type : str, optional
             Widget type for this canvas, by default "matplotlib"
         """
-        plot_model = PlotModel(is_main_canvas=is_main_canvas)
-        self._plot_models[canvas_id] = plot_model
+        run_list_model = RunListModel(is_main_canvas=is_main_canvas)
+        self._plot_models[canvas_id] = run_list_model
         self._canvas_widget_types[canvas_id] = widget_type
-        self.canvas_added.emit(canvas_id, plot_model)
+        self.canvas_added.emit(canvas_id, run_list_model)
 
     def get_canvas_widget_type(self, canvas_id: str) -> str:
         """Get the widget type for a canvas."""
@@ -174,6 +175,7 @@ class CanvasManager(QObject):
         """
         return self._run_assignments.get(run_uid)
 
+    # TODO: What is this for? Why does it return plot models?
     @property
     def canvases(self):
         """Get dictionary of current canvases and their plot models."""
@@ -205,8 +207,9 @@ class CanvasManager(QObject):
         canvas_id : str
             Target canvas identifier
         """
+        # TODO: Canvas class should have  the add_runs method
         if canvas_id in self._plot_models:
-            plot_model = self._plot_models[canvas_id]
+            run_list_model = self._plot_models[canvas_id]
             for run in run_list:
                 # Remove from current canvas if assigned
                 current_canvas = self.get_canvas_for_run(run.uid)
@@ -214,7 +217,7 @@ class CanvasManager(QObject):
                     self.remove_run_from_canvas(run, current_canvas)
 
                 # Add to new canvas
-                plot_model.add_run(run)
+                run_list_model.add_run(run)
                 self._run_assignments[run.uid] = canvas_id
 
     def get_canvas_ids(self) -> List[str]:

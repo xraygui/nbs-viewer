@@ -159,7 +159,7 @@ class AppModel(QObject):
 
         self._active_canvas_id = "main"
 
-        # Route catalog selections to the active canvas' PlotModel
+        # Route catalog selections to the active canvas' RunListModel
         self.catalogs.run_selected.connect(self._on_run_selected)
         self.catalogs.run_deselected.connect(self._on_run_deselected)
 

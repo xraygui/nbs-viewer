@@ -7,7 +7,7 @@ import uuid
 from ..views.catalog.kafka import KafkaView
 from ..models.catalog.kafka import KafkaCatalog
 
-from ..models.plot.plotModel import PlotModel
+from ..models.plot.runListModel import RunListModel
 from ..views.plot.plotWidget import PlotWidget
 
 from qtpy.QtCore import Signal
@@ -60,10 +60,10 @@ class KafkaViewerTab(QWidget):
         self.kafkaSource = kafkaSource
         self.catalog = catalog
 
-        self.plotModel = PlotModel()
-        self.catalog.item_selected.connect(self.plotModel.add_run)
-        self.catalog.item_deselected.connect(self.plotModel.remove_run)
-        self.plotWidget = PlotWidget(self.plotModel)
+        self.run_list_model = RunListModel()
+        self.catalog.item_selected.connect(self.run_list_model.add_run)
+        self.catalog.item_deselected.connect(self.run_list_model.remove_run)
+        self.plotWidget = PlotWidget(self.run_list_model)
 
         self.layout = QHBoxLayout(self)
         self.splitter = QSplitter(Qt.Horizontal)

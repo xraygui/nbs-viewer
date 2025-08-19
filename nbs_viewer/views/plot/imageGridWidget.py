@@ -38,19 +38,19 @@ class ImageGridWidget(QWidget):
     __widget_version__ = "1.0.0"
     __widget_author__ = "NBS Viewer Team"
 
-    def __init__(self, plotModel, parent=None):
+    def __init__(self, run_list_model, parent=None):
         """
         Initialize the image grid widget.
 
         Parameters
         ----------
-        plotModel : PlotModel
+        run_list_model : RunListModel
             Model managing the canvas data
         parent : QWidget, optional
             Parent widget, by default None
         """
         super().__init__(parent)
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
 
         # Initialize state
         self.plotArtists = {}
@@ -60,16 +60,23 @@ class ImageGridWidget(QWidget):
         self._total_images = 0
 
         # Create plot controls (for data selection)
-        self.plot_controls = PlotControls(self.plotModel)
-
+        self._create_plot_controls()
         # Connect to model signals
-        self.plotModel.selected_keys_changed.connect(self._on_selection_changed)
-        self.plotModel.visible_runs_changed.connect(self._on_visible_runs_changed)
-        self.plotModel.request_plot_update.connect(self._update_grid)
+        self._connect_signals()
 
         # Initial update
         self._setup_ui()
         self._update_grid()
+
+    def _create_plot_controls(self):
+        """Create plot controls."""
+        self.plot_controls = PlotControls(self.run_list_model)
+
+    def _connect_signals(self):
+        """Connect signals to model."""
+        self.run_list_model.selected_keys_changed.connect(self._on_selection_changed)
+        self.run_list_model.visible_runs_changed.connect(self._on_visible_runs_changed)
+        self.run_list_model.request_plot_update.connect(self._update_grid)
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -138,7 +145,7 @@ class ImageGridWidget(QWidget):
             (shape, dim_names, axis_arrays, associated_data) or None if no data
         """
         print_debug("ImageGridWidget", "Getting shape info")
-        visible_models = self.plotModel.visible_models
+        visible_models = self.run_list_model.visible_models
         if not visible_models:
             print_debug("ImageGridWidget", "No visible models")
             return None
@@ -275,7 +282,7 @@ class ImageGridWidget(QWidget):
         end_idx = min(start_idx + self._images_per_page, self._total_images)
 
         print_debug("ImageGridWidget", f"Displaying images {start_idx} to {end_idx-1}")
-        visible_models = self.plotModel.visible_models
+        visible_models = self.run_list_model.visible_models
         if not visible_models:
             return
 
@@ -607,7 +614,7 @@ class ImageGridWidget(QWidget):
         self.figure.clear()
 
         # Get data for new images that need to be fetched
-        visible_models = self.plotModel.visible_models
+        visible_models = self.run_list_model.visible_models
         if visible_models:
             run_model = visible_models[0]
             x_keys, y_keys, norm_keys = run_model.get_selected_keys()

@@ -21,7 +21,7 @@ class CanvasControlWidget(QWidget):
     canvases. Used by both CanvasRunList and DataSourceManager.
     """
 
-    def __init__(self, canvas_manager, plot_model, parent=None):
+    def __init__(self, canvas_manager, run_list_model, parent=None):
         """
         Initialize the canvas control widget.
 
@@ -29,14 +29,14 @@ class CanvasControlWidget(QWidget):
         ----------
         canvas_manager : CanvasManager
             Model managing available canvases
-        plot_model : PlotModel
+        run_list_model : RunListModel
             Model managing plot data
         parent : QWidget, optional
             Parent widget, by default None
         """
         super().__init__(parent)
         self.canvas_manager = canvas_manager
-        self.plot_model = plot_model
+        self.run_list_model = run_list_model
 
         # Initialize widget registry
         self.widget_registry = PlotWidgetRegistry()
@@ -111,7 +111,7 @@ class CanvasControlWidget(QWidget):
 
     def _on_new_canvas(self, widget_id):
         """Create new canvas with current selection and selected widget type."""
-        visible_models = self.plot_model.visible_models
+        visible_models = self.run_list_model.visible_models
         selected_runs = [model._run for model in visible_models]
         if selected_runs:
             # Get selected widget type
@@ -123,7 +123,7 @@ class CanvasControlWidget(QWidget):
 
     def _on_canvas_selected(self, canvas_id):
         """Add current selection to existing canvas."""
-        visible_models = self.plot_model.visible_models
+        visible_models = self.run_list_model.visible_models
         selected_runs = [model._run for model in visible_models]
         if selected_runs:
             # Add runs to selected canvas
@@ -132,8 +132,8 @@ class CanvasControlWidget(QWidget):
     def _on_clear_canvas(self):
         """Clear the current plot model and deselect all runs."""
         # Clear visible runs from the plot model
-        visible_uids = set(self.plot_model.visible_runs)
+        visible_uids = set(self.run_list_model.visible_runs)
         if visible_uids:
-            self.plot_model.set_uids_visible(visible_uids, False)
+            self.run_list_model.set_uids_visible(visible_uids, False)
             # Reset key selection
-            self.plot_model.set_selected_keys([], [], [], force_update=True)
+            self.run_list_model.set_selected_keys([], [], [], force_update=True)

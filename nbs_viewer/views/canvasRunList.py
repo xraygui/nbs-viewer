@@ -31,13 +31,13 @@ class CanvasRunList(QWidget):
 
     selectionChanged = Signal(list, str)  # (List[CatalogRun], canvas_id)
 
-    def __init__(self, plot_model, canvas_manager, canvas_id: str, parent=None):
+    def __init__(self, run_list_model, canvas_manager, canvas_id: str, parent=None):
         """
         Initialize the CanvasRunList.
 
         Parameters
         ----------
-        plot_model : PlotModel
+        run_list_model : RunListModel
             Model to display and manage runs for
         canvas_manager : CanvasManager
             Model managing available canvases
@@ -47,7 +47,7 @@ class CanvasRunList(QWidget):
             Parent widget, by default None
         """
         super().__init__(parent)
-        self.plot_model = plot_model
+        self.run_list_model = run_list_model
         self.canvas_id = canvas_id
         self._handling_selection = False
 
@@ -56,7 +56,7 @@ class CanvasRunList(QWidget):
         self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
         self.list_widget.itemChanged.connect(self.handle_item_changed)
 
-        self.canvas_controls = CanvasControlWidget(canvas_manager, plot_model, self)
+        self.canvas_controls = CanvasControlWidget(canvas_manager, run_list_model, self)
         self.remove_button = QPushButton("Remove Selected Runs")
         self.remove_button.setToolTip(
             "Permanently remove selected runs from this canvas"
@@ -77,12 +77,12 @@ class CanvasRunList(QWidget):
         layout.addWidget(self.canvas_controls)
 
         # Connect to model signals
-        self.plot_model.run_added.connect(self._on_run_added)
-        self.plot_model.run_removed.connect(self._on_run_removed)
-        self.plot_model.visible_runs_changed.connect(self._on_selection_changed)
+        self.run_list_model.run_added.connect(self._on_run_added)
+        self.run_list_model.run_removed.connect(self._on_run_removed)
+        self.run_list_model.visible_runs_changed.connect(self._on_selection_changed)
 
         # Initialize with current runs
-        for run in self.plot_model.available_runs:
+        for run in self.run_list_model.available_runs:
             self._add_run_to_list(run)
 
     def _add_run_to_list(self, run):
@@ -94,7 +94,7 @@ class CanvasRunList(QWidget):
         item.setData(Qt.UserRole, run.uid)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(
-            Qt.Checked if run.uid in self.plot_model._visible_runs else Qt.Unchecked
+            Qt.Checked if run.uid in self.run_list_model._visible_runs else Qt.Unchecked
         )
         self.list_widget.addItem(item)
 
@@ -138,7 +138,7 @@ class CanvasRunList(QWidget):
         for item in selected_items:
             uid = item.data(Qt.UserRole)
             # Remove from plot model first
-            self.plot_model.remove_uids([uid])
+            self.run_list_model.remove_uids([uid])
 
             # Remove from list widget
             row = self.list_widget.row(item)
@@ -165,7 +165,7 @@ class CanvasRunList(QWidget):
         item.setData(Qt.UserRole, plotItem.uid)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
-        self.plot_model.add_run(plotItem)
+        self.run_list_model.add_run(plotItem)
         self.list_widget.addItem(item)
         # print("Done adding bluesky plot item")
 
@@ -184,17 +184,17 @@ class CanvasRunList(QWidget):
             item = self.list_widget.item(i)
             if item.data(Qt.UserRole) == plotItem.uid:
                 self.list_widget.takeItem(i)
-                self.plot_model.remove_run(plotItem)
+                self.run_list_model.remove_run(plotItem)
                 break
 
     def handle_item_changed(self, item):
         """Handle checkbox state changes."""
         uid = item.data(Qt.UserRole)
         # print(f"handle_item_changed: {uid}")
-        if uid in self.plot_model.available_uids:
+        if uid in self.run_list_model.available_uids:
             is_visible = item.checkState() == Qt.Checked
             # print(f"Found Run, setting {uid} to {is_visible}")
-            self.plot_model.set_uids_visible([uid], is_visible)
+            self.run_list_model.set_uids_visible([uid], is_visible)
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
@@ -210,7 +210,7 @@ class CanvasRunList(QWidget):
         runs = []
         for item in selected_items:
             uid = item.data(Qt.UserRole)
-            run_model = self.plot_model._run_models.get(uid)
+            run_model = self.run_list_model._run_models.get(uid)
             if run_model:
                 runs.append(run_model.run)
 
@@ -224,7 +224,7 @@ class CanvasRunList(QWidget):
         combined_run = CombinedRunModel(runs=runs, method=CombinationMethod.AVERAGE)
 
         # Add to plot model
-        self.plot_model.add_run(combined_run)
+        self.run_list_model.add_run(combined_run)
 
         # Clear selection
         self.list_widget.clearSelection()

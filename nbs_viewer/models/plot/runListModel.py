@@ -2,12 +2,11 @@
 
 from typing import List, Optional
 from qtpy.QtCore import QObject, Signal
-import numpy as np
 from .runModel import RunModel
 from nbs_viewer.utils import print_debug
 
 
-class PlotModel(QObject):
+class RunListModel(QObject):
     """
     Model coordinating between run data and plot artists.
 
@@ -27,7 +26,7 @@ class PlotModel(QObject):
 
     def __init__(self, is_main_canvas=False):
         """
-        Initialize the plot model.
+        Initialize the run list model.
 
         Parameters
         ----------
@@ -60,7 +59,7 @@ class PlotModel(QObject):
 
     def update_available_keys(self) -> None:
         """Update available keys and maintain selection state."""
-        # print("Updating available keys in PlotModel")
+        # print("Updating available keys in RunListModel")
         runs = self.visible_models
         if not runs:
             if not self._retain_selection:
@@ -72,7 +71,7 @@ class PlotModel(QObject):
         # Get intersection of keys from all models
         first_run = runs[0]
         print_debug(
-            "PlotModel.update_available_keys",
+            "RunListModel.update_available_keys",
             f"available_keys from first_run.uid {first_run.uid}: {first_run.available_keys}",
             "run",
         )
@@ -239,7 +238,7 @@ class PlotModel(QObject):
         force_update : bool, optional
             Whether to force update the plot regardless of auto_add setting
         """
-        # print("PlotModel set_selection")
+        # print("RunListModel set_selection")
         # Always update internal state
         self._current_x_keys = x_keys
         self._current_y_keys = y_keys
@@ -256,7 +255,7 @@ class PlotModel(QObject):
         self.request_plot_update.emit()
         # Update plot if auto_add is enabled or force_update is True
         # if self._auto_add or force_update:
-        #     print("PlotModel set_selection calling _update_plot")
+        #     print("RunListModel set_selection calling _update_plot")
         #     self.request_plot_update.emit()
 
     def get_selected_keys(self):
@@ -282,7 +281,7 @@ class PlotModel(QObject):
         run : CatalogRun
             Run to add to the model
         """
-        print_debug("PlotModel.add_runs", f"Adding runs {len(run_list)}", "run")
+        print_debug("RunListModel.add_runs", f"Adding runs {len(run_list)}", "run")
         uid_list = []
         for run in run_list:
             uid = run.uid

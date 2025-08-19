@@ -176,13 +176,13 @@ class CanvasTab(QWidget):
     Uses collapsible panels for run list and plot controls to maximize plot space.
     """
 
-    def __init__(self, plot_model, canvas_manager, canvas_id, parent=None):
+    def __init__(self, run_list_model, canvas_manager, canvas_id, parent=None):
         """
         Initialize a canvas tab.
 
         Parameters
         ----------
-        plot_model : PlotModel
+        run_list_model : RunListModel
             Model managing the canvas data
         canvas_manager : CanvasManager
             Manager for all canvases
@@ -194,11 +194,11 @@ class CanvasTab(QWidget):
         super().__init__(parent)
 
         # Create widgets
-        self.run_list = CanvasRunList(plot_model, canvas_manager, canvas_id)
+        self.run_list = CanvasRunList(run_list_model, canvas_manager, canvas_id)
 
         # Create plot widget based on canvas widget type
         self.plot_widget = self._create_plot_widget(
-            plot_model, canvas_manager, canvas_id
+            run_list_model, canvas_manager, canvas_id
         )
 
         # Create collapsible panels for data management
@@ -246,13 +246,13 @@ class CanvasTab(QWidget):
         layout.addWidget(self.splitter)
         self.setLayout(layout)
 
-    def _create_plot_widget(self, plot_model, canvas_manager, canvas_id):
+    def _create_plot_widget(self, run_list_model, canvas_manager, canvas_id):
         """
         Create the appropriate plot widget based on canvas widget type.
 
         Parameters
         ----------
-        plot_model : PlotModel
+        run_list_model : RunListModel
             The plot model for this canvas
         canvas_manager : CanvasManager
             The canvas manager
@@ -273,7 +273,7 @@ class CanvasTab(QWidget):
         if widget_registry and widget_type in widget_registry.get_available_widgets():
             # Create widget using registry
             widget_class = widget_registry.get_widget(widget_type)
-            return widget_class(plot_model)
+            return widget_class(run_list_model)
         else:
             # Fallback to default PlotWidget
-            return PlotWidget(plot_model)
+            return PlotWidget(run_list_model)
