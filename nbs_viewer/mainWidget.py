@@ -1,6 +1,6 @@
 from .views.dataSourceSwitcher import DataSourceSwitcher
 from .models.app_model import AppModel
-from .views.plot.canvasTab import CanvasTab
+from .views.display.plotDisplay import PlotDisplay
 from .views.plot.plotWidget import PlotWidget
 from qtpy.QtWidgets import (
     QWidget,
@@ -189,7 +189,7 @@ class MainWidget(QWidget):
     def _on_canvas_added(self, canvas_id, plot_model):
         """Handle new canvas creation."""
         if canvas_id != "main":
-            tab = CanvasTab(plot_model, self.canvas_manager, canvas_id)
+            tab = PlotDisplay(plot_model, self.canvas_manager, canvas_id)
             self.tab_widget.addTab(tab, f"Canvas {canvas_id}")
             self.tab_widget.setCurrentWidget(tab)
 
