@@ -24,18 +24,18 @@ class RunListModel(QObject):
 
     request_plot_update = Signal()
 
-    def __init__(self, is_main_canvas=False):
+    def __init__(self, is_main_display=False):
         """
         Initialize the run list model.
 
         Parameters
         ----------
-        is_main_canvas : bool
+        is_main_display : bool
             If True, all runs are automatically selected
         """
         super().__init__()
         self._run_models = {}  # run_uid -> RunModel
-        self._is_main_canvas = is_main_canvas
+        self._is_main_display = is_main_display
 
         self.available_keys = list()
         self._current_x_keys = []
@@ -301,7 +301,7 @@ class RunListModel(QObject):
             # Update available keys first
         self.update_available_keys()
 
-        if self._is_main_canvas or self._auto_add:
+        if self._is_main_display or self._auto_add:
             self.set_uids_visible(uid_list, True)
         # Determine key selection
         if len(self._run_models) == 1 and not self._retain_selection:
@@ -316,7 +316,7 @@ class RunListModel(QObject):
 
         # Emit signals in correct order
 
-        # Handle main canvas auto-selection
+        # Handle main display auto-selection
 
         # Force plot update and legend refresh
         self.available_runs_changed.emit(self.available_runs)
@@ -356,7 +356,7 @@ class RunListModel(QObject):
         """Remove a single CatalogRun from the model via UID."""
         self.remove_uids([run.uid])
 
-    def set_runs(self, run_list, canvas_id="main"):
+    def set_runs(self, run_list, display_id="main"):
         """Update the complete selection state.
         Takes a list of CatalogRun objects and updates the model to contain
         only these runs.
@@ -420,7 +420,7 @@ class RunListModel(QObject):
 
     @property
     def visible_runs(self):
-        if self._is_main_canvas:
+        if self._is_main_display:
             return set(self._run_models.keys())
         else:
             return self._visible_runs

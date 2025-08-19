@@ -143,48 +143,48 @@ class Viewer(QMainWindow):
         self.switch_catalog_menu = catalog_menu.addMenu("&Switch Catalog")
         self._update_switch_catalog_menu()
 
-        # Canvas Menu
-        canvas_menu = menubar.addMenu("&Canvas")
+        # Display Menu
+        display_menu = menubar.addMenu("&Display")
 
-        # New Canvas
-        new_canvas_action = QAction("&New Canvas", self)
-        new_canvas_action.setShortcut("Ctrl+N")
-        new_canvas_action.setStatusTip("Create a new canvas")
-        new_canvas_action.triggered.connect(self._on_new_canvas)
-        canvas_menu.addAction(new_canvas_action)
+        # New Display
+        new_display_action = QAction("&New Display", self)
+        new_display_action.setShortcut("Ctrl+N")
+        new_display_action.setStatusTip("Create a new display")
+        new_display_action.triggered.connect(self._on_new_display)
+        display_menu.addAction(new_display_action)
 
-        canvas_menu.addSeparator()
+        display_menu.addSeparator()
 
-        # New Matplotlib Canvas
-        new_mpl_canvas_action = QAction("New &Matplotlib Canvas", self)
-        new_mpl_canvas_action.setShortcut("Ctrl+Shift+M")
-        new_mpl_canvas_action.setStatusTip("Create a new matplotlib canvas")
-        new_mpl_canvas_action.triggered.connect(self._on_new_matplotlib_canvas)
-        canvas_menu.addAction(new_mpl_canvas_action)
+        # New Matplotlib Display
+        new_mpl_display_action = QAction("New &Matplotlib Display", self)
+        new_mpl_display_action.setShortcut("Ctrl+Shift+M")
+        new_mpl_display_action.setStatusTip("Create a new matplotlib display")
+        new_mpl_display_action.triggered.connect(self._on_new_matplotlib_display)
+        display_menu.addAction(new_mpl_display_action)
 
-        # New Image Grid Canvas
-        new_image_grid_action = QAction("New &Image Grid Canvas", self)
+        # New Image Grid Display
+        new_image_grid_action = QAction("New &Image Grid Display", self)
         new_image_grid_action.setShortcut("Ctrl+Shift+I")
-        new_image_grid_action.setStatusTip("Create a new image grid canvas")
-        new_image_grid_action.triggered.connect(self._on_new_image_grid_canvas)
-        canvas_menu.addAction(new_image_grid_action)
+        new_image_grid_action.setStatusTip("Create a new image grid display")
+        new_image_grid_action.triggered.connect(self._on_new_image_grid_display)
+        display_menu.addAction(new_image_grid_action)
 
-        canvas_menu.addSeparator()
+        display_menu.addSeparator()
 
-        # Close Canvas
-        close_canvas_action = QAction("&Close Canvas", self)
-        close_canvas_action.setShortcut("Ctrl+W")
-        close_canvas_action.setStatusTip("Close the current canvas")
-        close_canvas_action.triggered.connect(self._on_close_canvas)
-        canvas_menu.addAction(close_canvas_action)
+        # Close Display
+        close_display_action = QAction("&Close Display", self)
+        close_display_action.setShortcut("Ctrl+W")
+        close_display_action.setStatusTip("Close the current display")
+        close_display_action.triggered.connect(self._on_close_display)
+        display_menu.addAction(close_display_action)
 
         # Keep duplicate for potential quick copy; no-op for now
 
-        canvas_menu.addSeparator()
+        display_menu.addSeparator()
 
-        # Remove unused canvas actions for now
+        # Remove unused display actions for now
 
-        # Remove unused canvas actions for now
+        # Remove unused display actions for now
 
     def _update_switch_catalog_menu(self):
         """Update the switch catalog submenu with available catalogs."""
@@ -265,40 +265,40 @@ class Viewer(QMainWindow):
         if self.app_model is not None:
             self.app_model.catalogs.set_current_catalog(label)
 
-    # Canvas menu action handlers
-    def _on_new_canvas(self):
-        """Handle creating a new canvas."""
-        self.mainWidget.create_canvas("matplotlib")
+    # Display menu action handlers
+    def _on_new_display(self):
+        """Handle creating a new display."""
+        self.mainWidget.create_display("matplotlib")
 
-    def _on_new_matplotlib_canvas(self):
-        """Handle creating a new matplotlib canvas."""
-        # TODO: Implement matplotlib canvas creation
-        self.mainWidget.create_matplotlib_canvas()
+    def _on_new_matplotlib_display(self):
+        """Handle creating a new matplotlib display."""
+        # TODO: Implement matplotlib display creation
+        self.mainWidget.create_matplotlib_display()
 
-    def _on_new_image_grid_canvas(self):
-        """Handle creating a new image grid canvas."""
-        # TODO: Implement image grid canvas creation
-        self.mainWidget.create_image_grid_canvas()
+    def _on_new_image_grid_display(self):
+        """Handle creating a new image grid display."""
+        # TODO: Implement image grid display creation
+        self.mainWidget.create_image_grid_display()
 
-    def _on_close_canvas(self):
-        """Handle closing the current canvas."""
-        # TODO: Implement canvas closing
-        self.mainWidget.close_current_canvas()
+    def _on_close_display(self):
+        """Handle closing the current display."""
+        # TODO: Implement display closing
+        self.mainWidget.close_current_display()
 
-    def _on_duplicate_canvas(self):
-        """Handle duplicating the current canvas."""
-        # TODO: Implement canvas duplication
-        self.mainWidget.duplicate_current_canvas()
+    def _on_duplicate_display(self):
+        """Handle duplicating the current display."""
+        # TODO: Implement display duplication
+        self.mainWidget.duplicate_current_display()
 
-    def _on_canvas_settings(self):
-        """Handle canvas settings."""
-        # TODO: Implement canvas settings dialog
-        print("Canvas settings - not implemented yet")
+    def _on_display_settings(self):
+        """Handle display settings."""
+        # TODO: Implement display settings dialog
+        print("Display settings - not implemented yet")
 
-    def _on_save_canvas_layout(self):
-        """Handle saving canvas layout."""
-        # TODO: Implement canvas layout saving
-        print("Save canvas layout - not implemented yet")
+    def _on_save_display_layout(self):
+        """Handle saving display layout."""
+        # TODO: Implement display layout saving
+        print("Save display layout - not implemented yet")
 
 
 def main():

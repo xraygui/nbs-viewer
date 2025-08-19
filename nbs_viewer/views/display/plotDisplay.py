@@ -16,35 +16,35 @@ from ..common.panel import CollapsiblePanel
 
 class PlotDisplay(QWidget):
     """
-    A tab containing a canvas run list and plot widget.
+    A tab containing a display run list and plot widget.
 
-    This represents a single canvas view, with its run management and plot display.
+    This represents a single display view, with its run management and plot display.
     Uses collapsible panels for run list and plot controls to maximize plot space.
     """
 
-    def __init__(self, run_list_model, canvas_manager, canvas_id, parent=None):
+    def __init__(self, run_list_model, display_manager, display_id, parent=None):
         """
-        Initialize a canvas tab.
+        Initialize a display tab.
 
         Parameters
         ----------
         run_list_model : RunListModel
-            Model managing the canvas data
-        canvas_manager : CanvasManager
-            Manager for all canvases
-        canvas_id : str
-            Identifier for this canvas
+            Model managing the display data
+        display_manager : DisplayManager
+            Manager for all displays
+        display_id : str
+            Identifier for this display
         parent : QWidget, optional
             Parent widget, by default None
         """
         super().__init__(parent)
 
         # Create widgets
-        self.run_list = RunListView(run_list_model, canvas_manager, canvas_id)
+        self.run_list = RunListView(run_list_model, display_manager, display_id)
 
-        # Create plot widget based on canvas widget type
+        # Create plot widget based on display widget type
         self.plot_widget = self._create_plot_widget(
-            run_list_model, canvas_manager, canvas_id
+            run_list_model, display_manager, display_id
         )
 
         # Create collapsible panels for data management
@@ -92,29 +92,29 @@ class PlotDisplay(QWidget):
         layout.addWidget(self.splitter)
         self.setLayout(layout)
 
-    def _create_plot_widget(self, run_list_model, canvas_manager, canvas_id):
+    def _create_plot_widget(self, run_list_model, display_manager, display_id):
         """
-        Create the appropriate plot widget based on canvas widget type.
+        Create the appropriate plot widget based on display widget type.
 
         Parameters
         ----------
         run_list_model : RunListModel
-            The plot model for this canvas
-        canvas_manager : CanvasManager
-            The canvas manager
-        canvas_id : str
-            The canvas identifier
+            The plot model for this display
+        display_manager : DisplayManager
+            The display manager
+        display_id : str
+            The display identifier
 
         Returns
         -------
         QWidget
             The created plot widget
         """
-        # Get widget type for this canvas
-        display_type = canvas_manager.get_canvas_display_type(canvas_id)
+        # Get widget type for this display
+        display_type = display_manager.get_display_type(display_id)
 
-        # Get widget registry from canvas manager
-        display_registry = canvas_manager._display_registry
+        # Get widget registry from display manager
+        display_registry = display_manager._display_registry
 
         if (
             display_registry

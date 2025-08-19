@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 from qtpy.QtCore import QObject, Signal
 
-from .plot.canvasManager import CanvasManager
+from .plot.displayManager import DisplayManager
 from ..views.display.displayRegistry import PlotDisplayRegistry
 
 
@@ -147,35 +147,35 @@ class CatalogManagerModel(QObject):
 class AppModel(QObject):
     """Top-level application model that owns persistent state."""
 
-    active_canvas_changed = Signal(str)
+    active_display_changed = Signal(str)
 
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
         self.config = ConfigModel(config_path)
-        self.displays = PlotDisplayRegistry()
-        self.canvases = CanvasManager()
-        self.canvases.set_display_registry(self.displays)
+        self.display_registry = PlotDisplayRegistry()
+        self.displays = DisplayManager()
+        self.displays.set_display_registry(self.display_registry)
         self.catalogs = CatalogManagerModel(self.config)
 
-        self._active_canvas_id = "main"
+        self._active_display_id = "main"
 
-        # Route catalog selections to the active canvas' RunListModel
+        # Route catalog selections to the active display' RunListModel
         self.catalogs.run_selected.connect(self._on_run_selected)
         self.catalogs.run_deselected.connect(self._on_run_deselected)
 
-    # Active canvas --------------------------------------------------------
-    def set_active_canvas(self, canvas_id: str) -> None:
-        self._active_canvas_id = canvas_id
-        self.active_canvas_changed.emit(canvas_id)
+    # Active display --------------------------------------------------------
+    def set_active_display(self, display_id: str) -> None:
+        self._active_display_id = display_id
+        self.active_display_changed.emit(display_id)
 
-    def get_active_canvas(self) -> str:
-        return self._active_canvas_id
+    def get_active_display(self) -> str:
+        return self._active_display_id
 
     # Catalog selection routing -------------------------------------------
 
-    def _get_plot_model(self, canvas_id: Optional[str] = None):
-        cid = canvas_id or self._active_canvas_id
-        models = self.canvases.canvases
+    def _get_plot_model(self, display_id: Optional[str] = None):
+        cid = display_id or self._active_display_id
+        models = self.displays.canvases
         return models.get(cid)
 
     def _on_run_selected(self, run) -> None:
@@ -189,8 +189,8 @@ class AppModel(QObject):
             plot_model.remove_run(run)
 
     # Convenience actions for menus ---------------------------------------
-    def new_canvas(self, widget_type: Optional[str] = None) -> str:
-        return self.canvases.create_canvas(widget_type)
+    def new_display(self, widget_type: Optional[str] = None) -> str:
+        return self.displays.create_display(widget_type)
 
-    def close_canvas(self, canvas_id: str) -> None:
-        self.canvases.remove_canvas(canvas_id)
+    def close_display(self, display_id: str) -> None:
+        self.displays.remove_display(canvas_id)
