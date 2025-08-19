@@ -15,27 +15,27 @@ class CanvasManager(QObject):
         Emitted when a new canvas is created (canvas_id, run_list_model)
     canvas_removed : Signal
         Emitted when a canvas is removed (canvas_id)
-    widget_type_changed : Signal
-        Emitted when widget type changes (canvas_id, widget_type)
+    display_type_changed : Signal
+        Emitted when display type changes (canvas_id, display_type)
     """
 
     canvas_added = Signal(str, object)  # canvas_id, run_list_model
     canvas_removed = Signal(str)  # canvas_id
-    widget_type_changed = Signal(str, str)  # canvas_id, widget_type
+    display_type_changed = Signal(str, str)  # canvas_id, display_type
 
     def __init__(self):
         super().__init__()
         self._plot_models = {}  # canvas_id -> PlotModel
         self._run_assignments = {}  # run_uid -> canvas_id
-        self._canvas_widget_types = {}  # canvas_id -> widget_type
-        self._widget_registry = None  # Will be set by MainWidget
+        self._canvas_display_types = {}  # canvas_id -> display_type
+        self._display_registry = None  # Will be set by MainWidget
 
         # Create main canvas with auto-selection enabled
         self._create_new_canvas("main", is_main_canvas=True)
 
-    def set_widget_registry(self, registry):
-        """Set the widget registry for this canvas manager."""
-        self._widget_registry = registry
+    def set_display_registry(self, registry):
+        """Set the display registry for this canvas manager."""
+        self._display_registry = registry
 
     def add_run_to_canvas(self, run: CatalogRun, canvas_id: str) -> None:
         """
@@ -81,44 +81,44 @@ class CanvasManager(QObject):
                 del self._run_assignments[uid]
 
             self._plot_models.pop(canvas_id)
-            if canvas_id in self._canvas_widget_types:
-                del self._canvas_widget_types[canvas_id]
+            if canvas_id in self._canvas_display_types:
+                del self._canvas_display_types[canvas_id]
             self.canvas_removed.emit(canvas_id)
 
-    def create_canvas(self, widget_type: Optional[str] = None) -> str:
+    def create_canvas(self, display_type: Optional[str] = None) -> str:
         """
-        Create a new canvas with specified widget type.
+        Create a new canvas with specified display type.
 
         Parameters
         ----------
-        widget_type : str, optional
-            Widget type to use for this canvas. If None, uses default.
+        display_type : str, optional
+            display type to use for this canvas. If None, uses default.
 
         Returns
         -------
         str
             The canvas identifier
         """
-        if widget_type is None and self._widget_registry:
-            widget_type = self._widget_registry.get_default_widget()
-        elif widget_type is None:
-            widget_type = "matplotlib"  # Fallback default
+        if display_type is None and self._display_registry:
+            display_type = self._display_registry.get_default_display()
+        elif display_type is None:
+            display_type = "matplotlib"  # Fallback default
 
-        # Validate widget type if registry is available
-        if self._widget_registry:
-            available_widgets = self._widget_registry.get_available_widgets()
-            if widget_type not in available_widgets:
-                raise ValueError(f"Unknown widget type: {widget_type}")
+        # Validate display type if registry is available
+        if self._display_registry:
+            available_displays = self._display_registry.get_available_displays()
+            if display_type not in available_displays:
+                raise ValueError(f"Unknown display type: {display_type}")
 
         canvas_id = f"canvas_{len(self._plot_models)}"
-        self._create_new_canvas(canvas_id, widget_type=widget_type)
+        self._create_new_canvas(canvas_id, display_type=display_type)
         return canvas_id
 
     def _create_new_canvas(
         self,
         canvas_id: str,
         is_main_canvas: bool = False,
-        widget_type: str = "matplotlib",
+        display_type: str = "matplotlib",
     ) -> None:
         """
         Create a new canvas and PlotModel.
@@ -129,35 +129,35 @@ class CanvasManager(QObject):
             Identifier for the canvas
         is_main_canvas : bool, optional
             Whether this is the main canvas, by default False
-        widget_type : str, optional
-            Widget type for this canvas, by default "matplotlib"
+        display_type : str, optional
+            display type for this canvas, by default "matplotlib"
         """
         run_list_model = RunListModel(is_main_canvas=is_main_canvas)
         self._plot_models[canvas_id] = run_list_model
-        self._canvas_widget_types[canvas_id] = widget_type
+        self._canvas_display_types[canvas_id] = display_type
         self.canvas_added.emit(canvas_id, run_list_model)
 
-    def get_canvas_widget_type(self, canvas_id: str) -> str:
-        """Get the widget type for a canvas."""
-        return self._canvas_widget_types.get(canvas_id, "matplotlib")
+    def get_canvas_display_type(self, canvas_id: str) -> str:
+        """Get the display type for a canvas."""
+        return self._canvas_display_types.get(canvas_id, "matplotlib")
 
-    def set_canvas_widget_type(self, canvas_id: str, widget_type: str):
-        """Set the widget type for a canvas."""
+    def set_canvas_display_type(self, canvas_id: str, display_type: str):
+        """Set the display type for a canvas."""
         if canvas_id in self._plot_models:
-            self._canvas_widget_types[canvas_id] = widget_type
-            self.widget_type_changed.emit(canvas_id, widget_type)
+            self._canvas_display_types[canvas_id] = display_type
+            self.display_type_changed.emit(canvas_id, display_type)
 
-    def get_available_widget_types(self) -> List[str]:
-        """Get list of available widget types."""
-        if self._widget_registry:
-            return self._widget_registry.get_available_widgets()
+    def get_available_display_types(self) -> List[str]:
+        """Get list of available display types."""
+        if self._display_registry:
+            return self._display_registry.get_available_displays()
         return ["matplotlib"]  # Fallback
 
-    def get_widget_metadata(self, widget_type: str) -> dict:
-        """Get metadata for a widget type."""
-        if self._widget_registry:
-            return self._widget_registry.get_widget_metadata(widget_type)
-        return {"name": widget_type, "description": ""}  # Fallback
+    def get_display_metadata(self, display_type: str) -> dict:
+        """Get metadata for a display type."""
+        if self._display_registry:
+            return self._display_registry.get_display_metadata(display_type)
+        return {"name": display_type, "description": ""}  # Fallback
 
     def get_canvas_for_run(self, run_uid: str) -> Optional[str]:
         """

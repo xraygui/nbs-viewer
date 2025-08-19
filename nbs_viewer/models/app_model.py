@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 from qtpy.QtCore import QObject, Signal
 
 from .plot.canvasManager import CanvasManager
-from ..views.plot.widget_registry import PlotWidgetRegistry
+from ..views.display.displayRegistry import PlotDisplayRegistry
 
 
 class ConfigModel(QObject):
@@ -152,9 +152,9 @@ class AppModel(QObject):
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
         self.config = ConfigModel(config_path)
-        self.widgets = PlotWidgetRegistry()
+        self.displays = PlotDisplayRegistry()
         self.canvases = CanvasManager()
-        self.canvases.set_widget_registry(self.widgets)
+        self.canvases.set_display_registry(self.displays)
         self.catalogs = CatalogManagerModel(self.config)
 
         self._active_canvas_id = "main"

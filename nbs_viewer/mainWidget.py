@@ -57,7 +57,7 @@ class MainWidget(QWidget):
         """Setup models"""
         # Use app-level model components
         self.canvas_manager = self.app_model.canvases
-        self.widget_registry = self.app_model.widgets
+        self.display_registry = self.app_model.displays
         # Apply config defaults (e.g., default widget)
         self._apply_config_defaults()
 
@@ -84,11 +84,11 @@ class MainWidget(QWidget):
     def _apply_config_defaults(self):
         """Apply defaults from config to registry."""
         try:
-            default_widget = self.app_model.config.get("plot_widgets.default_widget")
-            if default_widget:
-                self.widget_registry.set_default_widget(default_widget)
+            default_display = self.app_model.config.get("plot_displays.default_display")
+            if default_display:
+                self.display_registry.set_default_display(default_display)
         except Exception as e:
-            print(f"Failed to apply widget defaults: {e}")
+            print(f"Failed to apply display defaults: {e}")
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""

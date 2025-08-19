@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
-from .plot.canvasControl import CanvasControlWidget
+from .display.displayControl import DisplayControlWidget
 from ..models.app_model import AppModel
 from nbs_viewer.utils import print_debug
 
@@ -38,14 +38,14 @@ class DataSourceSwitcher(QWidget):
     def __init__(
         self,
         plot_model,
-        canvas_manager,
+        display_manager,
         config_file=None,
         app_model: AppModel = None,
         parent=None,
     ):
         super().__init__(parent)
         self.plot_model = plot_model
-        self.canvas_controls = CanvasControlWidget(canvas_manager, plot_model, self)
+        self.display_controls = DisplayControlWidget(display_manager, plot_model, self)
         self.config_file = config_file
         self.app_model = app_model
         self._catalogs = {}  # label -> catalog
@@ -77,7 +77,7 @@ class DataSourceSwitcher(QWidget):
         layout.addLayout(header)
         # layout.addLayout(source_buttons)
         layout.addWidget(self.stacked_widget)
-        layout.addWidget(self.canvas_controls)
+        layout.addWidget(self.display_controls)
         self.setLayout(layout)
 
         # Automatically load catalogs with autoload=true

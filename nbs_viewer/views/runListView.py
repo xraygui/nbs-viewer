@@ -11,13 +11,13 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 from qtpy.QtCore import Qt, Signal
-from .plot.canvasControl import CanvasControlWidget
+from .display.displayControl import DisplayControlWidget
 from ..models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 
 
 class RunListView(QWidget):
     """
-    Widget for managing run selection for a canvas.
+    Widget for managing run selection for a display.
 
     Provides a list interface for adding/removing runs and managing their
     selection state. Matches DataSourceManager's signal interface for
@@ -26,12 +26,12 @@ class RunListView(QWidget):
     Signals
     -------
     selectionChanged : Signal
-        Emitted when selection state changes (List[CatalogRun], canvas_id)
+        Emitted when selection state changes (List[CatalogRun], display_id)
     """
 
-    selectionChanged = Signal(list, str)  # (List[CatalogRun], canvas_id)
+    selectionChanged = Signal(list, str)  # (List[CatalogRun], display_id)
 
-    def __init__(self, run_list_model, canvas_manager, canvas_id: str, parent=None):
+    def __init__(self, run_list_model, display_manager, display_id: str, parent=None):
         """
             Initialize the RunListView
         .
@@ -40,16 +40,16 @@ class RunListView(QWidget):
             ----------
             run_list_model : RunListModel
                 Model to display and manage runs for
-            canvas_manager : CanvasManager
-                Model managing available canvases
-            canvas_id : str
-                Identifier for the canvas this list manages
+            display_manager : DisplayManager
+                Model managing available displays
+            display_id : str
+                Identifier for the display this list manages
             parent : QWidget, optional
                 Parent widget, by default None
         """
         super().__init__(parent)
         self.run_list_model = run_list_model
-        self.canvas_id = canvas_id
+        self.display_id = display_id
         self._handling_selection = False
 
         # Create widgets
@@ -57,10 +57,12 @@ class RunListView(QWidget):
         self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
         self.list_widget.itemChanged.connect(self.handle_item_changed)
 
-        self.canvas_controls = CanvasControlWidget(canvas_manager, run_list_model, self)
+        self.display_controls = DisplayControlWidget(
+            display_manager, run_list_model, self
+        )
         self.remove_button = QPushButton("Remove Selected Runs")
         self.remove_button.setToolTip(
-            "Permanently remove selected runs from this canvas"
+            "Permanently remove selected runs from this display"
         )
 
         # Add combine button
@@ -75,7 +77,7 @@ class RunListView(QWidget):
         layout.addWidget(self.list_widget)
         layout.addWidget(self.remove_button)
         layout.addWidget(self.combine_button)
-        layout.addWidget(self.canvas_controls)
+        layout.addWidget(self.display_controls)
 
         # Connect to model signals
         self.run_list_model.run_added.connect(self._on_run_added)

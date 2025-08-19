@@ -111,15 +111,18 @@ class PlotDisplay(QWidget):
             The created plot widget
         """
         # Get widget type for this canvas
-        widget_type = canvas_manager.get_canvas_widget_type(canvas_id)
+        display_type = canvas_manager.get_canvas_display_type(canvas_id)
 
         # Get widget registry from canvas manager
-        widget_registry = canvas_manager._widget_registry
+        display_registry = canvas_manager._display_registry
 
-        if widget_registry and widget_type in widget_registry.get_available_widgets():
+        if (
+            display_registry
+            and display_type in display_registry.get_available_displays()
+        ):
             # Create widget using registry
-            widget_class = widget_registry.get_widget(widget_type)
-            return widget_class(run_list_model)
+            display_class = display_registry.get_display(display_type)
+            return display_class(run_list_model)
         else:
             # Fallback to default PlotWidget
             return PlotWidget(run_list_model)
