@@ -80,7 +80,7 @@ class MainWidget(QWidget):
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""
-        main_model = self.display_manager.canvases["main"]
+        main_model = self.display_manager.run_list_models["main"]
 
         # Create main tab widgets
         self.data_source = DataSourceSwitcher(

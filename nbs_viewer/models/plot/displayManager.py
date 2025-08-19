@@ -26,7 +26,7 @@ class DisplayManager(QObject):
 
     def __init__(self):
         super().__init__()
-        self._plot_models = {}  # display_id -> PlotModel
+        self._run_list_models = {}  # display_id -> RunListModel
         self._run_assignments = {}  # run_uid -> display_id
         self._display_types = {}  # display_id -> display_type
         self._display_registry = DisplayRegistry()  # Will be set by MainWidget
@@ -45,9 +45,9 @@ class DisplayManager(QObject):
         display_id : str
             Target display identifier
         """
-        if display_id in self._plot_models:
-            plot_model = self._plot_models[display_id]
-            plot_model.add_run(run)
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models[display_id]
+            run_list_model.add_run(run)
             self._run_assignments[run.uid] = display_id
 
     def remove_run_from_display(self, run: CatalogRun, display_id: str) -> None:
@@ -61,15 +61,15 @@ class DisplayManager(QObject):
         display_id : str
             Source display identifier
         """
-        if display_id in self._plot_models:
-            plot_model = self._plot_models[display_id]
-            plot_model.remove_run(run)
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models[display_id]
+            run_list_model.remove_run(run)
             if run.uid in self._run_assignments:
                 del self._run_assignments[run.uid]
 
     def remove_display(self, display_id: str) -> None:
         """Remove a display if it exists and is not the main display."""
-        if display_id != "main" and display_id in self._plot_models:
+        if display_id != "main" and display_id in self._run_list_models:
             # Remove all runs assigned to this display
             runs_to_remove = [
                 uid for uid, cid in self._run_assignments.items() if cid == display_id
@@ -77,7 +77,7 @@ class DisplayManager(QObject):
             for uid in runs_to_remove:
                 del self._run_assignments[uid]
 
-            self._plot_models.pop(display_id)
+            self._run_list_models.pop(display_id)
             if display_id in self._display_types:
                 del self._display_types[display_id]
             self.display_removed.emit(display_id)
@@ -107,7 +107,7 @@ class DisplayManager(QObject):
             if display_type not in available_displays:
                 raise ValueError(f"Unknown display type: {display_type}")
 
-        display_id = f"display_{len(self._plot_models)}"
+        display_id = f"display_{len(self._run_list_models)}"
         self._create_new_display(display_id, display_type=display_type)
         return display_id
 
@@ -130,7 +130,7 @@ class DisplayManager(QObject):
             display type for this display, by default "matplotlib"
         """
         run_list_model = RunListModel(is_main_display=is_main_display)
-        self._plot_models[display_id] = run_list_model
+        self._run_list_models[display_id] = run_list_model
         self._display_types[display_id] = display_type
         self.display_added.emit(display_id, run_list_model)
 
@@ -140,7 +140,7 @@ class DisplayManager(QObject):
 
     def set_display_type(self, display_id: str, display_type: str):
         """Set the display type for a display."""
-        if display_id in self._plot_models:
+        if display_id in self._run_list_models:
             self._display_types[display_id] = display_type
             self.display_type_changed.emit(display_id, display_type)
 
@@ -172,11 +172,10 @@ class DisplayManager(QObject):
         """
         return self._run_assignments.get(run_uid)
 
-    # TODO: What is this for? Why does it return plot models?
     @property
-    def canvases(self):
-        """Get dictionary of current canvases and their plot models."""
-        return self._plot_models.copy()
+    def run_list_models(self):
+        """Get dictionary of current run list models."""
+        return self._run_list_models.copy()
 
     def create_display_with_runs(self, run_list: List[CatalogRun]) -> None:
         """
@@ -205,8 +204,8 @@ class DisplayManager(QObject):
             Target display identifier
         """
         # TODO: Display class should have  the add_runs method
-        if display_id in self._plot_models:
-            run_list_model = self._plot_models[display_id]
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models[display_id]
             for run in run_list:
                 # Remove from current display if assigned
                 current_display = self.get_display_for_run(run.uid)
@@ -226,4 +225,4 @@ class DisplayManager(QObject):
         List[str]
             List of display identifiers
         """
-        return list(self._plot_models.keys())
+        return list(self._run_list_models.keys())

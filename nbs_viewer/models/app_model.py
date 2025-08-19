@@ -3,7 +3,6 @@ from typing import Dict, List, Optional
 from qtpy.QtCore import QObject, Signal
 
 from .plot.displayManager import DisplayManager
-from .plot.displayRegistry import DisplayRegistry
 
 
 class ConfigModel(QObject):
@@ -158,6 +157,7 @@ class AppModel(QObject):
         self._active_display_id = "main"
 
         # Route catalog selections to the active display' RunListModel
+        # TODO: Should this only be done for the main display?
         self.catalogs.run_selected.connect(self._on_run_selected)
         self.catalogs.run_deselected.connect(self._on_run_deselected)
 
@@ -171,20 +171,11 @@ class AppModel(QObject):
 
     # Catalog selection routing -------------------------------------------
 
-    def _get_plot_model(self, display_id: Optional[str] = None):
-        display_id = display_id or self._active_display_id
-        models = self.display_manager.canvases
-        return models.get(display_id)
-
     def _on_run_selected(self, run) -> None:
-        plot_model = self._get_plot_model()
-        if plot_model is not None:
-            plot_model.add_run(run)
+        self.display_manager.add_run_to_display(run, self._active_display_id)
 
     def _on_run_deselected(self, run) -> None:
-        plot_model = self._get_plot_model()
-        if plot_model is not None:
-            plot_model.remove_run(run)
+        self.display_manager.remove_run_from_display(run, self._active_display_id)
 
     # Convenience actions for menus ---------------------------------------
     def new_display(self, widget_type: Optional[str] = None) -> str:
