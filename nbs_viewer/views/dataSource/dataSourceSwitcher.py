@@ -185,8 +185,8 @@ class DataSourceSwitcher(QWidget):
     def get_selected_runs(self):
         """Return selected runs from the current catalog view."""
         view = self.stacked_widget.currentWidget()
-        if view is not None and hasattr(view, "get_selected_items"):
-            return view.get_selected_items()
+        if view is not None and hasattr(view, "get_selected_runs"):
+            return view.get_selected_runs()
         return []
 
     def load_catalog_config(self, path: str):
@@ -262,12 +262,13 @@ class DataSourceSwitcher(QWidget):
         buttons.accepted.connect(URIDialog.accept)
         buttons.rejected.connect(URIDialog.reject)
         layout = QVBoxLayout()
-        layout.addWidget(URISourceView())
+        uriSource = URISourceView()
+        layout.addWidget(uriSource)
         layout.addWidget(buttons)
         URIDialog.setLayout(layout)
         URIDialog.exec_()
         if URIDialog.result() == QDialog.Accepted:
-            sourceView, catalog, label = URIDialog.get_source()
+            sourceView, catalog, label = uriSource.get_source()
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
                 self._catalogs[label] = catalog

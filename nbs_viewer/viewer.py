@@ -6,8 +6,9 @@ from qtpy.QtWidgets import (
     QMainWindow,
     QAction,
 )
+
 from .mainWidget import MainWidget
-from .models.app_model import AppModel
+from .models.app_model import AppModel, set_top_level_model
 from .utils import turn_on_debugging, turn_off_debugging
 from .logging_setup import setup_logging
 
@@ -28,6 +29,7 @@ class Viewer(QMainWindow):
         self.layout = QVBoxLayout(central_widget)
         # Create app-level model and pass into MainWidget
         self.app_model = AppModel(config_file)
+        set_top_level_model(self.app_model)
         self.mainWidget = MainWidget(
             central_widget, config_file=config_file, app_model=self.app_model
         )

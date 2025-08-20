@@ -23,6 +23,7 @@ from qtpy.QtCore import (
 from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
 from nbs_viewer.utils import print_debug
+from ...models.app_model import get_top_level_model
 
 
 class CustomHeaderView(QHeaderView):
@@ -294,6 +295,8 @@ class LazyLoadingTableView(QTableView):
 class CatalogTableView(QWidget):
     """A widget for displaying and managing catalog data in a table view."""
 
+    add_runs_to_display = Signal(list, str)
+
     def __init__(self, catalog, parent=None):
         """Initialize the CatalogTableView."""
         super().__init__(parent)
@@ -312,6 +315,10 @@ class CatalogTableView(QWidget):
         self.data_view.setHorizontalHeader(data_header)
         self.data_view.setSelectionBehavior(QTableView.SelectRows)
         self.data_view.setSelectionMode(QTableView.ExtendedSelection)
+
+        # Enable context menu for the table view
+        self.data_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.data_view.customContextMenuRequested.connect(self.showContextMenu)
 
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
@@ -457,7 +464,7 @@ class CatalogTableView(QWidget):
             self.on_selection_changed
         )
 
-    def get_selected_items(self):
+    def get_selected_runs(self):
         """
         Get the currently selected runs.
 
@@ -467,7 +474,7 @@ class CatalogTableView(QWidget):
             List of currently selected CatalogRun instances
         """
         print_debug(
-            "CatalogTableView.get_selected_items", "Getting selected items", "catalog"
+            "CatalogTableView.get_selected_runs", "Getting selected items", "catalog"
         )
         return self._catalog.get_selected_runs()
 
@@ -512,7 +519,7 @@ class CatalogTableView(QWidget):
         and the catalog's internal selection state.
         """
         # Clear the view's selection first
-        all_items = self.get_selected_items()
+        all_items = self.get_selected_runs()
         self.deselect_items(all_items)
         # Then clear the catalog's selection
         # This will trigger item_deselected signals for each selected run
@@ -606,3 +613,112 @@ class CatalogTableView(QWidget):
             model = source_model
 
         return model
+
+    def showContextMenu(self, pos):
+        """
+        Show context menu for run management.
+
+        Parameters
+        ----------
+        pos : QPoint
+            Position where the context menu should appear
+        """
+        # Get the index at the clicked position
+        index = self.data_view.indexAt(pos)
+        if not index.isValid():
+            return
+
+        # Get selected runs
+        selected_runs = self.get_selected_runs()
+        if not selected_runs:
+            return
+
+        menu = QMenu(self)
+        app_model = get_top_level_model()
+        # Add to new display
+        new_canvas_menu = QMenu("Move to New Display", self)
+        display_types = app_model.display_manager.get_available_display_types()
+        for display_type in display_types:
+            metadata = app_model.display_manager.get_display_metadata(display_type)
+            display_name = metadata.get("name", display_type)
+            action = QAction(display_name, self)
+            action.setToolTip(
+                f"Create a new {display_type} display and move selected runs to it"
+            )
+            action.triggered.connect(
+                lambda checked, name=display_type: self.move_selected_runs_to_new_display(
+                    name
+                )
+            )
+            new_canvas_menu.addAction(action)
+        menu.addMenu(new_canvas_menu)
+
+        new_canvas_copy_menu = QMenu("Copy to New Display", self)
+        display_types = app_model.display_manager.get_available_display_types()
+        for display_type in display_types:
+            metadata = app_model.display_manager.get_display_metadata(display_type)
+            display_name = metadata.get("name", display_type)
+            action = QAction(display_name, self)
+            action.setToolTip(
+                f"Create a new {display_type} display and copy selected runs to it"
+            )
+            action.triggered.connect(
+                lambda checked, name=display_type: self.copy_selected_runs_to_new_display(
+                    name
+                )
+            )
+            new_canvas_copy_menu.addAction(action)
+        menu.addMenu(new_canvas_copy_menu)
+        menu.addSeparator()
+        # Add submenu for existing displays
+        available_displays = app_model.display_manager.get_display_ids()
+        if available_displays:
+            move_menu = QMenu("Move to Display", self)
+            for display_name in available_displays:
+                action = QAction(display_name, self)
+                action.setToolTip(f"Move selected runs to {display_name}")
+                action.triggered.connect(
+                    lambda checked, name=display_name: self.move_selected_runs_to_display(
+                        name
+                    )
+                )
+                move_menu.addAction(action)
+            menu.addMenu(move_menu)
+
+            move_menu = QMenu("Copy to Display", self)
+            for display_name in available_displays:
+                action = QAction(display_name, self)
+                action.setToolTip(f"Copy selected runs to {display_name}")
+                action.triggered.connect(
+                    lambda checked, name=display_name: self.copy_selected_runs_to_display(
+                        name
+                    )
+                )
+                move_menu.addAction(action)
+            menu.addMenu(move_menu)
+
+        # Remove from current display
+        remove_action = QAction("Clear Selection", self)
+        remove_action.triggered.connect(self.deselect_all)
+        menu.addAction(remove_action)
+
+        menu.exec_(self.data_view.mapToGlobal(pos))
+        # Deselect the runs (this will remove them from the current display)
+
+    def move_selected_runs_to_new_display(self, display_type: str):
+        self.copy_selected_runs_to_new_display(display_type)
+        self.deselect_all()
+
+    def copy_selected_runs_to_new_display(self, display_type: str):
+        top_level_model = get_top_level_model()
+        runs = self.get_selected_runs()
+        top_level_model.display_manager.create_display_with_runs(runs, display_type)
+
+    def move_selected_runs_to_display(self, display_id: str):
+        self.copy_selected_runs_to_display(display_id)
+        self.deselect_all()
+
+    def copy_selected_runs_to_display(self, display_id: str):
+        runs = self.get_selected_runs()
+        top_level_model = get_top_level_model()
+        top_level_model.display_manager.add_runs_to_display(runs, display_id)

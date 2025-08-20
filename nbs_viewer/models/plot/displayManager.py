@@ -180,7 +180,9 @@ class DisplayManager(QObject):
         """Get dictionary of current run list models."""
         return self._run_list_models
 
-    def create_display_with_runs(self, run_list: List[CatalogRun]) -> None:
+    def create_display_with_runs(
+        self, run_list: List[CatalogRun], display_type: str = "matplotlib"
+    ) -> None:
         """
         Create a new display and add runs to it.
 
@@ -190,7 +192,7 @@ class DisplayManager(QObject):
             Runs to add to the new display
         """
         # Create new display
-        display_id = self.create_display()
+        display_id = self.create_display(display_type)
 
         # Add runs to the new display
         self.add_runs_to_display(run_list, display_id)

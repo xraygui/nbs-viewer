@@ -2,7 +2,7 @@
 label = "NEXAFS"
 url = "https://tiled.nsls2.bnl.gov"
 catalog_keys = ["nexafs", "raw"]
-catalog_model = "blueskycatalog"
+catalog_model = "nbscatalog"
 
 [[catalog]]
 label = "RSoXS Demo"
@@ -15,14 +15,3 @@ label = "BMM Demo"
 url = "http://tiled-demo.blueskyproject.io"
 catalog_keys = ["bmm","raw"]
 catalog_model = "blueskycatalog"
-
-# Example with authentication options
-[[catalog]]
-label = "Authenticated Server"
-url = "https://tiled.example.com"
-catalog_keys = ["data", "raw"]
-catalog_model = "blueskycatalog"
-# Optional authentication configuration
-api_key = "your-api-key-here"  # Optional: manual API key
-remember_me = true  # Optional: default true
-username = "user@example.com"  # Optional: pre-fill username for interactive auth

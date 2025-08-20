@@ -34,12 +34,6 @@ class MainWidget(QWidget):
         super().__init__(parent)
         self.config_file = config_file
         self.app_model = app_model
-        # Fallback for direct use in tests
-        # TODO: Wtf is this? Why?
-        if self.app_model is None:
-            from .models.app_model import AppModel as _AM
-
-            self.app_model = _AM(config_file)
 
         # Setup models before UI/signals
         self._setup_models()

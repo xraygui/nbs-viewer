@@ -4,6 +4,9 @@ from qtpy.QtCore import QObject, Signal
 
 from .plot.displayManager import DisplayManager
 
+# Global reference to the top-level AppModel instance
+_top_level_model = None
+
 
 class ConfigModel(QObject):
     """Application configuration and preferences."""
@@ -183,3 +186,38 @@ class AppModel(QObject):
 
     def close_display(self, display_id: str) -> None:
         self.display_manager.remove_display(display_id)
+
+
+def set_top_level_model(model: AppModel) -> None:
+    """
+    Set the global top-level AppModel instance.
+
+    Parameters
+    ----------
+    model : AppModel
+        The AppModel instance to set as the global top-level model
+    """
+    global _top_level_model
+    _top_level_model = model
+
+
+def get_top_level_model() -> AppModel:
+    """
+    Get the global top-level AppModel instance.
+
+    Returns
+    -------
+    AppModel
+        The global top-level AppModel instance
+
+    Raises
+    ------
+    RuntimeError
+        If called before the top-level model has been set
+    """
+    if _top_level_model is None:
+        raise RuntimeError(
+            "get_top_level_model() called before top-level model was set. "
+            "This should never occur in normal operation."
+        )
+    return _top_level_model
