@@ -2,7 +2,7 @@ from .plotDisplay import PlotDisplay
 from qtpy.QtWidgets import QWidget, QSplitter, QVBoxLayout
 from qtpy.QtCore import Qt
 
-from nbs_viewer.views.dataSourceSwitcher import DataSourceSwitcher
+from nbs_viewer.views.dataSource.dataSourceSwitcher import DataSourceSwitcher
 from nbs_viewer.views.plot.plotWidget import PlotWidget
 
 
@@ -40,3 +40,7 @@ class MainDisplay(PlotDisplay):
         layout = QVBoxLayout(self)
         layout.addWidget(splitter)
         self.setLayout(layout)
+
+    def get_selected_runs(self):
+        """Get the currently selected runs."""
+        return self.data_source.get_selected_runs()

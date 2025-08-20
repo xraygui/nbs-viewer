@@ -12,12 +12,13 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QCheckBox,
 )
+from tiled.client import from_uri, from_profile
 
-from .catalog.catalogTree import CatalogPicker
-from .catalog.base import CatalogTableView
-from .catalog.kafka import KafkaView
+from ..catalog.catalogTree import CatalogPicker
+from ..catalog.base import CatalogTableView
+from ..catalog.kafka import KafkaView
 
-from ..models.catalog.source_models import (
+from ...models.catalog.source_models import (
     SourceModel,
     URISourceModel,
     ProfileSourceModel,
@@ -25,7 +26,7 @@ from ..models.catalog.source_models import (
     ConfigSourceModel,
     ZMQSourceModel,
 )
-from ..models.catalog.kafka import KafkaCatalog
+from ...models.catalog.kafka import KafkaCatalog
 from tiled.profiles import list_profiles
 
 try:
@@ -351,7 +352,6 @@ class ProfileSourceView(SourceView):
 
         try:
             # Get the initial catalog without applying a model
-            from tiled.client import from_profile
 
             catalog = from_profile(self.model.profile)
             label = f"Profile: {self.model.profile}"

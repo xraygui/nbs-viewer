@@ -91,11 +91,11 @@ class MainWidget(QWidget):
     def create_display(self, widget_type=None):
         """Create a new display with optional widget type."""
         display_id = self.display_manager.create_display(widget_type)
+        current_display = self.get_current_display()
         # Auto-add selected runs from current catalog view
-        if hasattr(self, "data_source") and self.data_source is not None:
-            runs = self.data_source.get_selected_runs()
-            if runs:
-                self.display_manager.add_runs_to_display(runs, display_id)
+        runs = current_display.get_selected_runs()
+        if runs:
+            self.display_manager.add_runs_to_display(runs, display_id)
         return display_id
 
     def create_matplotlib_display(self):
@@ -122,13 +122,6 @@ class MainWidget(QWidget):
             print("Display duplication not implemented yet")
 
     def get_current_display(self):
-        """Get the currently active display model."""
-        current_tab = self.tab_widget.currentWidget()
-        if hasattr(current_tab, "plot_model"):
-            return current_tab.plot_model
-        return None
-
-    def get_current_display_widget(self):
         """Get the currently active display widget."""
         return self.tab_widget.currentWidget()
 

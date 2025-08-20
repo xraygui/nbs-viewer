@@ -1,8 +1,9 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from qtpy.QtCore import QObject, Signal
 from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
 from .displayRegistry import DisplayRegistry
+from ...models.plot.runModel import RunModel
 
 
 # TODO: Remove plot_models from this class
@@ -34,7 +35,9 @@ class DisplayManager(QObject):
         # Create main display with auto-selection enabled
         self._create_new_display("main", is_main_display=True)
 
-    def add_run_to_display(self, run: CatalogRun, display_id: str) -> None:
+    def add_run_to_display(
+        self, run: Union[CatalogRun, RunModel], display_id: str
+    ) -> None:
         """
         Add a run to a specific display.
 

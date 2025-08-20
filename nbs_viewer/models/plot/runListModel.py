@@ -1,6 +1,7 @@
 """Plot model managing run controllers and their associated plot artists."""
 
-from typing import List, Optional
+from typing import List, Optional, Union
+from nbs_viewer.models.catalog.base import CatalogRun
 from qtpy.QtCore import QObject, Signal
 from .runModel import RunModel
 from nbs_viewer.utils import print_debug
@@ -272,7 +273,7 @@ class RunListModel(QObject):
         run_model.available_keys_changed.disconnect(self.update_available_keys)
         run_model.plot_update_needed.disconnect(self.request_plot_update)
 
-    def add_runs(self, run_list):
+    def add_runs(self, run_list: Union[List[CatalogRun], List[RunModel]]):
         """
         Add a list of CatalogRun to the model and handle key selection.
 
@@ -322,7 +323,7 @@ class RunListModel(QObject):
         self.available_runs_changed.emit(self.available_runs)
         # self.request_plot_update.emit()
 
-    def add_run(self, run):
+    def add_run(self, run: Union[CatalogRun, RunModel]):
         """Add a single CatalogRun to the model."""
         self.add_runs([run])
 

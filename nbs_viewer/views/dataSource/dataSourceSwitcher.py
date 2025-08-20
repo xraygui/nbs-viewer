@@ -12,8 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
-from .display.displayControl import DisplayControlWidget
-from ..models.app_model import AppModel
+from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
 """
@@ -37,18 +36,18 @@ class DataSourceSwitcher(QWidget):
 
     def __init__(
         self,
-        app_model: AppModel,
+        app_model,
         run_list_model,
         parent=None,
     ):
         super().__init__(parent)
+        self.app_model = app_model
         self.run_list_model = run_list_model
         display_manager = app_model.display_manager
         self.display_controls = DisplayControlWidget(
             display_manager, run_list_model, self
         )
         self.config_file = app_model.config.path
-        self.app_model = app_model
         self._catalogs = {}  # label -> catalog
 
         # Create UI elements

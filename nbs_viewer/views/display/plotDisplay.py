@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QIcon
-from ..runListView import RunListView
+from ..dataSource.runListView import RunListView
 from ..plot.plotWidget import PlotWidget
 from ..common.panel import CollapsiblePanel
 
@@ -46,7 +46,7 @@ class PlotDisplay(QWidget):
         # Create widgets
         run_list_model = self.app_model.display_manager.run_list_models[self.display_id]
         display_manager = self.app_model.display_manager
-        self.run_list = RunListView(run_list_model, display_manager, self.display_id)
+        self.data_source = RunListView(run_list_model, display_manager, self.display_id)
 
         # Create plot widget based on display widget type
         self.plot_widget = self._create_plot_widget(
@@ -54,7 +54,7 @@ class PlotDisplay(QWidget):
         )
 
         # Create collapsible panels for data management
-        self.run_panel = CollapsiblePanel("Runs", self.run_list)
+        self.run_panel = CollapsiblePanel("Runs", self.data_source)
 
         # Create plot controls panel if available
         if hasattr(self.plot_widget, "plot_controls"):
@@ -98,6 +98,10 @@ class PlotDisplay(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
         self.setLayout(layout)
+
+    def get_selected_runs(self):
+        """Get the currently selected runs."""
+        return self.data_source.get_selected_runs()
 
     def _create_plot_widget(self, run_list_model, display_manager, display_id):
         """

@@ -11,17 +11,19 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 from qtpy.QtCore import Qt, Signal
-from .display.displayControl import DisplayControlWidget
-from ..models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
+from ..display.displayControl import DisplayControlWidget
+from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
+from ...models.plot.runModel import RunModel
+from typing import List
 
 
+# TODO: Should move closer to DataSourceSwitcher (which also needs cleanup)
 class RunListView(QWidget):
     """
     Widget for managing run selection for a display.
 
     Provides a list interface for adding/removing runs and managing their
-    selection state. Matches DataSourceManager's signal interface for
-    consistency.
+    selection state.
 
     Signals
     -------
@@ -147,6 +149,17 @@ class RunListView(QWidget):
             # Remove from list widget
             row = self.list_widget.row(item)
             self.list_widget.takeItem(row)
+
+    def get_selected_runs(self) -> List[RunModel]:
+        """Get the currently selected runs."""
+        return [
+            self.run_list_model.get_run(item.data(Qt.UserRole))
+            for item in self.list_widget.selectedItems()
+        ]
+
+    def deselect_all(self):
+        """Deselect all items in the list widget."""
+        self.list_widget.clearSelection()
 
     def addPlotItem(self, plotItem):
         """
