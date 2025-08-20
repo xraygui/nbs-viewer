@@ -22,29 +22,35 @@ class PlotDisplay(QWidget):
     Uses collapsible panels for run list and plot controls to maximize plot space.
     """
 
-    def __init__(self, run_list_model, display_manager, display_id, parent=None):
+    def __init__(self, app_model, display_id, parent=None):
         """
         Initialize a display tab.
 
         Parameters
         ----------
-        run_list_model : RunListModel
-            Model managing the display data
-        display_manager : DisplayManager
-            Manager for all displays
+        app_model : AppModel
+            Model managing the application data
         display_id : str
             Identifier for this display
         parent : QWidget, optional
             Parent widget, by default None
         """
         super().__init__(parent)
+        self.app_model = app_model
+        self.display_id = display_id
+        self.display_manager = self.app_model.display_manager
+        self.setup_models()
+        self.setup_ui()
 
+    def setup_models(self):
         # Create widgets
-        self.run_list = RunListView(run_list_model, display_manager, display_id)
+        run_list_model = self.app_model.display_manager.run_list_models[self.display_id]
+        display_manager = self.app_model.display_manager
+        self.run_list = RunListView(run_list_model, display_manager, self.display_id)
 
         # Create plot widget based on display widget type
         self.plot_widget = self._create_plot_widget(
-            run_list_model, display_manager, display_id
+            run_list_model, display_manager, self.display_id
         )
 
         # Create collapsible panels for data management
@@ -64,6 +70,7 @@ class PlotDisplay(QWidget):
         else:
             self.debug_panel = None
 
+    def setup_ui(self):
         # Create sidebar with stacked panels
         sidebar_widget = QWidget()
         sidebar_layout = QVBoxLayout(sidebar_widget)

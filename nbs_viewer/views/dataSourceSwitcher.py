@@ -37,16 +37,17 @@ class DataSourceSwitcher(QWidget):
 
     def __init__(
         self,
-        plot_model,
-        display_manager,
-        config_file=None,
-        app_model: AppModel = None,
+        app_model: AppModel,
+        run_list_model,
         parent=None,
     ):
         super().__init__(parent)
-        self.plot_model = plot_model
-        self.display_controls = DisplayControlWidget(display_manager, plot_model, self)
-        self.config_file = config_file
+        self.run_list_model = run_list_model
+        display_manager = app_model.display_manager
+        self.display_controls = DisplayControlWidget(
+            display_manager, run_list_model, self
+        )
+        self.config_file = app_model.config.path
         self.app_model = app_model
         self._catalogs = {}  # label -> catalog
 

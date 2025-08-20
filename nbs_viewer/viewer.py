@@ -31,6 +31,8 @@ class Viewer(QMainWindow):
         self.mainWidget = MainWidget(
             central_widget, config_file=config_file, app_model=self.app_model
         )
+        self.main_display = self.mainWidget.main_display
+        self.data_source = self.main_display.data_source
         self.layout.addWidget(self.mainWidget)
         central_widget.setLayout(self.layout)
         self._create_menu_bar()
@@ -190,7 +192,7 @@ class Viewer(QMainWindow):
         """Update the switch catalog submenu with available catalogs."""
         # Clear existing items
         self.switch_catalog_menu.clear()
-        labels = self.mainWidget.data_source.get_catalog_labels()
+        labels = self.app_model.catalogs.get_catalog_labels()
         for label in labels:
             action = QAction(label, self)
             action.triggered.connect(
@@ -210,7 +212,7 @@ class Viewer(QMainWindow):
             "TOML files (*.toml);;All files (*)",
         )
         if path:
-            self.mainWidget.data_source.load_catalog_config(path)
+            self.data_source.load_catalog_config(path)
             self._update_switch_catalog_menu()
 
     def _on_save_plot(self):
@@ -231,23 +233,23 @@ class Viewer(QMainWindow):
     # Catalog menu action handlers
     def _on_connect_tiled_uri(self):
         """Handle connecting to a Tiled URI."""
-        self.mainWidget.data_source.add_uri_source()
+        self.data_source.add_uri_source()
 
     def _on_add_catalog_source(self):
         """Handle adding a catalog source."""
-        self.mainWidget.data_source.add_new_source()
+        self.data_source.add_new_source()
 
     def _on_remove_catalog(self):
         """Handle removing a catalog source."""
-        self.mainWidget.data_source.remove_current_source()
+        self.data_source.remove_current_source()
 
     def _on_refresh_catalogs(self):
         """Handle refreshing all catalogs."""
-        self.mainWidget.data_source.refresh_catalog()
+        self.data_source.refresh_catalog()
 
     def _on_clear_selected_run(self):
         """Handle clearing selected run."""
-        self.mainWidget.data_source.deselect_all()
+        self.data_source.deselect_all()
 
     def _on_clear_cache(self):
         """Handle clearing cache."""
@@ -261,7 +263,7 @@ class Viewer(QMainWindow):
 
     def _on_switch_catalog(self, label: str):
         """Switch active catalog by label from submenu."""
-        self.mainWidget.data_source.switch_to_label(label)
+        self.data_source.switch_to_label(label)
         if self.app_model is not None:
             self.app_model.catalogs.set_current_catalog(label)
 

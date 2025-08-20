@@ -175,7 +175,7 @@ class DisplayManager(QObject):
     @property
     def run_list_models(self):
         """Get dictionary of current run list models."""
-        return self._run_list_models.copy()
+        return self._run_list_models
 
     def create_display_with_runs(self, run_list: List[CatalogRun]) -> None:
         """

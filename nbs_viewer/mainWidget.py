@@ -1,7 +1,6 @@
-from .views.dataSourceSwitcher import DataSourceSwitcher
 from .models.app_model import AppModel
 from .views.display.plotDisplay import PlotDisplay
-from .views.plot.plotWidget import PlotWidget
+from .views.display.mainDisplay import MainDisplay
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -36,6 +35,7 @@ class MainWidget(QWidget):
         self.config_file = config_file
         self.app_model = app_model
         # Fallback for direct use in tests
+        # TODO: Wtf is this? Why?
         if self.app_model is None:
             from .models.app_model import AppModel as _AM
 
@@ -80,42 +80,11 @@ class MainWidget(QWidget):
 
     def _create_main_tab(self):
         """Create the main tab with data source manager."""
-        main_model = self.display_manager.run_list_models["main"]
-
-        # Create main tab widgets
-        self.data_source = DataSourceSwitcher(
-            main_model,
-            self.display_manager,
-            self.config_file,
-            self.app_model,
-        )
-        self.plot_widget = PlotWidget(main_model)
-
-        # Create main tab layout with three panels
-        main_tab = QWidget()
-
-        # Create horizontal splitter for the three panels
-        splitter = QSplitter(Qt.Horizontal)
-
-        # Left panel: Data source
-        splitter.addWidget(self.data_source)
-
-        # Center panel: Plot widget
-        splitter.addWidget(self.plot_widget)
-
-        # Right panel: Plot controls
-        if hasattr(self.plot_widget, "plot_controls"):
-            splitter.addWidget(self.plot_widget.plot_controls)
-
-        # Set initial sizes (data:30%, plot:50%, controls:20%)
-        splitter.setSizes([300, 500, 200])
-
-        layout = QVBoxLayout(main_tab)
-        layout.addWidget(splitter)
-        main_tab.setLayout(layout)
+        # TODO: Move this into a separate class
+        self.main_display = MainDisplay(self.app_model, "main")
 
         # Add to tab widget and disable close button for main tab only
-        index = self.tab_widget.addTab(main_tab, "Main")
+        index = self.tab_widget.addTab(self.main_display, "Main")
         self.tab_widget.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
     # Controller methods for menu actions
@@ -177,7 +146,7 @@ class MainWidget(QWidget):
     def _on_display_added(self, display_id, plot_model):
         """Handle new display creation."""
         if display_id != "main":
-            tab = PlotDisplay(plot_model, self.display_manager, display_id)
+            tab = PlotDisplay(self.app_model, display_id)
             self.tab_widget.addTab(tab, f"Display {display_id}")
             self.tab_widget.setCurrentWidget(tab)
 
