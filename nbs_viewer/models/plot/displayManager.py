@@ -24,6 +24,7 @@ class DisplayManager(QObject):
     display_added = Signal(str, object)  # display_id, run_list_model
     display_removed = Signal(str)  # display_id
     display_type_changed = Signal(str, str)  # display_id, display_type
+    display_renamed = Signal(str, str)  # display_id, new_name
 
     def __init__(self, display_registry: DisplayRegistry):
         super().__init__()
@@ -96,6 +97,7 @@ class DisplayManager(QObject):
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models.pop(display_id)
             self._run_list_models[new_name] = run_list_model
+        self.display_renamed.emit(display_id, new_name)
 
     def remove_display(self, display_id: str) -> None:
         """Remove a display if it exists and is not the main display."""

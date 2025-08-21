@@ -49,6 +49,10 @@ class PlotDisplay(QWidget):
         self.setup_models()
         self.setup_ui()
 
+    def rename_display(self, new_name: str):
+        self.display_id = new_name
+        self.data_source.display_id = new_name
+
     def setup_models(self):
         # Create widgets
         self.run_list_model = self.display_manager.get_run_list_model(self.display_id)

@@ -5,6 +5,8 @@ from qtpy.QtWidgets import (
     QWidget,
     QMainWindow,
     QAction,
+    QInputDialog,
+    QMessageBox,
 )
 
 from .mainWidget import MainWidget
@@ -53,7 +55,7 @@ class Viewer(QMainWindow):
         open_config_action.triggered.connect(self._on_open_catalog_config)
         file_menu.addAction(open_config_action)
 
-        """         
+        """
         file_menu.addSeparator()
 
         # Save Plot
@@ -180,6 +182,12 @@ class Viewer(QMainWindow):
         display_menu.addAction(new_image_grid_action)
 
         display_menu.addSeparator()
+
+        rename_display_action = QAction("&Rename Display", self)
+        rename_display_action.setShortcut("Ctrl+Shift+R")
+        rename_display_action.setStatusTip("Rename the current display")
+        rename_display_action.triggered.connect(self._on_rename_display)
+        display_menu.addAction(rename_display_action)
 
         # Close Display
         close_display_action = QAction("&Close Display", self)
@@ -309,6 +317,19 @@ class Viewer(QMainWindow):
         """Handle saving display layout."""
         # TODO: Implement display layout saving
         print("Save display layout - not implemented yet")
+
+    def _on_rename_display(self):
+        """Handle renaming the current display."""
+        current_display_id = self.mainWidget.get_current_display().display_id
+        if current_display_id == "main":
+            QMessageBox.warning(self, "Cannot Rename", "Cannot rename the main display")
+            return
+        popup = QInputDialog(self)
+        popup.setWindowTitle("Rename Display")
+        popup.setLabelText("Enter the new name for the display:")
+        if popup.exec_():
+            new_name = popup.textValue()
+            self.app_model.display_manager.rename_display(current_display_id, new_name)
 
 
 def main():
