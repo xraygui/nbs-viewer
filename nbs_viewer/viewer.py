@@ -53,6 +53,7 @@ class Viewer(QMainWindow):
         open_config_action.triggered.connect(self._on_open_catalog_config)
         file_menu.addAction(open_config_action)
 
+        """         
         file_menu.addSeparator()
 
         # Save Plot
@@ -78,7 +79,8 @@ class Viewer(QMainWindow):
         print_action.triggered.connect(self._on_print)
         file_menu.addAction(print_action)
 
-        file_menu.addSeparator()
+        file_menu.addSeparator() 
+        """
 
         # Exit
         exit_action = QAction("E&xit", self)
@@ -98,7 +100,7 @@ class Viewer(QMainWindow):
         catalog_menu.addAction(connect_uri_action)
 
         # Add Catalog Source
-        add_source_action = QAction("&Add Catalog Source...", self)
+        add_source_action = QAction("&Add Catalog...", self)
         add_source_action.setShortcut("Ctrl+Shift+A")
         add_source_action.setStatusTip("Add a new catalog source")
         add_source_action.triggered.connect(self._on_add_catalog_source)
@@ -127,6 +129,7 @@ class Viewer(QMainWindow):
         clear_selected_run_action.triggered.connect(self._on_clear_selected_run)
         catalog_menu.addAction(clear_selected_run_action)
 
+        """
         # Clear Cache
         clear_cache_action = QAction("&Clear Cache", self)
         clear_cache_action.setShortcut("Ctrl+Shift+C")
@@ -141,10 +144,13 @@ class Viewer(QMainWindow):
         catalog_settings_action.setShortcut("Ctrl+Shift+S")
         catalog_settings_action.setStatusTip("Configure catalog settings")
         catalog_settings_action.triggered.connect(self._on_catalog_settings)
-        catalog_menu.addAction(catalog_settings_action)
+        catalog_menu.addAction(catalog_settings_action) """
 
         # Switch Catalog (submenu)
         self.switch_catalog_menu = catalog_menu.addMenu("&Switch Catalog")
+        self.app_model.catalogs.catalogs_changed.connect(
+            self._update_switch_catalog_menu
+        )
         self._update_switch_catalog_menu()
 
         # Display Menu
