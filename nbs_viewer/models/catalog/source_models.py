@@ -12,6 +12,7 @@ from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher as QtZMQRemoteDis
 from .base import CatalogBase
 from .kafka import KafkaCatalog
 from .base import load_catalog_models
+from nbs_viewer.utils import print_debug
 
 
 class SourceModel:
@@ -201,7 +202,8 @@ class URISourceModel(SourceModel):
                 if tokens:
                     context.configure_auth(tokens, remember_me=self.remember_me)
                     return
-            except Exception:
+            except Exception as e:
+                print_debug("URISourceModel", f"Authentication callback failed: {e}")
                 # If callback fails, we'll fall through to the exception below
                 pass
 
