@@ -264,6 +264,10 @@ class RunListView(QWidget):
         menu.addSeparator()
         # Add submenu for existing displays
         available_displays = app_model.display_manager.get_display_ids()
+        # We can't move a run to the same display or the main display
+        available_displays = [
+            d for d in available_displays if d not in [self.display_id, "main"]
+        ]
         if available_displays:
             move_menu = QMenu("Move to Display", self)
             for display_name in available_displays:

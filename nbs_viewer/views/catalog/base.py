@@ -296,14 +296,20 @@ class CatalogTableView(QWidget):
 
     add_runs_to_display = Signal(list, str)
 
-    def __init__(self, catalog, parent=None):
+    def __init__(self, catalog, display_id, parent=None):
         """Initialize the CatalogTableView."""
         super().__init__(parent)
         self._catalog = catalog
+        self.display_id = display_id
         self._handling_selection = False  # Flag to prevent circular updates
         self._is_inverted = False  # Track inversion state
         self._setup_ui()
+        self.setup_context_menu()
         self.refresh_filters()
+
+    def setup_context_menu(self):
+        self.data_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.data_view.customContextMenuRequested.connect(self.showContextMenu)
 
     def _setup_ui(self):
         """
@@ -316,8 +322,6 @@ class CatalogTableView(QWidget):
         self.data_view.setSelectionMode(QTableView.ExtendedSelection)
 
         # Enable context menu for the table view
-        self.data_view.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.data_view.customContextMenuRequested.connect(self.showContextMenu)
 
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
@@ -635,25 +639,27 @@ class CatalogTableView(QWidget):
         menu = QMenu(self)
         app_model = get_top_level_model()
         # Add to new display
-        new_canvas_menu = QMenu("Move to New Display", self)
-        display_types = app_model.display_manager.get_available_display_types()
-        for display_type in display_types:
-            metadata = app_model.display_manager.get_display_metadata(display_type)
-            display_name = metadata.get("name", display_type)
-            action = QAction(display_name, self)
-            action.setToolTip(
-                f"Create a new {display_type} display and move selected runs to it"
-            )
-            action.triggered.connect(
-                lambda checked, name=display_type: self.move_selected_runs_to_new_display(
-                    name
+        if self.display_id != "main":
+            new_canvas_menu = QMenu("Move to New Display", self)
+            display_types = app_model.display_manager.get_available_display_types()
+            for display_type in display_types:
+                metadata = app_model.display_manager.get_display_metadata(display_type)
+                display_name = metadata.get("name", display_type)
+                action = QAction(display_name, self)
+                action.setToolTip(
+                    f"Create a new {display_type} display and move selected runs to it"
                 )
-            )
-            new_canvas_menu.addAction(action)
-        menu.addMenu(new_canvas_menu)
+                action.triggered.connect(
+                    lambda checked, name=display_type: self.move_selected_runs_to_new_display(
+                        name
+                    )
+                )
+                new_canvas_menu.addAction(action)
+            menu.addMenu(new_canvas_menu)
 
         new_canvas_copy_menu = QMenu("Copy to New Display", self)
         display_types = app_model.display_manager.get_available_display_types()
+        # Remove the current display from the list
         for display_type in display_types:
             metadata = app_model.display_manager.get_display_metadata(display_type)
             display_name = metadata.get("name", display_type)
@@ -671,18 +677,23 @@ class CatalogTableView(QWidget):
         menu.addSeparator()
         # Add submenu for existing displays
         available_displays = app_model.display_manager.get_display_ids()
+        # Remove the current display from the list
+        available_displays = [
+            d for d in available_displays if d not in [self.display_id, "main"]
+        ]
         if available_displays:
-            move_menu = QMenu("Move to Display", self)
-            for display_name in available_displays:
-                action = QAction(display_name, self)
-                action.setToolTip(f"Move selected runs to {display_name}")
-                action.triggered.connect(
-                    lambda checked, name=display_name: self.move_selected_runs_to_display(
-                        name
+            if self.display_id != "main":
+                move_menu = QMenu("Move to Display", self)
+                for display_name in available_displays:
+                    action = QAction(display_name, self)
+                    action.setToolTip(f"Move selected runs to {display_name}")
+                    action.triggered.connect(
+                        lambda checked, name=display_name: self.move_selected_runs_to_display(
+                            name
+                        )
                     )
-                )
-                move_menu.addAction(action)
-            menu.addMenu(move_menu)
+                    move_menu.addAction(action)
+                menu.addMenu(move_menu)
 
             move_menu = QMenu("Copy to Display", self)
             for display_name in available_displays:

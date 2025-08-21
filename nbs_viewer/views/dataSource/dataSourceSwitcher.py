@@ -38,11 +38,13 @@ class DataSourceSwitcher(QWidget):
         self,
         app_model,
         run_list_model,
+        display_id,
         parent=None,
     ):
         super().__init__(parent)
         self.app_model = app_model
         self.run_list_model = run_list_model
+        self.display_id = display_id
         display_manager = app_model.display_manager
         self.display_controls = DisplayControlWidget(
             display_manager, run_list_model, self
@@ -106,7 +108,7 @@ class DataSourceSwitcher(QWidget):
             # Load catalogs with autoload=true
             for catalog_config in config.get("catalog", []):
                 if catalog_config.get("autoload", False):
-                    config_view = ConfigSourceView(catalog_config)
+                    config_view = ConfigSourceView(catalog_config, self.display_id)
                     sourceView, catalog, label = config_view.get_source(
                         interactive_auth=False
                     )
@@ -205,7 +207,7 @@ class DataSourceSwitcher(QWidget):
 
             # Load all catalogs in the file (not only autoload)
             for catalog_config in config.get("catalog", []):
-                config_view = ConfigSourceView(catalog_config)
+                config_view = ConfigSourceView(catalog_config, self.display_id)
                 sourceView, catalog, label = config_view.get_source()
                 if catalog is None or label is None:
                     continue
@@ -237,7 +239,9 @@ class DataSourceSwitcher(QWidget):
     def add_new_source(self):
         """Add a new data source via picker dialog."""
         print("Adding new source")
-        picker = DataSourcePicker(config_file=self.config_file, parent=self)
+        picker = DataSourcePicker(
+            self.display_id, config_file=self.config_file, parent=self
+        )
         if picker.exec_():
             sourceView, catalog, label = picker.get_source()
             if catalog is not None and label is not None:
@@ -262,7 +266,7 @@ class DataSourceSwitcher(QWidget):
         buttons.accepted.connect(URIDialog.accept)
         buttons.rejected.connect(URIDialog.reject)
         layout = QVBoxLayout()
-        uriSource = URISourceView()
+        uriSource = URISourceView(self.display_id)
         layout.addWidget(uriSource)
         layout.addWidget(buttons)
         URIDialog.setLayout(layout)

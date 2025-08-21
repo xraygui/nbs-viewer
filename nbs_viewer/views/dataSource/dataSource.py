@@ -60,7 +60,7 @@ def handle_authentication(context, parent=None):
 class SourceView(QWidget):
     """Base class for all source views."""
 
-    def __init__(self, model: SourceModel, parent=None):
+    def __init__(self, model: SourceModel, display_id, parent=None):
         """
         Initialize the source view.
 
@@ -73,6 +73,7 @@ class SourceView(QWidget):
         """
         super().__init__(parent)
         self.model = model
+        self.display_id = display_id
         self._setup_ui()
 
     def _setup_ui(self):
@@ -105,9 +106,9 @@ class SourceView(QWidget):
 
             # Create the appropriate view based on the catalog type
             if isinstance(catalog, KafkaCatalog):
-                catalog_view = KafkaView(catalog)
+                catalog_view = KafkaView(catalog, self.display_id)
             else:
-                catalog_view = CatalogTableView(catalog)
+                catalog_view = CatalogTableView(catalog, self.display_id)
 
             return catalog_view, catalog, label
         except Exception as e:
@@ -118,7 +119,7 @@ class SourceView(QWidget):
 class ConfigSourceView(SourceView):
     """View for configuration-based catalog sources."""
 
-    def __init__(self, catalog_config, parent=None):
+    def __init__(self, catalog_config, display_id, parent=None):
         """
         Initialize the configuration source view.
 
@@ -130,7 +131,7 @@ class ConfigSourceView(SourceView):
             The parent widget
         """
         model = ConfigSourceModel(catalog_config, auth_callback=handle_authentication)
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -152,7 +153,7 @@ class ConfigSourceView(SourceView):
 class URISourceView(SourceView):
     """View for Tiled URI catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the URI source view.
 
@@ -163,7 +164,7 @@ class URISourceView(SourceView):
         """
         # Create the model with an authentication callback
         model = URISourceModel(auth_callback=handle_authentication)
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -262,9 +263,9 @@ class URISourceView(SourceView):
 
                 # Create the appropriate view
                 if isinstance(catalog, KafkaCatalog):
-                    catalog_view = KafkaView(catalog)
+                    catalog_view = KafkaView(catalog, self.display_id)
                 else:
-                    catalog_view = CatalogTableView(catalog)
+                    catalog_view = CatalogTableView(catalog, self.display_id)
 
                 return catalog_view, catalog, label
             else:
@@ -278,7 +279,7 @@ class URISourceView(SourceView):
 class ProfileSourceView(SourceView):
     """View for Tiled profile catalog sources."""
 
-    def __init__(self, profiles, parent=None):
+    def __init__(self, profiles, display_id, parent=None):
         """
         Initialize the profile source view.
 
@@ -290,7 +291,7 @@ class ProfileSourceView(SourceView):
         model = ProfileSourceModel()
         self.profiles = profiles
 
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -391,7 +392,7 @@ class ProfileSourceView(SourceView):
 class KafkaSourceView(SourceView):
     """View for Kafka catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the Kafka source view.
 
@@ -401,7 +402,7 @@ class KafkaSourceView(SourceView):
             The parent widget
         """
         model = KafkaSourceModel()
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -438,7 +439,7 @@ class KafkaSourceView(SourceView):
 class ZMQSourceView(SourceView):
     """View for ZMQ catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the ZMQ source view.
 
@@ -448,7 +449,7 @@ class ZMQSourceView(SourceView):
             The parent widget
         """
         model = ZMQSourceModel()
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -466,7 +467,7 @@ class ZMQSourceView(SourceView):
 class DataSourcePicker(QDialog):
     """Dialog for selecting a data source."""
 
-    def __init__(self, config_file=None, parent=None):
+    def __init__(self, display_id, config_file=None, parent=None):
         """
         Initialize the data source picker dialog.
 
@@ -490,16 +491,16 @@ class DataSourcePicker(QDialog):
                 config = tomllib.load(f)
             for catalog in config.get("catalog", []):
                 source_name = f"Config: {catalog['label']}"
-                config_view = ConfigSourceView(catalog)
+                config_view = ConfigSourceView(catalog, display_id)
                 self.source_views[source_name] = config_view
 
         # Add standard source types
-        self.source_views["Tiled URI"] = URISourceView()
+        self.source_views["Tiled URI"] = URISourceView(display_id)
         profiles = list_profiles()
         if profiles:
-            self.source_views["Tiled Profile"] = ProfileSourceView(profiles)
-        self.source_views["Kafka"] = KafkaSourceView()
-        self.source_views["ZMQ"] = ZMQSourceView()
+            self.source_views["Tiled Profile"] = ProfileSourceView(profiles, display_id)
+        self.source_views["Kafka"] = KafkaSourceView(display_id)
+        self.source_views["ZMQ"] = ZMQSourceView(display_id)
 
         # Add all views to the UI
         for name, view in self.source_views.items():
