@@ -4,6 +4,7 @@ from qtpy.QtWidgets import QWidget
 import numpy as np
 import time as ttime
 from nbs_viewer.utils import print_debug
+from matplotlib.image import AxesImage
 
 
 class PlotDataModel(QWidget):
@@ -253,7 +254,9 @@ class PlotDataModel(QWidget):
                     self.artist.remove()
 
                 # Clear data based on artist type
-                if hasattr(self.artist, "set_data"):
+                if isinstance(self.artist, AxesImage):
+                    self.artist.set_data([[]])
+                elif hasattr(self.artist, "set_data"):
                     # Line2D case
                     self.artist.set_data([], [])
                 elif hasattr(self.artist, "set_array"):
@@ -263,4 +266,27 @@ class PlotDataModel(QWidget):
                 print(f"[PlotDataModel.clear] Error cleaning up artist: {e}")
             finally:
                 self.artist = None
+                self.draw_requested.emit()
+
+    def remove_artist_from_axes(self):
+        if self.artist is not None:
+            if self.artist.axes is not None:
+                self.artist.remove()
+                self.draw_requested.emit()
+
+    def add_artist_to_axes(self, axes):
+        if self.artist is not None:
+            axes.add_artist(self.artist)
+            self.draw_requested.emit()
+
+    def move_artist_to_axes(self, axes):
+        if self.artist is not None:
+            if self.artist.axes != axes:
+                print_debug(
+                    "PlotDataModel.move_artist_to_axes",
+                    f"Moving artist {self.label} from {self.artist.axes} to {axes}",
+                )
+                if self.artist.axes is not None:
+                    self.artist.remove()
+                axes.add_artist(self.artist)
                 self.draw_requested.emit()

@@ -10,15 +10,15 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QStackedWidget,
     QFileDialog,
+    QCheckBox,
 )
 from tiled.client import from_uri, from_profile
 
+from ..catalog.catalogTree import CatalogPicker
+from ..catalog.base import CatalogTableView
+from ..catalog.kafka import KafkaView
 
-from .catalog.catalogTree import CatalogPicker
-from .catalog.base import CatalogTableView
-from .catalog.kafka import KafkaView
-
-from ..models.catalog.source_models import (
+from ...models.catalog.source_models import (
     SourceModel,
     URISourceModel,
     ProfileSourceModel,
@@ -26,7 +26,8 @@ from ..models.catalog.source_models import (
     ConfigSourceModel,
     ZMQSourceModel,
 )
-from ..models.catalog.kafka import KafkaCatalog
+from ...models.catalog.kafka import KafkaCatalog
+from tiled.profiles import list_profiles
 
 try:
     import tomllib  # Python 3.11+
@@ -34,10 +35,32 @@ except ModuleNotFoundError:
     import tomli as tomllib  # Python <3.11
 
 
+def handle_authentication(context, parent=None):
+    """
+    Handle interactive authentication via GUI dialog.
+
+    Parameters
+    ----------
+    context : Context
+        The Tiled context that needs authentication
+
+    Returns
+    -------
+    dict or None
+        Authentication tokens if successful, None if cancelled
+    """
+    from .tiledAuth import TiledAuthDialog
+
+    auth_dialog = TiledAuthDialog(context, parent)
+    if auth_dialog.exec_() == QDialog.Accepted:
+        return auth_dialog.get_tokens()
+    return None
+
+
 class SourceView(QWidget):
     """Base class for all source views."""
 
-    def __init__(self, model: SourceModel, parent=None):
+    def __init__(self, model: SourceModel, display_id, parent=None):
         """
         Initialize the source view.
 
@@ -50,6 +73,7 @@ class SourceView(QWidget):
         """
         super().__init__(parent)
         self.model = model
+        self.display_id = display_id
         self._setup_ui()
 
     def _setup_ui(self):
@@ -60,7 +84,7 @@ class SourceView(QWidget):
         """Update the model with values from the UI."""
         raise NotImplementedError("Subclasses must implement update_model")
 
-    def get_source(self):
+    def get_source(self, **kwargs):
         """
         Get a source from the model and create the appropriate view.
 
@@ -82,9 +106,9 @@ class SourceView(QWidget):
 
             # Create the appropriate view based on the catalog type
             if isinstance(catalog, KafkaCatalog):
-                catalog_view = KafkaView(catalog)
+                catalog_view = KafkaView(catalog, self.display_id)
             else:
-                catalog_view = CatalogTableView(catalog)
+                catalog_view = CatalogTableView(catalog, self.display_id)
 
             return catalog_view, catalog, label
         except Exception as e:
@@ -95,7 +119,7 @@ class SourceView(QWidget):
 class ConfigSourceView(SourceView):
     """View for configuration-based catalog sources."""
 
-    def __init__(self, catalog_config, parent=None):
+    def __init__(self, catalog_config, display_id, parent=None):
         """
         Initialize the configuration source view.
 
@@ -106,15 +130,16 @@ class ConfigSourceView(SourceView):
         parent : QWidget, optional
             The parent widget
         """
-        model = ConfigSourceModel(catalog_config)
-        super().__init__(model, parent)
+        model = ConfigSourceModel(catalog_config, auth_callback=handle_authentication)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
         # Config source doesn't need UI components as it's pre-configured
         layout = QVBoxLayout()
         label = QLabel(
-            f"Configured source: {self.model.catalog_config.get('label', 'Unknown')}"
+            f"Configured source: "
+            f"{self.model.catalog_config.get('label', 'Unknown')}"
         )
         layout.addWidget(label)
         self.setLayout(layout)
@@ -128,7 +153,7 @@ class ConfigSourceView(SourceView):
 class URISourceView(SourceView):
     """View for Tiled URI catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the URI source view.
 
@@ -137,8 +162,9 @@ class URISourceView(SourceView):
         parent : QWidget, optional
             The parent widget
         """
-        model = URISourceModel()
-        super().__init__(model, parent)
+        # Create the model with an authentication callback
+        model = URISourceModel(auth_callback=handle_authentication)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -158,9 +184,21 @@ class URISourceView(SourceView):
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
 
+        self.cached_tokens_label = QLabel("Use Cached Credentials", self)
+        self.cached_tokens_checkbox = QCheckBox(self)
+        self.cached_tokens_checkbox.setToolTip(
+            "If checked, already-cached credentials will be used if available."
+        )
+        self.cached_tokens_checkbox.setChecked(self.model.use_cached_tokens)
+
+        cached_tokens_hbox = QHBoxLayout()
+        cached_tokens_hbox.addWidget(self.cached_tokens_label)
+        cached_tokens_hbox.addWidget(self.cached_tokens_checkbox)
+
         layout = QVBoxLayout()
         layout.addLayout(uri_hbox)
         layout.addLayout(profile_hbox)
+        layout.addLayout(cached_tokens_hbox)
         self.setLayout(layout)
 
     def update_model(self):
@@ -168,12 +206,14 @@ class URISourceView(SourceView):
         self.model.set_uri(self.uri_edit.text())
         self.model.set_profile(self.profile_edit.text())
 
-    def get_source(self):
+    def get_source(self, **kwargs):
         """
         Get a source from the model and create the appropriate view.
 
-        This overrides the base implementation to handle nested catalogs
-        and model selection.
+        This uses the three-stage approach:
+        1. Connect and authenticate
+        2. Navigate catalog tree (if needed)
+        3. Select catalog model
 
         Returns
         -------
@@ -189,40 +229,45 @@ class URISourceView(SourceView):
             return None, None, None
 
         try:
-            # Get the initial catalog without applying a model
-            from tiled.client import from_uri
+            # Stage 1: Connect and authenticate
+            self.model.use_cached_tokens = self.cached_tokens_checkbox.isChecked()
+            context, node_path_parts = self.model.connect_and_authenticate(**kwargs)
 
-            catalog = from_uri(self.model.uri)
-            label = f"Tiled: {self.model.uri}"
-
-            if self.model.profile:
-                catalog = catalog[self.model.profile]
-                label += ":" + self.model.profile
+            # Stage 2: Navigate catalog tree
+            client, label = self.model.navigate_catalog_tree(context, node_path_parts)
 
             # Check if we need to navigate through a nested catalog
-            test_uid = catalog.items_indexer[0][0]
+            test_uid = client.items_indexer[0][0]
             typical_uid4_len = 36
             if len(test_uid) < typical_uid4_len:
                 # Probably not really a UID, and we have a nested catalog
-                picker = CatalogPicker(catalog, self)
+                picker = CatalogPicker(client, self)
                 if picker.exec_():
                     selected_keys = picker.selected_entry
                     self.model.set_selected_keys(selected_keys)
 
                     # Update the label and catalog with selected keys
                     for key in selected_keys:
-                        catalog = catalog[key]
+                        client = client[key]
                         label += ":" + key
                 else:
                     return None, None, None  # User cancelled the dialog
 
-            # Now that we have the final catalog, show the model selection dialog
+            # Stage 3: Select catalog model
             model_dialog = CatalogModelPicker(self.model.catalog_models, self)
             if model_dialog.exec_():
                 self.model.set_selected_model(model_dialog.selected_model_name)
 
-                # Now get the source with the fully configured model
-                return super().get_source()
+                # Apply the selected model
+                catalog = self.model.select_catalog_model(client)
+
+                # Create the appropriate view
+                if isinstance(catalog, KafkaCatalog):
+                    catalog_view = KafkaView(catalog, self.display_id)
+                else:
+                    catalog_view = CatalogTableView(catalog, self.display_id)
+
+                return catalog_view, catalog, label
             else:
                 return None, None, None  # User cancelled the model selection
 
@@ -234,7 +279,7 @@ class URISourceView(SourceView):
 class ProfileSourceView(SourceView):
     """View for Tiled profile catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, profiles, display_id, parent=None):
         """
         Initialize the profile source view.
 
@@ -244,27 +289,49 @@ class ProfileSourceView(SourceView):
             The parent widget
         """
         model = ProfileSourceModel()
-        super().__init__(model, parent)
+        self.profiles = profiles
+
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
         self.profile_label = QLabel("Profile", self)
-        self.profile_edit = QLineEdit(self)
-        self.profile_edit.setText(self.model.profile)
+        self.profile_edit = QComboBox(self)
+        self.profile_edit.addItems(self.profiles.keys())
 
         profile_hbox = QHBoxLayout()
         profile_hbox.addWidget(self.profile_label)
         profile_hbox.addWidget(self.profile_edit)
 
+        source_hbox = QHBoxLayout()
+        self.source_label = QLabel("Profile location", self)
+        self.source_path = QLabel("")
+
+        self.profile_edit.currentTextChanged.connect(self.update_source_path)
+        self.update_source_path()
+
+        source_hbox.addWidget(self.source_label)
+        source_hbox.addWidget(self.source_path)
+
         layout = QVBoxLayout()
         layout.addLayout(profile_hbox)
+        layout.addLayout(source_hbox)
         self.setLayout(layout)
+
+    def update_source_path(self):
+        """Update the source path label with the current profile."""
+        try:
+            self.source_path.setText(
+                str(self.profiles[self.profile_edit.currentText()])
+            )
+        except KeyError:
+            self.source_path.setText("")
 
     def update_model(self):
         """Update the model with values from the UI."""
-        self.model.set_profile(self.profile_edit.text())
+        self.model.set_profile(self.profile_edit.currentText())
 
-    def get_source(self):
+    def get_source(self, **kwargs):
         """
         Get a source from the model and create the appropriate view.
 
@@ -286,7 +353,6 @@ class ProfileSourceView(SourceView):
 
         try:
             # Get the initial catalog without applying a model
-            from tiled.client import from_profile
 
             catalog = from_profile(self.model.profile)
             label = f"Profile: {self.model.profile}"
@@ -314,7 +380,7 @@ class ProfileSourceView(SourceView):
                 self.model.set_selected_model(model_dialog.selected_model_name)
 
                 # Now get the source with the fully configured model
-                return super().get_source()
+                return super().get_source(**kwargs)
             else:
                 return None, None, None  # User cancelled the model selection
 
@@ -326,7 +392,7 @@ class ProfileSourceView(SourceView):
 class KafkaSourceView(SourceView):
     """View for Kafka catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the Kafka source view.
 
@@ -336,7 +402,7 @@ class KafkaSourceView(SourceView):
             The parent widget
         """
         model = KafkaSourceModel()
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -373,7 +439,7 @@ class KafkaSourceView(SourceView):
 class ZMQSourceView(SourceView):
     """View for ZMQ catalog sources."""
 
-    def __init__(self, parent=None):
+    def __init__(self, display_id, parent=None):
         """
         Initialize the ZMQ source view.
 
@@ -383,7 +449,7 @@ class ZMQSourceView(SourceView):
             The parent widget
         """
         model = ZMQSourceModel()
-        super().__init__(model, parent)
+        super().__init__(model, display_id, parent)
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -401,7 +467,7 @@ class ZMQSourceView(SourceView):
 class DataSourcePicker(QDialog):
     """Dialog for selecting a data source."""
 
-    def __init__(self, config_file=None, parent=None):
+    def __init__(self, display_id, config_file=None, parent=None):
         """
         Initialize the data source picker dialog.
 
@@ -425,14 +491,16 @@ class DataSourcePicker(QDialog):
                 config = tomllib.load(f)
             for catalog in config.get("catalog", []):
                 source_name = f"Config: {catalog['label']}"
-                config_view = ConfigSourceView(catalog)
+                config_view = ConfigSourceView(catalog, display_id)
                 self.source_views[source_name] = config_view
 
         # Add standard source types
-        self.source_views["Tiled URI"] = URISourceView()
-        self.source_views["Tiled Profile"] = ProfileSourceView()
-        self.source_views["Kafka"] = KafkaSourceView()
-        self.source_views["ZMQ"] = ZMQSourceView()
+        self.source_views["Tiled URI"] = URISourceView(display_id)
+        profiles = list_profiles()
+        if profiles:
+            self.source_views["Tiled Profile"] = ProfileSourceView(profiles, display_id)
+        self.source_views["Kafka"] = KafkaSourceView(display_id)
+        self.source_views["ZMQ"] = ZMQSourceView(display_id)
 
         # Add all views to the UI
         for name, view in self.source_views.items():

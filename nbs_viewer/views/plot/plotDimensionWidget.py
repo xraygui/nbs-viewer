@@ -22,19 +22,19 @@ class PlotDimensionControl(QWidget):
     indicesUpdated = Signal(tuple)
     dimensionChanged = Signal(int)
 
-    def __init__(self, plotModel, canvas, parent=None):
+    def __init__(self, run_list_model, canvas, parent=None):
         """
         Initialize the dimension control widget.
 
         Parameters
         ----------
-        plotModel : PlotDataModel
+        run_list_model : RunListModel
             The plot data model to control.
         parent : QWidget, optional
             Parent widget, by default None.
         """
         super().__init__(parent)
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
         self.canvas = canvas
         self.sliders = []
         self.labels = []
@@ -42,9 +42,9 @@ class PlotDimensionControl(QWidget):
         self._nsliders = 0
         # Connect signals
         # Connect to model signals
-        self.plotModel.run_added.connect(self.on_run_added)
-        self.plotModel.run_removed.connect(self.on_run_removed)
-        self.plotModel.selected_keys_changed.connect(self.on_selection_changed)
+        self.run_list_model.run_added.connect(self.on_run_added)
+        self.run_list_model.run_removed.connect(self.on_run_removed)
+        self.run_list_model.selected_keys_changed.connect(self.on_selection_changed)
 
         self.init_ui()
 
@@ -265,12 +265,12 @@ class PlotDimensionControl(QWidget):
             Returns None if no shape info available
         """
         # print("Getting shape info...")
-        if not self.plotModel:
+        if not self.run_list_model:
             print("No plot model available")
             return None
 
         # Get all visible run models
-        run_models = self.plotModel.visible_models
+        run_models = self.run_list_model.visible_models
         # print(f"Visible run models: {run_models}")
 
         if not run_models:
@@ -357,8 +357,8 @@ class PlotDimensionControl(QWidget):
             Name of the dimension
         """
         # Try to get dimension name from the model
-        if hasattr(self.plotModel, "get_dimension_name"):
-            name = self.plotModel.get_dimension_name(dim_index)
+        if hasattr(self.run_list_model, "get_dimension_name"):
+            name = self.run_list_model.get_dimension_name(dim_index)
             if name:
                 return name
 

@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from ..data.base import CatalogRun
 from asteval import Interpreter
 import numpy as np
+from nbs_viewer.utils import print_debug
 
 
 class RunModel(QObject):
@@ -29,7 +30,7 @@ class RunModel(QObject):
     def __init__(self, run: CatalogRun):
         super().__init__()
         self._run = run
-
+        print_debug("RunModel.__init__", f"RunModel for run {run.uid}", "run")
         # Selection state
         self._selected_x: List[str] = []
         self._selected_y: List[str] = []
@@ -47,10 +48,29 @@ class RunModel(QObject):
 
     def _connect_run(self):
         self._run.data_changed.connect(self._on_data_changed)
+        # Also react to async key init signals to update available keys quickly
+        if hasattr(self._run, "keys_ready"):
+            self._run.keys_ready.connect(self._on_keys_event)
+        if hasattr(self._run, "keys_error"):
+            self._run.keys_error.connect(self._on_keys_event)
+
+    def _on_keys_event(self, *_):
+        # Single place to update keys and default selection on first load
+        previous_empty = len(self._available_keys) == 0
+        self._update_available_keys()
+        if previous_empty and self._available_keys:
+            # First time keys become available; set defaults if none selected
+            if not (self._selected_x or self._selected_y or self._selected_norm):
+                self._set_default_selection()
 
     def _disconnect_run(self):
         """Disconnect RunData signals."""
         self._run.data_changed.disconnect(self._on_data_changed)
+
+    @property
+    def display_name(self) -> str:
+        """Get descriptive name for the run."""
+        return self.run.display_name
 
     @property
     def run(self) -> CatalogRun:
@@ -84,6 +104,11 @@ class RunModel(QObject):
     def _update_available_keys(self) -> None:
         """Update internal available keys from run."""
         new_keys = self._run.available_keys
+        print_debug(
+            "RunModel._update_available_keys",
+            f"available_keys for {self.uid}: {new_keys} from run {id(self._run)}",
+            "run",
+        )
         if set(new_keys) != set(self._available_keys):
             self._available_keys = new_keys
             self.available_keys_changed.emit()

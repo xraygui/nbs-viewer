@@ -32,14 +32,15 @@ import uuid
 class PlotWorker(QThread):
     """Worker thread for fetching and preparing plot data."""
 
-    data_ready = Signal(object, object, object)  # (x, y, plotData)
+    data_ready = Signal(object, object, object, object)  # (x, y, plotData, artist)
     error_occurred = Signal(str)
 
-    def __init__(self, plotData, slice_info, dimension):
+    def __init__(self, plotData, slice_info, dimension, artist=None):
         super().__init__()
         self.plotData = plotData
         self.slice_info = slice_info
         self.dimension = dimension
+        self.artist = artist
         print_debug("PlotWorker", "Created new worker", category="DEBUG_PLOTS")
 
     @time_function(function_name="PlotWorker.run", category="DEBUG_PLOTS")
@@ -55,7 +56,7 @@ class PlotWorker(QThread):
                 f"Data fetch complete - x shape: {[xi.shape for xi in x]}, y shape: {y.shape}, time: {t2 - t1:.2f} seconds",
                 category="DEBUG_PLOTS",
             )
-            self.data_ready.emit(x, y, self.plotData)
+            self.data_ready.emit(x, y, self.plotData, self.artist)
         except Exception as e:
             error_msg = f"Error fetching plot data: {str(e)}"
             print_debug("PlotWorker", error_msg, category="DEBUG_PLOTS")
@@ -87,7 +88,7 @@ class NavigationToolbar(NavigationToolbar2QT):
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, plotModel, parent=None, width=5, height=4, dpi=100):
+    def __init__(self, run_list_model, parent=None, width=5, height=4, dpi=100):
         # Create figure with tight layout and proper spacing
         self.fig = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
 
@@ -99,7 +100,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
 
         # Store plot model
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
         self.plotArtists = {}
         self.workers = {}  # Store active workers
 
@@ -115,9 +116,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self.aspect_ratio = width / height
 
         # Connect signals
-        # self.plotModel.selected_keys_changed.connect(self._on_selected_keys_changed)
-        self.plotModel.run_removed.connect(self._on_run_removed)
-        self.plotModel.request_plot_update.connect(self.updatePlot)
+        # self.run_list_model.selected_keys_changed.connect(self._on_selected_keys_changed)
+        self.run_list_model.run_removed.connect(self._on_run_removed)
+        self.run_list_model.request_plot_update.connect(self.updatePlot)
 
     def sizeHint(self):
         width = self.width()
@@ -226,7 +227,7 @@ class MplCanvas(FigureCanvasQTAgg):
         try:
             visible_keys = set()
 
-            for runModel in self.plotModel.visible_models:
+            for runModel in self.run_list_model.visible_models:
                 xkeys, ykeys, normkeys = runModel.get_selected_keys()
                 for xkey in xkeys:
                     for ykey in ykeys:
@@ -278,9 +279,10 @@ class MplCanvas(FigureCanvasQTAgg):
         worker.start()
 
     @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
-    def _handle_plot_data(self, x, y, plotData):
+    def _handle_plot_data(self, x, y, plotData, artist=None):
         """Handle the plotting once data is ready."""
-        artist = plotData.artist
+        if artist is None:
+            artist = plotData.artist
         print_debug(
             "MplCanvas._handle_plot_data",
             f"Plotting {plotData.label}",
@@ -635,51 +637,54 @@ class PlotWidget(QWidget):
         The parent widget, by default None.
     """
 
-    def __init__(self, plotModel, parent=None):
+    def __init__(self, run_list_model, parent=None):
         super().__init__(parent)
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
 
-        # Create main splitter
-        self.layout = QSplitter(Qt.Horizontal)
+        # Create plot canvas
+        self.plot_canvas = MplCanvas(self.run_list_model, self, 5, 4, 100)
 
-        # Create and setup plot container widget
-        self.plot_container = QWidget()
-        self.plot_layout = QVBoxLayout(self.plot_container)
+        # Create toolbar
+        self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
 
-        # Add plot widgets to container
-        self.plot = MplCanvas(self.plotModel, self, 5, 4, 100)
-        self.toolbar = NavigationToolbar(self.plot, self)
-        self.plot_layout.addWidget(self.toolbar)
-        self.plot_layout.addWidget(self.plot)
+        # Create dimension control widget
+        self.dimension_control = PlotDimensionControl(
+            self.run_list_model, self.plot_canvas, self
+        )
 
-        # Add debug button
+        # Create plot controls (for data selection)
+        self.plot_controls = PlotControls(self.run_list_model)
+
+        # Add debug button if needed
         if DEBUG_VARIABLES["PRINT_DEBUG"]:
             self.debug_button = QPushButton("Debug Plot State")
             self.debug_button.clicked.connect(self._debug_plot_state)
-            self.plot_layout.addWidget(self.debug_button)
+        else:
+            self.debug_button = None
 
-        # Add dimension control widget
-        self.dimension_control = PlotDimensionControl(self.plotModel, self.plot, self)
-        self.plot_layout.addWidget(self.dimension_control)
+        # Create plot-specific layout (canvas + toolbar + dimension controls)
+        plot_layout = QVBoxLayout(self)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create plot controls
-        self.plotControls = PlotControls(self.plotModel)
+        # Add toolbar
+        plot_layout.addWidget(self.plot_toolbar)
 
-        # Add widgets to splitter
-        self.layout.addWidget(self.plot_container)
-        self.layout.addWidget(self.plotControls)
+        # Add canvas
+        plot_layout.addWidget(self.plot_canvas)
 
-        # Create main layout and add splitter
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(self.layout)
+        # Add dimension control
+        plot_layout.addWidget(self.dimension_control)
+
+        # Add debug button if available
+        if self.debug_button:
+            plot_layout.addWidget(self.debug_button)
 
         # Connect to model signals for cleanup
-        self.plotModel.run_removed.connect(self._on_run_removed)
+        self.run_list_model.run_removed.connect(self._on_run_removed)
 
     def _on_run_removed(self, run):
         """Handle run removal by cleaning up associated PlotDataModels."""
-        self.plot.remove_run_data(run.uid)
+        self.plot_canvas.remove_run_data(run.uid)
 
     def _debug_plot_state(self):
         """Print debug information about plot state."""
@@ -687,26 +692,26 @@ class PlotWidget(QWidget):
 
         # Canvas State
         print("\nMplCanvas State:")
-        self.plot._debug_plot_state()
+        self.plot_canvas._debug_plot_state()
 
         # Plot Model State
         print("\nPlot Model State:")
         print("  Available Runs:")
-        for run_model in self.plotModel._run_models.values():
+        for run_model in self.run_list_model._run_models.values():
             print(f"    - {run_model._run.display_name} (uid: {run_model._run.uid})")
 
         print("\n  Visible Runs:")
-        for uid in self.plotModel._visible_runs:
-            if uid in self.plotModel._run_models:
-                run = self.plotModel._run_models[uid]._run
+        for uid in self.run_list_model._visible_runs:
+            if uid in self.run_list_model._run_models:
+                run = self.run_list_model._run_models[uid]._run
                 print(f"    - {run.display_name} (uid: {uid})")
             else:
                 print(f"    - WARNING: Visible uid {uid} not in run models!")
 
         print("\n  Current Selection:")
-        print(f"    X keys: {self.plotModel._current_x_keys}")
-        print(f"    Y keys: {self.plotModel._current_y_keys}")
-        print(f"    Norm keys: {self.plotModel._current_norm_keys}")
+        print(f"    X keys: {self.run_list_model._current_x_keys}")
+        print(f"    Y keys: {self.run_list_model._current_y_keys}")
+        print(f"    Norm keys: {self.run_list_model._current_norm_keys}")
 
         print("\n=== End Debug Info ===\n")
 

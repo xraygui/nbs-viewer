@@ -28,8 +28,7 @@ def fillTree(value, parentItem):
         try:
             newval = value[key]
         except Exception as e:
-            print(f"Got exception for {key}")
-            raise e
+            print(f"Got exception for {key}: {e}")
         fillTree(newval, child)
         parentItem.addChild(child)
 

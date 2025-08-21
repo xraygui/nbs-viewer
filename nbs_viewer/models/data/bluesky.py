@@ -66,6 +66,7 @@ class BlueskyRun(CatalogRun):
         self._axis_cache = {}
         self._shape_cache = {}
         self._dim_cache = {}  # New cache for dimensions
+        self._run_keys_cache = None
         self._has_data = None
         self._metadata = None
         self._start_doc = None
@@ -77,12 +78,8 @@ class BlueskyRun(CatalogRun):
         # Setup metadata first since it's always available
         self.setup()
 
-        # Try to initialize data access, but don't fail if unavailable
-        try:
-            self._initialize_keys()
-        except Exception as e:
-            print(f"Warning: Could not initialize data for run {key}: {e}")
-            self._available_keys = []
+        # Defer keys initialization; emit loading/ready/error via background pool
+        # Caller (catalog UI) should schedule async key init using AppModel's pool
 
     @time_function(category="DEBUG_RUN")
     def _check_data_access(self):
@@ -108,6 +105,7 @@ class BlueskyRun(CatalogRun):
             self._chunk_cache.clear_run(self.start["uid"])
         self._shape_cache.clear()
         self._dim_cache.clear()
+        self._run_keys_cache = None
         self._start_doc = None
         self._stop_doc = None
         self._descriptors = None
@@ -432,6 +430,10 @@ class BlueskyRun(CatalogRun):
         tuple
             A tuple of (xkeys, ykeys) dictionaries
         """
+        # Return cached result if available
+        if self._run_keys_cache is not None:
+            return self._run_keys_cache
+
         if self._has_data is False:
             return {}, {}  # Return empty key sets if no data
 
@@ -525,7 +527,8 @@ class BlueskyRun(CatalogRun):
             f"Total getRunKeys took: {time.time() - t_start:.3f}s",
             category="DEBUG_CATALOG",
         )
-        return xkeys, ykeys
+        self._run_keys_cache = (xkeys, ykeys)
+        return self._run_keys_cache
 
     def __str__(self):
         """
@@ -620,6 +623,7 @@ class BlueskyRun(CatalogRun):
             self._data_cache.clear()
             self._shape_cache.clear()
             self._dim_cache.clear()  # Clear dimension cache as well
+            self._run_keys_cache = None
         if clear_nd:
             self._chunk_cache.clear_run(self.start["uid"])
 

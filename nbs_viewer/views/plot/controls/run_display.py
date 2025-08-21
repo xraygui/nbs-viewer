@@ -33,6 +33,8 @@ class RunDisplayWidget(QWidget):
 
     Parameters
     ----------
+    run_list_model : RunListModel
+        The run list model to control
     parent : Optional[QWidget], optional
         Parent widget, by default None
 
@@ -44,9 +46,9 @@ class RunDisplayWidget(QWidget):
 
     selection_changed = Signal(list, list, list)
 
-    def __init__(self, plotModel, parent: Optional[QWidget] = None):
+    def __init__(self, run_list_model, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
         self._show_all = False
         self._linked_mode = True
         self._current_run = None
@@ -55,9 +57,9 @@ class RunDisplayWidget(QWidget):
         self._setup_ui()
 
         # Connect signals
-        self.plotModel.available_keys_changed.connect(self._update_display)
-        self.plotModel.visible_runs_changed.connect(self._build_header)
-        self.plotModel.selected_keys_changed.connect(self._update_checkboxes)
+        self.run_list_model.available_keys_changed.connect(self._update_display)
+        self.run_list_model.visible_runs_changed.connect(self._build_header)
+        self.run_list_model.selected_keys_changed.connect(self._update_checkboxes)
 
         # Initial update
         self._update_display()
@@ -144,10 +146,10 @@ class RunDisplayWidget(QWidget):
 
     def _build_header(self) -> None:
         """Update the header label and run selector."""
-        run_models = self.plotModel.visible_models
+        run_models = self.run_list_model.visible_models
         # print(f"Building header for {len(run_models)} runs")
-        # print(f"{len(self.plotModel._visible_runs)} are visible")
-        # print(f"{len(self.plotModel._run_models)} are in run_models")
+        # print(f"{len(self.run_list_model._visible_runs)} are visible")
+        # print(f"{len(self.run_list_model._run_models)} are in run_models")
         # Block signals during update
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
@@ -159,7 +161,7 @@ class RunDisplayWidget(QWidget):
     def _update_header(self, run_uids: Optional[int] = None) -> None:
         # Update header label
         if self._linked_mode:
-            self._header_label.setText(self.plotModel.getHeaderLabel())
+            self._header_label.setText(self.run_list_model.getHeaderLabel())
         elif self._current_run:
             self._header_label.setText(f"Run {self._current_run.scan_id}")
         else:
@@ -170,8 +172,10 @@ class RunDisplayWidget(QWidget):
         self._clear_grid()
         # Get keys based on mode
         if self._linked_mode:
-            available_keys = self.plotModel.available_keys
-            selected_x, selected_y, selected_norm = self.plotModel.get_selected_keys()
+            available_keys = self.run_list_model.available_keys
+            selected_x, selected_y, selected_norm = (
+                self.run_list_model.get_selected_keys()
+            )
         elif self._current_run:
             available_keys = self._current_run.available_keys
             selected_x, selected_y, selected_norm = (
@@ -305,7 +309,7 @@ class RunDisplayWidget(QWidget):
         ]
 
         if self._linked_mode:
-            self.plotModel.set_selected_keys(
+            self.run_list_model.set_selected_keys(
                 x_keys, y_keys, norm_keys, force_update=False
             )
         elif self._current_run:
@@ -337,8 +341,8 @@ class RunDisplayWidget(QWidget):
         ]
 
         # Force update the plot with current selection
-        if hasattr(self.plotModel, "set_selected_keys"):
-            self.plotModel.set_selected_keys(
+        if hasattr(self.run_list_model, "set_selected_keys"):
+            self.run_list_model.set_selected_keys(
                 x_keys, y_keys, norm_keys, force_update=True
             )
         else:
@@ -372,7 +376,7 @@ class RunDisplayWidget(QWidget):
 
     def _synchronize_selections(self) -> None:
         """Find common selections across all runs and apply them."""
-        run_models = self.plotModel.visible_models
+        run_models = self.run_list_model.visible_models
         if not run_models:
             return
 
@@ -396,7 +400,7 @@ class RunDisplayWidget(QWidget):
                 norm_selections &= set(new_norm)
 
         # Apply common selections
-        self.plotModel.set_selected_keys(
+        self.run_list_model.set_selected_keys(
             list(x_selections),
             list(y_selections),
             list(norm_selections),

@@ -6,6 +6,7 @@ import collections
 from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points
 from ..data.base import CatalogRun
+from nbs_viewer.utils import print_debug
 
 
 def load_catalog_models():
@@ -195,6 +196,11 @@ class CatalogBase(QObject):
         List[CatalogRun]
             List of selected run objects
         """
+        print_debug(
+            "CatalogBase.get_selected_runs",
+            f"Getting selected runs, len {len(self._selection)}",
+            "catalog",
+        )
         return [self.get_run(uid) for uid in self._selection]
 
     def __len__(self) -> int:

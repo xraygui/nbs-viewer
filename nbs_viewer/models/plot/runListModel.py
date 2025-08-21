@@ -1,12 +1,14 @@
 """Plot model managing run controllers and their associated plot artists."""
 
-from typing import List, Optional
-from qtpy.QtCore import QObject, Signal
-import numpy as np
+from typing import List, Optional, Union
+from nbs_viewer.models.catalog.base import CatalogRun
+from qtpy.QtCore import QObject, Signal, Qt
+from qtpy.QtGui import QStandardItemModel, QStandardItem
 from .runModel import RunModel
+from nbs_viewer.utils import print_debug
 
 
-class PlotModel(QObject):
+class RunListModel(QStandardItemModel):
     """
     Model coordinating between run data and plot artists.
 
@@ -21,21 +23,22 @@ class PlotModel(QObject):
     run_removed = Signal(object)  # RunData removed from model
     available_runs_changed = Signal(list)  # List of Run UIDs
     visible_runs_changed = Signal(set)  # Set of visible Run UIDs
+    add_runs_to_display = Signal(list, str)
 
     request_plot_update = Signal()
 
-    def __init__(self, is_main_canvas=False):
+    def __init__(self, is_main_display=False):
         """
-        Initialize the plot model.
+        Initialize the run list model.
 
         Parameters
         ----------
-        is_main_canvas : bool
+        is_main_display : bool
             If True, all runs are automatically selected
         """
         super().__init__()
         self._run_models = {}  # run_uid -> RunModel
-        self._is_main_canvas = is_main_canvas
+        self._is_main_display = is_main_display
 
         self.available_keys = list()
         self._current_x_keys = []
@@ -46,6 +49,122 @@ class PlotModel(QObject):
         self._retain_selection = False
         self._transform = {"enabled": False, "text": ""}
         self._visible_runs = set()  # Track visible run UIDs
+
+        self.run_added.connect(self._on_run_added)
+        self.run_removed.connect(self._on_run_removed)
+        self.visible_runs_changed.connect(self._on_visible_runs_changed)
+        self.itemChanged.connect(self._on_item_changed)
+
+        self._initialize_runs()
+
+    def _initialize_runs(self):
+        """Initialize the model with current runs from run_list_model."""
+        self.clear()
+
+        for run in self.available_runs:
+            self._add_run_item(run)
+
+    def _add_run_item(self, run):
+        """Add a run as a QStandardItem to the model."""
+        item = QStandardItem(run.display_name)
+        item.setData(run.uid, Qt.UserRole)
+        item.setData(run, Qt.UserRole + 1)  # Store run object
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+        item.setCheckState(
+            Qt.Checked if run.uid in self._visible_runs else Qt.Unchecked
+        )
+        self.appendRow(item)
+
+    def _on_run_added(self, run):
+        """Handle new run added to model."""
+        self._add_run_item(run)
+
+    def _on_run_removed(self, run):
+        """Handle run removed from model."""
+        for row in range(self.rowCount()):
+            item = self.item(row)
+            if item.data(Qt.UserRole) == run.uid:
+                self.removeRow(row)
+                break
+
+    def _on_visible_runs_changed(self, visible_runs):
+        """Handle visible runs changed in model."""
+        # Update checkbox states for all items
+        for row in range(self.rowCount()):
+            item = self.item(row)
+            uid = item.data(Qt.UserRole)
+            item.setCheckState(
+                Qt.Checked if uid in self._visible_runs else Qt.Unchecked
+            )
+
+    def get_run_at_index(self, index):
+        """
+        Get the run object at the given index.
+
+        Parameters
+        ----------
+        index : QModelIndex
+            The model index
+
+        Returns
+        -------
+        RunModel or None
+            The run object or None if invalid index
+        """
+        if not index.isValid():
+            return None
+        item = self.itemFromIndex(index)
+        if item:
+            return item.data(Qt.UserRole + 1)
+        return None
+
+    def get_uid_at_index(self, index):
+        """
+        Get the UID at the given index.
+
+        Parameters
+        ----------
+        index : QModelIndex
+            The model index
+
+        Returns
+        -------
+        str or None
+            The UID or None if invalid index
+        """
+        if not index.isValid():
+            return None
+        item = self.itemFromIndex(index)
+        if item:
+            return item.data(Qt.UserRole)
+        return None
+
+    def find_index_by_uid(self, uid):
+        """
+        Find the model index for a given UID.
+
+        Parameters
+        ----------
+        uid : str
+            The UID to search for
+
+        Returns
+        -------
+        QModelIndex
+            The model index or invalid index if not found
+        """
+        for row in range(self.rowCount()):
+            item = self.item(row)
+            if item.data(Qt.UserRole) == uid:
+                return self.indexFromItem(item)
+        return self.index(-1, -1)  # Invalid index
+
+    def _on_item_changed(self, item):
+        """Handle checkbox state changes."""
+        uid = item.data(Qt.UserRole)
+        if uid:
+            is_visible = item.checkState() == Qt.Checked
+            self.set_uids_visible([uid], is_visible)
 
     def getHeaderLabel(self) -> str:
         models = self.visible_models
@@ -59,7 +178,7 @@ class PlotModel(QObject):
 
     def update_available_keys(self) -> None:
         """Update available keys and maintain selection state."""
-        # print("Updating available keys in PlotModel")
+        # print("Updating available keys in RunListModel")
         runs = self.visible_models
         if not runs:
             if not self._retain_selection:
@@ -70,6 +189,11 @@ class PlotModel(QObject):
 
         # Get intersection of keys from all models
         first_run = runs[0]
+        print_debug(
+            "RunListModel.update_available_keys",
+            f"available_keys from first_run.uid {first_run.uid}: {first_run.available_keys}",
+            "run",
+        )
         available_keys = first_run.available_keys
         for run in runs:
             available_keys = [
@@ -233,7 +357,7 @@ class PlotModel(QObject):
         force_update : bool, optional
             Whether to force update the plot regardless of auto_add setting
         """
-        # print("PlotModel set_selection")
+        # print("RunListModel set_selection")
         # Always update internal state
         self._current_x_keys = x_keys
         self._current_y_keys = y_keys
@@ -250,7 +374,7 @@ class PlotModel(QObject):
         self.request_plot_update.emit()
         # Update plot if auto_add is enabled or force_update is True
         # if self._auto_add or force_update:
-        #     print("PlotModel set_selection calling _update_plot")
+        #     print("RunListModel set_selection calling _update_plot")
         #     self.request_plot_update.emit()
 
     def get_selected_keys(self):
@@ -267,7 +391,7 @@ class PlotModel(QObject):
         run_model.available_keys_changed.disconnect(self.update_available_keys)
         run_model.plot_update_needed.disconnect(self.request_plot_update)
 
-    def add_runs(self, run_list):
+    def add_runs(self, run_list: Union[List[CatalogRun], List[RunModel]]):
         """
         Add a list of CatalogRun to the model and handle key selection.
 
@@ -276,6 +400,7 @@ class PlotModel(QObject):
         run : CatalogRun
             Run to add to the model
         """
+        print_debug("RunListModel.add_runs", f"Adding runs {len(run_list)}", "run")
         uid_list = []
         for run in run_list:
             uid = run.uid
@@ -295,7 +420,7 @@ class PlotModel(QObject):
             # Update available keys first
         self.update_available_keys()
 
-        if self._is_main_canvas or self._auto_add:
+        if self._is_main_display or self._auto_add:
             self.set_uids_visible(uid_list, True)
         # Determine key selection
         if len(self._run_models) == 1 and not self._retain_selection:
@@ -310,13 +435,13 @@ class PlotModel(QObject):
 
         # Emit signals in correct order
 
-        # Handle main canvas auto-selection
+        # Handle main display auto-selection
 
         # Force plot update and legend refresh
         self.available_runs_changed.emit(self.available_runs)
         # self.request_plot_update.emit()
 
-    def add_run(self, run):
+    def add_run(self, run: Union[CatalogRun, RunModel]):
         """Add a single CatalogRun to the model."""
         self.add_runs([run])
 
@@ -350,7 +475,7 @@ class PlotModel(QObject):
         """Remove a single CatalogRun from the model via UID."""
         self.remove_uids([run.uid])
 
-    def set_runs(self, run_list, canvas_id="main"):
+    def set_runs(self, run_list, display_id="main"):
         """Update the complete selection state.
         Takes a list of CatalogRun objects and updates the model to contain
         only these runs.
@@ -414,7 +539,7 @@ class PlotModel(QObject):
 
     @property
     def visible_runs(self):
-        if self._is_main_canvas:
+        if self._is_main_display:
             return set(self._run_models.keys())
         else:
             return self._visible_runs

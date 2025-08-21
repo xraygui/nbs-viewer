@@ -30,9 +30,9 @@ class PlotControls(QWidget):
         The parent widget, by default None
     """
 
-    def __init__(self, plotModel, parent=None):
+    def __init__(self, run_list_model, parent=None):
         super().__init__(parent)
-        self.plotModel = plotModel
+        self.run_list_model = run_list_model
 
         # Create the tab widget
         self.tab_widget = QTabWidget()
@@ -44,7 +44,7 @@ class PlotControls(QWidget):
         # Create the metadata tab
         self.metadata_tab = QWidget()
         self.metadata_layout = QVBoxLayout(self.metadata_tab)
-        self.metadata_viewer = MetadataViewer(plotModel)
+        self.metadata_viewer = MetadataViewer(run_list_model)
         self.metadata_layout.addWidget(self.metadata_viewer)
 
         # Add tabs to the tab widget
@@ -63,23 +63,23 @@ class PlotControls(QWidget):
         controls_layout = QHBoxLayout()
 
         # Auto add control
-        self.auto_add = AutoAddControl(self.plotModel)
+        self.auto_add = AutoAddControl(self.run_list_model)
         controls_layout.addWidget(self.auto_add)
 
         # Dynamic update control
-        self.dynamic_update = DynamicUpdateControl(self.plotModel)
+        self.dynamic_update = DynamicUpdateControl(self.run_list_model)
         controls_layout.addWidget(self.dynamic_update)
 
         # Retain selection control
-        self.retain_selection = RetainSelectionControl(self.plotModel)
+        self.retain_selection = RetainSelectionControl(self.run_list_model)
 
         self.plot_control_layout.addLayout(controls_layout)
         self.plot_control_layout.addWidget(self.retain_selection)
 
         # Transform control
-        self.transform = TransformControl(self.plotModel)
+        self.transform = TransformControl(self.run_list_model)
         self.plot_control_layout.addWidget(self.transform)
 
         # Run display widget
-        self.run_display = RunDisplayWidget(self.plotModel)
+        self.run_display = RunDisplayWidget(self.run_list_model)
         self.plot_control_layout.addWidget(self.run_display)

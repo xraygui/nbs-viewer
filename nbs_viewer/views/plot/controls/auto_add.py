@@ -11,26 +11,26 @@ class AutoAddControl(PlotControlWidget):
 
     Parameters
     ----------
-    plot_model : PlotModel
+    run_list_model : RunListModel
         The plot model to control
     parent : QWidget, optional
         Parent widget, by default None
     """
 
-    def __init__(self, plotModel, parent=None):
+    def __init__(self, run_list_model, parent=None):
         """
         Initialize the widget.
 
         Parameters
         ----------
-        plot_model : PlotModel
+        run_list_model : RunListModel
             The plot model to control
         parent : QWidget, optional
             Parent widget, by default None
         """
-        super().__init__(plotModel, parent)
+        super().__init__(run_list_model, parent)
         # Set initial state from model
-        self._auto_add_box.setChecked(self.plotModel.auto_add)
+        self._auto_add_box.setChecked(self.run_list_model.auto_add)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
@@ -71,4 +71,4 @@ class AutoAddControl(PlotControlWidget):
     def state_changed(self) -> None:
         """Handle state changes."""
         state = self.get_state()
-        self.plotModel.set_auto_add(state["auto_add"])
+        self.run_list_model.set_auto_add(state["auto_add"])
