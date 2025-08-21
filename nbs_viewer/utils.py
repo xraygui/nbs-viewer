@@ -25,6 +25,43 @@ CATEGORY_MAP = {
     "perf": "perf",
 }
 
+_top_level_model = None
+
+
+def set_top_level_model(model) -> None:
+    """
+    Set the global top-level AppModel instance.
+
+    Parameters
+    ----------
+    model : AppModel
+        The AppModel instance to set as the global top-level model
+    """
+    global _top_level_model
+    _top_level_model = model
+
+
+def get_top_level_model():
+    """
+    Get the global top-level AppModel instance.
+
+    Returns
+    -------
+    AppModel
+        The global top-level AppModel instance
+
+    Raises
+    ------
+    RuntimeError
+        If called before the top-level model has been set
+    """
+    if _top_level_model is None:
+        raise RuntimeError(
+            "get_top_level_model() called before top-level model was set. "
+            "This should never occur in normal operation."
+        )
+    return _top_level_model
+
 
 def _resolve_logger_name(category: str | None) -> str:
     return CATEGORY_MAP.get(category, f"nbs_viewer.{category}")

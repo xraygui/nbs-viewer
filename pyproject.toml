@@ -46,8 +46,8 @@ blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
 nbscatalog = "nbs_viewer.models.catalog.bluesky:NBSCatalog"
 
 [project.entry-points."nbs_viewer.plot_displays"]
-matplotlib = "nbs_viewer.views.plot.plotWidget:PlotWidget"
-image_grid = "nbs_viewer.views.plot.imageGridWidget:ImageGridWidget"
+matplotlib = "nbs_viewer.views.display.plotDisplay:PlotDisplay"
+image_grid = "nbs_viewer.views.display.plotDisplay:ImageGridDisplay"
 
 [project.entry-points."nbs_gui.tabs"]
 nbs-viewer-kafka = "nbs_viewer.widgets.kafkaViewerTab:KafkaViewerTab"

@@ -3,9 +3,9 @@ from typing import Dict, List, Optional
 from qtpy.QtCore import QObject, Signal
 
 from .plot.displayManager import DisplayManager
+from .plot.displayRegistry import DisplayRegistry
 
 # Global reference to the top-level AppModel instance
-_top_level_model = None
 
 
 class ConfigModel(QObject):
@@ -154,7 +154,8 @@ class AppModel(QObject):
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
         self.config = ConfigModel(config_path)
-        self.display_manager = DisplayManager()
+        self.display_registry = DisplayRegistry()
+        self.display_manager = DisplayManager(self.display_registry)
         self.catalogs = CatalogManagerModel(self.config)
 
         self._active_display_id = "main"
@@ -182,42 +183,7 @@ class AppModel(QObject):
 
     # Convenience actions for menus ---------------------------------------
     def new_display(self, widget_type: Optional[str] = None) -> str:
-        return self.display_manager.create_display(widget_type)
+        return self.display_manager.register_display(widget_type)
 
     def close_display(self, display_id: str) -> None:
         self.display_manager.remove_display(display_id)
-
-
-def set_top_level_model(model: AppModel) -> None:
-    """
-    Set the global top-level AppModel instance.
-
-    Parameters
-    ----------
-    model : AppModel
-        The AppModel instance to set as the global top-level model
-    """
-    global _top_level_model
-    _top_level_model = model
-
-
-def get_top_level_model() -> AppModel:
-    """
-    Get the global top-level AppModel instance.
-
-    Returns
-    -------
-    AppModel
-        The global top-level AppModel instance
-
-    Raises
-    ------
-    RuntimeError
-        If called before the top-level model has been set
-    """
-    if _top_level_model is None:
-        raise RuntimeError(
-            "get_top_level_model() called before top-level model was set. "
-            "This should never occur in normal operation."
-        )
-    return _top_level_model

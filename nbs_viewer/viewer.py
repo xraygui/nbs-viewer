@@ -8,8 +8,8 @@ from qtpy.QtWidgets import (
 )
 
 from .mainWidget import MainWidget
-from .models.app_model import AppModel, set_top_level_model
-from .utils import turn_on_debugging, turn_off_debugging
+from .models.app_model import AppModel
+from .utils import turn_on_debugging, turn_off_debugging, set_top_level_model
 from .logging_setup import setup_logging
 
 # import logging

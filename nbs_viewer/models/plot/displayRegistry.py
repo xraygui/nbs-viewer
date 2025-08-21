@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Type
 from importlib.metadata import entry_points
 from qtpy.QtWidgets import QWidget
+from nbs_viewer.views.display.plotDisplay import PlotDisplay
 
 
 @dataclass
@@ -81,6 +82,7 @@ class DisplayRegistry:
         """Load displays from entry points."""
         for ep in entry_points(group="nbs_viewer.plot_displays"):
             try:
+                print(f"Loading display {ep.name}")
                 display_class = ep.load()
                 if not self._validate_display_class(display_class):
                     print(f"display {ep.name} failed validation")
@@ -95,20 +97,9 @@ class DisplayRegistry:
     def _validate_display_class(self, display_class) -> bool:
         """Validate that display class meets requirements."""
         # Check inheritance
-        if not issubclass(display_class, QWidget):
+        if not issubclass(display_class, PlotDisplay):
             return False
-
-        # Check constructor signature - should accept run_list_model as first parameter
-        import inspect
-
-        sig = inspect.signature(display_class.__init__)
-        params = list(sig.parameters.keys())
-
-        # Skip 'self' parameter
-        if len(params) > 1 and params[1] == "run_list_model":
-            return True
-
-        return False
+        return True
 
     def _extract_metadata(self, display_class, display_id: str) -> dict:
         """Extract metadata from display class."""

@@ -22,8 +22,7 @@ from qtpy.QtCore import (
 
 from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
-from nbs_viewer.utils import print_debug
-from ...models.app_model import get_top_level_model
+from nbs_viewer.utils import print_debug, get_top_level_model
 
 
 class CustomHeaderView(QHeaderView):

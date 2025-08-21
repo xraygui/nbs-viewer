@@ -13,7 +13,7 @@ from ..display.displayControl import DisplayControlWidget
 from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 from ...models.plot.runModel import RunModel
 from typing import List
-from ...models.app_model import get_top_level_model
+from nbs_viewer.utils import get_top_level_model
 
 
 # TODO: Should move closer to DataSourceSwitcher (which also needs cleanup)

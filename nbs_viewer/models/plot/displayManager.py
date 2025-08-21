@@ -25,15 +25,15 @@ class DisplayManager(QObject):
     display_removed = Signal(str)  # display_id
     display_type_changed = Signal(str, str)  # display_id, display_type
 
-    def __init__(self):
+    def __init__(self, display_registry: DisplayRegistry):
         super().__init__()
         self._run_list_models = {}  # display_id -> RunListModel
         self._run_assignments = {}  # run_uid -> display_id
         self._display_types = {}  # display_id -> display_type
-        self._display_registry = DisplayRegistry()  # Will be set by MainWidget
+        self._display_registry = display_registry
 
         # Create main display with auto-selection enabled
-        self._create_new_display("main", is_main_display=True)
+        self.register_display(is_main_display=True)
 
     def add_run_to_display(
         self, run: Union[CatalogRun, RunModel], display_id: str
@@ -85,7 +85,12 @@ class DisplayManager(QObject):
                 del self._display_types[display_id]
             self.display_removed.emit(display_id)
 
-    def create_display(self, display_type: Optional[str] = None) -> str:
+    def register_display(
+        self,
+        display_type: Optional[str] = None,
+        display_id: Optional[str] = None,
+        is_main_display: bool = False,
+    ) -> str:
         """
         Create a new display with specified display type.
 
@@ -93,7 +98,10 @@ class DisplayManager(QObject):
         ----------
         display_type : str, optional
             display type to use for this display. If None, uses default.
-
+        display_id : str, optional
+            display id to use for this display. If None, uses default.
+        is_main_display : bool, optional
+            Whether this is the main display, by default False
         Returns
         -------
         str
@@ -110,16 +118,21 @@ class DisplayManager(QObject):
             if display_type not in available_displays:
                 raise ValueError(f"Unknown display type: {display_type}")
 
-        display_id = f"display_{len(self._run_list_models)}"
-        self._create_new_display(display_id, display_type=display_type)
+        if is_main_display:
+            display_id = "main"
+        elif display_id is None:
+            display_id = f"display_{len(self._run_list_models)}"
+        else:
+            display_id = display_id
+
+        self._display_types[display_id] = display_type
+
+        run_list_model = RunListModel(is_main_display=is_main_display)
+        self._run_list_models[display_id] = run_list_model
+        self.display_added.emit(display_id, run_list_model)
         return display_id
 
-    def _create_new_display(
-        self,
-        display_id: str,
-        is_main_display: bool = False,
-        display_type: str = "matplotlib",
-    ) -> None:
+    def get_run_list_model(self, display_id: str) -> None:
         """
         Create a new display and PlotModel.
 
@@ -127,15 +140,8 @@ class DisplayManager(QObject):
         ----------
         display_id : str
             Identifier for the display
-        is_main_display : bool, optional
-            Whether this is the main display, by default False
-        display_type : str, optional
-            display type for this display, by default "matplotlib"
         """
-        run_list_model = RunListModel(is_main_display=is_main_display)
-        self._run_list_models[display_id] = run_list_model
-        self._display_types[display_id] = display_type
-        self.display_added.emit(display_id, run_list_model)
+        return self._run_list_models[display_id]
 
     def get_display_type(self, display_id: str) -> str:
         """Get the display type for a display."""
@@ -192,9 +198,7 @@ class DisplayManager(QObject):
             Runs to add to the new display
         """
         # Create new display
-        display_id = self.create_display(display_type)
-
-        # Add runs to the new display
+        display_id = self.register_display(display_type)  # Add runs to the new display
         self.add_runs_to_display(run_list, display_id)
 
     def add_runs_to_display(self, run_list: List[CatalogRun], display_id: str) -> None:

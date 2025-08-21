@@ -84,13 +84,10 @@ class MainWidget(QWidget):
     # Controller methods for menu actions
     def create_display(self, widget_type=None):
         """Create a new display with optional widget type."""
-        display_id = self.display_manager.create_display(widget_type)
         current_display = self.get_current_display()
         # Auto-add selected runs from current catalog view
         runs = current_display.get_selected_runs()
-        if runs:
-            self.display_manager.add_runs_to_display(runs, display_id)
-        return display_id
+        self.display_manager.create_display_with_runs(runs, widget_type)
 
     def create_matplotlib_display(self):
         """Create a new matplotlib display."""
@@ -130,10 +127,12 @@ class MainWidget(QWidget):
         print("Apply display settings - not implemented yet")
 
     # Signal handlers
-    def _on_display_added(self, display_id, plot_model):
+    def _on_display_added(self, display_id):
         """Handle new display creation."""
         if display_id != "main":
-            tab = PlotDisplay(self.app_model, display_id)
+            widget_type = self.display_manager.get_display_type(display_id)
+            DisplayClass = self.app_model.display_registry.get_display(widget_type)
+            tab = DisplayClass(self.app_model, display_id)
             self.tab_widget.addTab(tab, f"Display {display_id}")
             self.tab_widget.setCurrentWidget(tab)
 

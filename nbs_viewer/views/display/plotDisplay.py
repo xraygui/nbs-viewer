@@ -11,6 +11,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QIcon
 from ..dataSource.runListView import RunListView
 from ..plot.plotWidget import PlotWidget
+from ..plot.imageGridWidget import ImageGridWidget
 from ..common.panel import CollapsiblePanel
 
 
@@ -21,6 +22,12 @@ class PlotDisplay(QWidget):
     This represents a single display view, with its run management and plot display.
     Uses collapsible panels for run list and plot controls to maximize plot space.
     """
+
+    __widget_name__ = "Plot"
+    __widget_description__ = "Display data as a plot"
+    __widget_capabilities__ = ["1d", "2d"]
+    __widget_version__ = "1.0.0"
+    __widget_author__ = "NBS Viewer Team"
 
     def __init__(self, app_model, display_id, parent=None):
         """
@@ -44,14 +51,13 @@ class PlotDisplay(QWidget):
 
     def setup_models(self):
         # Create widgets
-        run_list_model = self.app_model.display_manager.run_list_models[self.display_id]
-        display_manager = self.app_model.display_manager
-        self.data_source = RunListView(run_list_model, display_manager, self.display_id)
+        self.run_list_model = self.display_manager.get_run_list_model(self.display_id)
+        self.data_source = RunListView(
+            self.run_list_model, self.display_manager, self.display_id
+        )
 
         # Create plot widget based on display widget type
-        self.plot_widget = self._create_plot_widget(
-            run_list_model, display_manager, self.display_id
-        )
+        self.plot_widget = self._create_plot_widget()
 
         # Create collapsible panels for data management
         self.run_panel = CollapsiblePanel("Runs", self.data_source)
@@ -103,7 +109,7 @@ class PlotDisplay(QWidget):
         """Get the currently selected runs."""
         return self.data_source.get_selected_runs()
 
-    def _create_plot_widget(self, run_list_model, display_manager, display_id):
+    def _create_plot_widget(self):
         """
         Create the appropriate plot widget based on display widget type.
 
@@ -121,19 +127,15 @@ class PlotDisplay(QWidget):
         QWidget
             The created plot widget
         """
-        # Get widget type for this display
-        display_type = display_manager.get_display_type(display_id)
+        return PlotWidget(self.run_list_model)
 
-        # Get widget registry from display manager
-        display_registry = display_manager._display_registry
 
-        if (
-            display_registry
-            and display_type in display_registry.get_available_displays()
-        ):
-            # Create widget using registry
-            display_class = display_registry.get_display(display_type)
-            return display_class(run_list_model)
-        else:
-            # Fallback to default PlotWidget
-            return PlotWidget(run_list_model)
+class ImageGridDisplay(PlotDisplay):
+    __widget_name__ = "Image Grid"
+    __widget_description__ = "Display N-D data as a grid of 2D images"
+    __widget_capabilities__ = ["2d", "3d", "4d"]
+    __widget_version__ = "1.0.0"
+    __widget_author__ = "NBS Viewer Team"
+
+    def _create_plot_widget(self):
+        return ImageGridWidget(self.run_list_model)
