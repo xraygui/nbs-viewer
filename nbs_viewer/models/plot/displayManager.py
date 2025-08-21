@@ -35,51 +35,71 @@ class DisplayManager(QObject):
         # Create main display with auto-selection enabled
         self.register_display(is_main_display=True)
 
-    def add_run_to_display(
-        self, run: Union[CatalogRun, RunModel], display_id: str
-    ) -> None:
+    ###########################################################################
+    # Accessors and setters
+    ###########################################################################
+
+    def get_run_list_model(self, display_id: str) -> None:
         """
-        Add a run to a specific display.
+        Create a new display and PlotModel.
 
         Parameters
         ----------
-        run : CatalogRun
-            Run to add
         display_id : str
-            Target display identifier
+            Identifier for the display
         """
-        if display_id in self._run_list_models:
-            run_list_model = self._run_list_models[display_id]
-            run_list_model.add_run(run)
-            self._run_assignments[run.uid] = display_id
+        return self._run_list_models[display_id]
 
-    def remove_run_from_display(self, run: CatalogRun, display_id: str) -> None:
+    def get_display_ids(self) -> List[str]:
         """
-        Remove a run from a specific display.
+        Get list of all display IDs.
 
-        Parameters
-        ----------
-        run : CatalogRun
-            Run to remove
-        display_id : str
-            Source display identifier
+        Returns
+        -------
+        List[str]
+            List of display identifiers
         """
+        return list(self._run_list_models.keys())
+
+    def get_display_type(self, display_id: str) -> str:
+        """Get the display type for a display."""
+        return self._display_types.get(display_id, "matplotlib")
+
+    def set_display_type(self, display_id: str, display_type: str):
+        """Set the display type for a display."""
         if display_id in self._run_list_models:
-            run_list_model = self._run_list_models[display_id]
-            run_list_model.remove_run(run)
-            if run.uid in self._run_assignments:
-                del self._run_assignments[run.uid]
+            self._display_types[display_id] = display_type
+            self.display_type_changed.emit(display_id, display_type)
+
+    def get_available_display_types(self) -> List[str]:
+        """Get list of available display types."""
+        if self._display_registry:
+            return self._display_registry.get_available_displays()
+        return ["matplotlib"]  # Fallback
+
+    def get_display_metadata(self, display_type: str) -> dict:
+        """Get metadata for a display type."""
+        if self._display_registry:
+            return self._display_registry.get_display_metadata(display_type)
+        return {"name": display_type, "description": ""}  # Fallback
+
+    ###########################################################################
+    # Display management
+    ###########################################################################
+    def rename_display(self, display_id: str, new_name: str) -> None:
+        """
+        Rename a display.
+        """
+        if display_id in self._display_types:
+            display_type = self._display_types.pop(display_id)
+            self._display_types[new_name] = display_type
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models.pop(display_id)
+            self._run_list_models[new_name] = run_list_model
 
     def remove_display(self, display_id: str) -> None:
         """Remove a display if it exists and is not the main display."""
         if display_id != "main" and display_id in self._run_list_models:
-            # Remove all runs assigned to this display
-            runs_to_remove = [
-                uid for uid, cid in self._run_assignments.items() if cid == display_id
-            ]
-            for uid in runs_to_remove:
-                del self._run_assignments[uid]
-
             self._run_list_models.pop(display_id)
             if display_id in self._display_types:
                 del self._display_types[display_id]
@@ -132,60 +152,6 @@ class DisplayManager(QObject):
         self.display_added.emit(display_id, run_list_model)
         return display_id
 
-    def get_run_list_model(self, display_id: str) -> None:
-        """
-        Create a new display and PlotModel.
-
-        Parameters
-        ----------
-        display_id : str
-            Identifier for the display
-        """
-        return self._run_list_models[display_id]
-
-    def get_display_type(self, display_id: str) -> str:
-        """Get the display type for a display."""
-        return self._display_types.get(display_id, "matplotlib")
-
-    def set_display_type(self, display_id: str, display_type: str):
-        """Set the display type for a display."""
-        if display_id in self._run_list_models:
-            self._display_types[display_id] = display_type
-            self.display_type_changed.emit(display_id, display_type)
-
-    def get_available_display_types(self) -> List[str]:
-        """Get list of available display types."""
-        if self._display_registry:
-            return self._display_registry.get_available_displays()
-        return ["matplotlib"]  # Fallback
-
-    def get_display_metadata(self, display_type: str) -> dict:
-        """Get metadata for a display type."""
-        if self._display_registry:
-            return self._display_registry.get_display_metadata(display_type)
-        return {"name": display_type, "description": ""}  # Fallback
-
-    def get_display_for_run(self, run_uid: str) -> Optional[str]:
-        """
-        Get the display ID that a run is assigned to.
-
-        Parameters
-        ----------
-        run_uid : str
-            Run identifier to look up
-
-        Returns
-        -------
-        Optional[str]
-            Display ID if found, None otherwise
-        """
-        return self._run_assignments.get(run_uid)
-
-    @property
-    def run_list_models(self):
-        """Get dictionary of current run list models."""
-        return self._run_list_models
-
     def create_display_with_runs(
         self, run_list: List[CatalogRun], display_type: str = "matplotlib"
     ) -> None:
@@ -201,6 +167,9 @@ class DisplayManager(QObject):
         display_id = self.register_display(display_type)  # Add runs to the new display
         self.add_runs_to_display(run_list, display_id)
 
+    ###########################################################################
+    # Run management
+    ###########################################################################
     def add_runs_to_display(self, run_list: List[CatalogRun], display_id: str) -> None:
         """
         Add multiple runs to a specific display.
@@ -216,22 +185,37 @@ class DisplayManager(QObject):
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models[display_id]
             for run in run_list:
-                # Remove from current display if assigned
-                current_display = self.get_display_for_run(run.uid)
-                if current_display is not None:
-                    self.remove_run_from_display(run, current_display)
-
                 # Add to new display
                 run_list_model.add_run(run)
-                self._run_assignments[run.uid] = display_id
 
-    def get_display_ids(self) -> List[str]:
+    def add_run_to_display(
+        self, run: Union[CatalogRun, RunModel], display_id: str
+    ) -> None:
         """
-        Get list of all display IDs.
+        Add a run to a specific display.
 
-        Returns
-        -------
-        List[str]
-            List of display identifiers
+        Parameters
+        ----------
+        run : CatalogRun
+            Run to add
+        display_id : str
+            Target display identifier
         """
-        return list(self._run_list_models.keys())
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models[display_id]
+            run_list_model.add_run(run)
+
+    def remove_run_from_display(self, run: CatalogRun, display_id: str) -> None:
+        """
+        Remove a run from a specific display.
+
+        Parameters
+        ----------
+        run : CatalogRun
+            Run to remove
+        display_id : str
+            Source display identifier
+        """
+        if display_id in self._run_list_models:
+            run_list_model = self._run_list_models[display_id]
+            run_list_model.remove_run(run)
