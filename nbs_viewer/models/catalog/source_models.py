@@ -180,14 +180,28 @@ class URISourceModel(SourceModel):
         """
         # Check for environment variable first
         api_key = os.environ.get("TILED_API_KEY")
-        if api_key:
-            context.configure_auth({"api_key": api_key})
-            return
 
         # Check for manual API key
         if self.api_key:
-            context.configure_auth({"api_key": self.api_key})
-            return
+            context.api_key = self.api_key
+            try:
+                context.which_api_key()
+                return
+            except Exception as e:
+                print_debug("URISourceModel", f"API key failed: {e}")
+                context.api_key = None
+                # If callback fails, we'll fall through to the exception below
+                pass
+        if api_key:
+            context.api_key = api_key
+            try:
+                context.which_api_key()
+                return
+            except Exception as e:
+                print_debug("URISourceModel", f"TILED_API_KEY failed: {e}")
+                context.api_key = None
+                # If callback fails, we'll fall through to the exception below
+                pass
 
         # Check if we have cached tokens and remember_me is True
         if self.use_cached_tokens:
