@@ -237,21 +237,25 @@ class URISourceView(SourceView):
             client, label = self.model.navigate_catalog_tree(context, node_path_parts)
 
             # Check if we need to navigate through a nested catalog
-            test_uid = client.items_indexer[0][0]
-            typical_uid4_len = 36
-            if len(test_uid) < typical_uid4_len:
-                # Probably not really a UID, and we have a nested catalog
-                picker = CatalogPicker(client, self)
-                if picker.exec_():
-                    selected_keys = picker.selected_entry
-                    self.model.set_selected_keys(selected_keys)
+            try:
+                test_uid = client.items_indexer[0][0]
+                typical_uid4_len = 36
+                if len(test_uid) < typical_uid4_len:
+                    # Probably not really a UID, and we have a nested catalog
+                    picker = CatalogPicker(client, self)
+                    if picker.exec_():
+                        selected_keys = picker.selected_entry
+                        self.model.set_selected_keys(selected_keys)
 
-                    # Update the label and catalog with selected keys
-                    for key in selected_keys:
-                        client = client[key]
-                        label += ":" + key
-                else:
-                    return None, None, None  # User cancelled the dialog
+                        # Update the label and catalog with selected keys
+                        for key in selected_keys:
+                            client = client[key]
+                            label += ":" + key
+                    else:
+                        return None, None, None  # User cancelled the dialog
+            except IndexError:
+                # We have a blank catalog
+                pass
 
             # Stage 3: Select catalog model
             model_dialog = CatalogModelPicker(self.model.catalog_models, self)

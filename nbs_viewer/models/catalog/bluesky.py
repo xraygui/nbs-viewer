@@ -31,8 +31,8 @@ class BlueskyCatalog(CatalogBase):
             Parent object, by default None.
         """
         super().__init__(parent)
-        self._base_catalog = catalog
-        self._catalog = catalog
+        self._base_catalog = catalog.v2
+        self._catalog = catalog.v2
         self._wrapped_runs = {}
         self._chunk_cache = ChunkCache()
         # Enable async key discovery by default for Bluesky-based catalogs

@@ -86,7 +86,7 @@ class BlueskyRun(CatalogRun):
         """Check if run has accessible data."""
         try:
             # Check if primary stream exists and has data
-            if ("primary", "data") in self._run:
+            if "/".join(["primary", "data"]) in self._run:
                 self._has_data = True
             else:
                 print(f"Warning: Run {self._key} has no primary data stream")
@@ -235,7 +235,7 @@ class BlueskyRun(CatalogRun):
             logging.debug(f"Getting shape for key {key}")
             try:
                 # Try to get shape from metadata first
-                shape = self._run["primary", "data", key].shape
+                shape = self._run["/".join(["primary", "data", key])].shape
                 self._shape_cache[key] = shape
                 logging.debug("Got shape from metadata")
             except (KeyError, AttributeError):
@@ -337,7 +337,7 @@ class BlueskyRun(CatalogRun):
                 return self._data_cache[key]
 
             try:
-                data_accessor = self._run["primary", "data", key]
+                data_accessor = self._run["/".join(["primary", "data", key])]
                 data = data_accessor.read()
                 self._data_cache[key] = data
                 self._manage_cache(self._data_cache, self._max_1d_cache_items)
@@ -353,7 +353,7 @@ class BlueskyRun(CatalogRun):
         if self._chunk_cache is None:
             # Fallback to loading full data if no chunk cache available
             try:
-                data_accessor = self._run["primary", "data", key]
+                data_accessor = self._run["/".join(["primary", "data", key])]
                 data = data_accessor.read()
                 if slice_info is not None:
                     return data[slice_info]
@@ -442,11 +442,11 @@ class BlueskyRun(CatalogRun):
         # Get all available keys
         print_debug(
             "BlueskyRun.getRunKeys",
-            "Getting run['primary', 'data'].keys()",
+            "Getting run['/'.join(['primary', 'data'])].keys()",
             category="DEBUG_CATALOG",
         )
         try:
-            all_keys = list(self._run["primary", "data"].keys())
+            all_keys = list(self._run["/".join(["primary", "data"])].keys())
             self._has_data = True
         except Exception as e:
             print(
@@ -670,7 +670,9 @@ class BlueskyRun(CatalogRun):
         # Get y dimensions from cache or fetch
         if ykey not in self._dim_cache:
             try:
-                self._dim_cache[ykey] = self._run["primary", "data", ykey].dims
+                self._dim_cache[ykey] = self._run[
+                    "/".join(["primary", "data", ykey])
+                ].dims
             except Exception as e:
                 print(f"Could not get dimension names for {ykey}: {e}")
                 # Fallback to generating dimension names from shape
@@ -684,7 +686,9 @@ class BlueskyRun(CatalogRun):
         for key in xkeys:
             if key not in self._dim_cache:
                 try:
-                    self._dim_cache[key] = self._run["primary", "data", key].dims
+                    self._dim_cache[key] = self._run[
+                        "/".join(["primary", "data", key])
+                    ].dims
                 except Exception as e:
                     print(f"Could not get dimension names for {key}: {e}")
                     # Fallback to generating dimension names from shape

@@ -124,7 +124,7 @@ class CatalogManagerModel(QObject):
             self._current_label = label
             self.current_catalog_changed.emit(label)
 
-    # Actions --------------------------------------------------------------
+    """     # Actions --------------------------------------------------------------
     def refresh_current(self) -> None:
         cat = self.get_current_catalog()
         if cat is None:
@@ -137,6 +137,7 @@ class CatalogManagerModel(QObject):
             msg = f"Failed to refresh '{self._current_label}': {exc}"
             logging.getLogger("nbs_viewer.catalog").exception(msg)
             self.error.emit(msg)
+    """
 
     # Internal signal handlers --------------------------------------------
     def _on_item_selected(self, run):
