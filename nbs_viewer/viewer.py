@@ -118,13 +118,14 @@ class Viewer(QMainWindow):
         catalog_menu.addSeparator()
 
         # Refresh All Catalogs
+        """
         refresh_action = QAction("&Refresh Current Catalog", self)
         refresh_action.setShortcut("F5")
         refresh_action.setStatusTip("Refresh current catalog")
         refresh_action.triggered.connect(self._on_refresh_catalogs)
         catalog_menu.addAction(refresh_action)
+        """
 
-        # Refresh All Catalogs
         clear_selected_run_action = QAction("&Deselect Runs", self)
         clear_selected_run_action.setShortcut("Ctrl+Shift+D")
         clear_selected_run_action.setStatusTip("Deselect all runs")
@@ -259,9 +260,11 @@ class Viewer(QMainWindow):
         """Handle removing a catalog source."""
         self.data_source.remove_current_source()
 
+    '''
     def _on_refresh_catalogs(self):
         """Handle refreshing all catalogs."""
         self.data_source.refresh_catalog()
+    '''
 
     def _on_clear_selected_run(self):
         """Handle clearing selected run."""
