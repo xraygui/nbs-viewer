@@ -1,7 +1,6 @@
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QSplitter,
     QHBoxLayout,
     QPushButton,
     QLabel,
@@ -49,19 +48,17 @@ class CollapsiblePanel(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(5, 2, 5, 2)
 
-        # Toggle button
-        self.toggle_button = QPushButton("▼")
+        # Toggle button with Qt standard icons
+        self.toggle_button = QPushButton()
         self.toggle_button.setFixedSize(16, 16)
         self.toggle_button.setStyleSheet(
             """
             QPushButton {
                 border: none;
                 background: transparent;
-                font-weight: bold;
-                color: #404040;
             }
             QPushButton:hover {
-                color: #000000;
+                background-color: #e0e0e0;
             }
         """
         )
@@ -87,6 +84,9 @@ class CollapsiblePanel(QWidget):
 
         # Set initial state
         self.update_collapsed_state()
+
+        # Set initial icon (expanded state)
+        self.toggle_button.setIcon(self.style().standardIcon(self.style().SP_ArrowDown))
 
     def _setup_resize_handle(self):
         """Add a resize handle to make the panel resizable."""
@@ -130,7 +130,7 @@ class CollapsiblePanel(QWidget):
         """Handle mouse move during resize."""
         if self._resizing:
             delta_y = event.globalY() - self._start_y
-            new_height = max(50, self._start_height + delta_y)  # Minimum height
+            new_height = max(50, self._start_height + delta_y)  # Min height
             self.setFixedHeight(new_height)
 
     def _handle_mouse_release(self, event):
@@ -150,16 +150,22 @@ class CollapsiblePanel(QWidget):
             # Remove widget from layout to actually collapse
             self.panel_layout.removeWidget(self.widget)
             self.widget.hide()
-            self.toggle_button.setText("▶")
+            # Use Qt standard icon for collapsed state
+            self.toggle_button.setIcon(
+                self.style().standardIcon(self.style().SP_ArrowRight)
+            )
             # Set fixed height when collapsed (just header height)
             self.setFixedHeight(30)
             # Hide resize handle when collapsed
             self.resize_handle.hide()
         else:
             # Add widget back to layout
-            self.panel_layout.insertWidget(1, self.widget)  # Insert after header
+            self.panel_layout.insertWidget(1, self.widget)  # After header
             self.widget.show()
-            self.toggle_button.setText("▼")
+            # Use Qt standard icon for expanded state
+            self.toggle_button.setIcon(
+                self.style().standardIcon(self.style().SP_ArrowDown)
+            )
             # Allow resizing when expanded
             self.setFixedHeight(self.sizeHint().height())
             self.resize_handle.show()
