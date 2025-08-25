@@ -10,6 +10,8 @@ from qtpy.QtWidgets import (
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from qtpy.QtCore import QTimer
+
 from ...utils import print_debug
 from ...models.plot.plotDataModel import PlotDataModel
 from .plotControl import PlotControls
@@ -32,12 +34,6 @@ class ImageGridWidget(QWidget):
     and built-in navigation functionality.
     """
 
-    __widget_name__ = "Image Grid"
-    __widget_description__ = "Display N-D data as a grid of 2D images"
-    __widget_capabilities__ = ["2d", "3d", "4d"]
-    __widget_version__ = "1.0.0"
-    __widget_author__ = "NBS Viewer Team"
-
     def __init__(self, run_list_model, parent=None):
         """
         Initialize the image grid widget.
@@ -59,6 +55,9 @@ class ImageGridWidget(QWidget):
         self._images_per_page = 9  # Start with 9 for testing
         self._total_images = 0
 
+        # Batch drawing system (consistent with MplCanvas)
+        self._draw_pending = False
+
         # Create plot controls (for data selection)
         self._create_plot_controls()
         # Connect to model signals
@@ -77,6 +76,21 @@ class ImageGridWidget(QWidget):
         self.run_list_model.selected_keys_changed.connect(self._on_selection_changed)
         self.run_list_model.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.run_list_model.request_plot_update.connect(self._update_grid)
+
+    def draw(self):
+        """Draw the figure with throttling (consistent with MplCanvas)."""
+        if not self._draw_pending:
+            self._draw_pending = True
+            QTimer.singleShot(16, self._do_draw)  # About 60fps
+
+    def _do_draw(self):
+        """Actually perform the draw operation (consistent with MplCanvas)."""
+        self._draw_pending = False
+        print_debug("ImageGridWidget._do_draw", "Drawing")
+        try:
+            self.canvas.draw()
+        except Exception as e:
+            print_debug("ImageGridWidget", f"Error in draw: {e}")
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -281,12 +295,16 @@ class ImageGridWidget(QWidget):
         start_idx = (self._current_page - 1) * self._images_per_page
         end_idx = min(start_idx + self._images_per_page, self._total_images)
 
-        print_debug("ImageGridWidget", f"Displaying images {start_idx} to {end_idx-1}")
+        print_debug(
+            "ImageGridWidget._create_subplots_for_page",
+            f"Displaying images {start_idx} to {end_idx-1}",
+        )
         visible_models = self.run_list_model.visible_models
         if not visible_models:
             return
 
         run_model = visible_models[0]
+        print_debug("ImageGridWidget", f"Run model: {run_model.uid}")
         x_keys, y_keys, norm_keys = run_model.get_selected_keys()
 
         if not y_keys:
@@ -351,9 +369,7 @@ class ImageGridWidget(QWidget):
                     artist = ax.imshow(
                         np.zeros(image_shape), cmap="viridis", aspect="auto"
                     )
-                    self._start_image_worker(
-                        plot_data, slice_info, 2, image_idx, artist
-                    )
+                    self._start_image_worker(plot_data, slice_info, artist)
                 else:
                     print_debug(
                         "ImageGridWidget",
@@ -407,7 +423,7 @@ class ImageGridWidget(QWidget):
             Index of this image
         """
         # Create unique key for this image
-        key = image_idx
+        key = (run_model.uid, image_idx)
 
         if key not in self.plotArtists:
             print_debug(
@@ -426,18 +442,18 @@ class ImageGridWidget(QWidget):
             )
 
             # Connect signals
-            plot_data.data_changed.connect(self._handle_image_data)
+            plot_data.data_changed.connect(self._start_image_worker)
             plot_data.draw_requested.connect(self._handle_image_draw)
 
             # Store reference
             self.plotArtists[key] = plot_data
         else:
             plot_data = self.plotArtists[key]
-            plot_data.data_changed.connect(self._handle_image_data)
+            plot_data.data_changed.connect(self._start_image_worker)
             plot_data.draw_requested.connect(self._handle_image_draw)
         return plot_data
 
-    def _start_image_worker(self, plot_data, slice_info, dimension, key, artist=None):
+    def _start_image_worker(self, plot_data, slice_info=None, artist=None):
         """
         Start a PlotWorker for loading image data.
 
@@ -447,23 +463,22 @@ class ImageGridWidget(QWidget):
             The plot data model
         slice_info : tuple
             Slice indices
-        dimension : int
-            Plot dimension
-        key : tuple
-            Unique key for this image
+
         """
 
         print_debug("ImageGridWidget", f"Starting worker for image {plot_data.label}")
-
+        dimension = 2
+        if slice_info is None:
+            slice_info = plot_data._indices
         # Create worker
         worker_key = str(uuid.uuid4())
         worker = PlotWorker(plot_data, slice_info, dimension, artist)
         worker.data_ready.connect(self._handle_image_data)
         worker.error_occurred.connect(self._handle_image_error)
-        worker.finished.connect(lambda: self._cleanup_worker((key, worker_key)))
+        worker.finished.connect(lambda: self._cleanup_worker(worker_key))
 
         # Store worker reference and start it
-        self.workers[(key, worker_key)] = worker
+        self.workers[worker_key] = worker
         worker.start()
 
     def _handle_image_data(self, x, y, plot_data, artist=None):
@@ -503,7 +518,7 @@ class ImageGridWidget(QWidget):
             else:
                 print_debug("ImageGridWidget", f"Error plotting image data: {y.shape}")
             # Redraw the canvas
-            self.canvas.draw()
+            self.draw()
 
         except Exception as e:
             print_debug("ImageGridWidget", f"Error plotting image data: {e}")
@@ -511,7 +526,7 @@ class ImageGridWidget(QWidget):
     def _handle_image_draw(self):
         """Handle draw requests from plot data models."""
         # Redraw the canvas
-        self.canvas.draw()
+        self.draw()
 
     def _handle_image_error(self, error_msg):
         """Handle errors from image workers."""
@@ -693,9 +708,7 @@ class ImageGridWidget(QWidget):
                         artist = ax.imshow(
                             np.zeros(image_shape), cmap="viridis", aspect="auto"
                         )
-                        self._start_image_worker(
-                            plot_data, slice_info, 2, image_idx, artist
-                        )
+                        self._start_image_worker(plot_data, slice_info, artist)
 
                     except Exception as e:
                         print_debug(
@@ -713,4 +726,4 @@ class ImageGridWidget(QWidget):
         """Handle resize events."""
         super().resizeEvent(event)
         # Redraw the canvas
-        self.canvas.draw()
+        self.draw()

@@ -141,5 +141,11 @@ class ImageGridDisplay(PlotDisplay):
     __widget_version__ = "1.0.0"
     __widget_author__ = "NBS Viewer Team"
 
+    def setup_models(self):
+        super().setup_models()
+
+        # Enable single-selection mode for image grid displays
+        self.run_list_model._single_selection_mode = True
+
     def _create_plot_widget(self):
         return ImageGridWidget(self.run_list_model)

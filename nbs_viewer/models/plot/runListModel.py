@@ -27,7 +27,7 @@ class RunListModel(QStandardItemModel):
 
     request_plot_update = Signal()
 
-    def __init__(self, is_main_display=False):
+    def __init__(self, is_main_display=False, single_selection_mode=False):
         """
         Initialize the run list model.
 
@@ -35,10 +35,13 @@ class RunListModel(QStandardItemModel):
         ----------
         is_main_display : bool
             If True, all runs are automatically selected
+        single_selection_mode : bool
+            If True, only one run can be visible at a time (radio button behavior)
         """
         super().__init__()
         self._run_models = {}  # run_uid -> RunModel
         self._is_main_display = is_main_display
+        self._single_selection_mode = single_selection_mode
 
         self.available_keys = list()
         self._current_x_keys = []
@@ -498,16 +501,34 @@ class RunListModel(QStandardItemModel):
 
         Parameters
         ----------
-        run_list : List[CatalogRun]
-            Runs to select
+        uids : List[str]
+            List of UIDs to set visibility for
+        is_visible : bool
+            Whether to make the runs visible
         """
-        for uid in uids:
-            if uid in self._run_models:
-                if is_visible:
-                    self._visible_runs.add(uid)
-                elif uid in self._visible_runs:
+        if self._single_selection_mode and is_visible and uids:
+            # In single-selection mode, only the first UID should be visible
+            # Set all runs to not visible first
+            all_uids = list(self._run_models.keys())
+            for uid in all_uids:
+                if uid in self._visible_runs:
                     self._visible_runs.remove(uid)
-                self._run_models[uid].set_visible(is_visible)
+                self._run_models[uid].set_visible(False)
+
+            # Then set only the first UID to visible
+            first_uid = uids[0]
+            if first_uid in self._run_models:
+                self._visible_runs.add(first_uid)
+                self._run_models[first_uid].set_visible(True)
+        else:
+            # Normal behavior
+            for uid in uids:
+                if uid in self._run_models:
+                    if is_visible:
+                        self._visible_runs.add(uid)
+                    elif uid in self._visible_runs:
+                        self._visible_runs.remove(uid)
+                    self._run_models[uid].set_visible(is_visible)
 
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
@@ -539,6 +560,7 @@ class RunListModel(QStandardItemModel):
 
     @property
     def visible_runs(self):
+        """Get visible run UIDs"""
         if self._is_main_display:
             return set(self._run_models.keys())
         else:
