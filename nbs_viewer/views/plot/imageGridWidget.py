@@ -60,12 +60,12 @@ class ImageGridWidget(QWidget):
 
         # Create plot controls (for data selection)
         self._create_plot_controls()
-        # Connect to model signals
-        self._connect_signals()
-
         # Initial update
         self._setup_ui()
         self._update_grid()
+        # Connect to model signals
+
+        self._connect_signals()
 
     def _create_plot_controls(self):
         """Create plot controls."""

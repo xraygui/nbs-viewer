@@ -78,13 +78,13 @@ class DisplayControlWidget(QWidget):
         self.display_creation_menu.clear()
 
         available_displays = self.display_manager.get_available_display_types()
-        for display_id in available_displays:
-            metadata = self.display_manager.get_display_metadata(display_id)
-            display_name = metadata.get("name", display_id)
+        for display_type in available_displays:
+            metadata = self.display_manager.get_display_metadata(display_type)
+            display_name = metadata.get("name", display_type)
             action = QAction(display_name, self)
-            action.setData(display_id)
+            action.setData(display_type)
             action.triggered.connect(
-                lambda checked, did=display_id: self._on_new_display(did)
+                lambda checked, disp_type=display_type: self._on_new_display(disp_type)
             )
             self.display_creation_menu.addAction(action)
         has_actions = len(self.display_creation_menu.actions()) > 0
@@ -105,19 +105,14 @@ class DisplayControlWidget(QWidget):
         has_actions = len(self.display_menu.actions()) > 0
         self.add_to_display_btn.setEnabled(has_actions)
 
-    def _on_new_display(self, display_id):
+    def _on_new_display(self, display_type):
         """Create new display with current selection and selected display type."""
         visible_models = self.run_list_model.visible_models
         selected_runs = [model._run for model in visible_models]
-        if selected_runs:
-            # Get selected display type
-            selected_display = display_id
-
-            # Create new display with specified display type
-            display_id = self.display_manager.create_display(
-                display_type=selected_display
-            )
-            self.display_manager.add_runs_to_display(selected_runs, display_id)
+        # Create new display with specified display type
+        display_id = self.display_manager.create_display_with_runs(
+            selected_runs, display_type=display_type
+        )
 
     def _on_display_selected(self, display_id):
         """Add current selection to existing display."""
