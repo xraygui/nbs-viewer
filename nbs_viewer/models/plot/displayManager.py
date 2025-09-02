@@ -112,6 +112,7 @@ class DisplayManager(QObject):
         display_type: Optional[str] = None,
         display_id: Optional[str] = None,
         is_main_display: bool = False,
+        single_selection_mode: bool = False,
     ) -> str:
         """
         Create a new display with specified display type.
@@ -124,6 +125,8 @@ class DisplayManager(QObject):
             display id to use for this display. If None, uses default.
         is_main_display : bool, optional
             Whether this is the main display, by default False
+        single_selection_mode : bool, optional
+            Whether to enable single-selection mode for checkboxes, by default False
         Returns
         -------
         str
@@ -149,7 +152,9 @@ class DisplayManager(QObject):
 
         self._display_types[display_id] = display_type
 
-        run_list_model = RunListModel(is_main_display=is_main_display)
+        run_list_model = RunListModel(
+            is_main_display=is_main_display, single_selection_mode=single_selection_mode
+        )
         self._run_list_models[display_id] = run_list_model
         self.display_added.emit(display_id, run_list_model)
         return display_id
@@ -164,9 +169,17 @@ class DisplayManager(QObject):
         ----------
         run_list : List[CatalogRun]
             Runs to add to the new display
+        display_type : str
+            Type of display to create
         """
+        # Determine if this display type should use single-selection mode
+        single_selection_displays = ["image_grid", "spiral"]
+        single_selection_mode = display_type in single_selection_displays
+
         # Create new display
-        display_id = self.register_display(display_type)  # Add runs to the new display
+        display_id = self.register_display(
+            display_type, single_selection_mode=single_selection_mode
+        )
         self.add_runs_to_display(run_list, display_id)
 
     ###########################################################################

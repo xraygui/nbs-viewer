@@ -1,5 +1,5 @@
 from typing import Tuple
-from qtpy.QtCore import Signal, Slot
+from qtpy.QtCore import Signal, Slot, QObject
 from qtpy.QtWidgets import QWidget
 import numpy as np
 import time as ttime
@@ -7,7 +7,7 @@ from nbs_viewer.utils import print_debug
 from matplotlib.image import AxesImage
 
 
-class PlotDataModel(QWidget):
+class PlotDataModel(QObject):
     """
     A class to plot x, y data on a given MplCanvas instance and hold the
     resulting lines object.

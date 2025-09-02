@@ -10,6 +10,8 @@ from qtpy.QtWidgets import (
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from qtpy.QtCore import QTimer
+
 from ...utils import print_debug
 from ...models.plot.plotDataModel import PlotDataModel
 from .plotControl import PlotControls
@@ -32,12 +34,6 @@ class ImageGridWidget(QWidget):
     and built-in navigation functionality.
     """
 
-    __widget_name__ = "Image Grid"
-    __widget_description__ = "Display N-D data as a grid of 2D images"
-    __widget_capabilities__ = ["2d", "3d", "4d"]
-    __widget_version__ = "1.0.0"
-    __widget_author__ = "NBS Viewer Team"
-
     def __init__(self, run_list_model, parent=None):
         """
         Initialize the image grid widget.
@@ -58,15 +54,18 @@ class ImageGridWidget(QWidget):
         self._current_page = 1
         self._images_per_page = 9  # Start with 9 for testing
         self._total_images = 0
+        self.cmap = "viridis"
+        # Batch drawing system (consistent with MplCanvas)
+        self._draw_pending = False
 
         # Create plot controls (for data selection)
         self._create_plot_controls()
-        # Connect to model signals
-        self._connect_signals()
-
         # Initial update
         self._setup_ui()
         self._update_grid()
+        # Connect to model signals
+
+        self._connect_signals()
 
     def _create_plot_controls(self):
         """Create plot controls."""
@@ -77,6 +76,21 @@ class ImageGridWidget(QWidget):
         self.run_list_model.selected_keys_changed.connect(self._on_selection_changed)
         self.run_list_model.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.run_list_model.request_plot_update.connect(self._update_grid)
+
+    def draw(self):
+        """Draw the figure with throttling (consistent with MplCanvas)."""
+        if not self._draw_pending:
+            self._draw_pending = True
+            QTimer.singleShot(16, self._do_draw)  # About 60fps
+
+    def _do_draw(self):
+        """Actually perform the draw operation (consistent with MplCanvas)."""
+        self._draw_pending = False
+        print_debug("ImageGridWidget._do_draw", "Drawing")
+        try:
+            self.canvas.draw()
+        except Exception as e:
+            print_debug("ImageGridWidget", f"Error in draw: {e}")
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -99,6 +113,7 @@ class ImageGridWidget(QWidget):
         main_layout.addWidget(self.toolbar)  # Toolbar at top
         main_layout.addWidget(self.canvas)  # Canvas takes most space
         main_layout.addWidget(self.paging_controls)  # Paging at bottom
+        self.setLayout(main_layout)
 
     def _create_paging_controls(self):
         """Create paging controls as a separate component."""
@@ -265,28 +280,77 @@ class ImageGridWidget(QWidget):
         # Create subplots for current page
         self._create_subplots_for_page(shape, image_shape)
 
+    def _make_slice_info(self, shape, image_idx):
+        slice_indices = [0] * len(shape)
+        slice_indices[0] = image_idx  # Use first dimension for iteration
+
+        # Convert to proper slice format
+        slice_info = []
+        for j, dim_size in enumerate(shape):
+            if j < len(slice_indices):
+                if j >= len(shape) - 2:
+                    # Last 2 dimensions get full slices
+                    slice_info.append(slice(None, None, None))
+                else:
+                    # Other dimensions get integer index
+                    slice_info.append(slice_indices[j])
+            else:
+                slice_info.append(slice(None, None, None))
+
+        slice_info = tuple(slice_info)
+        return slice_info
+
+    def _create_artist(self, ax, image_or_shape):
+        if isinstance(image_or_shape, np.ndarray):
+            artist = ax.imshow(image_or_shape, cmap=self.cmap, aspect="auto")
+        else:
+            artist = ax.imshow(np.zeros(image_or_shape), cmap=self.cmap, aspect="auto")
+        return artist
+
+    def _move_plot_data_to_axes(self, plot_data, ax):
+        # Handle moving image artist to new axes
+        if hasattr(plot_data.artist, "get_array"):
+            # Get current image data and properties
+            image_data = plot_data.artist.get_array()
+            # Remove old artist
+            if plot_data.artist.axes is not None:
+                plot_data.artist.remove()
+
+            # Create new image on target axes
+            new_artist = self._create_artist(ax, image_data)
+            plot_data.set_artist(new_artist)
+            new_artist.autoscale()
+        else:
+            # Fallback to generic move (for non-image artists)
+            plot_data.move_artist_to_axes(ax)
+
+    def _style_axes(self, ax, slice_info, image_idx):
+        ax.set_title(f"Image {image_idx}")
+
     def _create_subplots_for_page(self, shape, image_shape):
         """
         Create subplots for the current page.
 
         Parameters
         ----------
-        start_idx : int
-            Starting image index
-        end_idx : int
-            Ending image index (exclusive)
-        full_shape : tuple
+        shape : tuple
             Full shape of the data
+        image_shape : tuple
+            Shape of the image
         """
         start_idx = (self._current_page - 1) * self._images_per_page
         end_idx = min(start_idx + self._images_per_page, self._total_images)
 
-        print_debug("ImageGridWidget", f"Displaying images {start_idx} to {end_idx-1}")
+        print_debug(
+            "ImageGridWidget._create_subplots_for_page",
+            f"Displaying images {start_idx} to {end_idx-1}",
+        )
         visible_models = self.run_list_model.visible_models
         if not visible_models:
             return
 
         run_model = visible_models[0]
+        print_debug("ImageGridWidget", f"Run model: {run_model.uid}")
         x_keys, y_keys, norm_keys = run_model.get_selected_keys()
 
         if not y_keys:
@@ -317,77 +381,39 @@ class ImageGridWidget(QWidget):
 
             # Create subplot
             ax = self.figure.add_subplot(rows, cols, subplot_idx)
-            ax.set_title(f"Image {image_idx}")
             self.axes[image_idx] = ax
+
+            slice_info = self._make_slice_info(shape, image_idx)
 
             try:
                 # Create slice indices for this image
-                slice_indices = [0] * len(shape)
-                slice_indices[0] = image_idx  # Use first dimension for iteration
-
-                # Convert to proper slice format
-                slice_info = []
-                for j, dim_size in enumerate(shape):
-                    if j < len(slice_indices):
-                        if j >= len(shape) - 2:
-                            # Last 2 dimensions get full slices
-                            slice_info.append(slice(None, None, None))
-                        else:
-                            # Other dimensions get integer index
-                            slice_info.append(slice_indices[j])
-                    else:
-                        slice_info.append(slice(None, None, None))
-
-                slice_info = tuple(slice_info)
                 print_debug(
                     "ImageGridWidget",
                     f"Processing image {image_idx} with indices {slice_info}",
                 )
                 # Create PlotDataModel for this image
                 plot_data = self._create_image_plot_data(
-                    run_model, x_keys, y_key, norm_keys, slice_info, image_idx
+                    run_model, slice_info, image_idx
                 )
                 if plot_data.artist is None:
-                    artist = ax.imshow(
-                        np.zeros(image_shape), cmap="viridis", aspect="auto"
-                    )
-                    self._start_image_worker(
-                        plot_data, slice_info, 2, image_idx, artist
-                    )
+                    artist = self._create_artist(ax, image_shape)
+                    self._start_image_worker(plot_data, slice_info, artist)
                 else:
                     print_debug(
                         "ImageGridWidget",
                         f"Moving artist {plot_data.label} to new axes",
                     )
-                    # Handle moving image artist to new axes
-                    if hasattr(plot_data.artist, "get_array"):
-                        # Get current image data and properties
-                        image_data = plot_data.artist.get_array()
-                        cmap = plot_data.artist.get_cmap()
-
-                        # Remove old artist
-                        if plot_data.artist.axes is not None:
-                            plot_data.artist.remove()
-
-                        # Create new image on target axes
-                        new_artist = ax.imshow(image_data, cmap=cmap, aspect="auto")
-                        plot_data.set_artist(new_artist)
-                        new_artist.autoscale()
-                    else:
-                        # Fallback to generic move (for non-image artists)
-                        plot_data.move_artist_to_axes(ax)
+                    self._move_plot_data_to_axes(plot_data, ax)
 
             except Exception as e:
                 print_debug("ImageGridWidget", f"Error creating image {image_idx}: {e}")
-
+            self._style_axes(ax, slice_info, image_idx)
         # Adjust layout for better spacing
         self.figure.tight_layout()
         self.canvas.draw()
         print_debug("ImageGridWidget", "Finished creating subplots")
 
-    def _create_image_plot_data(
-        self, run_model, x_keys, y_key, norm_keys, slice_info, image_idx
-    ):
+    def _create_image_plot_data(self, run_model, slice_info, image_idx):
         """
         Create a PlotDataModel for a single image.
 
@@ -407,8 +433,9 @@ class ImageGridWidget(QWidget):
             Index of this image
         """
         # Create unique key for this image
-        key = image_idx
-
+        key = (run_model.uid, image_idx)
+        x_keys, y_keys, norm_keys = run_model.get_selected_keys()
+        y_key = y_keys[0]
         if key not in self.plotArtists:
             print_debug(
                 "ImageGridWidget", f"Creating PlotDataModel for image {image_idx}"
@@ -426,18 +453,18 @@ class ImageGridWidget(QWidget):
             )
 
             # Connect signals
-            plot_data.data_changed.connect(self._handle_image_data)
+            plot_data.data_changed.connect(self._start_image_worker)
             plot_data.draw_requested.connect(self._handle_image_draw)
 
             # Store reference
             self.plotArtists[key] = plot_data
         else:
             plot_data = self.plotArtists[key]
-            plot_data.data_changed.connect(self._handle_image_data)
+            plot_data.data_changed.connect(self._start_image_worker)
             plot_data.draw_requested.connect(self._handle_image_draw)
         return plot_data
 
-    def _start_image_worker(self, plot_data, slice_info, dimension, key, artist=None):
+    def _start_image_worker(self, plot_data, slice_info=None, artist=None):
         """
         Start a PlotWorker for loading image data.
 
@@ -447,23 +474,22 @@ class ImageGridWidget(QWidget):
             The plot data model
         slice_info : tuple
             Slice indices
-        dimension : int
-            Plot dimension
-        key : tuple
-            Unique key for this image
+
         """
 
         print_debug("ImageGridWidget", f"Starting worker for image {plot_data.label}")
-
+        dimension = 2
+        if slice_info is None:
+            slice_info = plot_data._indices
         # Create worker
         worker_key = str(uuid.uuid4())
         worker = PlotWorker(plot_data, slice_info, dimension, artist)
         worker.data_ready.connect(self._handle_image_data)
         worker.error_occurred.connect(self._handle_image_error)
-        worker.finished.connect(lambda: self._cleanup_worker((key, worker_key)))
+        worker.finished.connect(lambda: self._cleanup_worker(worker_key))
 
         # Store worker reference and start it
-        self.workers[(key, worker_key)] = worker
+        self.workers[worker_key] = worker
         worker.start()
 
     def _handle_image_data(self, x, y, plot_data, artist=None):
@@ -503,7 +529,7 @@ class ImageGridWidget(QWidget):
             else:
                 print_debug("ImageGridWidget", f"Error plotting image data: {y.shape}")
             # Redraw the canvas
-            self.canvas.draw()
+            self.draw()
 
         except Exception as e:
             print_debug("ImageGridWidget", f"Error plotting image data: {e}")
@@ -511,7 +537,7 @@ class ImageGridWidget(QWidget):
     def _handle_image_draw(self):
         """Handle draw requests from plot data models."""
         # Redraw the canvas
-        self.canvas.draw()
+        self.draw()
 
     def _handle_image_error(self, error_msg):
         """Handle errors from image workers."""
@@ -578,139 +604,8 @@ class ImageGridWidget(QWidget):
             # Update grid layout without re-fetching data
             self._update_grid()
 
-    def _update_grid_layout_only(self):
-        """Update only the grid layout without re-fetching data."""
-        if not hasattr(self, "axes") or not self.axes:
-            # No existing data, do full update
-            self._update_grid()
-            return
-
-        # Calculate new page range
-        start_idx = (self._current_page - 1) * self._images_per_page
-        end_idx = min(start_idx + self._images_per_page, self._total_images)
-        images_this_page = end_idx - start_idx
-
-        # Calculate new grid dimensions
-        cols = int(np.ceil(np.sqrt(images_this_page)))
-        rows = int(np.ceil(images_this_page / cols))
-
-        print_debug(
-            "ImageGridWidget",
-            f"Updating layout: {images_this_page} images in {rows}x{cols}",
-        )
-
-        # Store existing image data before clearing
-        existing_images = {}
-        for image_idx, ax in self.axes.items():
-            if start_idx <= image_idx < end_idx:
-                # Store image data for images that will be on this page
-                for artist in ax.get_images():
-                    existing_images[image_idx] = {
-                        "array": artist.get_array(),
-                        "cmap": artist.get_cmap(),
-                    }
-
-        # Clear existing subplots
-        self.figure.clear()
-
-        # Get data for new images that need to be fetched
-        visible_models = self.run_list_model.visible_models
-        if visible_models:
-            run_model = visible_models[0]
-            x_keys, y_keys, norm_keys = run_model.get_selected_keys()
-            y_key = y_keys[0] if y_keys else None
-
-            # Get shape info for slice creation
-            shape_info = self._get_shape_info()
-            if shape_info:
-                shape, dim_names, axis_arrays, associated_data = shape_info
-                # Get image shape for placeholder images
-                total_images_result = self._get_total_images(shape)
-                if total_images_result:
-                    _, image_shape, _ = total_images_result
-                else:
-                    image_shape = (10, 10)  # fallback
-            else:
-                image_shape = (10, 10)  # fallback
-
-        # Recreate subplots for this page
-        new_axes = {}
-        for i in range(images_this_page):
-            image_idx = start_idx + i
-            row = i // cols
-            col = i % cols
-            subplot_idx = row * cols + col + 1
-
-            # Create subplot
-            ax = self.figure.add_subplot(rows, cols, subplot_idx)
-            ax.set_title(f"Image {image_idx}")
-            new_axes[image_idx] = ax
-
-            # Re-plot existing data if available
-            if image_idx in existing_images:
-                # Recreate the image from stored data
-                img_data = existing_images[image_idx]
-                ax.imshow(img_data["array"], cmap=img_data["cmap"], aspect="auto")
-                ax.set_xticks([])
-                ax.set_yticks([])
-                print_debug(
-                    "ImageGridWidget",
-                    f"Recreated image {image_idx} from stored data",
-                )
-            else:
-                # This is a new image, need to fetch data
-                if visible_models and y_key and shape_info:
-                    try:
-                        # Create slice indices for this image
-                        slice_indices = [0] * len(shape)
-                        slice_indices[0] = image_idx
-
-                        # Convert to proper slice format
-                        slice_info = []
-                        for j, dim_size in enumerate(shape):
-                            if j < len(slice_indices):
-                                if j >= len(shape) - 2:
-                                    # Last 2 dimensions get full slices
-                                    slice_info.append(slice(None, None, None))
-                                else:
-                                    # Other dimensions get integer index
-                                    slice_info.append(slice_indices[j])
-                            else:
-                                slice_info.append(slice(None, None, None))
-
-                        slice_info = tuple(slice_info)
-                        print_debug(
-                            "ImageGridWidget",
-                            f"Fetching data for new image {image_idx}",
-                        )
-
-                        # Create PlotDataModel for this new image
-                        plot_data = self._create_image_plot_data(
-                            run_model, x_keys, y_key, norm_keys, slice_info, image_idx
-                        )
-
-                        # Create placeholder image with correct shape
-                        artist = ax.imshow(
-                            np.zeros(image_shape), cmap="viridis", aspect="auto"
-                        )
-                        self._start_image_worker(
-                            plot_data, slice_info, 2, image_idx, artist
-                        )
-
-                    except Exception as e:
-                        print_debug(
-                            "ImageGridWidget", f"Error creating image {image_idx}: {e}"
-                        )
-
-        # Update axes reference
-        self.axes = new_axes
-
-        # Adjust layout and redraw
-        self.figure.tight_layout()
-        self.canvas.draw()
-
     def resizeEvent(self, event):
         """Handle resize events."""
         super().resizeEvent(event)
         # Redraw the canvas
-        self.canvas.draw()
+        self.draw()
