@@ -162,6 +162,29 @@ class RunListModel(QStandardItemModel):
                 return self.indexFromItem(item)
         return self.index(-1, -1)  # Invalid index
 
+    def get_first_run(self):
+        index = self.index(0, 0)
+        if not index.isValid():
+            return None
+        return self.get_run_at_index(index)
+
+    def get_siblings_of_run(self, run):
+        index = self.find_index_by_uid(run.uid)
+        if not index.isValid():
+            return [None, None]
+        siblings = []
+        for offset in [-1, 1]:
+            sibling_index = index.sibling(index.row() + offset, index.column())
+            if sibling_index.isValid():
+                sibling = self.get_run_at_index(sibling_index)
+                if sibling:
+                    siblings.append(sibling)
+                else:
+                    siblings.append(None)
+            else:
+                siblings.append(None)
+        return siblings
+
     def _on_item_changed(self, item):
         """Handle checkbox state changes."""
         uid = item.data(Qt.UserRole)
@@ -404,6 +427,7 @@ class RunListModel(QStandardItemModel):
             Run to add to the model
         """
         print_debug("RunListModel.add_runs", f"Adding runs {len(run_list)}", "run")
+        run_list = sorted(run_list, key=lambda x: x.scan_id)
         uid_list = []
         for run in run_list:
             uid = run.uid

@@ -75,7 +75,7 @@ class CatalogBase(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         """Initialize the catalog model."""
         super().__init__(parent)
-        self._selection = set()  # Set of selected UIDs
+        self._selection = []  # Set of selected UIDs
         self._filters = []
         self._runs = []
 
@@ -159,7 +159,7 @@ class CatalogBase(QObject):
             Unique identifier for the run
         """
         if uid not in self._selection:
-            self._selection.add(uid)
+            self._selection.append(uid)
             run = self.get_run(uid)
             self.item_selected.emit(run)
             self.selection_changed.emit(self.get_selected_runs())
@@ -174,7 +174,7 @@ class CatalogBase(QObject):
             Unique identifier for the run
         """
         if uid in self._selection:
-            self._selection.discard(uid)
+            self._selection.remove(uid)
             run = self.get_run(uid)
             self.item_deselected.emit(run)
             self.selection_changed.emit(self.get_selected_runs())
@@ -184,7 +184,7 @@ class CatalogBase(QObject):
         selection_copy = self._selection.copy()
         for uid in selection_copy:
             self.deselect_run(uid)
-        self._selection.clear()
+        self._selection = []
         self.selection_changed.emit([])
 
     def get_selected_runs(self) -> List[CatalogRun]:
@@ -201,7 +201,9 @@ class CatalogBase(QObject):
             f"Getting selected runs, len {len(self._selection)}",
             "catalog",
         )
-        return [self.get_run(uid) for uid in self._selection]
+        runs = [self.get_run(uid) for uid in self._selection]
+        runs = sorted(runs, key=lambda x: x.scan_id)
+        return runs
 
     def __len__(self) -> int:
         """Get number of runs in catalog."""

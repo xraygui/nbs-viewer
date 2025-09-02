@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-09-02
+
+### Changed
+- Single-selection mode enforced for ImageGrid
+- Selected runs from catalogs will now be sorted by scan_id
+
+### Fixed
+- ImageGrid caches images properly, and executes batched canvas draws
+- Matplotlib uses qtagg backend instead of Qt5Agg backend for compatibility
+
 ## [0.3.0] - 2025-08-21
 
 ### Added

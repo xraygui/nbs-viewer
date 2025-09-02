@@ -1,12 +1,9 @@
 import matplotlib
 import time as ttime
 
-matplotlib.use("Qt5Agg")
+matplotlib.use("qtagg")
 import numpy as np
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg,
-    NavigationToolbar2QT as NavigationToolbar2QT,
-)
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from qtpy.QtCore import Qt, QSize, QTimer, QThread, Signal, Slot
