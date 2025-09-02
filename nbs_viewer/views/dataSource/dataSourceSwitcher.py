@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
+from nbs_viewer.models.catalog.source_models import AuthenticationRejected
 from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
@@ -243,7 +244,11 @@ class DataSourceSwitcher(QWidget):
             self.display_id, config_file=self.config_file, parent=self
         )
         if picker.exec_():
-            sourceView, catalog, label = picker.get_source()
+            try:
+                sourceView, catalog, label = picker.get_source()
+            except AuthenticationRejected as e:
+                QMessageBox.critical(self, "Authentication Rejected", str(e))
+                return
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
                 self._catalogs[label] = catalog
@@ -272,7 +277,11 @@ class DataSourceSwitcher(QWidget):
         URIDialog.setLayout(layout)
         URIDialog.exec_()
         if URIDialog.result() == QDialog.Accepted:
-            sourceView, catalog, label = uriSource.get_source()
+            try:
+                sourceView, catalog, label = uriSource.get_source()
+            except AuthenticationRejected as e:
+                QMessageBox.critical(self, "Authentication Rejected", str(e))
+                return
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
                 self._catalogs[label] = catalog

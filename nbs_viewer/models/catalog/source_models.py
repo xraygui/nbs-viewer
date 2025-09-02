@@ -15,6 +15,12 @@ from .base import load_catalog_models
 from nbs_viewer.utils import print_debug
 
 
+class AuthenticationRejected(RuntimeError):
+    """Exception raised when authentication is rejected."""
+
+    pass
+
+
 class SourceModel:
     """
     Base class for catalog source models.
@@ -222,9 +228,9 @@ class URISourceModel(SourceModel):
                 pass
 
         # If we get here, authentication failed
-        raise RuntimeError(
+        raise AuthenticationRejected(
             "Authentication required but no valid credentials found and no "
-            "interactive authentication callback provided"
+            "interactive authentication callback provided, or authentication was cancelled"
         )
 
     def is_configured(self) -> bool:
