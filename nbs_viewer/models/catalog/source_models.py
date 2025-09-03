@@ -266,7 +266,6 @@ class URISourceModel(SourceModel):
                 auth_model = self.auth_callback(context, self)
                 if auth_model:
                     tokens = auth_model.get_tokens()
-                    print("tokens", tokens)
                     self.remember_me = auth_model.get_remember_me()
                     context.configure_auth(tokens, remember_me=self.remember_me)
                     print("Authentication successful")
