@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
-from nbs_viewer.models.catalog.source_models import AuthenticationRejected
+from nbs_viewer.models.catalog.source_models import CatalogLoadError
 from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
@@ -194,15 +194,15 @@ class DataSourceSwitcher(QWidget):
 
     def load_catalog_config(self, path: str):
         """Load a catalog configuration TOML file at runtime."""
+        from .dataSource import ConfigSourceView
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:
+            import tomli as tomllib  # Python <3.11
+
         try:
             # Import here to avoid circular imports
-            from .dataSource import ConfigSourceView
-
-            try:
-                import tomllib  # Python 3.11+
-            except ModuleNotFoundError:
-                import tomli as tomllib  # Python <3.11
-
             with open(path, "rb") as f:
                 config = tomllib.load(f)
 
@@ -239,15 +239,14 @@ class DataSourceSwitcher(QWidget):
 
     def add_new_source(self):
         """Add a new data source via picker dialog."""
-        print("Adding new source")
         picker = DataSourcePicker(
             self.display_id, config_file=self.config_file, parent=self
         )
         if picker.exec_():
             try:
                 sourceView, catalog, label = picker.get_source()
-            except AuthenticationRejected as e:
-                QMessageBox.critical(self, "Authentication Rejected", str(e))
+            except CatalogLoadError as e:
+                QMessageBox.critical(self, "Catalog Load Error", str(e))
                 return
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
@@ -277,20 +276,16 @@ class DataSourceSwitcher(QWidget):
         URIDialog.setLayout(layout)
         URIDialog.exec_()
         if URIDialog.result() == QDialog.Accepted:
-            try:
-                sourceView, catalog, label = uriSource.get_source()
-            except AuthenticationRejected as e:
-                QMessageBox.critical(self, "Authentication Rejected", str(e))
-                return
+            sourceView, catalog, label = uriSource.get_source()
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
                 self._catalogs[label] = catalog
                 # Register with app model
                 if self.app_model is not None:
                     self.app_model.catalogs.register_catalog(label, catalog)
-            self.stacked_widget.addWidget(sourceView)
-            self.dropdown.addItem(label)
-            self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
+                self.stacked_widget.addWidget(sourceView)
+                self.dropdown.addItem(label)
+                self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
 
             # Enable remove button when we have sources
             # self.remove_source.setEnabled(True)

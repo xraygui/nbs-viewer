@@ -53,7 +53,7 @@ def handle_authentication(context, parent=None):
 
     auth_dialog = TiledAuthDialog(context, parent)
     if auth_dialog.exec_() == QDialog.Accepted:
-        return auth_dialog.get_tokens()
+        return auth_dialog
     return None
 
 

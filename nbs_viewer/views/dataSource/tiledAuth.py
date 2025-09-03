@@ -63,8 +63,12 @@ class TiledAuthDialog(QDialog):
         self.setup_device_code_grant_ui()
 
         # Remember me checkbox
-        self.remember_checkbox = QCheckBox("Remember my credentials")
-        self.remember_checkbox.setChecked(self.remember_me)
+        self.remember_checkbox = QCheckBox(
+            "Remember my credentials (Disabled due to Tiled bug)"
+        )
+        # self.remember_checkbox.setChecked(self.remember_me)
+        self.remember_checkbox.setChecked(True)
+        self.remember_checkbox.setEnabled(False)
         self.remember_checkbox.setToolTip(
             "If checked, the credentials will be cached and reused for future connections.\n(Do not check for shared machines.)"
         )
