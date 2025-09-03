@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - ImageGrid caches images properly, and executes batched canvas draws
 - Matplotlib uses qtagg backend instead of Qt5Agg backend for compatibility
+- App crashes when cancelling authentication dialogs fixed
+- "remember me" setting for credential caching fixed
 
 ## [0.3.0] - 2025-08-21
 

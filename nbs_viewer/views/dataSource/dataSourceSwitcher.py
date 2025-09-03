@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
+from nbs_viewer.models.catalog.source_models import CatalogLoadError
 from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
@@ -91,20 +92,21 @@ class DataSourceSwitcher(QWidget):
     def load_autoload_catalogs(self):
         """
         Automatically load catalogs with autoload=true from the config file.
+
         """
+        from .dataSource import ConfigSourceView
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:
+            import tomli as tomllib  # Python <3.11
+
+        with open(self.config_file, "rb") as f:
+            config = tomllib.load(f)
         try:
             # Import here to avoid circular imports
-            from .dataSource import ConfigSourceView
 
             # Read the config file
-            try:
-                import tomllib  # Python 3.11+
-            except ModuleNotFoundError:
-                import tomli as tomllib  # Python <3.11
-
-            with open(self.config_file, "rb") as f:
-                config = tomllib.load(f)
-
             # Load catalogs with autoload=true
             for catalog_config in config.get("catalog", []):
                 if catalog_config.get("autoload", False):
@@ -193,15 +195,15 @@ class DataSourceSwitcher(QWidget):
 
     def load_catalog_config(self, path: str):
         """Load a catalog configuration TOML file at runtime."""
+        from .dataSource import ConfigSourceView
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:
+            import tomli as tomllib  # Python <3.11
+
         try:
             # Import here to avoid circular imports
-            from .dataSource import ConfigSourceView
-
-            try:
-                import tomllib  # Python 3.11+
-            except ModuleNotFoundError:
-                import tomli as tomllib  # Python <3.11
-
             with open(path, "rb") as f:
                 config = tomllib.load(f)
 
@@ -238,12 +240,15 @@ class DataSourceSwitcher(QWidget):
 
     def add_new_source(self):
         """Add a new data source via picker dialog."""
-        print("Adding new source")
         picker = DataSourcePicker(
             self.display_id, config_file=self.config_file, parent=self
         )
         if picker.exec_():
-            sourceView, catalog, label = picker.get_source()
+            try:
+                sourceView, catalog, label = picker.get_source()
+            except CatalogLoadError as e:
+                QMessageBox.critical(self, "Catalog Load Error", str(e))
+                return
             if catalog is not None and label is not None:
                 # Store catalog locally for view management
                 self._catalogs[label] = catalog
@@ -279,9 +284,9 @@ class DataSourceSwitcher(QWidget):
                 # Register with app model
                 if self.app_model is not None:
                     self.app_model.catalogs.register_catalog(label, catalog)
-            self.stacked_widget.addWidget(sourceView)
-            self.dropdown.addItem(label)
-            self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
+                self.stacked_widget.addWidget(sourceView)
+                self.dropdown.addItem(label)
+                self.dropdown.setCurrentIndex(self.dropdown.count() - 1)
 
             # Enable remove button when we have sources
             # self.remove_source.setEnabled(True)

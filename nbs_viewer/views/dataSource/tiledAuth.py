@@ -21,7 +21,7 @@ class TiledAuthDialog(QDialog):
 
     spec_changed = Signal()
 
-    def __init__(self, context: Context, parent=None):
+    def __init__(self, context: Context, catalog_model=None, parent=None):
         """
         Initialize the Tiled authentication dialog.
 
@@ -29,11 +29,14 @@ class TiledAuthDialog(QDialog):
         ----------
         context : Context
             The Tiled context that needs authentication
+        catalog_model : SourceModel, optional
+            The catalog source model that needs authentication
         parent : QWidget, optional
             The parent widget
         """
         super().__init__(parent)
         self.context = context
+        self.catalog_model = catalog_model
         self.tokens = None
         self.remember_me = True
 
@@ -46,7 +49,7 @@ class TiledAuthDialog(QDialog):
         self.layout = QVBoxLayout(self)
 
         # Status label
-        self.status_label = QLabel("Checking authentication requirements...")
+        self.status_label = QLabel("Initializing authentication...")
         self.layout.addWidget(self.status_label)
 
         # Provider dropdown
@@ -63,8 +66,12 @@ class TiledAuthDialog(QDialog):
         self.setup_device_code_grant_ui()
 
         # Remember me checkbox
-        self.remember_checkbox = QCheckBox("Remember my credentials")
-        self.remember_checkbox.setChecked(self.remember_me)
+        self.remember_checkbox = QCheckBox(
+            "Remember my credentials (Disabled due to Tiled bug)"
+        )
+        # self.remember_checkbox.setChecked(self.remember_me)
+        self.remember_checkbox.setChecked(True)
+        self.remember_checkbox.setEnabled(False)
         self.remember_checkbox.setToolTip(
             "If checked, the credentials will be cached and reused for future connections.\n(Do not check for shared machines.)"
         )
@@ -101,24 +108,100 @@ class TiledAuthDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        # Add catalog information header if available
+        if self.catalog_model:
+            catalog_header = self._create_catalog_header()
+            layout.addWidget(catalog_header)
+            layout.addWidget(QLabel(""))  # Spacer
+
         layout.addWidget(QLabel("Please enter your credentials:"))
 
-        # Username field
-        username_layout = QHBoxLayout()
-        username_layout.addWidget(QLabel("Username:"))
-        self.username_edit = QLineEdit()
-        username_layout.addWidget(self.username_edit)
-        layout.addLayout(username_layout)
+        # Create a form layout for better alignment
+        form_layout = QVBoxLayout()
 
-        # Password field
+        # Username field with fixed width
+        username_layout = QHBoxLayout()
+        username_label = QLabel("Username:")
+        username_label.setFixedWidth(80)  # Fixed width for alignment
+        username_layout.addWidget(username_label)
+        self.username_edit = QLineEdit()
+        self.username_edit.setMaxLength(20)  # Limit to 20 characters
+        self.username_edit.setFixedWidth(200)  # Fixed width for consistency
+        username_layout.addWidget(self.username_edit)
+        username_layout.addStretch()  # Push fields to the left
+        form_layout.addLayout(username_layout)
+
+        # Password field with fixed width
         password_layout = QHBoxLayout()
-        password_layout.addWidget(QLabel("Password:"))
+        password_label = QLabel("Password:")
+        password_label.setFixedWidth(80)  # Same width as username label
+        password_layout.addWidget(password_label)
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
+        self.password_edit.setMaxLength(20)  # Limit to 20 characters
+        self.password_edit.setFixedWidth(200)  # Same width as username field
         password_layout.addWidget(self.password_edit)
-        layout.addLayout(password_layout)
+        password_layout.addStretch()  # Push fields to the left
+        form_layout.addLayout(password_layout)
 
+        layout.addLayout(form_layout)
         self.auth_stack.addWidget(widget)
+
+    def _create_catalog_header(self):
+        """Create a header widget showing catalog information."""
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Style the header to make it stand out
+        header_widget.setStyleSheet(
+            """
+            QWidget {
+                background-color: #f0f0f0;
+                border: 1px solid #cccccc;
+                border-radius: 5px;
+            }
+            """
+        )
+
+        # Create catalog info text using the catalog model properties
+        catalog_text = "Connecting to:"
+
+        # Get display information from the catalog model
+        if hasattr(self.catalog_model, "get_display_label"):
+            display_label = self.catalog_model.get_display_label()
+            if display_label:
+                catalog_text += f"\n{display_label}"
+
+        # Show profile if available
+        if hasattr(self.catalog_model, "profile") and self.catalog_model.profile:
+            catalog_text += f"\nProfile: {self.catalog_model.profile}"
+
+        # Show selected catalog keys if available
+        if (
+            hasattr(self.catalog_model, "selected_keys")
+            and self.catalog_model.selected_keys
+        ):
+            keys = self.catalog_model.selected_keys
+            if isinstance(keys, list) and keys:
+                catalog_text += f"\nCatalog: {'/'.join(keys)}"
+            elif isinstance(keys, str) and keys:
+                catalog_text += f"\nCatalog: {keys}"
+
+        catalog_label = QLabel(catalog_text)
+        catalog_label.setStyleSheet(
+            """
+            QLabel {
+                color: #333333;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            """
+        )
+        catalog_label.setWordWrap(True)
+
+        header_layout.addWidget(catalog_label)
+        return header_widget
 
     def setup_device_code_grant_ui(self):
         """Set up the device code grant authentication UI."""
@@ -149,7 +232,7 @@ class TiledAuthDialog(QDialog):
         mode = self.spec.mode
         if mode == "internal" or mode == "password":
             self.auth_stack.setCurrentIndex(0)  # Password grant
-            self.status_label.setText("Please enter your credentials:")
+            self.status_label.setText("Ready for authentication")
         elif mode == "external":
             self.auth_stack.setCurrentIndex(1)  # Device code grant
             self.status_label.setText(
