@@ -92,20 +92,21 @@ class DataSourceSwitcher(QWidget):
     def load_autoload_catalogs(self):
         """
         Automatically load catalogs with autoload=true from the config file.
+
         """
+        from .dataSource import ConfigSourceView
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:
+            import tomli as tomllib  # Python <3.11
+
+        with open(self.config_file, "rb") as f:
+            config = tomllib.load(f)
         try:
             # Import here to avoid circular imports
-            from .dataSource import ConfigSourceView
 
             # Read the config file
-            try:
-                import tomllib  # Python 3.11+
-            except ModuleNotFoundError:
-                import tomli as tomllib  # Python <3.11
-
-            with open(self.config_file, "rb") as f:
-                config = tomllib.load(f)
-
             # Load catalogs with autoload=true
             for catalog_config in config.get("catalog", []):
                 if catalog_config.get("autoload", False):

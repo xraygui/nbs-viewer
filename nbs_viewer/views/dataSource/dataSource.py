@@ -135,19 +135,48 @@ class ConfigSourceView(SourceView):
 
     def _setup_ui(self):
         """Set up the user interface components."""
-        # Config source doesn't need UI components as it's pre-configured
         layout = QVBoxLayout()
+
+        # Show the configured source label
         label = QLabel(
             f"Configured source: "
             f"{self.model.catalog_config.get('label', 'Unknown')}"
         )
         layout.addWidget(label)
+        model = self.model.source_model
+        # Add cached credentials checkbox for URI sources
+        if hasattr(model, "use_cached_tokens"):
+            self.cached_credentials_cb = QCheckBox("Use cached credentials")
+            self.cached_credentials_cb.setChecked(model.use_cached_tokens)
+            self.cached_credentials_cb.toggled.connect(
+                self._on_cached_credentials_toggled
+            )
+            layout.addWidget(self.cached_credentials_cb)
+
+            # Add note about clearing credentials
+            note_label = QLabel(
+                "Uncheck to clear cached credentials and enter new ones"
+            )
+            note_label.setStyleSheet("color: gray; font-size: 10px;")
+            layout.addWidget(note_label)
+
         self.setLayout(layout)
 
     def update_model(self):
         """Update the model with values from the UI."""
-        # No UI updates needed for config source as it's pre-configured
-        pass
+        # Update cached credentials setting if available
+        if hasattr(self, "cached_credentials_cb") and hasattr(
+            self.model.source_model, "use_cached_tokens"
+        ):
+            self.model.source_model.use_cached_tokens = (
+                self.cached_credentials_cb.isChecked()
+            )
+
+    def _on_cached_credentials_toggled(self, checked):
+        """Handle cached credentials checkbox toggle."""
+        if hasattr(self.model.source_model, "use_cached_tokens"):
+            self.model.source_model.use_cached_tokens = checked
+            print(f"Cached credentials {'enabled' if checked else 'disabled'}")
 
 
 class URISourceView(SourceView):
