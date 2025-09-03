@@ -63,11 +63,22 @@ class SourceModel:
         """
         raise NotImplementedError("Subclasses must implement is_configured")
 
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        return "Unknown Catalog"
+
 
 class URISourceModel(SourceModel):
     """Model for Tiled URI catalog sources."""
 
-    def __init__(self, auth_callback=None):
+    def __init__(self, auth_callback=None, cache_credentials=True):
         """
         Initialize the URI source model.
 
@@ -76,6 +87,9 @@ class URISourceModel(SourceModel):
         auth_callback : callable, optional
             Callback function for handling interactive authentication.
             Should take a Context object and return authentication tokens.
+        cache_credentials : bool, optional
+            Whether to use cached authentication tokens. Default is True.
+            Set to False for shared machines or when you want to force fresh auth.
         """
         super().__init__()
         self.uri = "http://localhost:8000"
@@ -83,12 +97,25 @@ class URISourceModel(SourceModel):
         self.selected_keys = []
         self.selected_model_name = None
         self.api_key = None
-        self.use_cached_tokens = True
+        self.use_cached_tokens = cache_credentials
         self.remember_me = True
         # New authentication properties
         self.username = ""
         self.password = ""
         self.auth_callback = auth_callback
+
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        if self.profile:
+            return f"Tiled URI: {self.uri} (Profile: {self.profile})"
+        return f"Tiled URI: {self.uri}"
 
     def set_uri(self, uri: str) -> None:
         """
@@ -236,7 +263,7 @@ class URISourceModel(SourceModel):
         if self.auth_callback and interactive_auth:
             auth_attempts.append("Interactive authentication callback")
             try:
-                auth_model = self.auth_callback(context)
+                auth_model = self.auth_callback(context, self)
                 if auth_model:
                     tokens = auth_model.get_tokens()
                     print("tokens", tokens)
@@ -577,6 +604,17 @@ class ConfigSourceModel(SourceModel):
         self.auth_callback = auth_callback
         self.source_model = self._create_source_model()
 
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        return self.catalog_config.get("label", "Unknown Catalog")
+
     @property
     def autoload(self) -> bool:
         """
@@ -601,7 +639,12 @@ class ConfigSourceModel(SourceModel):
         source_type = self.catalog_config.get("source_type", "uri")
 
         if source_type == "uri":
-            model = URISourceModel(auth_callback=self.auth_callback)
+            # Get cache_credentials setting from config, default to True for backward compatibility
+            cache_credentials = self.catalog_config.get("cache_credentials", True)
+
+            model = URISourceModel(
+                auth_callback=self.auth_callback, cache_credentials=cache_credentials
+            )
             model.set_uri(self.catalog_config["url"])
 
             if self.catalog_config.get("catalog_keys"):

@@ -35,7 +35,7 @@ except ModuleNotFoundError:
     import tomli as tomllib  # Python <3.11
 
 
-def handle_authentication(context, parent=None):
+def handle_authentication(context, catalog_model=None, parent=None):
     """
     Handle interactive authentication via GUI dialog.
 
@@ -43,6 +43,10 @@ def handle_authentication(context, parent=None):
     ----------
     context : Context
         The Tiled context that needs authentication
+    catalog_model : SourceModel, optional
+        The catalog source model that needs authentication
+    parent : QWidget, optional
+        The parent widget
 
     Returns
     -------
@@ -51,7 +55,7 @@ def handle_authentication(context, parent=None):
     """
     from .tiledAuth import TiledAuthDialog
 
-    auth_dialog = TiledAuthDialog(context, parent)
+    auth_dialog = TiledAuthDialog(context, catalog_model, parent)
     if auth_dialog.exec_() == QDialog.Accepted:
         return auth_dialog
     return None
