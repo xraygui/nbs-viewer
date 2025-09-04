@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-09-04
+### Added
+- New config options for default credential caching
+- Better display of what catalog you are authenticating to
+
+### Fixed
+- App crashes when cancelling authentication dialogs fixed
+- "remember me" setting for credential caching fixed
+
 ## [0.3.1] - 2025-09-02
 
 ### Changed
@@ -14,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - ImageGrid caches images properly, and executes batched canvas draws
 - Matplotlib uses qtagg backend instead of Qt5Agg backend for compatibility
-- App crashes when cancelling authentication dialogs fixed
-- "remember me" setting for credential caching fixed
 
 ## [0.3.0] - 2025-08-21
 
