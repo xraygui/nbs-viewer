@@ -694,4 +694,4 @@ class ConfigSourceModel(SourceModel):
 
     def get_source(self, interactive_auth=True) -> Tuple[CatalogBase, str]:
         """Get a catalog source from the configuration."""
-        return self.source_model.get_source(interactive_auth)
+        return self.source_model.get_source(interactive_auth=interactive_auth)
