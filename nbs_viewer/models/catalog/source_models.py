@@ -15,6 +15,18 @@ from .base import load_catalog_models
 from nbs_viewer.utils import print_debug
 
 
+class CatalogLoadError(RuntimeError):
+    """Exception raised when a catalog load fails."""
+
+    pass
+
+
+class AuthenticationRejected(CatalogLoadError):
+    """Exception raised when authentication is rejected."""
+
+    pass
+
+
 class SourceModel:
     """
     Base class for catalog source models.
@@ -51,11 +63,22 @@ class SourceModel:
         """
         raise NotImplementedError("Subclasses must implement is_configured")
 
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        return "Unknown Catalog"
+
 
 class URISourceModel(SourceModel):
     """Model for Tiled URI catalog sources."""
 
-    def __init__(self, auth_callback=None):
+    def __init__(self, auth_callback=None, cache_credentials=True):
         """
         Initialize the URI source model.
 
@@ -64,6 +87,9 @@ class URISourceModel(SourceModel):
         auth_callback : callable, optional
             Callback function for handling interactive authentication.
             Should take a Context object and return authentication tokens.
+        cache_credentials : bool, optional
+            Whether to use cached authentication tokens. Default is True.
+            Set to False for shared machines or when you want to force fresh auth.
         """
         super().__init__()
         self.uri = "http://localhost:8000"
@@ -71,12 +97,25 @@ class URISourceModel(SourceModel):
         self.selected_keys = []
         self.selected_model_name = None
         self.api_key = None
-        self.use_cached_tokens = True
+        self.use_cached_tokens = cache_credentials
         self.remember_me = True
         # New authentication properties
         self.username = ""
         self.password = ""
         self.auth_callback = auth_callback
+
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        if self.profile:
+            return f"Tiled URI: {self.uri} (Profile: {self.profile})"
+        return f"Tiled URI: {self.uri}"
 
     def set_uri(self, uri: str) -> None:
         """
@@ -178,54 +217,94 @@ class URISourceModel(SourceModel):
         context : Context
             The Tiled context to authenticate
         """
+        auth_attempts = []
+        auth_failures = []
+
         # Check for environment variable first
         api_key = os.environ.get("TILED_API_KEY")
-
-        # Check for manual API key
-        if self.api_key:
-            context.api_key = self.api_key
-            try:
-                context.which_api_key()
-                return
-            except Exception as e:
-                print_debug("URISourceModel", f"API key failed: {e}")
-                context.api_key = None
-                # If callback fails, we'll fall through to the exception below
-                pass
         if api_key:
+            auth_attempts.append("TILED_API_KEY environment variable")
             context.api_key = api_key
             try:
                 context.which_api_key()
-                return
+                return True
             except Exception as e:
-                print_debug("URISourceModel", f"TILED_API_KEY failed: {e}")
+                auth_failures.append(f"TILED_API_KEY environment variable: {e}")
                 context.api_key = None
-                # If callback fails, we'll fall through to the exception below
-                pass
+                print_debug("URISourceModel", f"TILED_API_KEY failed: {e}")
+
+        # Check for manual API key
+        if self.api_key:
+            auth_attempts.append("Manual API key")
+            context.api_key = self.api_key
+            try:
+                context.which_api_key()
+                return True
+            except Exception as e:
+                auth_failures.append(f"Manual API key: {e}")
+                context.api_key = None
+                print_debug("URISourceModel", f"Manual API key failed: {e}")
 
         # Check if we have cached tokens and remember_me is True
         if self.use_cached_tokens:
-            found_valid_tokens = context.use_cached_tokens()
-            if found_valid_tokens:
-                return
+            auth_attempts.append("Cached authentication tokens")
+            try:
+                found_valid_tokens = context.use_cached_tokens()
+                if found_valid_tokens:
+                    return True
+                else:
+                    auth_failures.append(
+                        "Cached authentication tokens: No valid tokens found"
+                    )
+            except Exception as e:
+                auth_failures.append(f"Cached authentication tokens: {e}")
 
         # Try interactive authentication via callback
         if self.auth_callback and interactive_auth:
+            auth_attempts.append("Interactive authentication callback")
             try:
-                tokens = self.auth_callback(context)
-                if tokens:
+                auth_model = self.auth_callback(context, self)
+                if auth_model:
+                    tokens = auth_model.get_tokens()
+                    self.remember_me = auth_model.get_remember_me()
                     context.configure_auth(tokens, remember_me=self.remember_me)
-                    return
+                    print("Authentication successful")
+                    return True
+                else:
+                    auth_failures.append(
+                        "Interactive authentication callback: No auth model returned"
+                    )
             except Exception as e:
+                auth_failures.append(f"Interactive authentication callback: {e}")
                 print_debug("URISourceModel", f"Authentication callback failed: {e}")
-                # If callback fails, we'll fall through to the exception below
-                pass
+        elif not self.auth_callback:
+            auth_failures.append(
+                "Interactive authentication callback: No callback provided"
+            )
 
-        # If we get here, authentication failed
-        raise RuntimeError(
-            "Authentication required but no valid credentials found and no "
-            "interactive authentication callback provided"
-        )
+        # Build detailed error message
+        error_msg = "Authentication required but all methods failed:\n\n"
+        error_msg += "Authentication methods attempted:\n"
+        for attempt in auth_attempts:
+            error_msg += f"  ✓ {attempt}\n"
+
+        error_msg += "\nAuthentication failures:\n"
+        for failure in auth_failures:
+            error_msg += f"  ✗ {failure}\n"
+
+        error_msg += "\nPossible solutions:\n"
+        if not self.api_key and not api_key:
+            error_msg += "  • Set an API key via set_api_key() or TILED_API_KEY environment variable\n"
+        if not self.auth_callback:
+            error_msg += "  • Provide an authentication callback function\n"
+        if not self.use_cached_tokens:
+            error_msg += "  • Enable cached tokens (use_cached_tokens=True)\n"
+
+        error_msg += f"  • Server URI: {self.uri}\n"
+        if self.profile:
+            error_msg += f"  • Profile: {self.profile}\n"
+
+        raise AuthenticationRejected(error_msg)
 
     def is_configured(self) -> bool:
         """Check if the model has the minimum required configuration."""
@@ -258,7 +337,9 @@ class URISourceModel(SourceModel):
         auth_is_required = context.server_info.authentication.required
 
         if auth_is_required:
-            self._handle_authentication(context, interactive_auth)
+            success = self._handle_authentication(context, interactive_auth)
+            if not success:
+                raise AuthenticationRejected("Authentication failed")
 
         return context, node_path_parts
 
@@ -335,7 +416,7 @@ class URISourceModel(SourceModel):
             - A label describing the source
         """
         if not self.is_fully_configured():
-            raise ValueError("URI source model is not fully configured")
+            raise CatalogLoadError("URI source model is not fully configured")
 
         # Stage 1: Connect and authenticate
         context, node_path_parts = self.connect_and_authenticate(interactive_auth)
@@ -399,7 +480,7 @@ class ProfileSourceModel(SourceModel):
     def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         """Get a catalog source from the profile."""
         if not self.is_configured():
-            raise ValueError("Profile source model is not fully configured")
+            raise CatalogLoadError("Profile source model is not fully configured")
 
         catalog = from_profile(self.profile)
         label = f"Profile: {self.profile}"
@@ -428,11 +509,14 @@ class ZMQSourceModel(SourceModel):
         return True
 
     def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
-        zmq_dispatcher = QtZMQRemoteDispatcher("localhost:5578")
-        label = "ZMQ: localhost:5578"
-        # Create the Kafka catalog (poorly named -- really a live catalog)
-        catalog = KafkaCatalog(zmq_dispatcher)
-        return catalog, label
+        try:
+            zmq_dispatcher = QtZMQRemoteDispatcher("localhost:5578")
+            label = "ZMQ: localhost:5578"
+            # Create the Kafka catalog (poorly named -- really a live catalog)
+            catalog = KafkaCatalog(zmq_dispatcher)
+            return catalog, label
+        except Exception as e:
+            raise CatalogLoadError(f"ZMQ source model failed to load: {e}")
 
 
 class KafkaSourceModel(SourceModel):
@@ -475,28 +559,31 @@ class KafkaSourceModel(SourceModel):
     def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
         """Get a catalog source from Kafka."""
         if not self.is_configured():
-            raise ValueError("Kafka source model is not fully configured")
+            raise CatalogLoadError("Kafka source model is not fully configured")
         label = f"Kafka: {self.beamline_acronym}"
 
         # Read Kafka configuration
-        kafka_config = nslsii.kafka_utils._read_bluesky_kafka_config_file(
-            config_file_path=self.config_file
-        )
+        try:
+            kafka_config = nslsii.kafka_utils._read_bluesky_kafka_config_file(
+                config_file_path=self.config_file
+            )
 
-        # Generate a unique consumer group ID
-        unique_group_id = f"echo-{self.beamline_acronym}-{str(uuid.uuid4())[:8]}"
-        topics = [f"{self.beamline_acronym}.bluesky.runengine.documents"]
-        # Create the Kafka dispatcher
-        kafka_dispatcher = QtRemoteDispatcher(
-            topics,
-            ",".join(kafka_config["bootstrap_servers"]),
-            unique_group_id,
-            consumer_config=kafka_config["runengine_producer_config"],
-        )
+            # Generate a unique consumer group ID
+            unique_group_id = f"echo-{self.beamline_acronym}-{str(uuid.uuid4())[:8]}"
+            topics = [f"{self.beamline_acronym}.bluesky.runengine.documents"]
+            # Create the Kafka dispatcher
+            kafka_dispatcher = QtRemoteDispatcher(
+                topics,
+                ",".join(kafka_config["bootstrap_servers"]),
+                unique_group_id,
+                consumer_config=kafka_config["runengine_producer_config"],
+            )
 
-        # Create the Kafka catalog
-        catalog = KafkaCatalog(kafka_dispatcher)
-        return catalog, label
+            # Create the Kafka catalog
+            catalog = KafkaCatalog(kafka_dispatcher)
+            return catalog, label
+        except Exception as e:
+            raise CatalogLoadError(f"Kafka source model failed to load: {e}")
 
 
 class ConfigSourceModel(SourceModel):
@@ -515,6 +602,17 @@ class ConfigSourceModel(SourceModel):
         self.catalog_config = catalog_config
         self.auth_callback = auth_callback
         self.source_model = self._create_source_model()
+
+    def get_display_label(self) -> str:
+        """
+        Get a human-readable label for display in the authentication dialog.
+
+        Returns
+        -------
+        str
+            A human-readable label describing the catalog source
+        """
+        return self.catalog_config.get("label", "Unknown Catalog")
 
     @property
     def autoload(self) -> bool:
@@ -540,7 +638,12 @@ class ConfigSourceModel(SourceModel):
         source_type = self.catalog_config.get("source_type", "uri")
 
         if source_type == "uri":
-            model = URISourceModel(auth_callback=self.auth_callback)
+            # Get cache_credentials setting from config, default to True for backward compatibility
+            cache_credentials = self.catalog_config.get("cache_credentials", True)
+
+            model = URISourceModel(
+                auth_callback=self.auth_callback, cache_credentials=cache_credentials
+            )
             model.set_uri(self.catalog_config["url"])
 
             if self.catalog_config.get("catalog_keys"):
