@@ -177,8 +177,9 @@ class FilterModel(QSortFilterProxyModel):
             return False
 
         data_str = str(data)
-        regex = self.filterRegExp()
-        return regex.indexIn(data_str) != -1
+        regex = self.filterRegularExpression()
+        match = regex.match(data_str)
+        return match.hasMatch()
 
 
 class LazyLoadingTableView(QTableView):
@@ -438,7 +439,7 @@ class CatalogTableView(QWidget):
         )
 
         # Connect filter controls to filter model
-        self.filterLineEdit.textChanged.connect(filter_model.setFilterRegExp)
+        self.filterLineEdit.textChanged.connect(filter_model.setFilterRegularExpression)
         self.filterComboBox.clear()
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(

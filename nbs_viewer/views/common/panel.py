@@ -5,6 +5,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QLabel,
     QFrame,
+    QStyle,
 )
 from qtpy.QtCore import Qt
 
@@ -86,7 +87,7 @@ class CollapsiblePanel(QWidget):
         self.update_collapsed_state()
 
         # Set initial icon (expanded state)
-        self.toggle_button.setIcon(self.style().standardIcon(self.style().SP_ArrowDown))
+        self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
 
     def _setup_resize_handle(self):
         """Add a resize handle to make the panel resizable."""
@@ -151,9 +152,7 @@ class CollapsiblePanel(QWidget):
             self.panel_layout.removeWidget(self.widget)
             self.widget.hide()
             # Use Qt standard icon for collapsed state
-            self.toggle_button.setIcon(
-                self.style().standardIcon(self.style().SP_ArrowRight)
-            )
+            self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
             # Set fixed height when collapsed (just header height)
             self.setFixedHeight(30)
             # Hide resize handle when collapsed
@@ -163,9 +162,7 @@ class CollapsiblePanel(QWidget):
             self.panel_layout.insertWidget(1, self.widget)  # After header
             self.widget.show()
             # Use Qt standard icon for expanded state
-            self.toggle_button.setIcon(
-                self.style().standardIcon(self.style().SP_ArrowDown)
-            )
+            self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
             # Allow resizing when expanded
             self.setFixedHeight(self.sizeHint().height())
             self.resize_handle.show()

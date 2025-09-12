@@ -1,6 +1,6 @@
 """Base table model for catalog data display."""
 
-from qtpy.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QTimer, Signal
+from qtpy.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, Signal
 from bluesky_widgets.qt.threading import create_worker
 import collections
 from nbs_viewer.utils import print_debug
@@ -304,10 +304,10 @@ class CatalogTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         """Get data for display."""
         if not index.isValid():
-            return QVariant()
+            return None
 
         if index.column() >= self.columnCount() or index.row() >= self.rowCount():
-            return QVariant()
+            return None
 
         if role == Qt.DisplayRole:
             if index in self._data:
@@ -373,7 +373,7 @@ class CatalogTableModel(QAbstractTableModel):
 
             return LOADING_PLACEHOLDER
 
-        return QVariant()
+        return None
 
     def rowCount(self, index=None):
         """Get total number of rows."""
