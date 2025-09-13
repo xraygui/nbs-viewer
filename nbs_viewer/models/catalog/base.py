@@ -7,6 +7,7 @@ from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points
 from ..data.base import CatalogRun
 from nbs_viewer.utils import print_debug
+from typing import Set
 
 
 def load_catalog_models():
@@ -158,11 +159,7 @@ class CatalogBase(QObject):
         uid : str
             Unique identifier for the run
         """
-        if uid not in self._selection:
-            self._selection.append(uid)
-            run = self.get_run(uid)
-            self.item_selected.emit(run)
-            self.selection_changed.emit(self.get_selected_runs())
+        self.update_selection({uid}, set())
 
     def deselect_run(self, uid: str) -> None:
         """
@@ -173,11 +170,7 @@ class CatalogBase(QObject):
         uid : str
             Unique identifier for the run
         """
-        if uid in self._selection:
-            self._selection.remove(uid)
-            run = self.get_run(uid)
-            self.item_deselected.emit(run)
-            self.selection_changed.emit(self.get_selected_runs())
+        self.update_selection(set(), {uid})
 
     def clear_selection(self) -> None:
         """Clear all selections."""
@@ -186,6 +179,21 @@ class CatalogBase(QObject):
             self.deselect_run(uid)
         self._selection = []
         self.selection_changed.emit([])
+
+    def update_selection(
+        self, selected_keys: Set[str], deselected_keys: Set[str]
+    ) -> None:
+        for uid in selected_keys:
+            if uid not in self._selection:
+                self._selection.append(uid)
+                run = self.get_run(uid)
+                self.item_selected.emit(run)
+        for uid in deselected_keys:
+            if uid in self._selection:
+                self._selection.remove(uid)
+                run = self.get_run(uid)
+                self.item_deselected.emit(run)
+        self.selection_changed.emit(self.get_selected_runs())
 
     def get_selected_runs(self) -> List[CatalogRun]:
         """

@@ -6,10 +6,10 @@ import logging
 DEBUG_VARIABLES = {
     "PRINT_DEBUG": True,
     "DEBUG_CATALOG": True,
-    "DEBUG_PLOTS": False,
-    "DEBUG_RUNLIST": False,
-    "cache": True,
-    "dimension": True,
+    "DEBUG_PLOTS": True,
+    "DEBUG_RUNLIST": True,
+    "cache": False,
+    "dimension": False,
 }
 
 

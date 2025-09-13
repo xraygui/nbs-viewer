@@ -244,13 +244,18 @@ class PlotDataModel(QObject):
         """
         print_debug(
             "PlotDataModel.clear",
-            f"Clearing artist for {self.label}",
+            f"Clearing {self.label}",
             category="DEBUG_PLOTS",
         )
         if self.artist is not None:
             try:
                 if self.artist.axes is not None:
                     # Remove from axes
+                    print_debug(
+                        "PlotDataModel.clear",
+                        f"Removing artist {self.label} from axes",
+                        category="DEBUG_PLOTS",
+                    )
                     self.artist.remove()
 
                 # Clear data based on artist type

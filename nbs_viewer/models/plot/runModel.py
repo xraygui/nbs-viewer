@@ -120,6 +120,7 @@ class RunModel(QObject):
 
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
+        print_debug("RunModel._on_data_changed", f"Data changed for {self.uid}", "run")
         self._update_available_keys()
         self.data_changed.emit()
 
@@ -214,6 +215,7 @@ class RunModel(QObject):
     def cleanup(self):
         """Clean up resources and disconnect signals."""
         # Disconnect RunData signals
+        print_debug("RunModel.cleanup", f"Cleaning up run {self.uid}", "run")
         try:
             self._disconnect_run()
         except Exception as e:
@@ -225,7 +227,7 @@ class RunModel(QObject):
         self._selected_norm.clear()
 
         # Emit a final signal to ensure any remaining references are cleaned up
-        self.data_changed.emit()
+        # self.data_changed.emit()
         self.visibility_changed.emit(False)
 
     def get_selected_keys(self):
