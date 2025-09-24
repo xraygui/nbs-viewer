@@ -375,6 +375,8 @@ class CatalogTableView(QWidget):
         # Get the source model using our utility method
         source_model = self.get_source_model()
 
+        selected_keys = set()
+        deselected_keys = set()
         # Handle newly selected items
         for index in selected.indexes():
             if index.column() == 0:  # Only process first column
@@ -382,7 +384,7 @@ class CatalogTableView(QWidget):
                 source_index = self.map_to_source(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
-                    self._catalog.select_run(key)
+                    selected_keys.add(key)
 
         # Handle deselected items similarly
         for index in deselected.indexes():
@@ -390,7 +392,8 @@ class CatalogTableView(QWidget):
                 source_index = self.map_to_source(index)
                 key = source_model.get_key(source_index.row())
                 if key is not None:
-                    self._catalog.deselect_run(key)
+                    deselected_keys.add(key)
+        self._catalog.update_selection(selected_keys, deselected_keys)
 
     def _handle_invert(self):
         """Handle inversion by clearing selection and toggling order."""

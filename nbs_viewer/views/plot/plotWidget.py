@@ -204,6 +204,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.updatePlot()
 
     def _on_run_removed(self, run):
+        print("Run Removed")
         """Handle removal of a run."""
         self.remove_run_data(run.uid)
 
@@ -266,6 +267,11 @@ class MplCanvas(FigureCanvasQTAgg):
         # Create worker for this plot
         worker_key = str(uuid.uuid4())
         model_key = plotData._key
+        print_debug(
+            "MplCanvas.plot_data",
+            f"Creating worker for {plotData.label} with key {worker_key}",
+            category="DEBUG_PLOTS",
+        )
         worker = PlotWorker(plotData, self._slice, self._dimension)
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
@@ -677,7 +683,7 @@ class PlotWidget(QWidget):
             plot_layout.addWidget(self.debug_button)
 
         # Connect to model signals for cleanup
-        self.run_list_model.run_removed.connect(self._on_run_removed)
+        # self.run_list_model.run_removed.connect(self._on_run_removed)
 
     def _on_run_removed(self, run):
         """Handle run removal by cleaning up associated PlotDataModels."""

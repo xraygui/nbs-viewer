@@ -440,6 +440,7 @@ class RunListModel(QStandardItemModel):
                 run_model = RunModel(run)
             else:
                 run_model = run
+            run_model.set_transform(self._transform)
             self._connect_run_model(run_model)
             self._run_models[uid] = run_model
             self.run_added.emit(run)
@@ -481,6 +482,11 @@ class RunListModel(QStandardItemModel):
         run_list : List[CatalogRun]
             Runs to remove from the model
         """
+        print_debug(
+            "RunListModel.remove_uids",
+            f"Removing uids {uid_list}",
+            category="DEBUG_RUNLIST",
+        )
         for uid in uid_list:
             if uid in self._run_models:
                 run_model = self._run_models.pop(uid)
@@ -507,6 +513,7 @@ class RunListModel(QStandardItemModel):
         Takes a list of CatalogRun objects and updates the model to contain
         only these runs.
         """
+        print_debug("RunListModel.set_runs", f"Setting runs {len(run_list)}", "run")
         current_uids = {run.uid for run in run_list}
         existing_uids = set(self._run_models.keys())
 
@@ -530,6 +537,11 @@ class RunListModel(QStandardItemModel):
         is_visible : bool
             Whether to make the runs visible
         """
+        print_debug(
+            "RunListModel.set_uids_visible",
+            f"Setting uids {uids} to {is_visible}",
+            category="DEBUG_RUNLIST",
+        )
         if self._single_selection_mode and is_visible and uids:
             # In single-selection mode, only the first UID should be visible
             # Set all runs to not visible first

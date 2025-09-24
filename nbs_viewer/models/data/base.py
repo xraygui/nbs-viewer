@@ -363,9 +363,6 @@ class CatalogRun(QObject):
         """Compute available keys (no signals, safe for background thread)."""
         return self.getAvailableKeys() or []
 
-    @time_function(
-        function_name="CatalogRun._initialize_keys", category="DEBUG_CATALOG"
-    )
     def _initialize_keys(self):
         """Initialize available keys synchronously on the calling thread."""
         # Mark as started and notify listeners
@@ -493,7 +490,7 @@ class CatalogRun(QObject):
 
         return result
 
-    @time_function(function_name="CatalogRun.analyze_dimensions")
+    # @time_function(function_name="CatalogRun.analyze_dimensions")
     def analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
         """
         Analyze dimensions for a given y-key and set of x-keys, synthesizing information

@@ -4,6 +4,7 @@ from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
 from .displayRegistry import DisplayRegistry
 from ...models.plot.runModel import RunModel
+from ...utils import print_debug
 
 
 # TODO: Remove plot_models from this class
@@ -216,6 +217,11 @@ class DisplayManager(QObject):
         display_id : str
             Target display identifier
         """
+        print_debug(
+            "DisplayManager.add_run_to_display",
+            f"Adding run {run.uid} to display {display_id}",
+            category="DEBUG_DISPLAYMANAGER",
+        )
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models[display_id]
             run_list_model.add_run(run)
@@ -231,6 +237,11 @@ class DisplayManager(QObject):
         display_id : str
             Source display identifier
         """
+        print_debug(
+            "DisplayManager.remove_run_from_display",
+            f"Removing run {run.uid} from display {display_id}",
+            category="DEBUG_DISPLAYMANAGER",
+        )
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models[display_id]
             run_list_model.remove_run(run)
