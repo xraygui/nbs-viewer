@@ -161,6 +161,17 @@ class ReverseModel(QSortFilterProxyModel):
         self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
 
+    def set_visible_rows(self, start_row, end_row):
+        """
+        Forward set_visible_rows call to the source model.
+
+        This allows the LazyLoadingTableView to properly trigger
+        data loading through the proxy chain.
+        """
+        source_model = self.sourceModel()
+        if hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(start_row, end_row)
+
 
 class FilterModel(QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
@@ -180,6 +191,118 @@ class FilterModel(QSortFilterProxyModel):
         regex = self.filterRegularExpression()
         match = regex.match(data_str)
         return match.hasMatch()
+
+    def set_visible_rows(self, start_row, end_row):
+        """
+        Forward set_visible_rows call to the source model.
+
+        This allows the LazyLoadingTableView to properly trigger
+        data loading through the proxy chain.
+        """
+        source_model = self.sourceModel()
+        if hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(start_row, end_row)
+
+    def setFilterRegularExpression(self, pattern):
+        """
+        Override to trigger intelligent data loading for filtering.
+
+        When a filter is applied, we need to ensure that data is loaded
+        for rows that might match the filter, not just currently visible rows.
+        """
+        # Convert string pattern to QRegularExpression if needed
+
+        # Call the parent method with the QRegularExpression
+        super().setFilterRegularExpression(pattern)
+
+        # If we have a filter pattern, trigger intelligent data loading
+        if pattern and pattern.strip():
+            self._trigger_intelligent_filtering()
+        else:
+            # If filter is cleared, the normal lazy loading will handle it
+            pass
+
+    def _trigger_intelligent_filtering(self):
+        """
+        Trigger intelligent data loading for filtering.
+
+        This expands the visible range intelligently to find more matches
+        while maintaining lazy loading efficiency.
+        """
+        # Get the source model (CatalogTableModel)
+        source_model = self.sourceModel()
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
+
+        if hasattr(source_model, "set_visible_rows"):
+            # Start with a reasonable range for filtering
+            total_rows = source_model.rowCount()
+            if total_rows > 0:
+                # Expand the range to load more data for filtering
+                # Start with a larger chunk than normal lazy loading
+                chunk_size = 200  # Load more data for filtering
+                max_expansion = 1000  # Don't expand beyond 1000 rows total
+
+                start_row = 0
+                end_row = min(chunk_size, total_rows - 1)
+
+                # Don't expand beyond reasonable limits
+                end_row = min(end_row, max_expansion)
+
+                # Set the expanded visible range
+                source_model.set_visible_rows(start_row, end_row)
+
+                # Schedule a check to see if we need more data
+                from qtpy.QtCore import QTimer
+
+                QTimer.singleShot(100, lambda: self._check_filter_sufficiency())
+
+    def _check_filter_sufficiency(self):
+        """
+        Check if we have enough filter matches, and expand range if needed.
+        This method will keep trying until sufficient matches are found or
+        we've exhausted the source model.
+        """
+        # Count current visible rows in the filtered model
+        visible_count = self.rowCount()
+
+        # If we have very few matches, try to expand the range further
+        if visible_count < 5:  # Threshold for "too few matches"
+            print(f"Insufficient filter matches ({visible_count}), expanding range")
+            source_model = self.sourceModel()
+            while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+                source_model = source_model.sourceModel()
+
+            if hasattr(source_model, "set_visible_rows"):
+                # Get current visible range and expand it further
+                current_range = getattr(source_model, "_visible_rows", set())
+                if current_range:
+                    min_row = min(current_range)
+                    max_row = max(current_range)
+                    total_rows = source_model.rowCount()
+
+                    # Check if we've already expanded to cover all available data
+                    if min_row <= 0 and max_row >= total_rows - 1:
+                        print(
+                            "Filter range covers all available data, stopping expansion"
+                        )
+                        return
+
+                    # Expand by another chunk
+                    new_start = max(0, min_row - 100)
+                    new_end = min(total_rows - 1, max_row + 100)
+
+                    print(
+                        f"Expanding filter range from {min_row}-{max_row} to {new_start}-{new_end}"
+                    )
+                    source_model.set_visible_rows(new_start, new_end)
+
+                    # Schedule another check in 5 seconds to avoid blocking GUI
+                    from qtpy.QtCore import QTimer
+
+                    QTimer.singleShot(5000, self._check_filter_sufficiency)
+                else:
+                    print("No current range found, cannot expand further")
 
 
 class LazyLoadingTableView(QTableView):
@@ -282,14 +405,10 @@ class LazyLoadingTableView(QTableView):
             self.model().rowCount() - 1, last_visible + self._buffer_size
         )
 
-        # Find the source model (CatalogTableModel)
-        source_model = self.model()
-        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
-            source_model = source_model.sourceModel()
-
-        # If the source model has a set_visible_rows method, call it
-        if hasattr(source_model, "set_visible_rows"):
-            source_model.set_visible_rows(first_visible, last_visible)
+        # Call set_visible_rows on the current model (FilterModel)
+        # This will forward the call through the proxy chain to the source model
+        if hasattr(self.model(), "set_visible_rows"):
+            self.model().set_visible_rows(first_visible, last_visible)
 
 
 class CatalogTableView(QWidget):
@@ -327,7 +446,7 @@ class CatalogTableView(QWidget):
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
 
-        self.display_button = QPushButton("Display Selection", self)
+        self.display_button = QPushButton("Update Catalog", self)
         self.display_button.clicked.connect(self.refresh_filters)
 
         self.invertButton = QPushButton("Reverse Data", self)
