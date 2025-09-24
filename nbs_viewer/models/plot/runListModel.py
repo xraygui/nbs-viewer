@@ -440,6 +440,7 @@ class RunListModel(QStandardItemModel):
                 run_model = RunModel(run)
             else:
                 run_model = run
+            run_model.set_transform(self._transform)
             self._connect_run_model(run_model)
             self._run_models[uid] = run_model
             self.run_added.emit(run)
