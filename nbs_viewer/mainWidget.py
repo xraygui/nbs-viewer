@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QLineEdit,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QEvent
 
 
 try:
@@ -92,7 +92,7 @@ class RenameableTabBar(QTabBar):
 
     def eventFilter(self, obj, event):
         """Handle events for the inline editor."""
-        if obj == self.editor and event.type() == event.KeyPress:
+        if obj == self.editor and event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Escape:
                 self._cancel_editing()
                 return True

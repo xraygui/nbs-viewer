@@ -4,6 +4,7 @@ import numpy as np
 import uuid
 from ..data.base import CatalogRun
 from .runModel import RunModel
+from asteval import Interpreter
 
 
 class CombinationMethod(Enum):
@@ -11,8 +12,7 @@ class CombinationMethod(Enum):
 
     AVERAGE = "average"
     SUM = "sum"
-    SUBTRACT = "subtract"  # First run - others
-    DIVIDE = "divide"  # First run / others
+    EXPRESSION = "expression"
 
 
 def make_scan_id(scan_ids: List[int]) -> str:
@@ -50,14 +50,16 @@ class CombinedRunModel(RunModel):
 
     def __init__(
         self,
-        runs: List[CatalogRun],
+        runs: Dict[str, CatalogRun],
         method: CombinationMethod = CombinationMethod.AVERAGE,
+        expression: str = None,
     ):
         first_run = runs[0] if runs else None
 
         # Use first run's metadata for display but with our generated uid
         self._source_runs = runs
         self._method = method
+        self._expression = expression
 
         scan_ids = []
         for run in self._source_runs:
@@ -65,14 +67,15 @@ class CombinedRunModel(RunModel):
             scan_ids.append(run.scan_id)
 
         # Set metadata from first run
-        if first_run:
-            self._metadata = {
-                "source_runs": [run.uid for run in runs],
-                "combination_method": method.value,
-                **first_run.metadata,
-            }
-        else:
-            self._metadata = {"source_runs": [], "combination_method": method.value}
+        self._metadata = {
+            "source_runs": [run.uid for run in runs],
+            "combination_method": method.value,
+        }
+        if method == CombinationMethod.EXPRESSION:
+            self._metadata["expression"] = expression
+        for run in runs:
+            self._metadata[f"Run {run.scan_id}"] = {}
+            self._metadata[f"Run {run.scan_id}"].update(run.metadata)
         self._scan_id = make_scan_id(scan_ids)
         self._plan_name = f"{len(scan_ids)} Combined"
         self._start = self._source_runs[0].start
@@ -229,24 +232,23 @@ class CombinedRunModel(RunModel):
             return x_data, []
 
         # Stack y data for combining
-        try:
-            y_stack = np.stack(y_norm)
-
-            # Apply combination method
-            if self._method == CombinationMethod.AVERAGE:
-                y_combined = np.mean(y_stack, axis=0)
-            elif self._method == CombinationMethod.SUM:
-                y_combined = np.sum(y_stack, axis=0)
-            elif self._method == CombinationMethod.SUBTRACT:
-                y_combined = y_stack[0] - np.sum(y_stack[1:], axis=0)
-            elif self._method == CombinationMethod.DIVIDE:
-                y_combined = y_stack[0] / np.prod(y_stack[1:], axis=0)
-
-        except Exception as e:
-            print(f"Error in _combine_data: {e}")
-            print(f"x_lists shape: {[x.shape for x in x_lists]}")
-            print(f"y_lists structure: {[len(yl) for yl in y_lists]}")
-            return x_data, []
+        if self._method == CombinationMethod.EXPRESSION:
+            combinator = Interpreter()
+            combinator.symtable["runlist"] = y_norm
+            y_combined = combinator(self._expression)
+        else:
+            try:
+                y_stack = np.stack(y_norm)
+                # Apply combination method
+                if self._method == CombinationMethod.AVERAGE:
+                    y_combined = np.mean(y_stack, axis=0)
+                elif self._method == CombinationMethod.SUM:
+                    y_combined = np.sum(y_stack, axis=0)
+            except Exception as e:
+                print(f"Error in _combine_data: {e}")
+                print(f"x_lists shape: {[x.shape for x in x_lists]}")
+                print(f"y_lists structure: {[len(yl) for yl in y_lists]}")
+                return x_data, []
 
         return x_data, y_combined
 

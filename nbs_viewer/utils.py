@@ -110,7 +110,7 @@ def time_function(function_name=None, category=None):
                 else:
                     logger_name = _resolve_logger_name(category)
                 logger = logging.getLogger(logger_name)
-                logger.info(f"{function_name} | {end_time - start_time:.6f}s")
+                logger.debug(f"{function_name} | {end_time - start_time:.6f}s")
                 return result
 
             return wrapper
@@ -127,7 +127,7 @@ def time_function(function_name=None, category=None):
             result = function(*args, **kwargs)
             end_time = ttime.time()
             logger = logging.getLogger("perf")
-            logger.info(f"{name} | {end_time - start_time:.6f}s")
+            logger.debug(f"{name} | {end_time - start_time:.6f}s")
             return result
 
         return wrapper
@@ -143,7 +143,7 @@ def time_function(function_name=None, category=None):
                 result = function(*args, **kwargs)
                 end_time = ttime.time()
                 logger = logging.getLogger("perf")
-                logger.info(f"{name} | {end_time - start_time:.6f}s")
+                logger.debug(f"{name} | {end_time - start_time:.6f}s")
                 return result
 
             return wrapper
