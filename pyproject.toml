@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "setuptools_scm"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "nbs-viewer"
@@ -37,10 +37,11 @@ Issues = "https://github.com/xraygui/nbs-viewer/issues"
 [project.scripts]
 nbs-viewer = "nbs_viewer.viewer:main"
 
-[tool.setuptools]
-packages = ["nbs_viewer"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools_scm]
+[tool.hatch.build.targets.wheel]
+packages = ["nbs_viewer"]
 
 [project.entry-points."nbs_viewer.catalog_models"]
 blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
