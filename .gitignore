@@ -98,4 +98,6 @@ Thumbs.db
 *.json
 !pyproject.toml
 !setup.cfg
-!requirements*.txt 
+!requirements*.txt # pixi environments
+.pixi/*
+!.pixi/config.toml
