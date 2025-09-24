@@ -52,6 +52,7 @@ image_grid = "nbs_viewer.views.display.plotDisplay:ImageGridDisplay"
 
 [project.entry-points."nbs_gui.tabs"]
 nbs-viewer-kafka = "nbs_viewer.widgets.kafkaViewerTab:KafkaViewerTab"
+
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
@@ -60,14 +61,20 @@ platforms = ["linux-64"]
 nbs-viewer = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+nbs-viewer = "nbs-viewer"
 
 [tool.pixi.dependencies]
+nslsii = ">=0.11.2,<0.12"
 numpy = ">=2.2.6,<3"
 qtpy = ">=2.4.3,<3"
 matplotlib = ">=3.10.6,<4"
-tiled = ">=0.1.2,<0.2"
+tiled = ">=0.1.0b17,<0.1.1"
 bluesky-widgets = ">=0.0.17,<0.0.18"
 bluesky-live = ">=0.0.8,<0.0.9"
 qt6-wayland = ">=6.9.2,<7"
 pyside6 = ">=6.9.2,<7"
 pyqtgraph = ">=0.13.7,<0.14"
+pyzmq = ">=27.1.0,<28"
+bluesky-tiled-plugins = ">=2.0.0b68,<3"
+databroker = ">=2.0.0b68,<3"
+asteval = ">=1.0.6,<2"
