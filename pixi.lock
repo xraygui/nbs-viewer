@@ -5447,20 +5447,20 @@ packages:
   timestamp: 1757782706200
 - pypi: ./
   name: nbs-viewer
-  version: 0.3.5.dev1+g2074e24e0.d20250924
-  sha256: e053bec22124805c07667b718b8cecaf04245407b788ce710ca5e8a491988fbf
+  version: 0.3.5.dev3+g3b0aab717.d20250924
+  sha256: b402106296e68d4611dfcece25be4183d15627251b789e2bd665e0b4089ac3fb
   requires_dist:
-  - numpy
-  - qtpy
-  - matplotlib
-  - tiled>=0.1.0b17
-  - bluesky-widgets>=0.0.15
-  - pyzmq
-  - bluesky-kafka
-  - nslsii
-  - databroker[back-compat,client,server]>=2.0.0b57
-  - bluesky-tiled-plugins>=2.0.0b59
   - asteval
+  - bluesky-kafka
+  - bluesky-tiled-plugins>=2.0.0b59
+  - bluesky-widgets>=0.0.15
+  - databroker[back-compat,client,server]>=2.0.0b57
+  - matplotlib
+  - nslsii
+  - numpy
+  - pyzmq
+  - qtpy
+  - tiled>=0.1.0b17
   - tomli>=2.0.0 ; python_full_version < '3.11'
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
