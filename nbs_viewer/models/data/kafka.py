@@ -30,6 +30,7 @@ class KafkaRun(CatalogRun):
         "group_name": ["start", "group_name"],
         "sample_name": ["start", "sample_name"],
         "motors": ["start", "motors"],
+        "exit_status": [],
     }
 
     DISPLAY_KEYS = {
@@ -40,16 +41,18 @@ class KafkaRun(CatalogRun):
         "plan_name": "Plan",
         "group_name": "Group",
         "sample_name": "Sample",
+        "exit_status": "Status",
     }
 
     METADATA_KEYS = [
+        "exit_status",
         "scan_id",
-        "uid",
-        "time",
-        "num_points",
         "plan_name",
-        "group_name",
         "sample_name",
+        "group_name",
+        "num_points",
+        "time",
+        "uid",
     ]
 
     @classmethod
@@ -285,6 +288,13 @@ class KafkaRun(CatalogRun):
         """
         self._stop_doc = doc
         self.data_changed.emit()
+
+    @property
+    def exit_status(self):
+        """
+        Get the exit status of the run.
+        """
+        return self.get_md_value(["stop", "exit_status"], "In Progress")
 
     def scanFinished(self):
         """

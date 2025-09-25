@@ -32,6 +32,7 @@ class BlueskyRun(CatalogRun):
         "plan_name": ["start", "plan_name"],
         "date": [],
         "num_points": [],
+        "exit_status": ["stop", "exit_status"],
     }
 
     DISPLAY_KEYS = {
@@ -40,9 +41,10 @@ class BlueskyRun(CatalogRun):
         "plan_name": "Plan Name",
         "date": "Date",
         "num_points": "Scan Points",
+        "exit_status": "Status",
     }
 
-    METADATA_KEYS = ["scan_id", "plan_name", "num_points", "date", "uid"]
+    METADATA_KEYS = ["exit_status", "scan_id", "plan_name", "num_points", "date", "uid"]
 
     @time_function(function_name="BlueskyRun.__init__", category="DEBUG_CATALOG")
     def __init__(self, run, key, catalog, parent=None, chunk_cache=None):

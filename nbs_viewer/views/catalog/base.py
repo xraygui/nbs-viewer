@@ -10,6 +10,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QCheckBox,
 )
 from qtpy.QtCore import (
     Qt,
@@ -482,6 +483,21 @@ class CatalogTableView(QWidget):
         filterLayout.addWidget(self.filterLineEdit)
         filterLayout.addWidget(self.filterComboBox)
 
+        self.filterLineEdit2 = QLineEdit(self)
+        self.filterComboBox2 = QComboBox(self)
+
+        filterLayout2 = QHBoxLayout()
+        filterLayout2.addWidget(QLabel("RegEx Filter 2"))
+        filterLayout2.addWidget(self.filterLineEdit2)
+        filterLayout2.addWidget(self.filterComboBox2)
+
+        self.exitFilterCheckBox = QCheckBox(self)
+        self.exitFilterCheckBox.setChecked(False)
+        self.exitFilterCheckBox.stateChanged.connect(self.on_exit_filter_changed)
+        exitFilterLayout = QHBoxLayout()
+        exitFilterLayout.addWidget(QLabel("Exclude Unsuccessful Runs"))
+        exitFilterLayout.addWidget(self.exitFilterCheckBox)
+
         scrollLayout = QHBoxLayout()
         scrollLayout.addWidget(self.scrollToTopButton)
         scrollLayout.addWidget(self.scrollToBottomButton)
@@ -491,10 +507,29 @@ class CatalogTableView(QWidget):
             layout.addWidget(widget)
         layout.addWidget(self.display_button)
         layout.addLayout(filterLayout)
+        layout.addLayout(filterLayout2)
+        layout.addLayout(exitFilterLayout)
         layout.addLayout(scrollLayout)
         layout.addWidget(self.invertButton)
         layout.addWidget(self.data_view)
         self.setLayout(layout)
+
+    def on_exit_filter_changed(self, state):
+        """
+        Handle changes to the exit status filter checkbox.
+
+        Parameters
+        ----------
+        state : int
+            Checkbox state (0 = unchecked, 2 = checked)
+        """
+        # Get the third filter model (for exit status)
+        filter_model3 = self.data_view.model()
+
+        if state == 2:  # Checked - filter for successful runs only
+            filter_model3.setFilterRegularExpression("success")
+        else:  # Unchecked - clear the filter
+            filter_model3.setFilterRegularExpression("")
 
     def on_selection_changed(self, selected, deselected):
         """Handle changes in the selection state of table rows."""
@@ -541,10 +576,14 @@ class CatalogTableView(QWidget):
         self._is_inverted = not self._is_inverted
 
         # Get models
-        filter_model = self.data_view.model()
+        filter_model3 = self.data_view.model()
+        filter_model2 = filter_model3.sourceModel()
+        filter_model = filter_model2.sourceModel()
         reverse_model = filter_model.sourceModel()
         reverse_model.toggleInvert()
         filter_model.invalidateFilter()
+        filter_model2.invalidateFilter()
+        filter_model3.invalidateFilter()
         self.data_view._update_visible_rows()
 
     def setupModelAndView(self):
@@ -556,36 +595,58 @@ class CatalogTableView(QWidget):
         catalog : Catalog
             The catalog to display in the table
         """
-        # Create model chain: source -> reverse -> filter
+        # Create model chain: source -> reverse -> filter1 -> filter2 -> filter3
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
         table_model = CatalogTableModel(catalog)
         reverse_model = ReverseModel(parent=self.data_view)
         filter_model = FilterModel(parent=self.data_view)
+        filter_model2 = FilterModel(parent=self.data_view)
+        filter_model3 = FilterModel(parent=self.data_view)
 
         self.lowest_model = reverse_model
         # Connect models
         reverse_model.setSourceModel(table_model)
         filter_model.setSourceModel(reverse_model)
+        filter_model2.setSourceModel(filter_model)
+        filter_model3.setSourceModel(filter_model2)
 
         # Disconnect existing selection model if it exists
         if self.data_view.model() is not None:
             self.data_view.selectionModel().selectionChanged.disconnect()
 
-        # Set the filter model as the view's model
-        self.data_view.setModel(filter_model)
+        # Set the third filter model as the view's model
+        self.data_view.setModel(filter_model3)
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
         # Connect filter controls to filter model
         self.filterLineEdit.textChanged.connect(filter_model.setFilterRegularExpression)
+        self.filterLineEdit2.textChanged.connect(
+            filter_model2.setFilterRegularExpression
+        )
         self.filterComboBox.clear()
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(
             lambda index: filter_model.setFilterKeyColumn(index)
         )
+
+        # Configure the second filter model (user-defined regex)
+        self.filterComboBox2.clear()
+        self.filterComboBox2.addItems([col for col in table_model.columns])
+        self.filterComboBox2.currentIndexChanged.connect(
+            lambda index: filter_model2.setFilterKeyColumn(index)
+        )
+
+        # Configure the third filter model for exit status
+        # Find the "Status" column index
+        status_column_index = 0  # Default to first column
+        if "Status" in table_model.columns:
+            status_column_index = table_model.columns.index("Status")
+        # Set the filter column to "Status" permanently
+        filter_model3.setFilterKeyColumn(status_column_index)
 
         # Connect invert button to our handler instead
         self.invertButton.setEnabled(True)
@@ -595,6 +656,8 @@ class CatalogTableView(QWidget):
             # Set the invert property on the reverse model
             reverse_model.toggleInvert()
             filter_model.invalidateFilter()
+            filter_model2.invalidateFilter()
+            filter_model3.invalidateFilter()
             self.data_view._update_visible_rows()
 
     def refresh_filters(self):
