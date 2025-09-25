@@ -440,7 +440,7 @@ class CatalogTableView(QWidget):
         self._is_inverted = False  # Track inversion state
         self._setup_ui()
         self.setup_context_menu()
-        self.refresh_filters()
+        self.setupModelAndView()
 
     def setup_context_menu(self):
         self.data_view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -547,7 +547,7 @@ class CatalogTableView(QWidget):
         filter_model.invalidateFilter()
         self.data_view._update_visible_rows()
 
-    def setupModelAndView(self, catalog):
+    def setupModelAndView(self):
         """
         Set up the table model and view with the given catalog.
 
@@ -557,10 +557,14 @@ class CatalogTableView(QWidget):
             The catalog to display in the table
         """
         # Create model chain: source -> reverse -> filter
+        catalog = self._catalog
+        for f in self.filter_list:
+            catalog = f.filter_catalog(catalog)
         table_model = CatalogTableModel(catalog)
         reverse_model = ReverseModel(parent=self.data_view)
         filter_model = FilterModel(parent=self.data_view)
 
+        self.lowest_model = reverse_model
         # Connect models
         reverse_model.setSourceModel(table_model)
         filter_model.setSourceModel(reverse_model)
@@ -594,16 +598,23 @@ class CatalogTableView(QWidget):
             self.data_view._update_visible_rows()
 
     def refresh_filters(self):
+        selection_model = self.data_view.selectionModel()
+        if selection_model:
+            selection_model.clearSelection()
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
 
-        self.setupModelAndView(catalog)
+        # self.setupModelAndView(catalog)
+        table_model = CatalogTableModel(catalog)
+        self.lowest_model.setSourceModel(table_model)
+
+        self.data_view._update_visible_rows()
 
         # Reconnect the selection model's signal after setting up the new model
-        self.data_view.selectionModel().selectionChanged.connect(
-            self.on_selection_changed
-        )
+        # self.data_view.selectionModel().selectionChanged.connect(
+        #    self.on_selection_changed
+        # )
 
     def get_selected_runs(self):
         """
