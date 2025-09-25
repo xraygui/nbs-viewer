@@ -414,6 +414,85 @@ class RunListView(QWidget):
 
         return selected_runs
 
+    def _check_run_compatibility(self, runs):
+        """
+        Check if runs are compatible for combination.
+
+        Parameters
+        ----------
+        runs : List[RunModel]
+            List of runs to check for compatibility
+
+        Returns
+        -------
+        bool
+            True if runs are compatible, False otherwise
+        """
+        if len(runs) < 2:
+            return True
+
+        try:
+            # Get common keys across all runs
+            common_keys = set(runs[0].available_keys)
+            for run in runs[1:]:
+                common_keys &= set(run.available_keys)
+
+            if not common_keys:
+                QMessageBox.warning(
+                    self,
+                    "Incompatible Runs",
+                    "Selected runs have no common data keys. Cannot combine runs with completely different data structures.",
+                )
+                return False
+
+            # Try to find a suitable key for shape comparison
+            test_key = None
+            preferred_keys = ["time"]
+
+            # Look for preferred keys first
+            for key in preferred_keys:
+                if key in common_keys:
+                    test_key = key
+                    break
+
+            # If no preferred key found, use the first common key
+            if test_key is None:
+                test_key = list(common_keys)[0]
+
+            # Check if all runs have the same shape for the test key
+            shapes = []
+            for run in runs:
+                try:
+                    shape = run.getShape(test_key)
+                    shapes.append(shape)
+                except Exception:
+                    QMessageBox.warning(
+                        self,
+                        "Data Access Error",
+                        f"Could not access data for key '{test_key}' in one or more runs.",
+                    )
+                    return False
+
+            # Check if all shapes are the same
+            if len(set(shapes)) > 1:
+                QMessageBox.warning(
+                    self,
+                    "Incompatible Data Shapes",
+                    f"Selected runs have different data shapes for key '{test_key}': {shapes}. "
+                    "All runs must have the same data dimensions to be combined.",
+                )
+                return False
+
+            return True
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Compatibility Check Failed",
+                f"Error checking run compatibility: {str(e)}",
+            )
+            return False
+
     def deselect_all(self):
         """Deselect all items in the list widget."""
         self.list_view.clearSelection()
@@ -459,6 +538,10 @@ class RunListView(QWidget):
             QMessageBox.warning(
                 self, "Cannot Combine", "Please select at least 2 runs to combine"
             )
+            return
+
+        # Check run compatibility
+        if not self._check_run_compatibility(selected_runs):
             return
 
         # Get selected combination method from dropdown
