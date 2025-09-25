@@ -45,13 +45,13 @@ class KafkaRun(CatalogRun):
     }
 
     METADATA_KEYS = [
-        "exit_status",
         "scan_id",
         "plan_name",
         "sample_name",
         "group_name",
         "num_points",
         "time",
+        "exit_status",
         "uid",
     ]
 

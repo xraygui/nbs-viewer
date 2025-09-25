@@ -50,13 +50,13 @@ class NBSRun(BlueskyRun):
     }
 
     METADATA_KEYS = [
-        "exit_status",
         "scan_id",
         "plan_name",
         "sample_name",
         "sample_id",
         "group_name",
         "date",
+        "exit_status",
         "uid",
     ]
 

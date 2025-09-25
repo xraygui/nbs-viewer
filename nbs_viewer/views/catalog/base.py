@@ -209,9 +209,9 @@ class FilterModel(QSortFilterProxyModel):
         # The view needs to display rows start_row to end_row
         # So we need at least (end_row + 1) total filtered matches
         self._filter_target_rows = end_row + 1
-        print(
-            f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
-        )
+        # print(
+        #    f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
+        # )
 
         # Always forward to the source model
         source_model = self.sourceModel()
@@ -221,7 +221,7 @@ class FilterModel(QSortFilterProxyModel):
         # If we don't have enough matches yet, continue loading
         current_matches = self.rowCount()
         if current_matches < self._filter_target_rows:
-            print(f"Need more data: {current_matches} < {self._filter_target_rows}")
+            # print(f"Need more data: {current_matches} < {self._filter_target_rows}")
             # Get the source model and continue loading
             source_model = self.sourceModel()
             while hasattr(source_model, "sourceModel") and source_model.sourceModel():
@@ -277,7 +277,7 @@ class FilterModel(QSortFilterProxyModel):
         start_row = self._filter_loaded_end
         end_row = min(start_row + self._filter_chunk_size - 1, total_rows - 1)
 
-        print(f"Loading filter chunk: rows {start_row} to {end_row}")
+        # print(f"Loading filter chunk: rows {start_row} to {end_row}")
 
         # Load this chunk
         source_model.set_visible_rows(start_row, end_row)
@@ -298,13 +298,13 @@ class FilterModel(QSortFilterProxyModel):
         # Count current visible rows in the filtered model
         visible_count = self.rowCount()
         self._filter_loaded_end = max(self._filter_loaded_end, visible_count)
-        print(
-            f"Current filtered rows: {visible_count} (target: {self._filter_target_rows})"
-        )
+        # print(
+        #     f"Current filtered rows: {visible_count} (target: {self._filter_target_rows})"
+        # )
 
         # If we have enough matches, we're done
         if visible_count >= self._filter_target_rows:
-            print(f"Filtering complete: {visible_count} rows found")
+            # print(f"Filtering complete: {visible_count} rows found")
             return
 
         # Get the source model
@@ -315,13 +315,13 @@ class FilterModel(QSortFilterProxyModel):
         total_rows = source_model.rowCount()
         # Check if we've loaded all available data
         if self._filter_loaded_end >= total_rows:
-            print(
-                f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
-            )
+            # print(
+            #    f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
+            # )
             return
 
         # Load the next chunk
-        print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
+        # print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
         self._load_next_filter_chunk(source_model)
 
 
@@ -633,12 +633,22 @@ class CatalogTableView(QWidget):
             lambda index: filter_model.setFilterKeyColumn(index)
         )
 
+        # Set default column for first filter to "Plan Name" if it exists
+        if "Plan Name" in table_model.columns:
+            plan_column_index = table_model.columns.index("Plan Name")
+            self.filterComboBox.setCurrentIndex(plan_column_index)
+
         # Configure the second filter model (user-defined regex)
         self.filterComboBox2.clear()
         self.filterComboBox2.addItems([col for col in table_model.columns])
         self.filterComboBox2.currentIndexChanged.connect(
             lambda index: filter_model2.setFilterKeyColumn(index)
         )
+
+        # Set default column for second filter to "Sample Name" if it exists
+        if "Sample Name" in table_model.columns:
+            sample_column_index = table_model.columns.index("Sample Name")
+            self.filterComboBox2.setCurrentIndex(sample_column_index)
 
         # Configure the third filter model for exit status
         # Find the "Status" column index
