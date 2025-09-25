@@ -177,6 +177,11 @@ class FilterModel(QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setDynamicSortFilter(True)
+        self.saved_start_row = 0
+        self.saved_end_row = 0
+        self._filter_target_rows = 0
+        self._filter_loaded_end = 0
+        self._filter_chunk_size = 50
 
     def filterAcceptsRow(self, source_row, source_parent):
         model = self.sourceModel()
@@ -199,9 +204,28 @@ class FilterModel(QSortFilterProxyModel):
         This allows the LazyLoadingTableView to properly trigger
         data loading through the proxy chain.
         """
+        # If we're currently filtering, update our target based on what the view needs
+        # The view needs to display rows start_row to end_row
+        # So we need at least (end_row + 1) total filtered matches
+        self._filter_target_rows = end_row + 1
+        print(
+            f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
+        )
+
+        # Always forward to the source model
         source_model = self.sourceModel()
         if hasattr(source_model, "set_visible_rows"):
             source_model.set_visible_rows(start_row, end_row)
+
+        # If we don't have enough matches yet, continue loading
+        current_matches = self.rowCount()
+        if current_matches < self._filter_target_rows:
+            print(f"Need more data: {current_matches} < {self._filter_target_rows}")
+            # Get the source model and continue loading
+            source_model = self.sourceModel()
+            while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+                source_model = source_model.sourceModel()
+            self._load_next_filter_chunk(source_model)
 
     def setFilterRegularExpression(self, pattern):
         """
@@ -217,7 +241,8 @@ class FilterModel(QSortFilterProxyModel):
 
         # If we have a filter pattern, trigger intelligent data loading
         if pattern and pattern.strip():
-            self._trigger_intelligent_filtering()
+            self._filter_loaded_end = 0
+            self._check_filter_sufficiency()
         else:
             # If filter is cleared, the normal lazy loading will handle it
             pass
@@ -226,83 +251,77 @@ class FilterModel(QSortFilterProxyModel):
         """
         Trigger intelligent data loading for filtering.
 
-        This expands the visible range intelligently to find more matches
-        while maintaining lazy loading efficiency.
+        This loads data in chunks until we have enough filtered results
+        to display (target: 50 visible rows).
         """
         # Get the source model (CatalogTableModel)
         source_model = self.sourceModel()
         while hasattr(source_model, "sourceModel") and source_model.sourceModel():
             source_model = source_model.sourceModel()
 
-        if hasattr(source_model, "set_visible_rows"):
-            # Start with a reasonable range for filtering
-            total_rows = source_model.rowCount()
-            if total_rows > 0:
-                # Expand the range to load more data for filtering
-                # Start with a larger chunk than normal lazy loading
-                chunk_size = 200  # Load more data for filtering
-                max_expansion = 1000  # Don't expand beyond 1000 rows total
+        self._filter_loaded_end = 0  # Track how much data we've loaded
 
-                start_row = 0
-                end_row = min(chunk_size, total_rows - 1)
+        # Start loading the first chunk
+        self._load_next_filter_chunk(source_model)
 
-                # Don't expand beyond reasonable limits
-                end_row = min(end_row, max_expansion)
+    def _load_next_filter_chunk(self, source_model):
+        """
+        Load the next chunk of data for filtering.
+        """
+        total_rows = source_model.rowCount()
+        if total_rows == 0:
+            return
 
-                # Set the expanded visible range
-                source_model.set_visible_rows(start_row, end_row)
+        # Calculate the next chunk to load
+        start_row = self._filter_loaded_end
+        end_row = min(start_row + self._filter_chunk_size - 1, total_rows - 1)
 
-                # Schedule a check to see if we need more data
-                from qtpy.QtCore import QTimer
+        print(f"Loading filter chunk: rows {start_row} to {end_row}")
 
-                QTimer.singleShot(100, lambda: self._check_filter_sufficiency())
+        # Load this chunk
+        source_model.set_visible_rows(start_row, end_row)
+
+        # Update our tracking
+        self._filter_loaded_end = end_row + 1
+
+        # Schedule a check after the chunk loads
+
+        QTimer.singleShot(1000, lambda: self._check_filter_sufficiency())
 
     def _check_filter_sufficiency(self):
         """
-        Check if we have enough filter matches, and expand range if needed.
-        This method will keep trying until sufficient matches are found or
+        Check if we have enough filter matches, and load more chunks if needed.
+        This method will keep loading chunks until sufficient matches are found or
         we've exhausted the source model.
         """
         # Count current visible rows in the filtered model
         visible_count = self.rowCount()
+        self._filter_loaded_end = max(self._filter_loaded_end, visible_count)
+        print(
+            f"Current filtered rows: {visible_count} (target: {self._filter_target_rows})"
+        )
 
-        # If we have very few matches, try to expand the range further
-        if visible_count < 5:  # Threshold for "too few matches"
-            print(f"Insufficient filter matches ({visible_count}), expanding range")
-            source_model = self.sourceModel()
-            while hasattr(source_model, "sourceModel") and source_model.sourceModel():
-                source_model = source_model.sourceModel()
+        # If we have enough matches, we're done
+        if visible_count >= self._filter_target_rows:
+            print(f"Filtering complete: {visible_count} rows found")
+            return
 
-            if hasattr(source_model, "set_visible_rows"):
-                # Get current visible range and expand it further
-                current_range = getattr(source_model, "_visible_rows", set())
-                if current_range:
-                    min_row = min(current_range)
-                    max_row = max(current_range)
-                    total_rows = source_model.rowCount()
+        # Get the source model
+        source_model = self.sourceModel()
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
 
-                    # Check if we've already expanded to cover all available data
-                    if min_row <= 0 and max_row >= total_rows - 1:
-                        print(
-                            "Filter range covers all available data, stopping expansion"
-                        )
-                        return
+        total_rows = source_model.rowCount()
+        # Check if we've loaded all available data
+        if self._filter_loaded_end >= total_rows:
+            print(
+                f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
+            )
+            return
 
-                    # Expand by another chunk
-                    new_start = max(0, min_row - 100)
-                    new_end = min(total_rows - 1, max_row + 100)
-
-                    print(
-                        f"Expanding filter range from {min_row}-{max_row} to {new_start}-{new_end}"
-                    )
-                    source_model.set_visible_rows(new_start, new_end)
-
-                    # Schedule another check in 5 seconds to avoid blocking GUI
-                    from qtpy.QtCore import QTimer
-
-                    QTimer.singleShot(5000, self._check_filter_sufficiency)
-                else:
-                    print("No current range found, cannot expand further")
+        # Load the next chunk
+        print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
+        self._load_next_filter_chunk(source_model)
 
 
 class LazyLoadingTableView(QTableView):
@@ -393,17 +412,13 @@ class LazyLoadingTableView(QTableView):
         last_visible = self.rowAt(viewport_height - 1)
         if last_visible < 0:
             if self.model().rowCount() > 0:
-                last_visible = min(
-                    first_visible + self._buffer_size, self.model().rowCount() - 1
-                )
+                last_visible = first_visible + self._buffer_size
             else:
                 last_visible = 0
 
         # Add a buffer of rows above and below for smoother scrolling
         first_visible = max(0, first_visible - self._buffer_size)
-        last_visible = min(
-            self.model().rowCount() - 1, last_visible + self._buffer_size
-        )
+        last_visible = last_visible + self._buffer_size
 
         # Call set_visible_rows on the current model (FilterModel)
         # This will forward the call through the proxy chain to the source model
