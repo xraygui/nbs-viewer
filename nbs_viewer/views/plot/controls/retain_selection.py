@@ -44,7 +44,7 @@ class RetainSelectionControl(PlotControlWidget):
         self._retain_selection_box.setToolTip(
             "Keep current plot selections when runs change"
         )
-        self._retain_selection_box.clicked.connect(self.state_changed)
+        self._retain_selection_box.checkStateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self._retain_selection_box)
         self.setLayout(layout)
 
@@ -71,7 +71,7 @@ class RetainSelectionControl(PlotControlWidget):
         if "retain_selection" in state:
             self._retain_selection_box.setChecked(state["retain_selection"])
 
-    def state_changed(self) -> None:
+    def _on_checkbox_changed(self, checkState) -> None:
         """Handle state changes."""
         state = self.get_state()
         self.run_list_model.set_retain_selection(state["retain_selection"])

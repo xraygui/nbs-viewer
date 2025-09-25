@@ -41,7 +41,7 @@ class DynamicUpdateControl(PlotControlWidget):
         layout.addWidget(QLabel("Dynamic Update"))
         self._dynamic_box = QCheckBox()
         self._dynamic_box.setChecked(False)
-        self._dynamic_box.clicked.connect(self.state_changed)
+        self._dynamic_box.checkStateChanged.connect(self._on_state_changed)
         layout.addWidget(self._dynamic_box)
         self.setLayout(layout)
 
@@ -68,7 +68,7 @@ class DynamicUpdateControl(PlotControlWidget):
         if "dynamic" in state:
             self._dynamic_box.setChecked(state["dynamic"])
 
-    def state_changed(self) -> None:
+    def _on_state_changed(self, checkState) -> None:
         """Handle state changes."""
         state = self.get_state()
         self.run_list_model.set_dynamic_update(state["dynamic"])
