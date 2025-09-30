@@ -42,7 +42,7 @@ class CombinedRunModel(RunModel):
 
     Parameters
     ----------
-    runs : List[CatalogRun]
+    runs : List[RunModel]
         List of runs to combine
     method : CombinationMethod, optional
         Method to use for combining runs, by default AVERAGE
@@ -50,7 +50,7 @@ class CombinedRunModel(RunModel):
 
     def __init__(
         self,
-        runs: Dict[str, CatalogRun],
+        runs: List[RunModel],
         method: CombinationMethod = CombinationMethod.AVERAGE,
         expression: str = None,
     ):
@@ -78,10 +78,10 @@ class CombinedRunModel(RunModel):
             self._metadata[f"Run {run.scan_id}"].update(run.metadata)
         self._scan_id = make_scan_id(scan_ids)
         self._plan_name = f"{len(scan_ids)} Combined"
-        self._start = self._source_runs[0].start
+        self._start = self._source_runs[0].run.start
         self._uid = str(uuid.uuid4())
 
-        super().__init__(first_run)
+        super().__init__(first_run.run)
 
     def _connect_run(self):
         for run in self._source_runs:
@@ -93,7 +93,7 @@ class CombinedRunModel(RunModel):
             run.data_changed.disconnect(self._on_data_changed)
 
     @property
-    def run(self):
+    def run(self) -> CatalogRun:
         return self._source_runs[0].run
 
     @property
@@ -163,17 +163,10 @@ class CombinedRunModel(RunModel):
         run_data = []
         for run in self._source_runs:
             try:
-                xlist, xnames, extra = run.get_dimension_axes(ykey, xkeys, slice_info)
-                xlist = [x for x in xlist if x.size > 1]  # omit empty dimensions
-                y = run.getData(ykey, slice_info)
-                if norm_keys is not None:
-                    normlist = [
-                        run.getData(norm_key, slice_info) for norm_key in norm_keys
-                    ]
-                    norm = np.prod(normlist, axis=0)
-                else:
-                    norm = None
-                run_data.append((xlist, y, norm))
+                xlist, y = run.get_plot_data(
+                    xkeys, ykey, norm_keys, slice_info, transform=False
+                )
+                run_data.append((xlist, y))
             except Exception as e:
                 print(f"Error getting plot data from run {run.uid}: {str(e)}")
                 continue
@@ -206,27 +199,13 @@ class CombinedRunModel(RunModel):
             return [], []
 
         # Separate x and y data
-        x_lists, y_lists, norm_lists = zip(*run_data)
+        x_lists, y_lists = zip(*run_data)
 
         # For now, use x data from first run
         x_data = x_lists[0]
 
-        y_norm = []
-        # Filter out empty y_lists
-        for y, norm in zip(y_lists, norm_lists):
-            if norm is None:
-                yfinal = y
-            elif np.isscalar(norm):
-                yfinal = y / norm
-            else:
-                temp_norm = norm
-                while temp_norm.ndim < y.ndim:
-                    temp_norm = np.expand_dims(temp_norm, axis=-1)
-                yfinal = y / temp_norm
-            y_norm.append(yfinal)
-
         # Verify all remaining y_lists have same length
-        y_shapes = [y.shape for y in y_norm]
+        y_shapes = [y.shape for y in y_lists]
         if not all(shape == y_shapes[0] for shape in y_shapes):
             print(f"Warning: Inconsistent y shapes: {y_shapes}")
             return x_data, []
@@ -234,11 +213,11 @@ class CombinedRunModel(RunModel):
         # Stack y data for combining
         if self._method == CombinationMethod.EXPRESSION:
             combinator = Interpreter()
-            combinator.symtable["runlist"] = y_norm
+            combinator.symtable["runlist"] = y_lists
             y_combined = combinator(self._expression)
         else:
             try:
-                y_stack = np.stack(y_norm)
+                y_stack = np.stack(y_lists)
                 # Apply combination method
                 if self._method == CombinationMethod.AVERAGE:
                     y_combined = np.mean(y_stack, axis=0)
@@ -265,7 +244,7 @@ class CombinedRunModel(RunModel):
         return self._method
 
     @property
-    def source_runs(self) -> List[CatalogRun]:
+    def source_runs(self) -> List[RunModel]:
         """Get list of source runs being combined."""
         return self._source_runs.copy()
 

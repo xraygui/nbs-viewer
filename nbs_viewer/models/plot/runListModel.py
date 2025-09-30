@@ -1,6 +1,6 @@
 """Plot model managing run controllers and their associated plot artists."""
 
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Set
 from nbs_viewer.models.catalog.base import CatalogRun
 from qtpy.QtCore import QObject, Signal, Qt
 from qtpy.QtGui import QStandardItemModel, QStandardItem
@@ -15,6 +15,9 @@ class RunListModel(QStandardItemModel):
     This class handles the high-level coordination between data sources
     and their visual representation, managing RunModels and delegating
     actual artist management to PlotDataModel.
+
+    Badly needs simplification. Should not add CatalogRun objects via signal/slot, should do directly
+    in add_runs. Needs typing to distinguish between CatalogRun and RunModel.
     """
 
     available_keys_changed = Signal()
@@ -67,7 +70,7 @@ class RunListModel(QStandardItemModel):
         for run in self.available_runs:
             self._add_run_item(run)
 
-    def _add_run_item(self, run):
+    def _add_run_item(self, run: RunModel):
         """Add a run as a QStandardItem to the model."""
         item = QStandardItem(run.display_name)
         item.setData(run.uid, Qt.UserRole)
@@ -78,11 +81,11 @@ class RunListModel(QStandardItemModel):
         )
         self.appendRow(item)
 
-    def _on_run_added(self, run):
+    def _on_run_added(self, run: RunModel):
         """Handle new run added to model."""
         self._add_run_item(run)
 
-    def _on_run_removed(self, run):
+    def _on_run_removed(self, run: RunModel):
         """Handle run removed from model."""
         for row in range(self.rowCount()):
             item = self.item(row)
@@ -258,12 +261,12 @@ class RunListModel(QStandardItemModel):
         self._retain_selection = enabled
 
     @property
-    def available_runs(self):
+    def available_runs(self) -> List[CatalogRun]:
         """Get list of all available CatalogRun objects."""
         return [model._run for model in self._run_models.values()]
 
     @property
-    def available_models(self):
+    def available_models(self) -> List[RunModel]:
         """Get list of all available RunModels."""
         return list(self._run_models.values())
 
@@ -407,12 +410,12 @@ class RunListModel(QStandardItemModel):
         """Get selected keys from all run models."""
         return self._current_x_keys, self._current_y_keys, self._current_norm_keys
 
-    def _connect_run_model(self, run_model):
+    def _connect_run_model(self, run_model: RunModel):
         """Connect signals from a RunModel."""
         run_model.available_keys_changed.connect(self.update_available_keys)
         run_model.plot_update_needed.connect(self.request_plot_update)
 
-    def _disconnect_run_model(self, run_model):
+    def _disconnect_run_model(self, run_model: RunModel):
         """Disconnect signals from a RunModel."""
         run_model.available_keys_changed.disconnect(self.update_available_keys)
         run_model.plot_update_needed.disconnect(self.request_plot_update)
@@ -443,7 +446,7 @@ class RunListModel(QStandardItemModel):
             run_model.set_transform(self._transform)
             self._connect_run_model(run_model)
             self._run_models[uid] = run_model
-            self.run_added.emit(run)
+            self.run_added.emit(run_model)
 
             # Update available keys first
         self.update_available_keys()
@@ -453,6 +456,7 @@ class RunListModel(QStandardItemModel):
         # Determine key selection
         if len(self._run_models) == 1 and not self._retain_selection:
             # First run, get default selection
+            run = self._run_models[uid_list[0]].run
             x_keys, y_keys, norm_keys = run.get_default_selection()
             self.set_selected_keys(x_keys, y_keys, norm_keys)
         else:
@@ -504,7 +508,7 @@ class RunListModel(QStandardItemModel):
         self.available_runs_changed.emit(self.available_runs)
         # self.request_plot_update.emit()
 
-    def remove_run(self, run):
+    def remove_run(self, run: Union[CatalogRun, RunModel]):
         """Remove a single CatalogRun from the model via UID."""
         self.remove_uids([run.uid])
 
@@ -570,7 +574,7 @@ class RunListModel(QStandardItemModel):
         self.visible_runs_changed.emit(self.visible_runs)
         # self.request_plot_update.emit()
 
-    def set_run_visible(self, run, is_visible):
+    def set_run_visible(self, run: Union[CatalogRun, RunModel], is_visible: bool):
         """
         Update run visibility.
 
@@ -584,7 +588,7 @@ class RunListModel(QStandardItemModel):
         self.set_uids_visible([run.uid], is_visible)
 
     @property
-    def visible_models(self):
+    def visible_models(self) -> List[RunModel]:
         """
         Get currently selected RunModels.
         """
@@ -595,7 +599,7 @@ class RunListModel(QStandardItemModel):
         ]
 
     @property
-    def visible_runs(self):
+    def visible_runs(self) -> Set[str]:
         """Get visible run UIDs"""
         if self._is_main_display:
             return set(self._run_models.keys())

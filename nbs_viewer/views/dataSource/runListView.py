@@ -21,6 +21,7 @@ from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
 from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 from ...models.plot.runModel import RunModel
+from ...models.plot.frozenRunModel import FrozenRunModel
 from typing import List
 from nbs_viewer.utils import get_top_level_model
 
@@ -377,13 +378,17 @@ class RunListView(QWidget):
         self.combine_button = QPushButton("Combine Selected Runs")
         self.combine_button.setToolTip("Create a combined run from selected runs")
 
+        self.freeze_button = QPushButton("Freeze Selected Runs")
+        self.freeze_button.setToolTip("Freeze selected runs")
+
         button_layout.addWidget(self.remove_button)
         button_layout.addWidget(self.combine_method_combo)
         button_layout.addWidget(self.combine_button)
-
+        button_layout.addWidget(self.freeze_button)
         # Connect signals
         self.combine_button.clicked.connect(self._combine_selected_runs)
         self.remove_button.clicked.connect(self._remove_selected)
+        self.freeze_button.clicked.connect(self._freeze_selected_runs)
 
         # Layout
         layout = QVBoxLayout(self)
@@ -414,7 +419,7 @@ class RunListView(QWidget):
 
         return selected_runs
 
-    def _check_run_compatibility(self, runs):
+    def _check_run_compatibility(self, runs: List[RunModel]):
         """
         Check if runs are compatible for combination.
 
@@ -463,7 +468,7 @@ class RunListView(QWidget):
             shapes = []
             for run in runs:
                 try:
-                    shape = run.getShape(test_key)
+                    shape = run._run.getShape(test_key)
                     shapes.append(shape)
                 except Exception:
                     QMessageBox.warning(
@@ -580,6 +585,17 @@ class RunListView(QWidget):
 
             # Clear selection
             self.list_view.clearSelection()
+
+    def _freeze_selected_runs(self):
+        """Freeze selected runs."""
+        runs = self.get_selected_runs()
+        for model in runs:
+            uid = model.uid
+            run = model.run
+            for key in model._selected_y:
+                frozen_run = FrozenRunModel(run, key)
+                print(f"Adding frozen run: {frozen_run.display_name}")
+                self.run_list_model.add_run(frozen_run)
 
     def uncheck_selected_runs(self):
         """Uncheck all selected runs."""

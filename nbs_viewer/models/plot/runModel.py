@@ -124,11 +124,13 @@ class RunModel(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    def get_plot_data(self, xkeys, ykey, norm_keys=None, slice_info=None):
+    def get_plot_data(
+        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
+    ) -> Tuple[List[np.ndarray], np.ndarray]:
         xlist, xnames, extra = self._run.get_dimension_axes(ykey, xkeys, slice_info)
-        ylist = self._run.getData(ykey, slice_info)
+        y = self._run.getData(ykey, slice_info)
         # We want to omit "empty" dimensions that have size 1, but not if we only have one data point
-        if ylist.size > 1:
+        if y.size > 1:
             xlist = [x for x in xlist if x.size > 1]
         if norm_keys is not None:
             normlist = [
@@ -137,11 +139,23 @@ class RunModel(QObject):
             norm = np.prod(normlist, axis=0)
         else:
             norm = None
-        xlist, ylist = self.transform_data(xlist, ylist, norm)
-        return xlist, ylist
+
+        if norm is None:
+            pass
+        elif np.isscalar(norm):
+            y = y / norm
+        else:
+            temp_norm = norm
+            while temp_norm.ndim < y.ndim:
+                temp_norm = np.expand_dims(temp_norm, axis=-1)
+            y = y / temp_norm
+
+        if transform:
+            xlist, y = self.transform_data(xlist, y)
+        return xlist, y
 
     def transform_data(
-        self, xlist: List[np.ndarray], y: np.ndarray, norm: Optional[np.ndarray] = None
+        self, xlist: List[np.ndarray], y: np.ndarray
     ) -> Tuple[List[np.ndarray], np.ndarray]:
         """
         Transform data using normalization and custom transformations.
@@ -161,24 +175,13 @@ class RunModel(QObject):
             Transformed (x_data_list, y_data)
         """
         # Apply normalization if provided
-        if norm is None:
-            yfinal = y
-        elif np.isscalar(norm):
-            yfinal = y / norm
-        else:
-            temp_norm = norm
-            while temp_norm.ndim < y.ndim:
-                temp_norm = np.expand_dims(temp_norm, axis=-1)
-            yfinal = y / temp_norm
-
         # Apply custom transformation
         if self._transform_text:
-            self._transform.symtable["y"] = yfinal
+            self._transform.symtable["y"] = y
             self._transform.symtable["x"] = xlist
-            self._transform.symtable["norm"] = norm
-            yfinal = self._transform(self._transform_text)
+            y = self._transform(self._transform_text)
 
-        return xlist, yfinal
+        return xlist, y
 
     def set_transform(self, transform_state: Dict[str, Any]) -> None:
         """
