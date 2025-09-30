@@ -429,13 +429,16 @@ class RunListModel(QStandardItemModel):
         run : CatalogRun
             Run to add to the model
         """
-        print_debug("RunListModel.add_runs", f"Adding runs {len(run_list)}", "run")
+        print_debug("RunListModel.add_runs", f"Adding {len(run_list)} runs", "run")
         run_list = sorted(run_list, key=lambda x: x.scan_id)
         uid_list = []
         for run in run_list:
             uid = run.uid
             uid_list.append(uid)
             if uid in self._run_models:
+                print_debug(
+                    "RunListModel.add_runs", f"Run {uid} already in model", "run"
+                )
                 continue
 
             # Create and connect new run model
@@ -471,7 +474,7 @@ class RunListModel(QStandardItemModel):
 
         # Force plot update and legend refresh
         self.available_runs_changed.emit(self.available_runs)
-        # self.request_plot_update.emit()
+        self.request_plot_update.emit()
 
     def add_run(self, run: Union[CatalogRun, RunModel]):
         """Add a single CatalogRun to the model."""

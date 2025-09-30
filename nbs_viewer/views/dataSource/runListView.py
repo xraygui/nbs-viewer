@@ -608,8 +608,10 @@ class RunListView(QWidget):
         self.run_list_model.set_uids_visible(uids, True)
 
     def move_selected_runs_to_new_display(self, display_type: str):
-        self.copy_selected_runs_to_new_display(display_type)
+        runs = self.get_selected_runs()
         self._remove_selected()
+        top_level_model = get_top_level_model()
+        top_level_model.display_manager.create_display_with_runs(runs, display_type)
 
     def copy_selected_runs_to_new_display(self, display_type: str):
         top_level_model = get_top_level_model()
@@ -617,8 +619,10 @@ class RunListView(QWidget):
         top_level_model.display_manager.create_display_with_runs(runs, display_type)
 
     def move_selected_runs_to_display(self, display_id: str):
-        self.copy_selected_runs_to_display(display_id)
+        runs = self.get_selected_runs()
         self._remove_selected()
+        top_level_model = get_top_level_model()
+        top_level_model.display_manager.add_runs_to_display(runs, display_id)
 
     def copy_selected_runs_to_display(self, display_id: str):
         runs = self.get_selected_runs()
