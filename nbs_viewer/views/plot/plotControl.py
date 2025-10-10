@@ -108,5 +108,27 @@ class PlotControls(QWidget):
         # Using size-policy-only approach - no stretch factors needed
 
         # Add stretchable spacer at the bottom to push headers to top when collapsed
-        # Use stretch factor 0 so it doesn't compete with expanding panels
-        # self.plot_control_layout.addStretch(0)
+        self.spacer = self.plot_control_layout.addStretch(0)
+        self._update_spacer_stretch()
+
+    def _update_spacer_stretch(self):
+        """Update spacer stretch factor based on panel states."""
+        # Count collapsed panels
+        collapsed_count = 0
+        for panel in [
+            self.plot_settings_panel,
+            self.transform_panel,
+            self.run_display_panel,
+        ]:
+            if panel.is_collapsed:
+                collapsed_count += 1
+
+        # If all panels are collapsed, spacer should expand to push headers up
+        # If any panel is expanded, spacer should not expand (stretch=0)
+        total_panels = 3
+        spacer_stretch = 1 if collapsed_count == total_panels else 0
+
+        # Update spacer stretch factor by removing and re-adding it
+        if self.spacer:
+            self.plot_control_layout.removeItem(self.spacer)
+            self.spacer = self.plot_control_layout.addStretch(spacer_stretch)

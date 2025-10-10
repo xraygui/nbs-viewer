@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set
+from typing import Optional
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QWidget,
@@ -48,8 +48,8 @@ class RunDisplayWidget(QWidget):
 
     def __init__(self, run_list_model, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        # Set size policy to allow expansion (used by CollapsiblePanel)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        # Allow full expansion within the panel
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.run_list_model = run_list_model
         self._show_all = False
         self._linked_mode = True

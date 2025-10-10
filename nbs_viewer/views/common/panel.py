@@ -8,7 +8,10 @@ from qtpy.QtWidgets import (
     QStyle,
     QSizePolicy,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QSize
+
+# Fallback for maximum Qt widget size (not exported by qtpy)
+QWIDGETSIZE_MAX = 16777215
 
 
 class CollapsiblePanel(QWidget):
@@ -111,6 +114,25 @@ class CollapsiblePanel(QWidget):
         # Set initial state
         self.update_collapsed_state()
 
+    def sizeHint(self):
+        """Return appropriate size based on collapsed state and expandability."""
+        if self.is_collapsed:
+            # Collapsed: just header height
+            return QSize(200, 24)  # Width doesn't matter much for vertical layout
+        else:
+            if self.can_expand:
+                # Expanded and can expand: return large height to fill space
+                return QSize(200, 1000)  # Large height to encourage expansion
+            else:
+                # Expanded but fixed size: return natural size
+                content_height = self.widget.sizeHint().height() if self.widget else 0
+                return QSize(200, 24 + content_height)
+
+    # Important: Avoid forcing the child's height. Let the layout manage it.
+    # Over-managing sizes here fights Qt's layout negotiation and can leave
+    # the panel stuck at 0 height when re-expanded. Removing this prevents
+    # stale fixed heights from persisting across toggles.
+
     def _setup_resize_handle(self):
         """Add a resize handle to make the panel resizable."""
         # Create a thin frame that acts as a resize handle
@@ -167,6 +189,19 @@ class CollapsiblePanel(QWidget):
         self.is_collapsed = not self.is_collapsed
         self.update_collapsed_state()
 
+        # Force parent layout recalculation and update spacer
+        self.updateGeometry()
+        parent = self.parent()
+        if parent:
+            parent.update()
+            parent.updateGeometry()
+            if hasattr(parent, "layout") and parent.layout():
+                parent.layout().invalidate()
+                parent.layout().activate()
+            # Update spacer stretch factor if parent has this method
+            if hasattr(parent, "_update_spacer_stretch"):
+                parent._update_spacer_stretch()
+
     def update_collapsed_state(self):
         """Update the visual state based on collapsed status."""
         if self.is_collapsed:
@@ -175,9 +210,10 @@ class CollapsiblePanel(QWidget):
             self.widget.hide()
             # Use Qt standard icon for collapsed state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
-            # Set size policy for collapsed state - take minimum space
+            # Set hard cap to header height so the layout can't stretch a collapsed panel
+            self.setMinimumHeight(24)
+            self.setMaximumHeight(24)
             self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            self.setFixedHeight(24)  # Just header height
             # Hide resize handle when collapsed
             self.resize_handle.hide()
         else:
@@ -186,20 +222,21 @@ class CollapsiblePanel(QWidget):
             self.widget.show()
             # Use Qt standard icon for expanded state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+            # Clear any previous hard caps from collapsed state
+            self.setMinimumHeight(24)
+            self.setMaximumHeight(QWIDGETSIZE_MAX)
             # Set size policy and constraints based on expandability
             if self.can_expand:
                 self.setSizePolicy(
-                    QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
                 )
-                # For expanding panels, set minimal minimum height
-                self.setMinimumHeight(24)  # Just the header height
-                # Don't set maximum height - allow unlimited expansion
+                # No fixed height for content; let the layout stretch it
             else:
                 self.setSizePolicy(
                     QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum
                 )
                 # For fixed panels, set both minimum and maximum to natural size
-                content_height = self.widget.sizeHint().height()
+                content_height = self.widget.sizeHint().height() if self.widget else 0
                 natural_height = 24 + content_height
                 self.setMinimumHeight(natural_height)
                 self.setMaximumHeight(natural_height)
