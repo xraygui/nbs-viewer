@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QMessageBox,
     QInputDialog,
+    QSizePolicy,
 )
 
 from .base import PlotControlWidget
@@ -56,6 +57,8 @@ class TransformControl(PlotControlWidget):
         """
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
         super().__init__(run_list_model, parent)
+        # Set size policy for compact layout
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         # Set initial state from model
         transform_state = self.run_list_model.transform
         self._transform_box.setChecked(transform_state["enabled"])

@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Union, Set
 from nbs_viewer.models.catalog.base import CatalogRun
-from qtpy.QtCore import QObject, Signal, Qt
+from qtpy.QtCore import Signal, Qt
 from qtpy.QtGui import QStandardItemModel, QStandardItem
 from .runModel import RunModel
 from nbs_viewer.utils import print_debug
@@ -16,7 +16,7 @@ class RunListModel(QStandardItemModel):
     and their visual representation, managing RunModels and delegating
     actual artist management to PlotDataModel.
 
-    Badly needs simplification. Should not add CatalogRun objects via signal/slot, should do directly
+    Badly needs simplification. Should not add CatalogRun objects via signal/slot,
     in add_runs. Needs typing to distinguish between CatalogRun and RunModel.
     """
 
@@ -324,7 +324,7 @@ class RunListModel(QStandardItemModel):
             model.set_transform(self._transform)
 
         # Force plot update
-        # self.request_plot_update.emit()
+        self.request_plot_update.emit()
 
     @property
     def transform(self) -> dict:
@@ -509,7 +509,7 @@ class RunListModel(QStandardItemModel):
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
         self.available_runs_changed.emit(self.available_runs)
-        # self.request_plot_update.emit()
+        self.request_plot_update.emit()
 
     def remove_run(self, run: Union[CatalogRun, RunModel]):
         """Remove a single CatalogRun from the model via UID."""
@@ -575,7 +575,7 @@ class RunListModel(QStandardItemModel):
 
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
-        # self.request_plot_update.emit()
+        self.request_plot_update.emit()
 
     def set_run_visible(self, run: Union[CatalogRun, RunModel], is_visible: bool):
         """

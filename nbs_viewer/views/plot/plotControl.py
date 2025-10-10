@@ -1,12 +1,11 @@
-from typing import Dict, List
 from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QTabWidget,
-    QTreeWidget,
     QHBoxLayout,
 )
 
+from ..common.panel import CollapsiblePanel
 from .controls.run_display import RunDisplayWidget
 from .controls.auto_add import AutoAddControl
 from .controls.dynamic_update import DynamicUpdateControl
@@ -40,6 +39,8 @@ class PlotControls(QWidget):
         # Create the plot control tab
         self.plot_control_tab = QWidget()
         self.plot_control_layout = QVBoxLayout(self.plot_control_tab)
+        self.plot_control_layout.setContentsMargins(0, 0, 0, 0)
+        self.plot_control_layout.setSpacing(1)  # Minimal spacing between panels
 
         # Create the metadata tab
         self.metadata_tab = QWidget()
@@ -53,33 +54,59 @@ class PlotControls(QWidget):
 
         # Main layout
         self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         self.layout.addWidget(self.tab_widget)
 
         self.setup_plot_control_tab()
 
     def setup_plot_control_tab(self):
         """Setup the plot control tab with all its widgets."""
-        # Create horizontal layout for controls
-        controls_layout = QHBoxLayout()
+
+        # Plot Settings Panel (collapsible)
+        plot_settings_widget = QWidget()
+        plot_settings_layout = QVBoxLayout(plot_settings_widget)
+        plot_settings_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create horizontal layout for plot settings controls
+        settings_controls_layout = QHBoxLayout()
 
         # Auto add control
         self.auto_add = AutoAddControl(self.run_list_model)
-        controls_layout.addWidget(self.auto_add)
+        settings_controls_layout.addWidget(self.auto_add)
 
         # Dynamic update control
         self.dynamic_update = DynamicUpdateControl(self.run_list_model)
-        controls_layout.addWidget(self.dynamic_update)
+        settings_controls_layout.addWidget(self.dynamic_update)
 
-        # Retain selection control
+        # Retain selection control (in its own row for better layout)
         self.retain_selection = RetainSelectionControl(self.run_list_model)
 
-        self.plot_control_layout.addLayout(controls_layout)
-        self.plot_control_layout.addWidget(self.retain_selection)
+        plot_settings_layout.addLayout(settings_controls_layout)
+        plot_settings_layout.addWidget(self.retain_selection)
 
-        # Transform control
+        # Create collapsible plot settings panel (fixed size)
+        self.plot_settings_panel = CollapsiblePanel(
+            "Plot Settings", plot_settings_widget, can_expand=False
+        )
+        self.plot_control_layout.addWidget(self.plot_settings_panel)
+
+        # Transform Panel (collapsible, fixed size)
         self.transform = TransformControl(self.run_list_model)
-        self.plot_control_layout.addWidget(self.transform)
+        self.transform_panel = CollapsiblePanel(
+            "Transform", self.transform, can_expand=False
+        )
+        self.plot_control_layout.addWidget(self.transform_panel)
 
-        # Run display widget
+        # Run Display Panel (collapsible, expanding, starts expanded)
         self.run_display = RunDisplayWidget(self.run_list_model)
-        self.plot_control_layout.addWidget(self.run_display)
+        self.run_display_panel = CollapsiblePanel(
+            "Run Display", self.run_display, can_expand=True, initially_expanded=True
+        )
+        self.plot_control_layout.addWidget(self.run_display_panel)
+
+        # Using size-policy-only approach - no stretch factors needed
+
+        # Add stretchable spacer at the bottom to push headers to top when collapsed
+        # Use stretch factor 0 so it doesn't compete with expanding panels
+        # self.plot_control_layout.addStretch(0)

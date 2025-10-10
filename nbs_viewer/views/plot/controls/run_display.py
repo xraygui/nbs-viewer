@@ -48,6 +48,8 @@ class RunDisplayWidget(QWidget):
 
     def __init__(self, run_list_model, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        # Set size policy to allow expansion (used by CollapsiblePanel)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.run_list_model = run_list_model
         self._show_all = False
         self._linked_mode = True

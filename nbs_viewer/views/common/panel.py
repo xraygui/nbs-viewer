@@ -6,6 +6,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QFrame,
     QStyle,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 
@@ -17,7 +18,9 @@ class CollapsiblePanel(QWidget):
     Similar to Photoshop's collapsible tool panels.
     """
 
-    def __init__(self, title, widget, parent=None):
+    def __init__(
+        self, title, widget, parent=None, can_expand=False, initially_expanded=False
+    ):
         """
         Initialize a collapsible panel.
 
@@ -29,15 +32,30 @@ class CollapsiblePanel(QWidget):
             The widget to show/hide
         parent : QWidget, optional
             Parent widget
+        can_expand : bool, optional
+            Whether this panel can expand to fill available space
+        initially_expanded : bool, optional
+            Whether the panel should start expanded (default: False)
         """
         super().__init__(parent)
         self.widget = widget
-        self.is_collapsed = False
+        self.can_expand = can_expand
+        self.is_collapsed = (
+            not initially_expanded
+        )  # Start collapsed or expanded based on parameter
 
         # Create layout
         self.panel_layout = QVBoxLayout(self)
         self.panel_layout.setContentsMargins(0, 0, 0, 0)
         self.panel_layout.setSpacing(0)
+
+        # Set size policy based on expandability
+        if can_expand:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+            )
+        else:
+            self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
         # Create header
         header = QFrame()
@@ -45,13 +63,14 @@ class CollapsiblePanel(QWidget):
         header.setStyleSheet(
             "QFrame { background-color: #f0f0f0; border: 1px solid #c0c0c0; }"
         )
+        header.setFixedHeight(24)  # Compact header height
 
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(5, 2, 5, 2)
+        header_layout.setContentsMargins(3, 1, 3, 1)  # More compact margins
 
         # Toggle button with Qt standard icons
         self.toggle_button = QPushButton()
-        self.toggle_button.setFixedSize(16, 16)
+        self.toggle_button.setFixedSize(14, 14)  # Smaller button for compactness
         self.toggle_button.setStyleSheet(
             """
             QPushButton {
@@ -67,7 +86,7 @@ class CollapsiblePanel(QWidget):
 
         # Title label
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold; color: #404040;")
+        title_label.setStyleSheet("font-weight: bold; color: #404040; font-size: 11px;")
 
         header_layout.addWidget(self.toggle_button)
         header_layout.addWidget(title_label)
@@ -83,17 +102,20 @@ class CollapsiblePanel(QWidget):
         # Make panel resizable by adding a splitter handle
         self._setup_resize_handle()
 
+        # Set initial icon based on initial state
+        if self.is_collapsed:
+            self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
+        else:
+            self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+
         # Set initial state
         self.update_collapsed_state()
-
-        # Set initial icon (expanded state)
-        self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
 
     def _setup_resize_handle(self):
         """Add a resize handle to make the panel resizable."""
         # Create a thin frame that acts as a resize handle
         self.resize_handle = QFrame()
-        self.resize_handle.setFixedHeight(3)
+        self.resize_handle.setFixedHeight(2)  # More compact
         self.resize_handle.setStyleSheet(
             """
             QFrame {
@@ -153,8 +175,9 @@ class CollapsiblePanel(QWidget):
             self.widget.hide()
             # Use Qt standard icon for collapsed state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
-            # Set fixed height when collapsed (just header height)
-            self.setFixedHeight(30)
+            # Set size policy for collapsed state - take minimum space
+            self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            self.setFixedHeight(24)  # Just header height
             # Hide resize handle when collapsed
             self.resize_handle.hide()
         else:
@@ -163,6 +186,21 @@ class CollapsiblePanel(QWidget):
             self.widget.show()
             # Use Qt standard icon for expanded state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
-            # Allow resizing when expanded
-            self.setFixedHeight(self.sizeHint().height())
+            # Set size policy and constraints based on expandability
+            if self.can_expand:
+                self.setSizePolicy(
+                    QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+                )
+                # For expanding panels, set minimal minimum height
+                self.setMinimumHeight(24)  # Just the header height
+                # Don't set maximum height - allow unlimited expansion
+            else:
+                self.setSizePolicy(
+                    QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum
+                )
+                # For fixed panels, set both minimum and maximum to natural size
+                content_height = self.widget.sizeHint().height()
+                natural_height = 24 + content_height
+                self.setMinimumHeight(natural_height)
+                self.setMaximumHeight(natural_height)
             self.resize_handle.show()
