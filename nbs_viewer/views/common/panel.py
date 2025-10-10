@@ -67,6 +67,9 @@ class CollapsiblePanel(QWidget):
             "QFrame { background-color: #f0f0f0; border: 1px solid #c0c0c0; }"
         )
         header.setFixedHeight(24)  # Compact header height
+        # Make entire header clickable to toggle
+        header.setCursor(Qt.PointingHandCursor)
+        header.mousePressEvent = lambda event: self.toggle()
 
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(3, 1, 3, 1)  # More compact margins
@@ -89,7 +92,13 @@ class CollapsiblePanel(QWidget):
 
         # Title label
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold; color: #404040; font-size: 11px;")
+        # Remove any box around the text and keep it visually clean
+        title_label.setStyleSheet(
+            "font-weight: bold; color: #404040; font-size: 11px; border: none;"
+            " background: transparent;"
+        )
+        # Let clicks pass through the label so header clicks still toggle
+        title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         header_layout.addWidget(self.toggle_button)
         header_layout.addWidget(title_label)
@@ -101,6 +110,21 @@ class CollapsiblePanel(QWidget):
         # Store references
         self.header = header
         self.title_label = title_label
+
+        # Content container provides consistent padding around all panel content
+        self.content_container = QFrame()
+        self.content_container.setObjectName("content_container")
+        self.content_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.content_container.setStyleSheet(
+            "#content_container { border: none; background: transparent; }"
+        )
+        content_layout = QVBoxLayout(self.content_container)
+        # Consistent inner padding for all panels (left, top, right, bottom)
+        content_layout.setContentsMargins(8, 6, 8, 6)
+        content_layout.setSpacing(6)
+        content_layout.addWidget(self.widget)
 
         # Make panel resizable by adding a splitter handle
         self._setup_resize_handle()
@@ -121,11 +145,15 @@ class CollapsiblePanel(QWidget):
             return QSize(200, 24)  # Width doesn't matter much for vertical layout
         else:
             if self.can_expand:
-                # Expanded and can expand: return large height to fill space
-                return QSize(200, 1000)  # Large height to encourage expansion
+                # Expanded and can expand: return a generous preferred height
+                return QSize(200, 1000)
             else:
-                # Expanded but fixed size: return natural size
-                content_height = self.widget.sizeHint().height() if self.widget else 0
+                # Expanded but fixed size: header + content container
+                content_height = (
+                    self.content_container.sizeHint().height()
+                    if self.content_container
+                    else 0
+                )
                 return QSize(200, 24 + content_height)
 
     # Important: Avoid forcing the child's height. Let the layout manage it.
@@ -205,9 +233,9 @@ class CollapsiblePanel(QWidget):
     def update_collapsed_state(self):
         """Update the visual state based on collapsed status."""
         if self.is_collapsed:
-            # Remove widget from layout to actually collapse
-            self.panel_layout.removeWidget(self.widget)
-            self.widget.hide()
+            # Remove content from layout to actually collapse
+            self.panel_layout.removeWidget(self.content_container)
+            self.content_container.hide()
             # Use Qt standard icon for collapsed state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
             # Set hard cap to header height so the layout can't stretch a collapsed panel
@@ -217,9 +245,9 @@ class CollapsiblePanel(QWidget):
             # Hide resize handle when collapsed
             self.resize_handle.hide()
         else:
-            # Add widget back to layout
-            self.panel_layout.insertWidget(1, self.widget)  # After header
-            self.widget.show()
+            # Add content back to layout
+            self.panel_layout.insertWidget(1, self.content_container)  # After header
+            self.content_container.show()
             # Use Qt standard icon for expanded state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
             # Clear any previous hard caps from collapsed state
@@ -236,7 +264,11 @@ class CollapsiblePanel(QWidget):
                     QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum
                 )
                 # For fixed panels, set both minimum and maximum to natural size
-                content_height = self.widget.sizeHint().height() if self.widget else 0
+                content_height = (
+                    self.content_container.sizeHint().height()
+                    if self.content_container
+                    else 0
+                )
                 natural_height = 24 + content_height
                 self.setMinimumHeight(natural_height)
                 self.setMaximumHeight(natural_height)
