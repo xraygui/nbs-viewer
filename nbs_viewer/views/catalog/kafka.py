@@ -40,6 +40,8 @@ class KafkaView(CatalogTableView):
         """
         Set up the user interface components.
         """
+        self.filter_list = []
+        
         self.data_view = LazyLoadingTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
