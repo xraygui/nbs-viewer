@@ -86,9 +86,11 @@ class KafkaRun(CatalogRun):
     def setup(self):
         """Set up the run object by extracting metadata from start document."""
         self.metadata = self.start
-
-        for key, keylist in self._METADATA_MAP.items():
-            setattr(self, key, self.get_md_value(keylist))
+        
+        for attr, keys in self._METADATA_MAP.items():
+            if not hasattr(self.__class__, attr):
+                value = self.get_md_value(keys)
+                setattr(self, attr, value)
 
         self._plot_hints = self.start.get("plot_hints", {})
         self.hints = self.start.get("hints", {})
