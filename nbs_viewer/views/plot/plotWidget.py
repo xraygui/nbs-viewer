@@ -246,13 +246,6 @@ class MplCanvas(FigureCanvasQTAgg):
     def resizeEvent(self, event):
         """Handle resize events to maintain proper layout."""
         super().resizeEvent(event)
-        # Update figure size while maintaining margins
-        width = event.size().width() / self.fig.dpi
-        height = event.size().height() / self.fig.dpi
-        self.fig.set_size_inches(width, height)
-        # Ensure layout is updated
-        # self.fig.tight_layout()
-        self.draw()
 
     def plot_data(self, plotData):
         """
