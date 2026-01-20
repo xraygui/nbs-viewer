@@ -16,6 +16,10 @@ from nbs_viewer.models.catalog.source_models import CatalogLoadError
 from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # Python <3.11
 """
 This is now the primary thing to refactor -- very poorly named, this is really
 the central widget that controls the data sources and the plot list. It is what
@@ -96,13 +100,12 @@ class DataSourceSwitcher(QWidget):
         """
         from .dataSource import ConfigSourceView
 
-        try:
-            import tomllib  # Python 3.11+
-        except ModuleNotFoundError:
-            import tomli as tomllib  # Python <3.11
+        print("load_autoload_catalogs")
+
 
         with open(self.config_file, "rb") as f:
             config = tomllib.load(f)
+            print(f"config: {config}")
         try:
             # Import here to avoid circular imports
 

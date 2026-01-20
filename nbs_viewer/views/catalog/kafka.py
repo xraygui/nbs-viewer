@@ -41,7 +41,7 @@ class KafkaView(CatalogTableView):
         Set up the user interface components.
         """
         self.filter_list = []
-        
+
         self.data_view = LazyLoadingTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
@@ -65,6 +65,14 @@ class KafkaView(CatalogTableView):
         filterLayout.addWidget(QLabel("RegEx Filter"))
         filterLayout.addWidget(self.filterLineEdit)
         filterLayout.addWidget(self.filterComboBox)
+
+        self.filterLineEdit2 = QLineEdit(self)
+        self.filterComboBox2 = QComboBox(self)
+
+        filterLayout2 = QHBoxLayout()
+        filterLayout2.addWidget(QLabel("RegEx Filter 2"))
+        filterLayout2.addWidget(self.filterLineEdit2)
+        filterLayout2.addWidget(self.filterComboBox2)
 
         scrollLayout = QHBoxLayout()
         scrollLayout.addWidget(self.scrollToTopButton)
@@ -109,6 +117,8 @@ class KafkaView(CatalogTableView):
 
         layout = QVBoxLayout()
         layout.addLayout(filterLayout)
+        layout.addLayout(filterLayout2)
+
         layout.addLayout(controls_layout)
         layout.addLayout(remove_layout)
         layout.addLayout(scrollLayout)
