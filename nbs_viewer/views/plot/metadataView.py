@@ -6,6 +6,7 @@ from qtpy.QtWidgets import (
     QMenu,
     QDialog,
     QComboBox,
+    QHeaderView,
 )
 from qtpy.QtGui import QStandardItemModel, QStandardItem
 from qtpy.QtCore import (
@@ -466,8 +467,7 @@ class FullMetadataBrowser(QDialog):
         self.tree_view.setUniformRowHeights(True)
         self.metadata_model = FullMetadataModel(self)
         self.tree_view.setModel(self.metadata_model)
-        self.tree_view.header().setStretchLastSection(True)
-        self.tree_view.setColumnWidth(0, 280)
+        self._configure_column_sizes()
         layout = QVBoxLayout(self)
         layout.addWidget(self.run_selector)
         layout.addWidget(self.tree_view)
@@ -493,12 +493,21 @@ class FullMetadataBrowser(QDialog):
         if index < 0 or index >= len(self._runs):
             self.metadata_model.clear()
             self.metadata_model.setHorizontalHeaderLabels(["Key", "Value"])
+            self._configure_column_sizes()
             return
         run = self._runs[index]
         self.metadata_model.load_runs([run])
+        self._configure_column_sizes()
         for row in range(self.metadata_model.rowCount()):
             tree_index = self.metadata_model.index(row, 0)
             self.tree_view.expand(tree_index)
+
+    def _configure_column_sizes(self):
+        header = self.tree_view.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        self.tree_view.setColumnWidth(1, 260)
 
 
 class MetadataViewer(QWidget):

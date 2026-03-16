@@ -23,6 +23,7 @@ from qtpy.QtCore import (
 
 from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
+from ..plot.metadataView import FullMetadataBrowser
 from nbs_viewer.utils import print_debug, get_top_level_model
 
 
@@ -437,6 +438,7 @@ class CatalogTableView(QWidget):
         super().__init__(parent)
         self._catalog = catalog
         self.display_id = display_id
+        self._metadata_browser_dialog = None
         self._handling_selection = False  # Flag to prevent circular updates
         self._is_inverted = False  # Track inversion state
         self._setup_ui()
@@ -857,6 +859,9 @@ class CatalogTableView(QWidget):
         selected_runs = self.get_selected_runs()
         if not selected_runs:
             return
+        clicked_run = self.get_run_at_index(index)
+        if clicked_run is None:
+            clicked_run = selected_runs[0]
 
         menu = QMenu(self)
         app_model = get_top_level_model()
@@ -896,6 +901,14 @@ class CatalogTableView(QWidget):
             )
             new_canvas_copy_menu.addAction(action)
         menu.addMenu(new_canvas_copy_menu)
+        browse_action = QAction("Browse Metadata", self)
+        browse_action.setToolTip("Open metadata browser for this run")
+        browse_action.triggered.connect(
+            lambda checked=False, run=clicked_run, runs=selected_runs: self._browse_metadata_for_run(
+                run, runs
+            )
+        )
+        menu.addAction(browse_action)
         menu.addSeparator()
         # Add submenu for existing displays
         available_displays = app_model.display_manager.get_display_ids()
@@ -936,6 +949,45 @@ class CatalogTableView(QWidget):
 
         menu.exec_(self.data_view.mapToGlobal(pos))
         # Deselect the runs (this will remove them from the current display)
+
+    def get_run_at_index(self, index):
+        """
+        Get run object for a clicked table index.
+
+        Parameters
+        ----------
+        index : QModelIndex
+            View index from the table
+
+        Returns
+        -------
+        CatalogRun or None
+            Run for the clicked row, if available
+        """
+        if not index.isValid():
+            return None
+        source_model = self.get_source_model()
+        source_index = self.map_to_source(index)
+        if not source_index.isValid():
+            return None
+        key = source_model.get_key(source_index.row())
+        if key is None:
+            return None
+        try:
+            return self._catalog.get_run(key)
+        except Exception:
+            return None
+
+    def _browse_metadata_for_run(self, run, runs):
+        if run is None:
+            return
+        browse_runs = runs if runs else [run]
+        self._metadata_browser_dialog = FullMetadataBrowser(
+            browse_runs, selected_run=run, parent=self
+        )
+        self._metadata_browser_dialog.show()
+        self._metadata_browser_dialog.raise_()
+        self._metadata_browser_dialog.activateWindow()
 
     def move_selected_runs_to_new_display(self, display_type: str):
         self.copy_selected_runs_to_new_display(display_type)

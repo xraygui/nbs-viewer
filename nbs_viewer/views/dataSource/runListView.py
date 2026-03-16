@@ -15,6 +15,7 @@ from ..display.displayControl import DisplayControlWidget
 from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
 from ...models.plot.runModel import RunModel
 from ...models.plot.frozenRunModel import FrozenRunModel
+from ..plot.metadataView import FullMetadataBrowser
 from typing import List
 from nbs_viewer.utils import get_top_level_model
 from .expressionBuilder import ExpressionBuilderDialog
@@ -56,6 +57,7 @@ class RunListView(QWidget):
         self.run_list_model = run_list_model
         self.display_id = display_id
         self._handling_selection = False
+        self._metadata_browser_dialog = None
 
         # Create widgets
         self.list_view = QListView(self)
@@ -351,6 +353,9 @@ class RunListView(QWidget):
         selected_runs = self.get_selected_runs()
         if not selected_runs:
             return
+        clicked_run = self.run_list_model.get_run_at_index(index)
+        if clicked_run is None:
+            return
 
         menu = QMenu(self)
         app_model = get_top_level_model()
@@ -364,6 +369,13 @@ class RunListView(QWidget):
         check_action.triggered.connect(self.check_selected_runs)
         check_action.setToolTip("Plot selected runs")
         menu.addAction(check_action)
+
+        browse_action = QAction("Browse Metadata", self)
+        browse_action.setToolTip("Open metadata browser for this run")
+        browse_action.triggered.connect(
+            lambda checked=False, run=clicked_run: self._browse_metadata_for_run(run)
+        )
+        menu.addAction(browse_action)
 
         menu.addSeparator()
 
@@ -441,3 +453,14 @@ class RunListView(QWidget):
         menu.addAction(remove_action)
 
         menu.exec_(self.list_view.mapToGlobal(pos))
+
+    def _browse_metadata_for_run(self, run):
+        runs = self.run_list_model.available_models
+        if not runs:
+            return
+        self._metadata_browser_dialog = FullMetadataBrowser(
+            runs, selected_run=run, parent=self
+        )
+        self._metadata_browser_dialog.show()
+        self._metadata_browser_dialog.raise_()
+        self._metadata_browser_dialog.activateWindow()
