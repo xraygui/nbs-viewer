@@ -98,7 +98,6 @@ class FullMetadataModel(QStandardItemModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setHorizontalHeaderLabels(["Key", "Value"])
-        self._seen = set()
         self._thread_pool = QThreadPool.globalInstance()
 
     def load_runs(self, runs):
@@ -112,7 +111,6 @@ class FullMetadataModel(QStandardItemModel):
         """
         self.clear()
         self.setHorizontalHeaderLabels(["Key", "Value"])
-        self._seen = set()
         for run_model in runs:
             label = f"Run {getattr(run_model, 'scan_id', 'Unknown')}"
             root_key = QStandardItem(label)
@@ -152,12 +150,6 @@ class FullMetadataModel(QStandardItemModel):
             self._populate_children(item, obj, depth)
             item.setData(True, self.LOADED_ROLE)
             return
-        oid = id(obj)
-        if oid in self._seen:
-            self._populate_children(item, obj, depth)
-            item.setData(True, self.LOADED_ROLE)
-            return
-        self._seen.add(oid)
         self._set_loading_placeholder(item)
         item.setData(True, self.LOADING_ROLE)
         persistent_index = QPersistentModelIndex(index)
@@ -207,14 +199,6 @@ class FullMetadataModel(QStandardItemModel):
             parent_item.appendRow([key_item, value_item])
             return
 
-        oid = id(obj)
-        if oid in self._seen:
-            key_item = QStandardItem("<recursive reference>")
-            value_item = QStandardItem("")
-            parent_item.appendRow([key_item, value_item])
-            return
-        self._seen.add(oid)
-
         children = self._iter_children(obj)
         if not children:
             key_item = QStandardItem("<empty>")
@@ -224,13 +208,18 @@ class FullMetadataModel(QStandardItemModel):
 
         for key, value in children:
             key_item = QStandardItem(str(key))
-            value_item = QStandardItem(self._format_branch_value(value))
-            key_item.setData(value, self.OBJECT_ROLE)
+            if self._is_recursive_reference(parent_item, value):
+                value_item = QStandardItem("<recursive reference>")
+            else:
+                value_item = QStandardItem(self._format_branch_value(value))
+                key_item.setData(value, self.OBJECT_ROLE)
             key_item.setData(False, self.LOADED_ROLE)
             key_item.setData(False, self.LOADING_ROLE)
             key_item.setData(depth + 1, self.DEPTH_ROLE)
             parent_item.appendRow([key_item, value_item])
-            if self._is_expandable(value):
+            if not self._is_recursive_reference(parent_item, value) and self._is_expandable(
+                value
+            ):
                 self._add_placeholder(key_item)
 
     @Slot(object, object, object)
@@ -257,13 +246,16 @@ class FullMetadataModel(QStandardItemModel):
             return
         for key, value in children:
             key_item = QStandardItem(str(key))
-            value_item = QStandardItem(self._format_branch_value(value))
-            key_item.setData(value, self.OBJECT_ROLE)
+            if self._is_recursive_reference(item, value):
+                value_item = QStandardItem("<recursive reference>")
+            else:
+                value_item = QStandardItem(self._format_branch_value(value))
+                key_item.setData(value, self.OBJECT_ROLE)
             key_item.setData(False, self.LOADED_ROLE)
             key_item.setData(False, self.LOADING_ROLE)
             key_item.setData(depth + 1, self.DEPTH_ROLE)
             item.appendRow([key_item, value_item])
-            if self._is_expandable(value):
+            if not self._is_recursive_reference(item, value) and self._is_expandable(value):
                 self._add_placeholder(key_item)
         item.setData(True, self.LOADED_ROLE)
 
@@ -274,7 +266,10 @@ class FullMetadataModel(QStandardItemModel):
     def _iter_children_static(obj):
         if isinstance(obj, Mapping):
             try:
-                return list(obj.items())
+                pairs = []
+                for key, value in obj.items():
+                    pairs.append((key, FullMetadataModel._prepare_value_static(value)))
+                return pairs
             except Exception:
                 return []
 
@@ -318,9 +313,7 @@ class FullMetadataModel(QStandardItemModel):
         if isinstance(value, Sequence) and not isinstance(
             value, (str, bytes, bytearray)
         ):
-            if hasattr(value, "shape"):
-                return False
-            return True
+            return False
         return False
 
     def _format_branch_value(self, value):
@@ -340,11 +333,20 @@ class FullMetadataModel(QStandardItemModel):
                     return f"<array> shape={value.shape}"
                 except Exception:
                     return "<array>"
-            try:
-                return f"<list> ({len(value)} items)"
-            except Exception:
-                return "<list>"
+            return self._format_leaf_value(value)
         return self._format_leaf_value(value)
+
+    def _is_recursive_reference(self, parent_item, value):
+        if isinstance(value, (str, bytes, bytearray, int, float, bool, type(None))):
+            return False
+        value_id = id(value)
+        current = parent_item
+        while current is not None:
+            obj = current.data(self.OBJECT_ROLE)
+            if obj is not None and id(obj) == value_id:
+                return True
+            current = current.parent()
+        return False
 
     def _format_leaf_value(self, value):
         if value is None:
