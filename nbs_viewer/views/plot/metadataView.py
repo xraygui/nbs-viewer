@@ -5,6 +5,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QMenu,
     QDialog,
+    QComboBox,
 )
 from qtpy.QtGui import QStandardItemModel, QStandardItem
 from qtpy.QtCore import (
@@ -20,6 +21,8 @@ from qtpy.QtCore import (
 
 class MetadataModel(QStandardItemModel):
     """Model for displaying run metadata in a tree structure."""
+
+    RUN_MODEL_ROLE = Qt.UserRole + 50
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,6 +44,7 @@ class MetadataModel(QStandardItemModel):
             # Multiple runs - create parent nodes for each
             for run in runs:
                 run_item = QStandardItem(f"Run {run.scan_id}")
+                run_item.setData(run, self.RUN_MODEL_ROLE)
                 self.appendRow([run_item, QStandardItem()])
                 self._add_metadata_dict(run.metadata, run_item)
         elif len(runs) == 1:
@@ -441,10 +445,22 @@ class MetadataChildrenWorker(QRunnable):
 class FullMetadataBrowser(QDialog):
     """Dialog window for full metadata browsing."""
 
-    def __init__(self, runs, parent=None):
+    def __init__(self, runs, selected_run=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Browse Metadata")
         self.resize(900, 600)
+        self._runs = list(runs)
+
+        self.run_selector = QComboBox(self)
+        for run in self._runs:
+            scan_id = getattr(run, "scan_id", "Unknown")
+            plan_name = getattr(run, "plan_name", "")
+            if plan_name:
+                label = f"Run {scan_id} - {plan_name}"
+            else:
+                label = f"Run {scan_id}"
+            self.run_selector.addItem(label, run)
+
         self.tree_view = QTreeView(self)
         self.tree_view.setAlternatingRowColors(True)
         self.tree_view.setUniformRowHeights(True)
@@ -453,13 +469,36 @@ class FullMetadataBrowser(QDialog):
         self.tree_view.header().setStretchLastSection(True)
         self.tree_view.setColumnWidth(0, 280)
         layout = QVBoxLayout(self)
+        layout.addWidget(self.run_selector)
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
-        self.metadata_model.load_runs(runs)
         self.tree_view.expanded.connect(self.metadata_model.expand_index)
+        self.run_selector.currentIndexChanged.connect(self._on_run_selection_changed)
+
+        selected_index = 0
+        if selected_run is not None:
+            selected_uid = getattr(selected_run, "uid", None)
+            for idx, run in enumerate(self._runs):
+                if getattr(run, "uid", None) == selected_uid:
+                    selected_index = idx
+                    break
+        self.run_selector.setCurrentIndex(selected_index)
+        self._load_selected_run(selected_index)
+
+    @Slot(int)
+    def _on_run_selection_changed(self, index):
+        self._load_selected_run(index)
+
+    def _load_selected_run(self, index):
+        if index < 0 or index >= len(self._runs):
+            self.metadata_model.clear()
+            self.metadata_model.setHorizontalHeaderLabels(["Key", "Value"])
+            return
+        run = self._runs[index]
+        self.metadata_model.load_runs([run])
         for row in range(self.metadata_model.rowCount()):
-            index = self.metadata_model.index(row, 0)
-            self.tree_view.expand(index)
+            tree_index = self.metadata_model.index(row, 0)
+            self.tree_view.expand(tree_index)
 
 
 class MetadataViewer(QWidget):
@@ -511,17 +550,40 @@ class MetadataViewer(QWidget):
         pos : QPoint
             Position where context menu should appear
         """
+        clicked_index = self.tree_view.indexAt(pos)
+        selected_run = self._get_run_for_index(clicked_index)
         menu = QMenu(self)
         browse_action = menu.addAction("browse metadata")
-        browse_action.triggered.connect(self._open_full_metadata_browser)
+        browse_action.triggered.connect(
+            lambda checked=False, run=selected_run: self._open_full_metadata_browser(run)
+        )
         menu.exec_(self.tree_view.viewport().mapToGlobal(pos))
 
-    def _open_full_metadata_browser(self):
+    def _get_run_for_index(self, index):
+        if not index.isValid():
+            runs = self.plot_model.visible_models
+            return runs[0] if runs else None
+        current = index
+        parent = current.parent()
+        while parent.isValid():
+            current = parent
+            parent = current.parent()
+        item = self.metadata_model.itemFromIndex(current)
+        if item is not None:
+            run = item.data(MetadataModel.RUN_MODEL_ROLE)
+            if run is not None:
+                return run
+        runs = self.plot_model.visible_models
+        return runs[0] if runs else None
+
+    def _open_full_metadata_browser(self, selected_run=None):
         """Open popup browser for full metadata navigation."""
         runs = self.plot_model.visible_models
         if not runs:
             return
-        self._browser_dialog = FullMetadataBrowser(runs, self)
+        self._browser_dialog = FullMetadataBrowser(
+            runs, selected_run=selected_run, parent=self
+        )
         self._browser_dialog.show()
         self._browser_dialog.raise_()
         self._browser_dialog.activateWindow()
