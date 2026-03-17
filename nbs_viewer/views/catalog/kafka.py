@@ -40,6 +40,8 @@ class KafkaView(CatalogTableView):
         """
         Set up the user interface components.
         """
+        self.filter_list = []
+
         self.data_view = LazyLoadingTableView(self)
         data_header = CustomHeaderView(Qt.Horizontal, self.data_view)
         self.data_view.setHorizontalHeader(data_header)
@@ -63,6 +65,14 @@ class KafkaView(CatalogTableView):
         filterLayout.addWidget(QLabel("RegEx Filter"))
         filterLayout.addWidget(self.filterLineEdit)
         filterLayout.addWidget(self.filterComboBox)
+
+        self.filterLineEdit2 = QLineEdit(self)
+        self.filterComboBox2 = QComboBox(self)
+
+        filterLayout2 = QHBoxLayout()
+        filterLayout2.addWidget(QLabel("RegEx Filter 2"))
+        filterLayout2.addWidget(self.filterLineEdit2)
+        filterLayout2.addWidget(self.filterComboBox2)
 
         scrollLayout = QHBoxLayout()
         scrollLayout.addWidget(self.scrollToTopButton)
@@ -107,6 +117,8 @@ class KafkaView(CatalogTableView):
 
         layout = QVBoxLayout()
         layout.addLayout(filterLayout)
+        layout.addLayout(filterLayout2)
+
         layout.addLayout(controls_layout)
         layout.addLayout(remove_layout)
         layout.addLayout(scrollLayout)
@@ -139,9 +151,9 @@ class KafkaView(CatalogTableView):
         )
         self.removeSelectedButton.setEnabled(selected)
 
-    def setupModelAndView(self, catalog):
+    def setupModelAndView(self):
         """Set up the model and view."""
-        super().setupModelAndView(catalog)
+        super().setupModelAndView()
         # Update button states after model setup
         self._update_button_states()
 
@@ -149,7 +161,7 @@ class KafkaView(CatalogTableView):
         self.data_view._update_visible_rows()
 
     def refresh_filters(self):
-        self.setupModelAndView(self._catalog)
+        self.setupModelAndView()
 
         # Reconnect the selection model's signal after setting up the new model
         self.data_view.selectionModel().selectionChanged.connect(

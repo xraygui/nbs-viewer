@@ -82,7 +82,7 @@ class PlotDataModel(QObject):
         self._dimension = dimension
         self.artist = None
         self._visible = self._run._is_visible
-        self._run.visibility_changed.connect(self.set_visible)
+        self._run.visibility_changed.connect(self._on_run_visibility_changed)
         self._run.selected_keys_changed.connect(self._on_keys_changed)
         self._run.transform_changed.connect(self._on_data_changed)
         self._run.data_changed.connect(self._on_data_changed)
@@ -147,6 +147,13 @@ class PlotDataModel(QObject):
                 f"Data info not changed for {self.label}, visible: {self._visible}",
                 category="DEBUG_PLOTS",
             )
+
+    def _on_run_visibility_changed(self, visible):
+        xkeys, ykeys, normkeys = self._run.get_selected_keys()
+        if self._xkey not in xkeys or self._ykey not in ykeys:
+            self.set_visible(False)
+        else:
+            self.set_visible(visible)
 
     def set_norm_keys(self, norm_keys):
         if set(norm_keys) != set(self._norm_keys):

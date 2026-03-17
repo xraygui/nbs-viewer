@@ -10,6 +10,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QCheckBox,
 )
 from qtpy.QtCore import (
     Qt,
@@ -22,6 +23,7 @@ from qtpy.QtCore import (
 
 from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
+from ..plot.metadataView import FullMetadataBrowser
 from nbs_viewer.utils import print_debug, get_top_level_model
 
 
@@ -161,11 +163,27 @@ class ReverseModel(QSortFilterProxyModel):
         self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
 
+    def set_visible_rows(self, start_row, end_row):
+        """
+        Forward set_visible_rows call to the source model.
+
+        This allows the LazyLoadingTableView to properly trigger
+        data loading through the proxy chain.
+        """
+        source_model = self.sourceModel()
+        if hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(start_row, end_row)
+
 
 class FilterModel(QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setDynamicSortFilter(True)
+        self.saved_start_row = 0
+        self.saved_end_row = 0
+        self._filter_target_rows = 0
+        self._filter_loaded_end = 0
+        self._filter_chunk_size = 50
 
     def filterAcceptsRow(self, source_row, source_parent):
         model = self.sourceModel()
@@ -180,6 +198,132 @@ class FilterModel(QSortFilterProxyModel):
         regex = self.filterRegularExpression()
         match = regex.match(data_str)
         return match.hasMatch()
+
+    def set_visible_rows(self, start_row, end_row):
+        """
+        Forward set_visible_rows call to the source model.
+
+        This allows the LazyLoadingTableView to properly trigger
+        data loading through the proxy chain.
+        """
+        # If we're currently filtering, update our target based on what the view needs
+        # The view needs to display rows start_row to end_row
+        # So we need at least (end_row + 1) total filtered matches
+        self._filter_target_rows = end_row + 1
+        # print(
+        #    f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
+        # )
+
+        # Always forward to the source model
+        source_model = self.sourceModel()
+        if hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(start_row, end_row)
+
+        # If we don't have enough matches yet, continue loading
+        current_matches = self.rowCount()
+        if current_matches < self._filter_target_rows:
+            # print(f"Need more data: {current_matches} < {self._filter_target_rows}")
+            # Get the source model and continue loading
+            source_model = self.sourceModel()
+            while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+                source_model = source_model.sourceModel()
+            self._load_next_filter_chunk(source_model)
+
+    def setFilterRegularExpression(self, pattern):
+        """
+        Override to trigger intelligent data loading for filtering.
+
+        When a filter is applied, we need to ensure that data is loaded
+        for rows that might match the filter, not just currently visible rows.
+        """
+        # Convert string pattern to QRegularExpression if needed
+
+        # Call the parent method with the QRegularExpression
+        super().setFilterRegularExpression(pattern)
+
+        # If we have a filter pattern, trigger intelligent data loading
+        if pattern and pattern.strip():
+            self._filter_loaded_end = 0
+            self._check_filter_sufficiency()
+        else:
+            # If filter is cleared, the normal lazy loading will handle it
+            pass
+
+    def _trigger_intelligent_filtering(self):
+        """
+        Trigger intelligent data loading for filtering.
+
+        This loads data in chunks until we have enough filtered results
+        to display (target: 50 visible rows).
+        """
+        # Get the source model (CatalogTableModel)
+        source_model = self.sourceModel()
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
+
+        self._filter_loaded_end = 0  # Track how much data we've loaded
+
+        # Start loading the first chunk
+        self._load_next_filter_chunk(source_model)
+
+    def _load_next_filter_chunk(self, source_model):
+        """
+        Load the next chunk of data for filtering.
+        """
+        total_rows = source_model.rowCount()
+        if total_rows == 0:
+            return
+
+        # Calculate the next chunk to load
+        start_row = self._filter_loaded_end
+        end_row = min(start_row + self._filter_chunk_size - 1, total_rows - 1)
+
+        # print(f"Loading filter chunk: rows {start_row} to {end_row}")
+
+        # Load this chunk
+        source_model.set_visible_rows(start_row, end_row)
+
+        # Update our tracking
+        self._filter_loaded_end = end_row + 1
+
+        # Schedule a check after the chunk loads
+
+        QTimer.singleShot(1000, lambda: self._check_filter_sufficiency())
+
+    def _check_filter_sufficiency(self):
+        """
+        Check if we have enough filter matches, and load more chunks if needed.
+        This method will keep loading chunks until sufficient matches are found or
+        we've exhausted the source model.
+        """
+        # Count current visible rows in the filtered model
+        visible_count = self.rowCount()
+        self._filter_loaded_end = max(self._filter_loaded_end, visible_count)
+        # print(
+        #     f"Current filtered rows: {visible_count} (target: {self._filter_target_rows})"
+        # )
+
+        # If we have enough matches, we're done
+        if visible_count >= self._filter_target_rows:
+            # print(f"Filtering complete: {visible_count} rows found")
+            return
+
+        # Get the source model
+        source_model = self.sourceModel()
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
+
+        total_rows = source_model.rowCount()
+        # Check if we've loaded all available data
+        if self._filter_loaded_end >= total_rows:
+            # print(
+            #    f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
+            # )
+            return
+
+        # Load the next chunk
+        # print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
+        self._load_next_filter_chunk(source_model)
 
 
 class LazyLoadingTableView(QTableView):
@@ -270,26 +414,18 @@ class LazyLoadingTableView(QTableView):
         last_visible = self.rowAt(viewport_height - 1)
         if last_visible < 0:
             if self.model().rowCount() > 0:
-                last_visible = min(
-                    first_visible + self._buffer_size, self.model().rowCount() - 1
-                )
+                last_visible = first_visible + self._buffer_size
             else:
                 last_visible = 0
 
         # Add a buffer of rows above and below for smoother scrolling
         first_visible = max(0, first_visible - self._buffer_size)
-        last_visible = min(
-            self.model().rowCount() - 1, last_visible + self._buffer_size
-        )
+        last_visible = last_visible + self._buffer_size
 
-        # Find the source model (CatalogTableModel)
-        source_model = self.model()
-        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
-            source_model = source_model.sourceModel()
-
-        # If the source model has a set_visible_rows method, call it
-        if hasattr(source_model, "set_visible_rows"):
-            source_model.set_visible_rows(first_visible, last_visible)
+        # Call set_visible_rows on the current model (FilterModel)
+        # This will forward the call through the proxy chain to the source model
+        if hasattr(self.model(), "set_visible_rows"):
+            self.model().set_visible_rows(first_visible, last_visible)
 
 
 class CatalogTableView(QWidget):
@@ -302,11 +438,12 @@ class CatalogTableView(QWidget):
         super().__init__(parent)
         self._catalog = catalog
         self.display_id = display_id
+        self._metadata_browser_dialog = None
         self._handling_selection = False  # Flag to prevent circular updates
         self._is_inverted = False  # Track inversion state
         self._setup_ui()
         self.setup_context_menu()
-        self.refresh_filters()
+        self.setupModelAndView()
 
     def setup_context_menu(self):
         self.data_view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -327,7 +464,7 @@ class CatalogTableView(QWidget):
         self.filter_list = []
         self.filter_list.append(DateSearchWidget(self))
 
-        self.display_button = QPushButton("Display Selection", self)
+        self.display_button = QPushButton("Update Catalog", self)
         self.display_button.clicked.connect(self.refresh_filters)
 
         self.invertButton = QPushButton("Reverse Data", self)
@@ -348,6 +485,21 @@ class CatalogTableView(QWidget):
         filterLayout.addWidget(self.filterLineEdit)
         filterLayout.addWidget(self.filterComboBox)
 
+        self.filterLineEdit2 = QLineEdit(self)
+        self.filterComboBox2 = QComboBox(self)
+
+        filterLayout2 = QHBoxLayout()
+        filterLayout2.addWidget(QLabel("RegEx Filter 2"))
+        filterLayout2.addWidget(self.filterLineEdit2)
+        filterLayout2.addWidget(self.filterComboBox2)
+
+        self.exitFilterCheckBox = QCheckBox(self)
+        self.exitFilterCheckBox.setChecked(False)
+        self.exitFilterCheckBox.stateChanged.connect(self.on_exit_filter_changed)
+        exitFilterLayout = QHBoxLayout()
+        exitFilterLayout.addWidget(QLabel("Exclude Unsuccessful Runs"))
+        exitFilterLayout.addWidget(self.exitFilterCheckBox)
+
         scrollLayout = QHBoxLayout()
         scrollLayout.addWidget(self.scrollToTopButton)
         scrollLayout.addWidget(self.scrollToBottomButton)
@@ -357,10 +509,29 @@ class CatalogTableView(QWidget):
             layout.addWidget(widget)
         layout.addWidget(self.display_button)
         layout.addLayout(filterLayout)
+        layout.addLayout(filterLayout2)
+        layout.addLayout(exitFilterLayout)
         layout.addLayout(scrollLayout)
         layout.addWidget(self.invertButton)
         layout.addWidget(self.data_view)
         self.setLayout(layout)
+
+    def on_exit_filter_changed(self, state):
+        """
+        Handle changes to the exit status filter checkbox.
+
+        Parameters
+        ----------
+        state : int
+            Checkbox state (0 = unchecked, 2 = checked)
+        """
+        # Get the third filter model (for exit status)
+        filter_model3 = self.data_view.model()
+
+        if state == 2:  # Checked - filter for successful runs only
+            filter_model3.setFilterRegularExpression("success")
+        else:  # Unchecked - clear the filter
+            filter_model3.setFilterRegularExpression("")
 
     def on_selection_changed(self, selected, deselected):
         """Handle changes in the selection state of table rows."""
@@ -407,13 +578,17 @@ class CatalogTableView(QWidget):
         self._is_inverted = not self._is_inverted
 
         # Get models
-        filter_model = self.data_view.model()
+        filter_model3 = self.data_view.model()
+        filter_model2 = filter_model3.sourceModel()
+        filter_model = filter_model2.sourceModel()
         reverse_model = filter_model.sourceModel()
         reverse_model.toggleInvert()
         filter_model.invalidateFilter()
+        filter_model2.invalidateFilter()
+        filter_model3.invalidateFilter()
         self.data_view._update_visible_rows()
 
-    def setupModelAndView(self, catalog):
+    def setupModelAndView(self):
         """
         Set up the table model and view with the given catalog.
 
@@ -422,32 +597,68 @@ class CatalogTableView(QWidget):
         catalog : Catalog
             The catalog to display in the table
         """
-        # Create model chain: source -> reverse -> filter
+        # Create model chain: source -> reverse -> filter1 -> filter2 -> filter3
+        catalog = self._catalog
+        for f in self.filter_list:
+            catalog = f.filter_catalog(catalog)
         table_model = CatalogTableModel(catalog)
         reverse_model = ReverseModel(parent=self.data_view)
         filter_model = FilterModel(parent=self.data_view)
+        filter_model2 = FilterModel(parent=self.data_view)
+        filter_model3 = FilterModel(parent=self.data_view)
 
+        self.lowest_model = reverse_model
         # Connect models
         reverse_model.setSourceModel(table_model)
         filter_model.setSourceModel(reverse_model)
+        filter_model2.setSourceModel(filter_model)
+        filter_model3.setSourceModel(filter_model2)
 
         # Disconnect existing selection model if it exists
         if self.data_view.model() is not None:
             self.data_view.selectionModel().selectionChanged.disconnect()
 
-        # Set the filter model as the view's model
-        self.data_view.setModel(filter_model)
+        # Set the third filter model as the view's model
+        self.data_view.setModel(filter_model3)
         self.data_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
         )
 
         # Connect filter controls to filter model
         self.filterLineEdit.textChanged.connect(filter_model.setFilterRegularExpression)
+        self.filterLineEdit2.textChanged.connect(
+            filter_model2.setFilterRegularExpression
+        )
         self.filterComboBox.clear()
         self.filterComboBox.addItems([col for col in table_model.columns])
         self.filterComboBox.currentIndexChanged.connect(
             lambda index: filter_model.setFilterKeyColumn(index)
         )
+
+        # Set default column for first filter to "Plan Name" if it exists
+        if "Plan Name" in table_model.columns:
+            plan_column_index = table_model.columns.index("Plan Name")
+            self.filterComboBox.setCurrentIndex(plan_column_index)
+
+        # Configure the second filter model (user-defined regex)
+        self.filterComboBox2.clear()
+        self.filterComboBox2.addItems([col for col in table_model.columns])
+        self.filterComboBox2.currentIndexChanged.connect(
+            lambda index: filter_model2.setFilterKeyColumn(index)
+        )
+
+        # Set default column for second filter to "Sample Name" if it exists
+        if "Sample Name" in table_model.columns:
+            sample_column_index = table_model.columns.index("Sample Name")
+            self.filterComboBox2.setCurrentIndex(sample_column_index)
+
+        # Configure the third filter model for exit status
+        # Find the "Status" column index
+        status_column_index = 0  # Default to first column
+        if "Status" in table_model.columns:
+            status_column_index = table_model.columns.index("Status")
+        # Set the filter column to "Status" permanently
+        filter_model3.setFilterKeyColumn(status_column_index)
 
         # Connect invert button to our handler instead
         self.invertButton.setEnabled(True)
@@ -457,19 +668,28 @@ class CatalogTableView(QWidget):
             # Set the invert property on the reverse model
             reverse_model.toggleInvert()
             filter_model.invalidateFilter()
+            filter_model2.invalidateFilter()
+            filter_model3.invalidateFilter()
             self.data_view._update_visible_rows()
 
     def refresh_filters(self):
+        selection_model = self.data_view.selectionModel()
+        if selection_model:
+            selection_model.clearSelection()
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
 
-        self.setupModelAndView(catalog)
+        # self.setupModelAndView(catalog)
+        table_model = CatalogTableModel(catalog)
+        self.lowest_model.setSourceModel(table_model)
+
+        self.data_view._update_visible_rows()
 
         # Reconnect the selection model's signal after setting up the new model
-        self.data_view.selectionModel().selectionChanged.connect(
-            self.on_selection_changed
-        )
+        # self.data_view.selectionModel().selectionChanged.connect(
+        #    self.on_selection_changed
+        # )
 
     def get_selected_runs(self):
         """
@@ -639,6 +859,9 @@ class CatalogTableView(QWidget):
         selected_runs = self.get_selected_runs()
         if not selected_runs:
             return
+        clicked_run = self.get_run_at_index(index)
+        if clicked_run is None:
+            clicked_run = selected_runs[0]
 
         menu = QMenu(self)
         app_model = get_top_level_model()
@@ -678,6 +901,14 @@ class CatalogTableView(QWidget):
             )
             new_canvas_copy_menu.addAction(action)
         menu.addMenu(new_canvas_copy_menu)
+        browse_action = QAction("Browse Metadata", self)
+        browse_action.setToolTip("Open metadata browser for this run")
+        browse_action.triggered.connect(
+            lambda checked=False, run=clicked_run, runs=selected_runs: self._browse_metadata_for_run(
+                run, runs
+            )
+        )
+        menu.addAction(browse_action)
         menu.addSeparator()
         # Add submenu for existing displays
         available_displays = app_model.display_manager.get_display_ids()
@@ -718,6 +949,45 @@ class CatalogTableView(QWidget):
 
         menu.exec_(self.data_view.mapToGlobal(pos))
         # Deselect the runs (this will remove them from the current display)
+
+    def get_run_at_index(self, index):
+        """
+        Get run object for a clicked table index.
+
+        Parameters
+        ----------
+        index : QModelIndex
+            View index from the table
+
+        Returns
+        -------
+        CatalogRun or None
+            Run for the clicked row, if available
+        """
+        if not index.isValid():
+            return None
+        source_model = self.get_source_model()
+        source_index = self.map_to_source(index)
+        if not source_index.isValid():
+            return None
+        key = source_model.get_key(source_index.row())
+        if key is None:
+            return None
+        try:
+            return self._catalog.get_run(key)
+        except Exception:
+            return None
+
+    def _browse_metadata_for_run(self, run, runs):
+        if run is None:
+            return
+        browse_runs = runs if runs else [run]
+        self._metadata_browser_dialog = FullMetadataBrowser(
+            browse_runs, selected_run=run, parent=self
+        )
+        self._metadata_browser_dialog.show()
+        self._metadata_browser_dialog.raise_()
+        self._metadata_browser_dialog.activateWindow()
 
     def move_selected_runs_to_new_display(self, display_type: str):
         self.copy_selected_runs_to_new_display(display_type)

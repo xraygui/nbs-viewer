@@ -461,6 +461,7 @@ class CatalogTableModel(QAbstractTableModel):
             Last visible row
         """
         # Calculate the new visible rows set
+        end_row = min(end_row, self._catalog_length - 1)
         new_visible_rows = set(range(start_row, end_row + 1))
         if new_visible_rows:
             print_debug(

@@ -46,14 +46,15 @@ class NBSRun(BlueskyRun):
         "sample_name": "Sample Name",
         "sample_id": "Sample ID",
         "num_points": "Scan Points",
+        "exit_status": "Status",
     }
 
     METADATA_KEYS = [
         "scan_id",
         "plan_name",
-        "group_name",
         "sample_name",
         "sample_id",
+        "group_name",
         "date",
         "exit_status",
         "uid",

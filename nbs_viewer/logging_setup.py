@@ -94,3 +94,4 @@ def setup_logging(
     logging.getLogger("httpx").setLevel(logging.INFO)
     logging.getLogger("httpcore").setLevel(logging.INFO)
     logging.getLogger("tiled").setLevel(logging.INFO)
+    logging.getLogger("bluesky_widgets.qt.kafka_dispatcher").setLevel(logging.INFO)

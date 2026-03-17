@@ -1,4 +1,4 @@
-from qtpy.QtWidgets import QWidget
+from qtpy.QtWidgets import QWidget, QSizePolicy
 from qtpy.QtCore import Signal
 
 
@@ -25,6 +25,8 @@ class PlotControlWidget(QWidget):
     def __init__(self, run_list_model, parent=None):
         super().__init__(parent)
         self.run_list_model = run_list_model
+        # Prefer to expand when the panel allows it; let layout manage height
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._setup_ui()
 
     def _setup_ui(self) -> None:

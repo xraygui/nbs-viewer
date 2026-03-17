@@ -41,7 +41,7 @@ class AutoAddControl(PlotControlWidget):
         layout.addWidget(QLabel("Auto Add"))
         self._auto_add_box = QCheckBox()
         self._auto_add_box.setChecked(True)
-        self._auto_add_box.clicked.connect(self.state_changed)
+        self._auto_add_box.checkStateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self._auto_add_box)
         self.setLayout(layout)
 
@@ -68,7 +68,7 @@ class AutoAddControl(PlotControlWidget):
         if "auto_add" in state:
             self._auto_add_box.setChecked(state["auto_add"])
 
-    def state_changed(self) -> None:
-        """Handle state changes."""
+    def _on_checkbox_changed(self, checkState) -> None:
+        """Handle checkbox state changes."""
         state = self.get_state()
         self.run_list_model.set_auto_add(state["auto_add"])

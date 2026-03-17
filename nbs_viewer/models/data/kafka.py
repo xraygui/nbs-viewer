@@ -30,6 +30,7 @@ class KafkaRun(CatalogRun):
         "group_name": ["start", "group_name"],
         "sample_name": ["start", "sample_name"],
         "motors": ["start", "motors"],
+        "exit_status": [],
     }
 
     DISPLAY_KEYS = {
@@ -40,16 +41,18 @@ class KafkaRun(CatalogRun):
         "plan_name": "Plan",
         "group_name": "Group",
         "sample_name": "Sample",
+        "exit_status": "Status",
     }
 
     METADATA_KEYS = [
         "scan_id",
-        "uid",
-        "time",
-        "num_points",
         "plan_name",
-        "group_name",
         "sample_name",
+        "group_name",
+        "num_points",
+        "time",
+        "exit_status",
+        "uid",
     ]
 
     @classmethod
@@ -83,9 +86,11 @@ class KafkaRun(CatalogRun):
     def setup(self):
         """Set up the run object by extracting metadata from start document."""
         self.metadata = self.start
-
-        for key, keylist in self._METADATA_MAP.items():
-            setattr(self, key, self.get_md_value(keylist))
+        
+        for attr, keys in self._METADATA_MAP.items():
+            if not hasattr(self.__class__, attr):
+                value = self.get_md_value(keys)
+                setattr(self, attr, value)
 
         self._plot_hints = self.start.get("plot_hints", {})
         self.hints = self.start.get("hints", {})
@@ -285,6 +290,13 @@ class KafkaRun(CatalogRun):
         """
         self._stop_doc = doc
         self.data_changed.emit()
+
+    @property
+    def exit_status(self):
+        """
+        Get the exit status of the run.
+        """
+        return self.get_md_value(["stop", "exit_status"], "In Progress")
 
     def scanFinished(self):
         """

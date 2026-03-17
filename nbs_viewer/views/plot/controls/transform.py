@@ -3,12 +3,12 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QCheckBox,
-    QFrame,
     QPushButton,
     QLineEdit,
     QComboBox,
     QMessageBox,
     QInputDialog,
+    QSizePolicy,
 )
 
 from .base import PlotControlWidget
@@ -56,6 +56,8 @@ class TransformControl(PlotControlWidget):
         """
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
         super().__init__(run_list_model, parent)
+        # Set size policy for compact layout
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         # Set initial state from model
         transform_state = self.run_list_model.transform
         self._transform_box.setChecked(transform_state["enabled"])
@@ -64,33 +66,31 @@ class TransformControl(PlotControlWidget):
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        # Main layout
-        layout = QVBoxLayout()
+        # Layout directly; the panel now provides consistent padding so
+        # we don't need an extra framed container here
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
-        # Transform frame
-        transform_frame = QFrame()
-        transform_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        transform_layout = QVBoxLayout(transform_frame)
-
-        # Transform header
-        transform_header = QHBoxLayout()
-        transform_header.addWidget(QLabel("Transform"))
+        # Header row: label + checkbox
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("Transform"))
         self._transform_box = QCheckBox()
         self._transform_box.setChecked(False)
         self._transform_box.clicked.connect(self._on_transform_state_changed)
-        transform_header.addWidget(self._transform_box)
-        transform_layout.addLayout(transform_header)
+        header_layout.addWidget(self._transform_box)
+        header_layout.addStretch(1)
+        layout.addLayout(header_layout)
 
         # Transform combo box
         self._transform_combo = QComboBox()
         self._transform_combo.setEnabled(False)
         self._transform_combo.addItems(self._transforms.keys())
         self._transform_combo.currentTextChanged.connect(self._on_transform_selected)
-        transform_layout.addWidget(self._transform_combo)
+        layout.addWidget(self._transform_combo)
 
-        # Custom transform input
-        custom_transform_layout = QHBoxLayout()
+        # Custom transform input + save button
+        row = QHBoxLayout()
         self._transform_text_edit = QLineEdit()
         self._transform_text_edit.setEnabled(False)
         self._transform_text_edit.setPlaceholderText(
@@ -99,15 +99,13 @@ class TransformControl(PlotControlWidget):
         self._transform_text_edit.editingFinished.connect(
             self._on_custom_transform_changed
         )
-        custom_transform_layout.addWidget(self._transform_text_edit)
+        row.addWidget(self._transform_text_edit)
 
         save_transform_btn = QPushButton("Save")
         save_transform_btn.clicked.connect(self._save_custom_transform)
-        custom_transform_layout.addWidget(save_transform_btn)
+        row.addWidget(save_transform_btn)
 
-        transform_layout.addLayout(custom_transform_layout)
-        layout.addWidget(transform_frame)
-        self.setLayout(layout)
+        layout.addLayout(row)
 
     def _on_transform_state_changed(self) -> None:
         """Handle transform checkbox state change."""
