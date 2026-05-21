@@ -649,6 +649,99 @@ class BlueskyRun(CatalogRun):
 
         return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}
 
+    def _primary_data_path(self, key: str) -> str:
+        """
+        Build the canonical path for a key in the primary data group.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        str
+            Path into the run object.
+        """
+        return "/".join(["primary", "data", key])
+
+    def _infer_dims_from_shape(self, key: str, shape: Tuple[int, ...]) -> Tuple[str, ...]:
+        """
+        Infer dimension names when Tiled structure metadata has no dims.
+
+        Stacked Bluesky primary arrays typically use a leading event axis named
+        ``time`` when a ``time`` data key exists in the stream.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        shape : tuple of int
+            Array shape for the key.
+
+        Returns
+        -------
+        tuple of str
+            Inferred dimension names.
+        """
+        ndim = len(shape)
+        if ndim == 0:
+            return ()
+
+        if key == "time":
+            return ("time",)
+
+        has_time_key = False
+        try:
+            has_time_key = "time" in list(
+                self._run["/".join(["primary", "data"])].keys()
+            )
+        except Exception:
+            has_time_key = False
+
+        if has_time_key:
+            if ndim == 1:
+                return ("time",)
+            return ("time",) + tuple(f"dim_{i}" for i in range(0, ndim))
+
+        return tuple(f"dim_{i}" for i in range(ndim))
+
+    def _resolve_dims(self, key: str) -> Tuple[str, ...]:
+        """
+        Resolve dimension names for a data key, with shape-based inference as fallback.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        tuple of str
+            Dimension names for the key.
+        """
+        shape = tuple(self.getShape(key))
+        raw_dims = None
+        try:
+            raw_dims = self._run[self._primary_data_path(key)].dims
+        except Exception as ex:
+            print_debug(
+                "BlueskyRun._resolve_dims",
+                f"Could not read dims for {key}: {ex}",
+                category="DEBUG_CATALOG",
+            )
+
+        if raw_dims:
+            return tuple(raw_dims)
+
+        inferred = self._infer_dims_from_shape(key, shape)
+        print_debug(
+            "BlueskyRun._resolve_dims",
+            f"Inferred dims for {key} shape {shape}: {inferred}",
+            category="DEBUG_CATALOG",
+        )
+        return inferred
+
     def get_dims(
         self, ykey: str, xkeys: List[str]
     ) -> Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]:
@@ -669,33 +762,15 @@ class BlueskyRun(CatalogRun):
             - y_dims: Tuple of dimension names for y-data
             - x_dims: Dict mapping xkeys to their dimension names
         """
-        # Get y dimensions from cache or fetch
         if ykey not in self._dim_cache:
-            try:
-                self._dim_cache[ykey] = self._run[
-                    "/".join(["primary", "data", ykey])
-                ].dims
-            except Exception as e:
-                print(f"Could not get dimension names for {ykey}: {e}")
-                # Fallback to generating dimension names from shape
-                shape = self.getShape(ykey)
-                self._dim_cache[ykey] = tuple(f"dim_{i}" for i in range(len(shape)))
+            self._dim_cache[ykey] = self._resolve_dims(ykey)
 
         y_dims = self._dim_cache[ykey]
 
-        # Get x dimensions from cache or fetch
         x_dims = {}
         for key in xkeys:
             if key not in self._dim_cache:
-                try:
-                    self._dim_cache[key] = self._run[
-                        "/".join(["primary", "data", key])
-                    ].dims
-                except Exception as e:
-                    print(f"Could not get dimension names for {key}: {e}")
-                    # Fallback to generating dimension names from shape
-                    shape = self.getShape(key)
-                    self._dim_cache[key] = tuple(f"dim_{i}" for i in range(len(shape)))
+                self._dim_cache[key] = self._resolve_dims(key)
             x_dims[key] = self._dim_cache[key]
 
         return y_dims, x_dims

@@ -588,12 +588,16 @@ class CatalogRun(QObject):
             if time_motors:
                 result["associated_axes"]["time"] = time_motors
 
-        # Add remaining x dimensions
+        y_dim_names = set(y_dims) if y_dims else set()
+
         for key in xkeys:
             if (
                 key not in ordered_dims
                 and key != "time"
-                and not any(key in axes for axes in result["associated_axes"].values())
+                and key in y_dim_names
+                and not any(
+                    key in axes for axes in result["associated_axes"].values()
+                )
             ):
                 ordered_dims.append(key)
                 dim_metadata[key] = {
@@ -687,11 +691,16 @@ class CatalogRun(QObject):
 
         # Get the shape for reference
         effective_shape = dim_info["effective_shape"]
+        ndim = len(effective_shape)
         if slice_info is None:
-            slice_info = tuple([slice(None)] * len(dim_info["ordered_dims"]))
+            slice_info = tuple([slice(None)] * ndim)
+        else:
+            slice_info = tuple(slice_info[:ndim])
+            if len(slice_info) < ndim:
+                slice_info = slice_info + (slice(None),) * (ndim - len(slice_info))
 
         # Process each dimension in order
-        for i, dim_name in enumerate(dim_info["ordered_dims"]):
+        for i, dim_name in enumerate(dim_info["ordered_dims"][:ndim]):
             dim_meta = dim_info["dim_metadata"][dim_name]
             dim_type = dim_meta["type"]
 

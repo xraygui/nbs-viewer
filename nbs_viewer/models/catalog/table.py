@@ -227,6 +227,11 @@ class CatalogTableModel(QAbstractTableModel):
         self._keys[rowNum] = key
         for i, item in enumerate(row):
             self._data[self.createIndex(rowNum, i)] = item
+        print_debug(
+            "CatalogTableModel.on_row_loaded",
+            f"Row {rowNum} loaded key={key} cols={len(row)}",
+            category="DEBUG_RUNLIST",
+        )
         self.dataChanged.emit(
             self.createIndex(rowNum, 0), self.createIndex(rowNum, len(row) - 1), []
         )
@@ -290,13 +295,17 @@ class CatalogTableModel(QAbstractTableModel):
                 except Exception as ex:
                     print_debug(
                         "CatalogTableModel.get_chunk",
-                        f"Error in chunk_generator: {ex}",
+                        f"Error in chunk_generator row {count}: {ex}",
                         category="DEBUG_RUNLIST",
                     )
                     row = ["x"] * len(self._catalog.columns)
                 yield key, row
 
-            # print(f"Generated {count} rows from chunk {start}-{stop}")
+            print_debug(
+                "CatalogTableModel.get_chunk",
+                f"Chunk {start}-{stop} yielded {count} rows",
+                category="DEBUG_RUNLIST",
+            )
 
         loaded_chunk = chunk_generator(chunk)
         return loaded_chunk
@@ -460,8 +469,13 @@ class CatalogTableModel(QAbstractTableModel):
         end_row : int
             Last visible row
         """
-        # Calculate the new visible rows set
+        if self._catalog_length <= 0:
+            return
+
         end_row = min(end_row, self._catalog_length - 1)
+        if start_row > end_row:
+            return
+
         new_visible_rows = set(range(start_row, end_row + 1))
         if new_visible_rows:
             print_debug(
@@ -511,6 +525,45 @@ class CatalogTableModel(QAbstractTableModel):
             if index not in self._data or self._data[index] == LOADING_PLACEHOLDER:
                 self.data(index)
 
-        # Immediately process the work queue to start loading visible rows
+        self._data_loading_timer.stop()
+        self._process_work_queue()
+
+    def request_chunk_load(self, start_row, end_row):
+        """
+        Queue chunk loads for a row range without changing visible rows.
+
+        Used by filter models to load metadata for filtering.
+        """
+        if self._catalog_length <= 0:
+            return
+
+        end_row = min(end_row, self._catalog_length - 1)
+        if start_row > end_row:
+            return
+
+        print_debug(
+            "CatalogTableModel.request_chunk_load",
+            f"Requesting rows {start_row}-{end_row}",
+            category="DEBUG_RUNLIST",
+        )
+
+        chunks = set()
+        for row in range(start_row, end_row + 1):
+            chunk_start = (row // self._chunk_size) * self._chunk_size
+            chunk_end = min(
+                chunk_start + self._chunk_size - 1, self._catalog_length - 1
+            )
+            chunks.add((chunk_start, chunk_end))
+
+        for chunk in chunks:
+            if chunk in self._loading_chunks:
+                continue
+            if any(
+                start == chunk[0] and end == chunk[1]
+                for start, end in self._work_queue
+            ):
+                continue
+            self._work_queue.append(chunk)
+
         self._data_loading_timer.stop()
         self._process_work_queue()

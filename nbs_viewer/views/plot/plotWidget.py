@@ -302,12 +302,15 @@ class MplCanvas(FigureCanvasQTAgg):
             self.updateLegend()
             self.currentDim = 1
 
-        # Handle 2D data (heatmap/image plots)
-        elif len(y.shape) == 2 and len(x) >= 2:
+        elif len(y.shape) == 2:
             try:
-                y = y.T  # Transpose the data
-                X = x[-2].T
-                Y = x[-1].T  # Swap x[-1] and x[-2]
+                y = y.T
+                if len(x) >= 2:
+                    X = x[-2].T
+                    Y = x[-1].T
+                else:
+                    ny, nx = y.shape
+                    X, Y = np.meshgrid(np.arange(nx), np.arange(ny))
 
                 if self.currentDim != 2:
                     # First time showing 2D plot, need full setup

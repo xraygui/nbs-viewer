@@ -304,9 +304,10 @@ class PlotDimensionControl(QWidget):
                         axis_arrays, axis_names, associated_data = (
                             run_model._run.get_dimension_axes(ykey, x_keys)
                         )
-                        shape = tuple(
-                            len(arr) if len(arr) > 0 else 1 for arr in axis_arrays
-                        )
+                        shape = tuple(run_model._run.getShape(ykey))
+                        y_dims, _ = run_model._run.get_dims(ykey, x_keys)
+                        if len(y_dims) == len(shape):
+                            axis_names = list(y_dims)
 
                         # Update max shape if this is larger
                         if (
