@@ -32,6 +32,7 @@ class ChunkCache:
     def __init__(self, max_size_bytes: int = 1e9, min_free_memory: float = 0.2):
         # Cache storage
         self.chunks: Dict[Tuple[str, str, Tuple[int, ...]], np.ndarray] = {}
+        self.slice_cache: Dict[Tuple, np.ndarray] = {}
         self.chunk_info: Dict[
             Tuple[str, str], Tuple[Tuple[int, ...], Tuple[int, ...]]
         ] = {}
@@ -83,6 +84,16 @@ class ChunkCache:
                     f"Could not get chunk info for {run.start['uid']}:{key}"
                 )
 
+            shape, chunks = self.chunk_info[(run.start["uid"], key)]
+
+            if self._is_monolithic_chunking(chunks):
+                print_debug(
+                    "ChunkCache",
+                    f"Monolithic chunking for {key}, using direct slice read",
+                    category="cache",
+                )
+                return self._get_data_sliced(run, key, slice_info)
+
             # Convert slice to chunk indices
             try:
                 chunks_needed, full_shape = self.get_chunk_indices(
@@ -101,20 +112,20 @@ class ChunkCache:
             except Exception as e:
                 raise ValueError(f"Error fetching chunks: {str(e)}")
 
-            # Assemble result
+            if len(chunks_needed) == 1:
+                chunk_info = chunks_needed[0]
+                chunk = chunks_data.get(chunk_info["chunk_indices"])
+                if chunk is not None and not self._chunk_needs_internal_slice(
+                    chunk, chunk_info
+                ):
+                    return self._squeeze_indexed_dims(chunk, slice_info)
+
             try:
                 result = self._assemble_result(chunks_data, chunks_needed, full_shape)
             except Exception as e:
                 raise ValueError(f"Error assembling result: {str(e)}")
 
-            # Squeeze out dimensions that were requested with integer indices
-            squeeze_dims = [
-                i for i, s in enumerate(slice_info) if not isinstance(s, slice)
-            ]
-            if squeeze_dims:
-                result = np.squeeze(result, axis=tuple(squeeze_dims))
-
-            return result
+            return self._squeeze_indexed_dims(result, slice_info)
 
         except Exception as e:
             print_debug("ChunkCache", f"Error in get_data: {str(e)}")
@@ -152,8 +163,194 @@ class ChunkCache:
                 return False
         return True
 
+    @staticmethod
+    def _is_monolithic_chunking(chunks: Tuple) -> bool:
+        """
+        Return True when the array is stored as a single Tiled chunk.
+
+        In this layout one "chunk" is the entire array; fetching by chunk
+        index downloads everything. Sliced reads must go through the API.
+        """
+        chunk_count = 1
+        for dim_chunks in chunks:
+            if isinstance(dim_chunks, (int, np.integer)):
+                chunk_count *= 1
+            else:
+                chunk_count *= len(dim_chunks)
+        return chunk_count == 1
+
+    @staticmethod
+    def _chunk_needs_internal_slice(chunk: np.ndarray, chunk_info: Dict) -> bool:
+        """
+        Return True when internal chunk indexing still needs to be applied.
+
+        Parameters
+        ----------
+        chunk : np.ndarray
+            Cached or fetched chunk array.
+        chunk_info : dict
+            Chunk metadata from get_chunk_indices.
+
+        Returns
+        -------
+        bool
+            True if ``internal_slices`` should be applied to the chunk.
+        """
+        if chunk_info.get("already_sliced"):
+            return False
+        return chunk.ndim >= len(chunk_info["internal_slices"])
+
+    @staticmethod
+    def _squeeze_indexed_dims(result: np.ndarray, slice_info: Tuple) -> np.ndarray:
+        """
+        Remove length-1 axes for integer indices still present after assembly.
+
+        Integer indices in ``slice_info`` may already have been removed by a
+        direct Tiled slice read; only squeeze axes that exist and have size 1.
+
+        Parameters
+        ----------
+        result : np.ndarray
+            Assembled array from chunk reads.
+        slice_info : tuple
+            Original per-dimension indices or slices.
+
+        Returns
+        -------
+        np.ndarray
+            Array with redundant length-1 axes removed.
+        """
+        if result.ndim == 0:
+            return result
+        axes = tuple(
+            i
+            for i, s in enumerate(slice_info)
+            if not isinstance(s, slice)
+            and i < result.ndim
+            and result.shape[i] == 1
+        )
+        if axes:
+            return np.squeeze(result, axis=axes)
+        return result
+
+    @staticmethod
+    def _slice_cache_key(slice_info: Tuple) -> Tuple:
+        """
+        Build a hashable cache key from a slice request tuple.
+        """
+        parts = []
+        for item in slice_info:
+            if isinstance(item, slice):
+                parts.append((item.start, item.stop, item.step))
+            else:
+                parts.append(item)
+        return tuple(parts)
+
+    def _get_data_sliced(self, run, key: str, slice_info: Tuple) -> np.ndarray:
+        """
+        Read only the requested slice via the Tiled client's slice API.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            Run containing the data.
+        key : str
+            Data key.
+        slice_info : tuple
+            Per-dimension indices or slice objects.
+
+        Returns
+        -------
+        np.ndarray
+            The requested array region.
+        """
+        run_uid = run.start["uid"]
+        cache_key = (run_uid, key, self._slice_cache_key(slice_info))
+        if cache_key in self.slice_cache:
+            self.hits += 1
+            self._update_access(cache_key)
+            return self.slice_cache[cache_key]
+
+        self.misses += 1
+        data_accessor = run["primary", "data", key]
+        data = data_accessor.read(slice=slice_info)
+        if hasattr(data, "read"):
+            data = data.read()
+        result = np.asarray(data)
+
+        nbytes = result.nbytes
+        if nbytes <= self.max_size:
+            while (
+                self.current_size + nbytes > self.max_size
+                and not self._evict_lru()
+            ):
+                pass
+            if self.current_size + nbytes <= self.max_size:
+                self.slice_cache[cache_key] = result
+                self.current_size += nbytes
+                self._update_access(cache_key)
+
+        print_debug(
+            "ChunkCache",
+            f"Direct slice read {key} shape {result.shape} ({nbytes / 1e6:.1f} MB)",
+            category="cache",
+        )
+        return result
+
+    def _global_slice_from_chunk(
+        self,
+        run_uid: str,
+        key: str,
+        chunk_indices: Tuple[int, ...],
+        internal_slices: Tuple,
+    ) -> Tuple:
+        """
+        Convert chunk-local indices into a global slice for the Tiled API.
+
+        Parameters
+        ----------
+        run_uid : str
+            Run identifier.
+        key : str
+            Data key.
+        chunk_indices : tuple
+            Chunk index per dimension.
+        internal_slices : tuple
+            Slice within the chunk (from get_chunk_indices).
+
+        Returns
+        -------
+        tuple
+            Global slice tuple for data_accessor.read(slice=...).
+        """
+        shape, chunks = self.chunk_info[(run_uid, key)]
+        global_slice = []
+        for dim, (chunk_idx, internal_s) in enumerate(
+            zip(chunk_indices, internal_slices)
+        ):
+            chunk_start = sum(chunks[dim][:chunk_idx])
+            if isinstance(internal_s, int):
+                global_slice.append(chunk_start + internal_s)
+            elif isinstance(internal_s, slice):
+                start = internal_s.start if internal_s.start is not None else 0
+                stop = (
+                    internal_s.stop
+                    if internal_s.stop is not None
+                    else shape[dim]
+                )
+                global_slice.append(
+                    slice(
+                        chunk_start + start,
+                        chunk_start + stop,
+                        internal_s.step,
+                    )
+                )
+            else:
+                global_slice.append(internal_s)
+        return tuple(global_slice)
+
     def _fetch_chunk(
-        self, run, key: str, chunk_idx: Tuple[int, ...]
+        self, run, key: str, chunk_info: Dict
     ) -> Optional[np.ndarray]:
         """
         Worker function to fetch a single chunk from the data source.
@@ -165,44 +362,57 @@ class ChunkCache:
             The run object containing the data
         key : str
             The data key
-        chunk_idx : Tuple[int, ...]
-            The chunk indices
+        chunk_info : dict
+            Chunk metadata including chunk_indices and internal_slices.
 
         Returns
         -------
         Optional[np.ndarray]
             The chunk data if successful, None if failed
         """
+        chunk_idx = chunk_info["chunk_indices"]
+        internal_slices = chunk_info["internal_slices"]
         try:
+            run_uid = run.start["uid"]
+            global_slice = self._global_slice_from_chunk(
+                run_uid, key, chunk_idx, internal_slices
+            )
             print_debug(
                 "ChunkCache",
-                f"Fetching chunk {chunk_idx} for key {key}",
+                f"Fetching {key} chunk {chunk_idx} via global slice {global_slice}",
                 category="cache",
             )
-            # time.sleep(10)  # Simulate slow data fetching
 
             data_accessor = run["primary", "data", key]
-            chunks = self.chunk_info[(run.start["uid"], key)][1]
-
-            # Build slice tuple for data access
-            chunk_slices = []
-            for dim, idx in enumerate(chunk_idx):
-                chunk_start = sum(chunks[dim][:idx])
-                chunk_size = chunks[dim][idx]
-                chunk_slices.append(slice(chunk_start, chunk_start + chunk_size))
-
-            chunk_data = data_accessor[tuple(chunk_slices)]
+            chunk_data = data_accessor.read(slice=global_slice)
             if hasattr(chunk_data, "read"):
                 chunk_data = chunk_data.read()
+            chunk_data = np.asarray(chunk_data)
 
-            # Cache the chunk data if successful
             if chunk_data is not None:
-                self.cache_chunk(run.start["uid"], key, chunk_idx, chunk_data)
+                cache_key = (
+                    run_uid,
+                    key,
+                    chunk_idx,
+                    self._slice_cache_key(internal_slices),
+                )
+                nbytes = chunk_data.nbytes
+                if nbytes <= self.max_size:
+                    while (
+                        self.current_size + nbytes > self.max_size
+                        and not self._evict_lru()
+                    ):
+                        pass
+                    if self.current_size + nbytes <= self.max_size:
+                        self.slice_cache[cache_key] = chunk_data
+                        self.current_size += nbytes
+                        self._update_access(cache_key)
             print_debug(
                 "ChunkCache",
-                f"Chunk {chunk_idx} fetched successfully",
+                f"Chunk {chunk_idx} fetched shape {chunk_data.shape}",
                 category="cache",
             )
+            chunk_info["already_sliced"] = True
             return chunk_data
         except Exception as e:
             print(f"Error fetching chunk: {str(e)}")
@@ -238,20 +448,31 @@ class ChunkCache:
                 chunk_idx = chunk_info["chunk_indices"]
                 cache_key = (run.start["uid"], key, chunk_idx)
 
-                # Check cache first
+                slice_key = (
+                    run.start["uid"],
+                    key,
+                    chunk_idx,
+                    self._slice_cache_key(chunk_info["internal_slices"]),
+                )
+                if slice_key in self.slice_cache:
+                    result[chunk_idx] = self.slice_cache[slice_key]
+                    chunk_info["already_sliced"] = True
+                    self.hits += 1
+                    continue
+
                 if cache_key in self.chunks:
                     result[chunk_idx] = self.chunks[cache_key]
                     self.hits += 1
                     continue
 
-                # Check if there's an active request
                 if cache_key in self.active_requests:
                     futures_to_wait.append((chunk_idx, self.active_requests[cache_key]))
                     continue
 
-                # Start new fetch request
                 self.misses += 1
-                future = self.worker_pool.submit(self._fetch_chunk, run, key, chunk_idx)
+                future = self.worker_pool.submit(
+                    self._fetch_chunk, run, key, chunk_info
+                )
                 self.active_requests[cache_key] = future
                 futures_to_wait.append((chunk_idx, future))
                 chunks_to_fetch.append(chunk_info)
@@ -438,15 +659,14 @@ class ChunkCache:
             internal_slices = chunk_info["internal_slices"]
             chunk = chunks_data[chunk_idx]
 
-            # Convert integer indices to size-1 slices to preserve dimensions
-            slice_list = []
-            for s in internal_slices:
-                if isinstance(s, int):
-                    slice_list.append(slice(s, s + 1))
-                else:
-                    slice_list.append(s)
-
-            chunk = chunk[tuple(slice_list)]
+            if self._chunk_needs_internal_slice(chunk, chunk_info):
+                slice_list = []
+                for s in internal_slices:
+                    if isinstance(s, int):
+                        slice_list.append(slice(s, s + 1))
+                    else:
+                        slice_list.append(s)
+                chunk = chunk[tuple(slice_list)]
             processed_chunks[chunk_idx] = chunk
 
         chunks = list(processed_chunks.values())
@@ -484,7 +704,7 @@ class ChunkCache:
                         break
 
                 # If we found a varying dimension, concatenate along that axis
-                if varying_dim is not None:
+                if varying_dim is not None and varying_dim < results[0].ndim:
                     result = np.concatenate(results, axis=varying_dim)
                 else:
                     # If no dimension varies, just return the first result

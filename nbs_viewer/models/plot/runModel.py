@@ -1,10 +1,16 @@
-from typing import List, Optional, Set
-from qtpy.QtCore import QObject, Signal
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Optional, Tuple, Any
 
-from ..data.base import CatalogRun
+from qtpy.QtCore import QObject, Signal
 from asteval import Interpreter
 import numpy as np
+
+from ..data.base import CatalogRun
+from .plot_geometry import (
+    PlotBundle,
+    get_render_mode_hint,
+    prepare_1d_bundle,
+    prepare_2d_bundle,
+)
 from nbs_viewer.utils import print_debug
 
 
@@ -124,14 +130,44 @@ class RunModel(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    def get_plot_data(
+    def _fetch_plot_arrays(
         self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
-    ) -> Tuple[List[np.ndarray], np.ndarray]:
-        xlist, xnames, extra = self._run.get_dimension_axes(ykey, xkeys, slice_info)
+    ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
+        """
+        Load and normalize raw x/y arrays for plotting.
+
+        Parameters
+        ----------
+        xkeys : list of str
+            X axis keys.
+        ykey : str
+            Y data key.
+        norm_keys : list of str, optional
+            Normalization keys.
+        slice_info : tuple, optional
+            Slice specification.
+        transform : bool
+            Whether to apply the user transform expression.
+
+        Returns
+        -------
+        tuple
+            (xlist, axis_names, y)
+        """
+        xlist, axis_names, _extra = self._run.get_dimension_axes(
+            ykey, xkeys, slice_info
+        )
         y = self._run.getData(ykey, slice_info)
-        # We want to omit "empty" dimensions that have size 1, but not if we only have one data point
         if y.size > 1:
-            xlist = [x for x in xlist if x.size > 1]
+            filtered = [(x, n) for x, n in zip(xlist, axis_names) if x.size > 1]
+            if filtered:
+                xlist, axis_names = zip(*filtered)
+                xlist = list(xlist)
+                axis_names = list(axis_names)
+            else:
+                xlist = []
+                axis_names = []
+
         if norm_keys is not None:
             normlist = [
                 self._run.getData(norm_key, slice_info) for norm_key in norm_keys
@@ -140,19 +176,89 @@ class RunModel(QObject):
         else:
             norm = None
 
-        if norm is None:
-            pass
-        elif np.isscalar(norm):
-            y = y / norm
-        else:
-            temp_norm = norm
-            while temp_norm.ndim < y.ndim:
-                temp_norm = np.expand_dims(temp_norm, axis=-1)
-            y = y / temp_norm
+        if norm is not None:
+            if np.isscalar(norm):
+                y = y / norm
+            else:
+                temp_norm = norm
+                while temp_norm.ndim < y.ndim:
+                    temp_norm = np.expand_dims(temp_norm, axis=-1)
+                y = y / temp_norm
 
         if transform:
             xlist, y = self.transform_data(xlist, y)
+        return xlist, axis_names, y
+
+    def get_plot_data(
+        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
+    ) -> Tuple[List[np.ndarray], np.ndarray]:
+        """
+        Get plot x arrays and y data (backward-compatible API).
+
+        Parameters
+        ----------
+        xkeys : list of str
+            X axis keys.
+        ykey : str
+            Y data key.
+        norm_keys : list of str, optional
+            Normalization keys.
+        slice_info : tuple, optional
+            Slice specification.
+        transform : bool
+            Whether to apply transforms.
+
+        Returns
+        -------
+        tuple
+            (xlist, y)
+        """
+        xlist, _axis_names, y = self._fetch_plot_arrays(
+            xkeys, ykey, norm_keys, slice_info, transform
+        )
         return xlist, y
+
+    def get_plot_bundle(
+        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
+    ) -> PlotBundle:
+        """
+        Get a prepared PlotBundle with render mode and coordinates.
+
+        Parameters
+        ----------
+        xkeys : list of str
+            X axis keys.
+        ykey : str
+            Y data key.
+        norm_keys : list of str, optional
+            Normalization keys.
+        slice_info : tuple, optional
+            Slice specification.
+        transform : bool
+            Whether to apply transforms.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared plot payload for the view layer.
+        """
+        xlist, axis_names, y = self._fetch_plot_arrays(
+            xkeys, ykey, norm_keys, slice_info, transform
+        )
+        hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
+
+        if y.ndim == 1:
+            return prepare_1d_bundle(y, xlist, axis_names)
+        if y.ndim == 2:
+            bundle = prepare_2d_bundle(y, xlist, axis_names, render_mode_hint=hint)
+            print_debug(
+                "RunModel.get_plot_bundle",
+                f"{ykey} render_mode={bundle.render_mode} shape={y.shape}",
+                category="DEBUG_PLOTS",
+            )
+            return bundle
+
+        raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")
 
     def transform_data(
         self, xlist: List[np.ndarray], y: np.ndarray

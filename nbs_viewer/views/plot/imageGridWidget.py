@@ -15,11 +15,10 @@ from qtpy.QtCore import QTimer
 from ...utils import print_debug
 from ...models.plot.plotDataModel import PlotDataModel
 from .plotControl import PlotControls
-from .plotWidget import PlotWorker
+from .plot_worker import PlotWorker, retire_plot_worker
 
 
 import numpy as np
-import uuid
 
 
 class ImageGridWidget(QWidget):
@@ -50,7 +49,9 @@ class ImageGridWidget(QWidget):
 
         # Initialize state
         self.plotArtists = {}
-        self.workers = {}
+        self._worker_generations = {}
+        self._active_workers = {}
+        self._pending_workers = set()
         self._current_page = 1
         self._images_per_page = 9  # Start with 9 for testing
         self._total_images = 0
@@ -397,7 +398,9 @@ class ImageGridWidget(QWidget):
                 )
                 if plot_data.artist is None:
                     artist = self._create_artist(ax, image_shape)
-                    self._start_image_worker(plot_data, slice_info, artist)
+                    self._start_image_worker(
+                        plot_data, slice_info, artist, image_idx
+                    )
                 else:
                     print_debug(
                         "ImageGridWidget",
@@ -460,11 +463,49 @@ class ImageGridWidget(QWidget):
             self.plotArtists[key] = plot_data
         else:
             plot_data = self.plotArtists[key]
-            plot_data.data_changed.connect(self._start_image_worker)
-            plot_data.draw_requested.connect(self._handle_image_draw)
+            plot_data.update_data_info(indices=slice_info)
         return plot_data
 
-    def _start_image_worker(self, plot_data, slice_info=None, artist=None):
+    def _grid_worker_key(self, run_uid, image_idx):
+        """
+        Unique worker key for one cell in the image grid.
+
+        Parameters
+        ----------
+        run_uid : str
+            Run identifier.
+        image_idx : int
+            Image index along the scanned dimension.
+
+        Returns
+        -------
+        tuple
+            Key for worker generation and active-worker tracking.
+        """
+        return (run_uid, image_idx)
+
+    def _image_idx_for_plot_data(self, plot_data):
+        """
+        Look up the grid image index for a PlotDataModel.
+
+        Parameters
+        ----------
+        plot_data : PlotDataModel
+            Model stored in ``plotArtists``.
+
+        Returns
+        -------
+        int
+            Image index for this grid cell.
+        """
+        for key, model in self.plotArtists.items():
+            if model is plot_data:
+                return key[1]
+        raise KeyError(f"No grid index for plot data {plot_data.label}")
+
+    def _start_image_worker(
+        self, plot_data, slice_info=None, artist=None, image_idx=None
+    ):
         """
         Start a PlotWorker for loading image data.
 
@@ -481,35 +522,60 @@ class ImageGridWidget(QWidget):
         dimension = 2
         if slice_info is None:
             slice_info = plot_data._indices
-        # Create worker
-        worker_key = str(uuid.uuid4())
-        worker = PlotWorker(plot_data, slice_info, dimension, artist)
+        if image_idx is None:
+            image_idx = self._image_idx_for_plot_data(plot_data)
+
+        worker_key = self._grid_worker_key(plot_data._run.uid, image_idx)
+        generation = self._worker_generations.get(worker_key, 0) + 1
+        self._worker_generations[worker_key] = generation
+
+        old_worker = self._active_workers.pop(worker_key, None)
+        retire_plot_worker(old_worker, self._pending_workers)
+
+        worker = PlotWorker(
+            plot_data, slice_info, dimension, generation, artist
+        )
         worker.data_ready.connect(self._handle_image_data)
         worker.error_occurred.connect(self._handle_image_error)
-        worker.finished.connect(lambda: self._cleanup_worker(worker_key))
-
-        # Store worker reference and start it
-        self.workers[worker_key] = worker
+        worker.finished.connect(
+            lambda wk=worker_key, w=worker: self._on_image_worker_finished(wk, w)
+        )
+        self._active_workers[worker_key] = worker
         worker.start()
 
-    def _handle_image_data(self, x, y, plot_data, artist=None):
+    def _on_image_worker_finished(self, worker_key, worker):
+        if self._active_workers.get(worker_key) is worker:
+            self._active_workers.pop(worker_key, None)
+
+    def _handle_image_data(self, bundle, plot_data, artist=None, generation=0):
         """
         Handle image data when it's ready.
 
         Parameters
         ----------
-        x : list
-            X-axis data
-        y : np.ndarray
-            Y-axis data (image data)
+        bundle : PlotBundle
+            Prepared plot data.
         plot_data : PlotDataModel
-            The plot data model
+            The plot data model.
+        artist : Artist, optional
+            Existing matplotlib artist.
+        generation : int
+            Worker generation; stale results are ignored.
         """
+        worker_key = self._grid_worker_key(
+            plot_data._run.uid, self._image_idx_for_plot_data(plot_data)
+        )
+        if generation != self._worker_generations.get(worker_key):
+            print_debug(
+                "ImageGridWidget",
+                f"Stale worker gen={generation} for {plot_data.label}, skipping",
+            )
+            return
+        y = bundle.y
         print_debug(
             "ImageGridWidget", f"Received data for {plot_data.label}: shape {y.shape}"
         )
 
-        # Find the axis for this plot data
         if artist is None:
             artist = plot_data.artist
         else:
@@ -519,7 +585,6 @@ class ImageGridWidget(QWidget):
             return
 
         try:
-            # Plot the image
             if len(y.shape) == 2:
                 print_debug(
                     "ImageGridWidget", f"Successfully plotted {plot_data.label}"
@@ -528,7 +593,6 @@ class ImageGridWidget(QWidget):
                 artist.autoscale()
             else:
                 print_debug("ImageGridWidget", f"Error plotting image data: {y.shape}")
-            # Redraw the canvas
             self.draw()
 
         except Exception as e:
@@ -543,24 +607,12 @@ class ImageGridWidget(QWidget):
         """Handle errors from image workers."""
         print_debug("ImageGridWidget", f"Image worker error: {error_msg}")
 
-    def _cleanup_worker(self, key):
-        """Clean up a worker thread."""
-        if key in self.workers:
-            worker = self.workers.pop(key)
-            try:
-                worker.data_ready.disconnect()
-                worker.error_occurred.disconnect()
-                worker.quit()
-                worker.wait()
-                worker.deleteLater()
-            except Exception as e:
-                print_debug("ImageGridWidget", f"Error cleaning up worker: {e}")
-
     def _clear_grid(self):
         """Clear all images from the grid."""
-        # Stop any active workers
-        for key in list(self.workers.keys()):
-            self._cleanup_worker(key)
+        for worker in list(self._active_workers.values()):
+            retire_plot_worker(worker, self._pending_workers)
+        self._active_workers.clear()
+        self._worker_generations.clear()
 
         # Clear subplots
         if hasattr(self, "figure"):

@@ -1,0 +1,181 @@
+"""
+Matplotlib renderers for 1D lines, uniform 2D images, and non-uniform meshes.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple
+
+import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
+from matplotlib.lines import Line2D
+
+from ...models.plot.plot_geometry import PlotBundle
+
+
+class LineRenderer:
+    """Render 1D line plots."""
+
+    @staticmethod
+    def create(axes: Axes, bundle: PlotBundle, label: str) -> Line2D:
+        x = bundle.x_line if bundle.x_line is not None else np.arange(bundle.y.size)
+        return axes.plot(x, bundle.y, clip_on=True, label=label)[0]
+
+    @staticmethod
+    def update(artist: Line2D, bundle: PlotBundle) -> None:
+        x = bundle.x_line if bundle.x_line is not None else np.arange(bundle.y.size)
+        artist.set_data(x, bundle.y)
+
+    @staticmethod
+    def set_labels(axes: Axes, bundle: PlotBundle) -> None:
+        if bundle.axis_names:
+            axes.set_xlabel(bundle.axis_names[0])
+
+
+class ImageRenderer:
+    """Render uniform-grid 2D data with imshow."""
+
+    @staticmethod
+    def create(
+        axes: Axes,
+        fig: Figure,
+        bundle: PlotBundle,
+        label: str,
+        colorbar_state: dict,
+    ) -> Tuple[AxesImage, object]:
+        extent = bundle.extent
+        artist = axes.imshow(
+            bundle.y,
+            extent=extent,
+            aspect="auto",
+            origin="upper",
+            interpolation="nearest",
+            label=label,
+        )
+        cbar = fig.colorbar(artist, ax=axes)
+        cbar.set_label(label)
+        colorbar_state["colorbar"] = cbar
+        ImageRenderer.set_labels(axes, bundle)
+        return artist, cbar
+
+    @staticmethod
+    def update(
+        artist: AxesImage,
+        bundle: PlotBundle,
+        autoscale: bool,
+        colorbar_state: dict,
+    ) -> None:
+        artist.set_data(bundle.y)
+        if autoscale:
+            finite = bundle.y[np.isfinite(bundle.y)]
+            if finite.size > 0:
+                artist.set_clim(float(np.min(finite)), float(np.max(finite)))
+        cbar = colorbar_state.get("colorbar")
+        if cbar is not None and autoscale:
+            cbar.update_ticks()
+
+    @staticmethod
+    def set_labels(axes: Axes, bundle: PlotBundle) -> None:
+        if len(bundle.axis_names) >= 2:
+            axes.set_xlabel(bundle.axis_names[-1])
+            axes.set_ylabel(bundle.axis_names[-2])
+
+
+class MeshRenderer:
+    """Render non-uniform 2D data with pcolormesh."""
+
+    @staticmethod
+    def create(
+        axes: Axes,
+        fig: Figure,
+        bundle: PlotBundle,
+        label: str,
+        colorbar_state: dict,
+    ):
+        mesh = axes.pcolormesh(
+            bundle.mesh_x,
+            bundle.mesh_y,
+            bundle.y,
+            shading="flat",
+            label=label,
+        )
+        cbar = fig.colorbar(mesh, ax=axes)
+        cbar.set_label(label)
+        colorbar_state["colorbar"] = cbar
+        MeshRenderer.set_labels(axes, bundle)
+        MeshRenderer._set_limits(axes, bundle)
+        return mesh, cbar
+
+    @staticmethod
+    def update(
+        artist,
+        bundle: PlotBundle,
+        autoscale: bool,
+        colorbar_state: dict,
+    ) -> None:
+        artist.set_array(bundle.y.ravel())
+        if autoscale:
+            finite = bundle.y[np.isfinite(bundle.y)]
+            if finite.size > 0:
+                vmin = float(np.min(finite))
+                vmax = float(np.max(finite))
+                artist.set_clim(vmin=vmin, vmax=vmax)
+        MeshRenderer._set_limits(artist.axes, bundle)
+
+    @staticmethod
+    def _set_limits(axes: Axes, bundle: PlotBundle) -> None:
+        if bundle.mesh_x is not None and bundle.mesh_y is not None:
+            axes.set_xlim(np.min(bundle.mesh_x), np.max(bundle.mesh_x))
+            axes.set_ylim(np.min(bundle.mesh_y), np.max(bundle.mesh_y))
+
+    @staticmethod
+    def set_labels(axes: Axes, bundle: PlotBundle) -> None:
+        if len(bundle.axis_names) >= 2:
+            axes.set_xlabel(bundle.axis_names[-1])
+            axes.set_ylabel(bundle.axis_names[-2])
+
+
+def remove_2d_artists(
+    axes: Axes, colorbar_state: dict, fig: Optional[Figure] = None
+) -> None:
+    """
+    Remove 2D plot artists and colorbar from axes.
+
+    Parameters
+    ----------
+    axes : Axes
+        Target axes.
+    colorbar_state : dict
+        Mutable dict holding optional ``colorbar`` key.
+    fig : Figure, optional
+        Parent figure; when given, removes orphaned colorbar axes left on
+        the figure after switching plots or runs.
+    """
+    cbar = colorbar_state.pop("colorbar", None)
+    if cbar is not None:
+        try:
+            cbar.remove()
+        except Exception:
+            pass
+
+    for image in list(axes.images):
+        try:
+            image.remove()
+        except Exception:
+            pass
+
+    while axes.collections:
+        try:
+            axes.collections[0].remove()
+        except Exception:
+            break
+
+    if fig is not None:
+        for ax in list(fig.axes):
+            if ax is not axes:
+                try:
+                    ax.remove()
+                except Exception:
+                    pass
