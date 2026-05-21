@@ -61,10 +61,19 @@ class PlotWorker(QThread):
     data_ready = Signal(object, object, object, int)
     error_occurred = Signal(str)
 
-    def __init__(self, plot_data, slice_info, dimension, generation, artist=None):
+    def __init__(
+        self,
+        plot_data,
+        slice_info,
+        dimension,
+        generation,
+        artist=None,
+        cube_view_spec=None,
+    ):
         super().__init__()
         self.plot_data = plot_data
         self.slice_info = slice_info
+        self.cube_view_spec = cube_view_spec
         self.dimension = dimension
         self.generation = generation
         self.artist = artist
@@ -79,7 +88,9 @@ class PlotWorker(QThread):
             print_debug("PlotWorker", "Starting data fetch", category="DEBUG_PLOTS")
             t1 = ttime.time()
             bundle = self.plot_data.get_plot_bundle(
-                self.slice_info, self.dimension
+                self.slice_info,
+                self.dimension,
+                cube_view_spec=self.cube_view_spec,
             )
             if self.isInterruptionRequested():
                 print_debug(

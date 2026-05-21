@@ -10,6 +10,7 @@ from matplotlib.lines import Line2D
 from qtpy.QtCore import QSize, QTimer, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
+from ...models.plot.cube_view import CubeViewSpec
 from ...models.plot.plotDataModel import PlotDataModel
 from ...models.plot.plot_geometry import PlotBundle, RenderMode
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
@@ -57,6 +58,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._draw_pending = False
         self._dimension = 1
         self._slice = None
+        self._cube_view_spec = None
         self._legend_visible = True
         self._active_render_mode = None
         self._colorbar_state = {}
@@ -76,7 +78,9 @@ class MplCanvas(FigureCanvasQTAgg):
     def heightForWidth(self, width):
         return int(width / self.aspect_ratio)
 
-    def update_view_state(self, indices, dimension, validate=False):
+    def update_view_state(
+        self, indices, dimension, validate=False, cube_view_spec=None
+    ):
         print_debug(
             "MplCanvas.update_view_state",
             f"indices={indices}, dimension={dimension}, validate={validate}",
@@ -102,8 +106,10 @@ class MplCanvas(FigureCanvasQTAgg):
             self.clear()
             self._dimension = dimension
 
-        if self._slice != indices:
+        view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
+        if view_changed:
             self._slice = indices
+            self._cube_view_spec = cube_view_spec
             self.updatePlot()
 
         return True
@@ -122,6 +128,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 ykey,
                 norm_keys=norm_keys,
                 indices=self._slice,
+                cube_view_spec=self._cube_view_spec,
                 dimension=self._dimension,
             )
             plotData.data_changed.connect(self.plot_data)
@@ -133,7 +140,10 @@ class MplCanvas(FigureCanvasQTAgg):
             self.plot_data(plotData)
         else:
             self.plotArtists[key].update_data_info(
-                norm_keys=norm_keys, indices=self._slice, dimension=self._dimension
+                norm_keys=norm_keys,
+                indices=self._slice,
+                cube_view_spec=self._cube_view_spec,
+                dimension=self._dimension,
             )
 
     def _on_render_mode_changed(self, plot_data, mode):
@@ -194,7 +204,12 @@ class MplCanvas(FigureCanvasQTAgg):
             category="DEBUG_PLOTS",
         )
         worker = PlotWorker(
-            plotData, self._slice, self._dimension, generation, plotData.artist
+            plotData,
+            self._slice,
+            self._dimension,
+            generation,
+            plotData.artist,
+            cube_view_spec=self._cube_view_spec,
         )
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)

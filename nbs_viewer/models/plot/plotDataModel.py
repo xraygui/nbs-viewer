@@ -7,6 +7,7 @@ import numpy as np
 from nbs_viewer.utils import print_debug
 from matplotlib.image import AxesImage
 
+from .cube_view import CubeViewSpec
 from .plot_geometry import PlotBundle, RenderMode
 
 
@@ -38,6 +39,7 @@ class PlotDataModel(QObject):
         norm_keys=None,
         label=None,
         indices=None,
+        cube_view_spec=None,
         dimension=1,
         parent=None,
     ):
@@ -57,7 +59,9 @@ class PlotDataModel(QObject):
         label : str, optional
             Plot label override.
         indices : tuple, optional
-            Slice indices for multidimensional data.
+            Legacy slice indices for multidimensional data.
+        cube_view_spec : CubeViewSpec, optional
+            N-D cube view for slice, reduce, and axis assignment.
         dimension : int, optional
             Plot dimensionality (1 or 2).
         parent : QWidget, optional
@@ -71,6 +75,7 @@ class PlotDataModel(QObject):
         self._norm_keys = norm_keys
         self._label = label
         self._indices = indices
+        self._cube_view_spec = cube_view_spec
         self._dimension = dimension
         self.artist = None
         self.last_bundle: Optional[PlotBundle] = None
@@ -95,16 +100,20 @@ class PlotDataModel(QObject):
     def render_mode(self) -> Optional[RenderMode]:
         return self._render_mode
 
-    def get_plot_bundle(self, indices=None, dimension=None) -> PlotBundle:
+    def get_plot_bundle(
+        self, indices=None, dimension=None, cube_view_spec=None
+    ) -> PlotBundle:
         """
         Fetch and prepare plot data as a PlotBundle.
 
         Parameters
         ----------
         indices : tuple, optional
-            Slice indices for multidimensional data.
+            Legacy slice indices for multidimensional data.
         dimension : int, optional
             Plot dimension count (unused; kept for API compatibility).
+        cube_view_spec : CubeViewSpec, optional
+            N-D cube view specification.
 
         Returns
         -------
@@ -115,8 +124,13 @@ class PlotDataModel(QObject):
             "PlotDataModel.get_plot_bundle",
             f"getting plot data for {self.label}",
         )
+        spec = cube_view_spec if cube_view_spec is not None else self._cube_view_spec
         bundle = self._run.get_plot_bundle(
-            [self._xkey], self._ykey, self._norm_keys, indices
+            [self._xkey],
+            self._ykey,
+            self._norm_keys,
+            slice_info=indices,
+            cube_view_spec=spec,
         )
         self._update_render_mode(bundle)
         self.last_bundle = bundle
@@ -148,7 +162,9 @@ class PlotDataModel(QObject):
             self._render_mode = bundle.render_mode
             self.render_mode_changed.emit(self, bundle.render_mode)
 
-    def update_data_info(self, norm_keys=None, indices=None, dimension=None):
+    def update_data_info(
+        self, norm_keys=None, indices=None, cube_view_spec=None, dimension=None
+    ):
         changed = False
         if self.artist is None:
             changed = True
@@ -157,6 +173,9 @@ class PlotDataModel(QObject):
             changed = True
         if indices is not None and indices != self._indices:
             self._indices = indices
+            changed = True
+        if cube_view_spec is not None and cube_view_spec != self._cube_view_spec:
+            self._cube_view_spec = cube_view_spec
             changed = True
         if dimension is not None and dimension != self._dimension:
             self._dimension = dimension

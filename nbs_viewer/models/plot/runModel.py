@@ -5,6 +5,7 @@ from asteval import Interpreter
 import numpy as np
 
 from ..data.base import CatalogRun
+from .cube_view import CubeViewSpec, apply_cube_view
 from .plot_geometry import (
     PlotBundle,
     get_render_mode_hint,
@@ -131,7 +132,13 @@ class RunModel(QObject):
         self.data_changed.emit()
 
     def _fetch_plot_arrays(
-        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
+        self,
+        xkeys,
+        ykey,
+        norm_keys=None,
+        slice_info=None,
+        cube_view_spec=None,
+        transform=True,
     ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
         """
         Load and normalize raw x/y arrays for plotting.
@@ -145,7 +152,10 @@ class RunModel(QObject):
         norm_keys : list of str, optional
             Normalization keys.
         slice_info : tuple, optional
-            Slice specification.
+            Legacy slice specification.
+        cube_view_spec : CubeViewSpec, optional
+            N-D cube view (slice, reduce, axis order). Takes precedence over
+            ``slice_info`` when provided.
         transform : bool
             Whether to apply the user transform expression.
 
@@ -154,11 +164,21 @@ class RunModel(QObject):
         tuple
             (xlist, axis_names, y)
         """
+        if cube_view_spec is not None:
+            slice_info = cube_view_spec.to_load_slice_info()
+
         xlist, axis_names, _extra = self._run.get_dimension_axes(
             ykey, xkeys, slice_info
         )
         y = self._run.getData(ykey, slice_info)
-        if y.size > 1:
+        storage_axes = list(xlist)
+        storage_names = list(axis_names)
+
+        if cube_view_spec is not None:
+            y, xlist, axis_names = apply_cube_view(
+                y, storage_axes, storage_names, cube_view_spec
+            )
+        elif y.size > 1:
             filtered = [(x, n) for x, n in zip(xlist, axis_names) if x.size > 1]
             if filtered:
                 xlist, axis_names = zip(*filtered)
@@ -172,6 +192,11 @@ class RunModel(QObject):
             normlist = [
                 self._run.getData(norm_key, slice_info) for norm_key in norm_keys
             ]
+            if cube_view_spec is not None:
+                for i, norm in enumerate(normlist):
+                    normlist[i], _, _ = apply_cube_view(
+                        norm, storage_axes, storage_names, cube_view_spec
+                    )
             norm = np.prod(normlist, axis=0)
         else:
             norm = None
@@ -219,7 +244,13 @@ class RunModel(QObject):
         return xlist, y
 
     def get_plot_bundle(
-        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
+        self,
+        xkeys,
+        ykey,
+        norm_keys=None,
+        slice_info=None,
+        cube_view_spec=None,
+        transform=True,
     ) -> PlotBundle:
         """
         Get a prepared PlotBundle with render mode and coordinates.
@@ -234,6 +265,8 @@ class RunModel(QObject):
             Normalization keys.
         slice_info : tuple, optional
             Slice specification.
+        cube_view_spec : CubeViewSpec, optional
+            N-D cube view specification.
         transform : bool
             Whether to apply transforms.
 
@@ -243,7 +276,12 @@ class RunModel(QObject):
             Prepared plot payload for the view layer.
         """
         xlist, axis_names, y = self._fetch_plot_arrays(
-            xkeys, ykey, norm_keys, slice_info, transform
+            xkeys,
+            ykey,
+            norm_keys,
+            slice_info=slice_info,
+            cube_view_spec=cube_view_spec,
+            transform=transform,
         )
         hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
 
