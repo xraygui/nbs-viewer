@@ -93,7 +93,18 @@ class _SliceReduceRow(QWidget):
         self._update_value_labels(0)
 
     def _emit_changed(self):
+        self._apply_role_ui()
         self.changed.emit()
+
+    def _apply_role_ui(self):
+        """
+        Enable the index slider only when the role is Index.
+        """
+        is_index = self.get_role() == DimRole.INDEX
+        self.slider.setEnabled(is_index)
+        self.value_label.setEnabled(is_index)
+        for label, _, _ in self._assoc_labels:
+            label.setEnabled(is_index)
 
     def _on_slider_changed(self, value):
         self._update_value_labels(value)
@@ -116,7 +127,7 @@ class _SliceReduceRow(QWidget):
             self.role_combo.blockSignals(True)
             self.role_combo.setCurrentIndex(index)
             self.role_combo.blockSignals(False)
-        self.slider.setEnabled(role == DimRole.INDEX)
+        self._apply_role_ui()
 
     def get_role(self):
         return self.role_combo.currentData()
@@ -494,9 +505,6 @@ class PlotDimensionControl(QWidget):
                             run_model._run.get_dimension_axes(ykey, x_keys)
                         )
                         shape = tuple(run_model._run.getShape(ykey))
-                        y_dims, _ = run_model._run.get_dims(ykey, x_keys)
-                        if len(y_dims) == len(shape):
-                            axis_names = list(y_dims)
 
                         if (
                             max_shape is None

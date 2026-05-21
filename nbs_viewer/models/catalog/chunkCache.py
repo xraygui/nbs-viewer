@@ -643,6 +643,20 @@ class ChunkCache:
 
         return chunks_needed, shape
 
+    @staticmethod
+    def _coord_dim_to_array_axis(depth: int, internal_slices: Tuple) -> int:
+        """
+        Map a chunk-grid coordinate dimension to an array axis.
+
+        Integer indices in ``internal_slices`` collapse axes when data is read
+        from Tiled, so coordinate depth does not match array axis index.
+        """
+        return depth - sum(
+            1
+            for i in range(depth)
+            if not isinstance(internal_slices[i], slice)
+        )
+
     def _assemble_result(
         self,
         chunks_data: Dict[Tuple[int, ...], np.ndarray],
@@ -652,16 +666,16 @@ class ChunkCache:
         """
         Assemble chunks into final result array.
         """
-        # First apply internal slices to each chunk
+        internal_slices = chunks_needed[0]["internal_slices"]
+
         processed_chunks = {}
         for chunk_info in chunks_needed:
             chunk_idx = chunk_info["chunk_indices"]
-            internal_slices = chunk_info["internal_slices"]
             chunk = chunks_data[chunk_idx]
 
             if self._chunk_needs_internal_slice(chunk, chunk_info):
                 slice_list = []
-                for s in internal_slices:
+                for s in chunk_info["internal_slices"]:
                     if isinstance(s, int):
                         slice_list.append(slice(s, s + 1))
                     else:
@@ -675,10 +689,9 @@ class ChunkCache:
         def concat_chunks(chunks_list, coords_list, depth=0):
             if not chunks_list:
                 return None
-            if depth >= len(chunks_list[0].shape):
+            if depth >= len(coords_list[0]):
                 return chunks_list[0]
 
-            # Group chunks by their coordinate at current depth
             groups = {}
             for chunk, coord in zip(chunks_list, coords_list):
                 key = coord[depth]
@@ -687,7 +700,6 @@ class ChunkCache:
                 groups[key][0].append(chunk)
                 groups[key][1].append(coord)
 
-            # Process each group recursively
             results = []
             for key in sorted(groups.keys()):
                 group_chunks, group_coords = groups[key]
@@ -695,25 +707,19 @@ class ChunkCache:
                 if result is not None:
                     results.append(result)
 
-            if results:
-                # Find the first dimension that varies between chunks
-                varying_dim = None
-                for i in range(len(coords_list[0])):
-                    if len(set(coord[i] for coord in coords_list)) > 1:
-                        varying_dim = i
-                        break
+            if not results:
+                return None
+            if len(results) == 1:
+                return results[0]
 
-                # If we found a varying dimension, concatenate along that axis
-                if varying_dim is not None and varying_dim < results[0].ndim:
-                    result = np.concatenate(results, axis=varying_dim)
-                else:
-                    # If no dimension varies, just return the first result
-                    result = results[0]
-                return result
-            return None
+            array_axis = self._coord_dim_to_array_axis(depth, internal_slices)
+            if array_axis >= results[0].ndim:
+                array_axis = results[0].ndim - 1
+            return np.concatenate(results, axis=array_axis)
 
-        # Concatenate all chunks
         result = concat_chunks(chunks, coords)
+        if result is None:
+            raise ValueError("No chunk data to assemble")
         return result
 
     def get_chunks(
