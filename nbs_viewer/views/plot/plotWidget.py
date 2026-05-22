@@ -3,8 +3,9 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QPushButton,
+    QSplitter,
 )
-
+from qtpy.QtCore import Qt
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from .mpl_canvas import MplCanvas, NavigationToolbar
@@ -41,11 +42,24 @@ class PlotWidget(QWidget):
         else:
             self.debug_button = None
 
+        plot_pane = QWidget()
+        plot_pane_layout = QVBoxLayout(plot_pane)
+        plot_pane_layout.setContentsMargins(0, 0, 0, 0)
+        plot_pane_layout.setSpacing(0)
+        plot_pane_layout.addWidget(self.plot_toolbar)
+        plot_pane_layout.addWidget(self.plot_canvas, stretch=1)
+
+        self.plot_splitter = QSplitter(Qt.Vertical, self)
+        self.plot_splitter.setChildrenCollapsible(True)
+        self.plot_splitter.addWidget(plot_pane)
+        self.plot_splitter.addWidget(self.dimension_control)
+        self.plot_splitter.setStretchFactor(0, 1)
+        self.plot_splitter.setStretchFactor(1, 0)
+        self.plot_splitter.setSizes([500, 120])
+
         plot_layout = QVBoxLayout(self)
         plot_layout.setContentsMargins(0, 0, 0, 0)
-        plot_layout.addWidget(self.plot_toolbar)
-        plot_layout.addWidget(self.plot_canvas)
-        plot_layout.addWidget(self.dimension_control)
+        plot_layout.addWidget(self.plot_splitter)
         if self.debug_button:
             plot_layout.addWidget(self.debug_button)
 
