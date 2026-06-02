@@ -218,6 +218,7 @@ class PlotDataModel(QObject):
             Whether to show or hide the artist.
         """
         visible = visible and self._run._is_visible
+        self._visible = visible
         if self.artist is not None:
             print_debug(
                 "PlotDataModel.set_visible",
@@ -226,7 +227,6 @@ class PlotDataModel(QObject):
             )
             was_visible = self.artist.get_visible()
             if was_visible != visible:
-                self._visible = visible
                 self.artist.set_visible(visible)
                 self.visibility_changed.emit(self, visible)
                 self.autoscale_requested.emit()
@@ -234,7 +234,7 @@ class PlotDataModel(QObject):
         else:
             print_debug(
                 "PlotDataModel.set_visible",
-                f"{self.label} has no artist",
+                f"{self.label} has no artist (model._visible={visible})",
                 category="DEBUG_PLOTS",
             )
 

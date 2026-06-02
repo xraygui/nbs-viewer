@@ -146,15 +146,50 @@ class MplCanvas(FigureCanvasQTAgg):
                 dimension=self._dimension,
             )
 
+    def _canvas_is_2d(self):
+        """
+        Return whether the canvas is currently showing 2D image or mesh data.
+
+        Returns
+        -------
+        bool
+            True if active render mode or dimension indicates 2D plotting.
+        """
+        return (
+            self._active_render_mode in ("image", "mesh") or self.currentDim == 2
+        )
+
+    def _mode_is_2d(self, mode):
+        """
+        Return whether a render mode string describes 2D plotting.
+
+        Parameters
+        ----------
+        mode : str
+            Render mode name from :class:`PlotBundle`.
+
+        Returns
+        -------
+        bool
+            True for image or mesh modes.
+        """
+        return mode in ("image", "mesh")
+
     def _on_render_mode_changed(self, plot_data, mode):
         print_debug(
             "MplCanvas",
             f"Render mode changed to {mode} for {plot_data.label}",
             category="DEBUG_PLOTS",
         )
+        was_2d = self._canvas_is_2d()
+        will_be_2d = self._mode_is_2d(mode)
+        if was_2d == will_be_2d:
+            return
+
         if plot_data.artist is not None:
             plot_data.clear()
         self._reset_plot_axes()
+        self.updatePlot()
 
     def _on_run_removed(self, run):
         self.remove_run_data(run.uid)
@@ -184,6 +219,12 @@ class MplCanvas(FigureCanvasQTAgg):
                     plotDataModel.clear()
                 else:
                     plotDataModel.set_visible(True)
+                    artist = plotDataModel.artist
+                    if artist is None or (
+                        isinstance(artist, Line2D)
+                        and not self._line_artist_on_axes(artist)
+                    ):
+                        self.plot_data(plotDataModel)
             if self._autoscale:
                 self.autoscale()
             self.draw()
@@ -264,12 +305,57 @@ class MplCanvas(FigureCanvasQTAgg):
             artist = None
 
         plotData.set_artist(artist)
+        if bundle.render_mode == "line":
+            self._ensure_sibling_lines_on_axes(except_key=plotData._key)
         self.draw()
 
+    def _ensure_sibling_lines_on_axes(self, except_key=None):
+        """
+        Re-queue plot workers for visible line series not on the axes.
+
+        Covers races where another handler cleared lines but left plot models.
+        """
+        for key, model in self.plotArtists.items():
+            if key == except_key or not getattr(model, "_visible", False):
+                continue
+            if model.render_mode != "line":
+                continue
+            artist = model.artist
+            if artist is None or (
+                isinstance(artist, Line2D) and not self._line_artist_on_axes(artist)
+            ):
+                print_debug(
+                    "MplCanvas._ensure_sibling_lines_on_axes",
+                    f"Re-plotting {model.label}",
+                    category="DEBUG_PLOTS",
+                )
+                self.plot_data(model)
+
+    def _line_artist_on_axes(self, artist):
+        """
+        Return whether a line artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib line artist.
+
+        Returns
+        -------
+        bool
+            True if artist is a Line2D on ``self.axes``.
+        """
+        return isinstance(artist, Line2D) and artist.axes is self.axes
+
     def _render_line(self, bundle: PlotBundle, plotData, artist):
-        if isinstance(artist, Line2D):
+        if self._line_artist_on_axes(artist):
             LineRenderer.update(artist, bundle)
         else:
+            if isinstance(artist, Line2D):
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
             artist = LineRenderer.create(self.axes, bundle, plotData.label)
             self._artist_count += 1
         LineRenderer.set_labels(self.axes, bundle)
@@ -319,6 +405,9 @@ class MplCanvas(FigureCanvasQTAgg):
                 self.axes.lines[0].remove()
             except Exception:
                 break
+        for model in self.plotArtists.values():
+            if isinstance(model.artist, Line2D):
+                model.artist = None
         self._active_render_mode = None
 
     def _handle_plot_error(self, error_msg):
@@ -486,6 +575,107 @@ class MplCanvas(FigureCanvasQTAgg):
         print(f"Current Dimension: {self._dimension}")
         print(f"Active Render Mode: {self._active_render_mode}")
         print(f"Current Slice: {self._slice}")
+        print(f"plotArtists count: {len(self.plotArtists)}")
+        print(f"active workers: {list(self._active_workers.keys())}")
+
+        visible_keys = set()
+        for runModel in self.run_list_model.visible_models:
+            xkeys, ykeys, normkeys = runModel.get_selected_keys()
+            print(
+                f"  run {runModel.scan_id}: x={xkeys} y={ykeys} norm={normkeys}"
+            )
+            for xkey in xkeys:
+                for ykey in ykeys:
+                    visible_keys.add((xkey, ykey, runModel.uid))
+        print(f"expected visible_keys ({len(visible_keys)}):")
+        for key in sorted(visible_keys):
+            print(f"    {key}")
+
+        axes_line_ids = {id(line) for line in self.axes.get_lines()}
+
+        def _on_axes(artist):
+            return self._line_artist_on_axes(artist)
+        print("plotArtists:")
         for key, model in self.plotArtists.items():
-            print(f"  {key}: mode={model.render_mode}, bundle={model.last_bundle}")
+            artist = model.artist
+            artist_visible = None
+            mpl_label = None
+            on_axes = _on_axes(artist)
+            if artist is not None:
+                artist_visible = artist.get_visible()
+                mpl_label = artist.get_label() if hasattr(artist, "get_label") else None
+                if on_axes and id(artist) not in axes_line_ids:
+                    on_axes = False
+            print(
+                f"  {key}:"
+                f" label={model.label!r}"
+                f" mode={model.render_mode}"
+                f" in_visible_keys={key in visible_keys}"
+                f" model._visible={getattr(model, '_visible', '?')}"
+                f" artist={artist is not None}"
+                f" artist.get_visible()={artist_visible}"
+                f" on_axes={on_axes}"
+                f" mpl_label={mpl_label!r}"
+            )
+
+        lines = self.axes.get_lines()
+        print(f"axes.get_lines() ({len(lines)}):")
+        for i, line in enumerate(lines):
+            print(
+                f"  [{i}] label={line.get_label()!r}"
+                f" visible={line.get_visible()}"
+                f" id={id(line)}"
+            )
+
+        artist_ids = {
+            id(m.artist) for m in self.plotArtists.values() if m.artist is not None
+        }
+        orphan_lines = [
+            line
+            for line in lines
+            if id(line) not in artist_ids
+            and line.get_label()
+            and not line.get_label().startswith("_")
+        ]
+        if orphan_lines:
+            print(f"lines on axes not tracked in plotArtists ({len(orphan_lines)}):")
+            for line in orphan_lines:
+                print(
+                    f"  label={line.get_label()!r}"
+                    f" visible={line.get_visible()}"
+                    f" id={id(line)}"
+                )
+
+        missing_artists = [
+            key for key in visible_keys if key not in self.plotArtists
+        ]
+        if missing_artists:
+            print(f"visible_keys without plotArtists entry ({len(missing_artists)}):")
+            for key in sorted(missing_artists):
+                print(f"    {key}")
+
+        stale_artists = [
+            key
+            for key, model in self.plotArtists.items()
+            if key in visible_keys
+            and not self._line_artist_on_axes(model.artist)
+        ]
+        if stale_artists:
+            print(
+                f"visible_keys without line on axes ({len(stale_artists)}):"
+            )
+            for key in sorted(stale_artists):
+                model = self.plotArtists[key]
+                axes_ref = (
+                    None
+                    if model.artist is None
+                    else getattr(model.artist, "axes", None)
+                )
+                print(f"    {key} artist.axes={axes_ref}")
+
+        legend = self.axes.get_legend()
+        if legend is not None:
+            print(f"legend visible={legend.get_visible()}")
+        else:
+            print("legend: None")
         print("=== End MplCanvas Debug Info ===\n")
