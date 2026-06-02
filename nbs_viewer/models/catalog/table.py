@@ -472,6 +472,7 @@ class CatalogTableModel(QAbstractTableModel):
         if self._catalog_length <= 0:
             return
 
+        start_row, end_row = min(start_row, end_row), max(start_row, end_row)
         end_row = min(end_row, self._catalog_length - 1)
         if start_row > end_row:
             return
@@ -491,6 +492,7 @@ class CatalogTableModel(QAbstractTableModel):
             )
 
         # If we're in inverted mode, we need to translate the visible rows
+        """
         if self._invert:
             # Map the visible rows to their inverted positions
             inverted_rows = set()
@@ -502,7 +504,7 @@ class CatalogTableModel(QAbstractTableModel):
             # print(
             #     f"Mapped visible rows to inverted positions: {start_row}-{end_row} -> {min(inverted_rows)}-{max(inverted_rows)}"
             # )
-
+        """
         # If the visible rows haven't changed, don't do anything
         if new_visible_rows == self._visible_rows:
             print_debug(
