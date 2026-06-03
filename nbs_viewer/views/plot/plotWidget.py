@@ -8,6 +8,8 @@ from qtpy.QtWidgets import (
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from .mpl_canvas import MplCanvas, NavigationToolbar
+from .roi_panel import RoiPanel
+from .roi_controller import RoiController
 from nbs_viewer.utils import DEBUG_VARIABLES
 from ..common.panel import CollapsiblePanel
 
@@ -41,6 +43,20 @@ class PlotWidget(QWidget):
             can_expand=False,
             resizable=False,
         )
+        self.roi_panel = RoiPanel(self)
+        self.roi_panel_panel = CollapsiblePanel(
+            "Region",
+            self.roi_panel,
+            can_expand=False,
+            resizable=False,
+        )
+        self.roi_controller = RoiController(
+            self.plot_canvas,
+            self.dimension_control,
+            self.roi_panel,
+            self.run_list_model,
+            self,
+        )
         self.plot_controls = PlotControls(self.run_list_model)
 
         if DEBUG_VARIABLES["PRINT_DEBUG"]:
@@ -64,6 +80,7 @@ class PlotWidget(QWidget):
         plot_layout.setSpacing(0)
         plot_layout.addWidget(plot_pane, 1)
         plot_layout.addWidget(self.dimension_control_panel, 0)
+        plot_layout.addWidget(self.roi_panel_panel, 0)
         if self.debug_button:
             plot_layout.addWidget(self.debug_button, 0)
 

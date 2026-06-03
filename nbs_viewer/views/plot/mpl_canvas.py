@@ -7,12 +7,16 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+from matplotlib.widgets import RectangleSelector
 from qtpy.QtCore import QSize, QTimer, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from ...models.plot.cube_view import CubeViewSpec
 from ...models.plot.plotDataModel import PlotDataModel
 from ...models.plot.plot_geometry import PlotBundle, RenderMode
+from ...models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
+from ...models.plot.region import RectRegion
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
@@ -40,6 +44,20 @@ class NavigationToolbar(NavigationToolbar2QT):
 
 
 class MplCanvas(FigureCanvasQTAgg):
+    """
+    Matplotlib canvas for run list plots.
+
+    Signals
+    -------
+    roi_region_changed : object
+        Emitted with a :class:`RectRegion` or ``None`` when the ROI changes.
+    plot_view_updated : Signal
+        Emitted after the visible plot view is updated.
+    """
+
+    roi_region_changed = Signal(object)
+    plot_view_updated = Signal()
+
     def __init__(self, run_list_model, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
         self.axes = self.fig.add_subplot(111)
@@ -64,6 +82,11 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_render_mode = None
         self._colorbar_state = {}
         self.currentDim = 1
+        self._roi_region = None
+        self._roi_source_key = None
+        self._roi_selector = None
+        self._roi_overlay = None
+        self._roi_draw_enabled = False
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
@@ -191,6 +214,7 @@ class MplCanvas(FigureCanvasQTAgg):
             plot_data.clear()
         self._reset_plot_axes()
         self.updatePlot()
+        self.plot_view_updated.emit()
 
     def _on_run_removed(self, run):
         self.remove_run_data(run.uid)
@@ -308,6 +332,8 @@ class MplCanvas(FigureCanvasQTAgg):
         plotData.set_artist(artist)
         if bundle.render_mode == "line":
             self._ensure_sibling_lines_on_axes(except_key=plotData._key)
+        self._sync_roi_display()
+        self.plot_view_updated.emit()
         self.draw()
 
     def _ensure_sibling_lines_on_axes(self, except_key=None):
@@ -479,8 +505,268 @@ class MplCanvas(FigureCanvasQTAgg):
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
 
+    def get_single_visible_2d_model(self):
+        """
+        Return the sole visible 2D plot model, if exactly one exists.
+
+        Returns
+        -------
+        PlotDataModel or None
+        """
+        models = []
+        for model in self.plotArtists.values():
+            if not getattr(model, "_visible", False):
+                continue
+            artist = model.artist
+            if artist is None or not artist.get_visible():
+                continue
+            if model.render_mode in ("image", "mesh"):
+                models.append(model)
+        if len(models) == 1:
+            return models[0]
+        return None
+
+    def get_active_plot_bundle(self):
+        """
+        Return the plot bundle for the single visible 2D trace.
+
+        Returns
+        -------
+        PlotBundle or None
+        """
+        model = self.get_single_visible_2d_model()
+        if model is None:
+            return None
+        if model.last_bundle is not None:
+            return model.last_bundle
+        return model.get_plot_bundle(
+            self._slice, self._dimension, self._cube_view_spec
+        )
+
+    def get_view_frame(self) -> PlotViewFrame:
+        """
+        Return the view frame for the current 2D plot.
+
+        Returns
+        -------
+        PlotViewFrame
+
+        Raises
+        ------
+        ValueError
+            If no 2D bundle is available.
+        """
+        bundle = self.get_active_plot_bundle()
+        if bundle is None:
+            raise ValueError("No active 2D plot bundle for ROI")
+        return frame_from_bundle(bundle)
+
+    def region_controls_enabled(self):
+        """
+        Return whether ROI controls should be enabled.
+
+        Returns
+        -------
+        bool
+        """
+        return self._canvas_is_2d() and self.get_single_visible_2d_model() is not None
+
+    def is_roi_draw_enabled(self):
+        """
+        Return whether interactive ROI drawing is active.
+        """
+        return self._roi_draw_enabled
+
+    def get_roi_region(self):
+        """
+        Return the current rectangle region, if any.
+
+        Returns
+        -------
+        RectRegion or None
+        """
+        return self._roi_region
+
+    def set_roi_draw_enabled(self, enabled: bool):
+        """
+        Enable or disable interactive rectangle drawing.
+        """
+        enabled = bool(enabled)
+        if enabled == self._roi_draw_enabled:
+            return
+        self._roi_draw_enabled = enabled
+        if self._roi_draw_enabled:
+            self._remove_roi_overlay()
+            self._attach_roi_selector()
+        else:
+            if self._roi_selector is not None:
+                region = self._region_from_selector()
+                if region is not None:
+                    self._set_roi_region(region, update_overlay=True)
+            self._detach_roi_selector()
+
+    def clear_roi(self):
+        """
+        Remove the ROI selector, overlay, and stored region.
+        """
+        self._roi_region = None
+        self._roi_source_key = None
+        self._destroy_roi_selector()
+        self._remove_roi_overlay()
+        self.roi_region_changed.emit(None)
+        if self._roi_draw_enabled:
+            self._attach_roi_selector()
+        self.draw_idle()
+
+    def _region_from_selector(self):
+        """
+        Read the current rectangle from the active selector extents.
+        """
+        if self._roi_selector is None:
+            return None
+        x0, x1, y0, y1 = self._roi_selector.extents
+        return RectRegion(x0=x0, x1=x1, y0=y0, y1=y1).normalized()
+
+    def _set_roi_region(self, region: RectRegion, update_overlay=None):
+        model = self.get_single_visible_2d_model()
+        self._roi_region = region.normalized()
+        self._roi_source_key = model._key if model is not None else None
+        if update_overlay is None:
+            update_overlay = not self._roi_draw_enabled
+        if update_overlay:
+            self._update_roi_overlay()
+        self.roi_region_changed.emit(self._roi_region)
+
+    def _on_roi_selected(self, _eclick, _erelease):
+        region = self._region_from_selector()
+        if region is None:
+            return
+        self._set_roi_region(region, update_overlay=False)
+
+    def _destroy_roi_selector(self):
+        """
+        Fully remove the RectangleSelector and its artists from the axes.
+        """
+        selector = self._roi_selector
+        self._roi_selector = None
+        if selector is None:
+            return
+        try:
+            selector.disconnect_events()
+        except Exception:
+            pass
+        try:
+            selector.set_active(False)
+        except Exception:
+            pass
+        try:
+            selector.clear()
+        except Exception:
+            pass
+        try:
+            selector.set_visible(False)
+        except Exception:
+            pass
+        for artist in tuple(getattr(selector, "artists", ())):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        for handle_group in (
+            getattr(selector, "_corner_handles", None),
+            getattr(selector, "_edge_handles", None),
+            getattr(selector, "_center_handle", None),
+        ):
+            if handle_group is not None and hasattr(handle_group, "remove"):
+                try:
+                    handle_group.remove()
+                except Exception:
+                    pass
+        selection = getattr(selector, "_selection_artist", None)
+        if selection is not None:
+            try:
+                selection.remove()
+            except Exception:
+                pass
+
+    def _detach_roi_selector(self):
+        self._destroy_roi_selector()
+
+    def _attach_roi_selector(self):
+        self._destroy_roi_selector()
+        if not self.region_controls_enabled():
+            return
+
+        self._roi_selector = RectangleSelector(
+            self.axes,
+            self._on_roi_selected,
+            useblit=False,
+            button=[1],
+            minspanx=0,
+            minspany=0,
+            spancoords="data",
+            interactive=True,
+            props=dict(
+                facecolor="cyan",
+                edgecolor="cyan",
+                alpha=0.2,
+                fill=True,
+                linewidth=1.5,
+            ),
+        )
+        if self._roi_region is not None:
+            region = self._roi_region.normalized()
+            self._roi_selector.extents = (
+                region.x0,
+                region.x1,
+                region.y0,
+                region.y1,
+            )
+
+    def _remove_roi_overlay(self):
+        if self._roi_overlay is not None:
+            try:
+                self._roi_overlay.remove()
+            except Exception:
+                pass
+            self._roi_overlay = None
+
+    def _update_roi_overlay(self):
+        self._remove_roi_overlay()
+        if self._roi_region is None:
+            return
+        region = self._roi_region.normalized()
+        width = region.x1 - region.x0
+        height = region.y1 - region.y0
+        self._roi_overlay = Rectangle(
+            (region.x0, region.y0),
+            width,
+            height,
+            linewidth=1.5,
+            edgecolor="cyan",
+            facecolor="cyan",
+            alpha=0.15,
+            fill=True,
+        )
+        self.axes.add_patch(self._roi_overlay)
+
+    def _sync_roi_display(self):
+        model = self.get_single_visible_2d_model()
+        if self._roi_region is not None:
+            if model is None or (
+                self._roi_source_key is not None
+                and model._key != self._roi_source_key
+            ):
+                self.clear_roi()
+                return
+            if not self._roi_draw_enabled:
+                self._update_roi_overlay()
+        if self._roi_draw_enabled and self._roi_selector is None:
+            self._attach_roi_selector()
+
     def clear(self):
         print_debug("MplCanvas.clear", "Starting Clear", category="DEBUG_PLOTS")
+        self.clear_roi()
 
         for model_key in list(self._active_workers.keys()):
             worker = self._active_workers.pop(model_key, None)
