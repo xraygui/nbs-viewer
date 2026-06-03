@@ -22,6 +22,8 @@ from nbs_viewer.models.plot.cube_view import (
     spec_for_plot_ndim,
 )
 from nbs_viewer.utils import print_debug
+from ..common.panel import CollapsiblePanel
+
 
 
 class _SliceReduceRow(QWidget):
@@ -197,6 +199,9 @@ class PlotDimensionControl(QWidget):
             Parent widget, by default None.
         """
         super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        )
         self.run_list_model = run_list_model
         self.canvas = canvas
         self._slice_rows = []
@@ -221,7 +226,7 @@ class PlotDimensionControl(QWidget):
         self.layout = QVBoxLayout()
 
         self.dimension_container = QWidget()
-        dimension_layout = QVBoxLayout(self.dimension_container)
+        dimension_layout = QHBoxLayout(self.dimension_container)
         dimension_label = QLabel("Plot Dimensions:")
         self.dimension_spinbox = QSpinBox()
         self.dimension_spinbox.setMinimum(1)
@@ -234,6 +239,7 @@ class PlotDimensionControl(QWidget):
         self.layout.addWidget(self.dimension_container)
         self.dimension_container.hide()
 
+        """
         hint = QLabel(
             "Controls apply to the selected Y array shape. "
             "Use arrows to move dimensions between slice/reduce and plot axes. "
@@ -241,7 +247,7 @@ class PlotDimensionControl(QWidget):
         )
         hint.setWordWrap(True)
         self.layout.addWidget(hint)
-
+        """
         self.sliders_container = QWidget()
         self.sliders_layout = QVBoxLayout(self.sliders_container)
         self.layout.addWidget(self.sliders_container)
@@ -268,6 +274,7 @@ class PlotDimensionControl(QWidget):
             self.canvas.update_view_state(
                 None, 1, validate=False, cube_view_spec=None
             )
+            self._refresh_parent_panel()
             return
 
         y_shape, dim_names, axis_arrays, associated_data = shape_info
@@ -299,6 +306,7 @@ class PlotDimensionControl(QWidget):
             pos for pos, sa in enumerate(order) if y_shape[sa] > 1
         ]
         if not visible_positions:
+            self._refresh_parent_panel()
             return
 
         slice_header = QLabel("Slice / reduce")
@@ -357,6 +365,17 @@ class PlotDimensionControl(QWidget):
             self._plot_rows.append(row)
 
         self._apply_view_state()
+        self._refresh_parent_panel()
+
+    def _refresh_parent_panel(self):
+        """
+        Update the enclosing CollapsiblePanel after rows are rebuilt.
+        """
+        panel = self.parentWidget()
+        while panel is not None and not isinstance(panel, CollapsiblePanel):
+            panel = panel.parentWidget()
+        if panel is not None:
+            panel.refresh_expanded_size()
 
     def _build_slice_row(
         self,

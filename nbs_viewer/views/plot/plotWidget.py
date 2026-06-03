@@ -3,13 +3,14 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QPushButton,
-    QSplitter,
+    QSizePolicy,
 )
-from qtpy.QtCore import Qt
 from .plotDimensionWidget import PlotDimensionControl
 from .plotControl import PlotControls
 from .mpl_canvas import MplCanvas, NavigationToolbar
 from nbs_viewer.utils import DEBUG_VARIABLES
+from ..common.panel import CollapsiblePanel
+
 
 
 class PlotWidget(QWidget):
@@ -34,6 +35,12 @@ class PlotWidget(QWidget):
         self.dimension_control = PlotDimensionControl(
             self.run_list_model, self.plot_canvas, self
         )
+        self.dimension_control_panel = CollapsiblePanel(
+            "Dimension Control",
+            self.dimension_control,
+            can_expand=False,
+            resizable=False,
+        )
         self.plot_controls = PlotControls(self.run_list_model)
 
         if DEBUG_VARIABLES["PRINT_DEBUG"]:
@@ -49,19 +56,16 @@ class PlotWidget(QWidget):
         plot_pane_layout.addWidget(self.plot_toolbar)
         plot_pane_layout.addWidget(self.plot_canvas, stretch=1)
 
-        self.plot_splitter = QSplitter(Qt.Vertical, self)
-        self.plot_splitter.setChildrenCollapsible(True)
-        self.plot_splitter.addWidget(plot_pane)
-        self.plot_splitter.addWidget(self.dimension_control)
-        self.plot_splitter.setStretchFactor(0, 1)
-        self.plot_splitter.setStretchFactor(1, 0)
-        self.plot_splitter.setSizes([500, 120])
-
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         plot_layout = QVBoxLayout(self)
         plot_layout.setContentsMargins(0, 0, 0, 0)
-        plot_layout.addWidget(self.plot_splitter)
+        plot_layout.setSpacing(0)
+        plot_layout.addWidget(plot_pane, 1)
+        plot_layout.addWidget(self.dimension_control_panel, 0)
         if self.debug_button:
-            plot_layout.addWidget(self.debug_button)
+            plot_layout.addWidget(self.debug_button, 0)
 
     def _debug_plot_state(self):
         self.plot_canvas._debug_plot_state()

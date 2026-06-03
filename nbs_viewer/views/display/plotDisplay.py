@@ -6,6 +6,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QLabel,
     QFrame,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QIcon
@@ -69,7 +70,11 @@ class PlotDisplay(QWidget):
         # Create plot controls panel if available
         if hasattr(self.plot_widget, "plot_controls"):
             self.plot_controls_panel = CollapsiblePanel(
-                "Plot Controls", self.plot_widget.plot_controls
+                "Plot Controls",
+                self.plot_widget.plot_controls,
+                can_expand=True,
+                resizable=False,
+                initially_expanded=True,
             )
         else:
             self.plot_controls_panel = None
@@ -83,17 +88,18 @@ class PlotDisplay(QWidget):
     def setup_ui(self):
         # Create sidebar with stacked panels
         sidebar_widget = QWidget()
+        sidebar_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(2)
 
-        # Add panels in order
-        sidebar_layout.addWidget(self.run_panel)
+        sidebar_layout.addWidget(self.run_panel, 0)
         if self.plot_controls_panel:
-            sidebar_layout.addWidget(self.plot_controls_panel)
+            sidebar_layout.addWidget(self.plot_controls_panel, 1)
         if self.debug_panel:
-            sidebar_layout.addWidget(self.debug_panel)
-        sidebar_layout.addStretch()  # Push panels to top
+            sidebar_layout.addWidget(self.debug_panel, 0)
 
         # Create splitter for resizable panels
         self.splitter = QSplitter(Qt.Horizontal)

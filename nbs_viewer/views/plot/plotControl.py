@@ -33,15 +33,24 @@ class PlotControls(QWidget):
     def __init__(self, run_list_model, parent=None):
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
 
         # Create the tab widget
         self.tab_widget = QTabWidget()
+        self.tab_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
 
         # Create the plot control tab
         self.plot_control_tab = QWidget()
+        self.plot_control_tab.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         self.plot_control_layout = QVBoxLayout(self.plot_control_tab)
         self.plot_control_layout.setContentsMargins(0, 0, 0, 0)
-        self.plot_control_layout.setSpacing(1)  # Minimal spacing between panels
+        self.plot_control_layout.setSpacing(1)
 
         # Create the metadata tab
         self.metadata_tab = QWidget()
@@ -57,7 +66,7 @@ class PlotControls(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
-        self.layout.addWidget(self.tab_widget)
+        self.layout.addWidget(self.tab_widget, 1)
 
         self.setup_plot_control_tab()
 
@@ -95,48 +104,51 @@ class PlotControls(QWidget):
 
         # Create collapsible plot settings panel (fixed size)
         self.plot_settings_panel = CollapsiblePanel(
-            "Plot Settings", plot_settings_widget, can_expand=False
+            "Plot Settings", plot_settings_widget, can_expand=False, resizable=False
         )
-        self.plot_control_layout.addWidget(self.plot_settings_panel)
+        self.plot_control_layout.addWidget(self.plot_settings_panel, 0)
 
-        # Transform Panel (collapsible, fixed size)
         self.transform = TransformControl(self.run_list_model)
         self.transform_panel = CollapsiblePanel(
-            "Transform", self.transform, can_expand=False
+            "Transform", self.transform, can_expand=False, resizable=False
         )
-        self.plot_control_layout.addWidget(self.transform_panel)
+        self.plot_control_layout.addWidget(self.transform_panel, 0)
 
-        # Run Display Panel (collapsible, expanding, starts expanded)
         self.run_display = RunDisplayWidget(self.run_list_model)
         self.run_display_panel = CollapsiblePanel(
-            "Run Display", self.run_display, can_expand=True, initially_expanded=True
+            "Run Display",
+            self.run_display,
+            can_expand=True,
+            initially_expanded=True,
+            resizable=False,
         )
-        self.plot_control_layout.addWidget(self.run_display_panel)
+        self.plot_control_layout.addWidget(self.run_display_panel, 0)
 
-        # Using size-policy-only approach - no stretch factors needed
-
-        # Add stretchable spacer at the bottom to push headers to top when collapsed
         self.spacer = self.plot_control_layout.addStretch(0)
-        self._update_spacer_stretch()
+        self._update_panel_layout()
 
-    def _update_spacer_stretch(self):
-        """Update spacer stretch factor based on panel states."""
-        # Count collapsed panels
-        collapsed_count = 0
-        for panel in [
+    def _update_panel_layout(self):
+        """
+        Distribute vertical space: Run Display grows when expanded; spacer
+        only absorbs slack when every panel is collapsed.
+        """
+        panels = [
             self.plot_settings_panel,
             self.transform_panel,
             self.run_display_panel,
-        ]:
-            if panel.is_collapsed:
-                collapsed_count += 1
+        ]
+        collapsed_count = sum(1 for panel in panels if panel.is_collapsed)
 
-        # If all panels are collapsed, spacer should expand to push headers up
-        # If any panel is expanded, spacer should not expand (stretch=0)
-        total_panels = 3
-        spacer_stretch = 1 if collapsed_count == total_panels else 0
+        self.plot_control_layout.setStretchFactor(self.plot_settings_panel, 0)
+        self.plot_control_layout.setStretchFactor(self.transform_panel, 0)
+        run_stretch = 0 if self.run_display_panel.is_collapsed else 1
+        self.plot_control_layout.setStretchFactor(self.run_display_panel, run_stretch)
 
-        # Update spacer stretch factor by removing and re-adding it
+        spacer_stretch = 1 if collapsed_count == len(panels) else 0
         if self.spacer:
             self.plot_control_layout.removeItem(self.spacer)
             self.spacer = self.plot_control_layout.addStretch(spacer_stretch)
+
+    def _update_spacer_stretch(self):
+        """Called when a collapsible panel toggles; refresh layout stretch."""
+        self._update_panel_layout()

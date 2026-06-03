@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QStyle,
     QSizePolicy,
 )
-from qtpy.QtCore import Qt, QSize
+from qtpy.QtCore import Qt, QSize, Signal
 
 # Fallback for maximum Qt widget size (not exported by qtpy)
 QWIDGETSIZE_MAX = 16777215
@@ -18,6 +18,40 @@ RESIZE_HANDLE_HEIGHT = 2
 MIN_EXPANDABLE_CONTENT_HEIGHT = 80
 
 
+def _widget_layout(widget):
+    """
+    Return a QWidget's layout manager.
+
+    Some widgets store their layout in a ``layout`` attribute, which shadows
+    ``QWidget.layout()`` and breaks a normal ``widget.layout()`` call.
+
+    Parameters
+    ----------
+    widget : QWidget
+        Widget that may own a layout.
+
+    Returns
+    -------
+    QLayout or None
+        The widget's layout, if one exists.
+    """
+    if widget is None:
+        return None
+    try:
+        return QWidget.layout(widget)
+    except (TypeError, RuntimeError):
+        pass
+    stored = widget.__dict__.get("layout")
+    if stored is not None and hasattr(stored, "minimumSize"):
+        return stored
+    lay = getattr(widget, "layout", None)
+    if callable(lay):
+        return lay()
+    if lay is not None and hasattr(lay, "minimumSize"):
+        return lay
+    return None
+
+
 class CollapsiblePanel(QWidget):
     """
     A collapsible panel with a header and toggle functionality.
@@ -25,8 +59,16 @@ class CollapsiblePanel(QWidget):
     Similar to Photoshop's collapsible tool panels.
     """
 
+    collapsed_changed = Signal(bool)
+
     def __init__(
-        self, title, widget, parent=None, can_expand=False, initially_expanded=False
+        self,
+        title,
+        widget,
+        parent=None,
+        can_expand=False,
+        initially_expanded=False,
+        resizable=False,
     ):
         """
         Initialize a collapsible panel.
@@ -43,10 +85,13 @@ class CollapsiblePanel(QWidget):
             Whether this panel can expand to fill available space
         initially_expanded : bool, optional
             Whether the panel should start expanded (default: False)
+        resizable : bool, optional
+            Whether the user can drag a handle to resize the panel height
         """
         super().__init__(parent)
         self.widget = widget
         self.can_expand = can_expand
+        self.resizable = resizable
         self.is_collapsed = (
             not initially_expanded
         )  # Start collapsed or expanded based on parameter
@@ -128,11 +173,13 @@ class CollapsiblePanel(QWidget):
         # Consistent inner padding for all panels (left, top, right, bottom)
         content_layout.setContentsMargins(8, 6, 8, 6)
         content_layout.setSpacing(6)
-        content_layout.addWidget(self.widget)
+        stretch = 1 if self.can_expand else 0
+        content_layout.addWidget(self.widget, stretch)
         self._apply_content_size_constraints()
 
-        # Make panel resizable by adding a splitter handle
-        self._setup_resize_handle()
+        self.resize_handle = None
+        if self.resizable:
+            self._setup_resize_handle()
 
         # Set initial icon based on initial state
         if self.is_collapsed:
@@ -157,6 +204,11 @@ class CollapsiblePanel(QWidget):
             )
             self.widget.setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+            )
+        content_layout = self.content_container.layout()
+        if content_layout is not None:
+            content_layout.setStretchFactor(
+                self.widget, 1 if self.can_expand else 0
             )
 
     def _content_vertical_margins(self):
@@ -187,7 +239,7 @@ class CollapsiblePanel(QWidget):
         hint = self.widget.minimumSizeHint().height()
         if hint <= 0:
             hint = self.widget.sizeHint().height()
-        layout = self.widget.layout()
+        layout = _widget_layout(self.widget)
         if hint <= 0 and layout is not None:
             hint = layout.minimumSize().height()
         if self.can_expand:
@@ -203,9 +255,10 @@ class CollapsiblePanel(QWidget):
         int
             Minimum expanded panel height in pixels.
         """
+        handle = RESIZE_HANDLE_HEIGHT if self.resizable else 0
         return (
             HEADER_HEIGHT
-            + RESIZE_HANDLE_HEIGHT
+            + handle
             + self._content_vertical_margins()
             + self._minimum_content_height()
         )
@@ -228,14 +281,8 @@ class CollapsiblePanel(QWidget):
     def sizeHint(self):
         """Return appropriate size based on collapsed state and expandability."""
         if self.is_collapsed:
-            # Collapsed: just header height
-            return QSize(200, 24)  # Width doesn't matter much for vertical layout
-        else:
-            if self.can_expand:
-                # Expanded and can expand: return a generous preferred height
-                return QSize(200, 1000)
-            else:
-                return QSize(200, self._preferred_expanded_height())
+            return QSize(200, HEADER_HEIGHT)
+        return QSize(200, self._preferred_expanded_height())
 
     # Important: Avoid forcing the child's height. Let the layout manage it.
     # Over-managing sizes here fights Qt's layout negotiation and can leave
@@ -301,6 +348,7 @@ class CollapsiblePanel(QWidget):
         """Toggle the collapsed state."""
         self.is_collapsed = not self.is_collapsed
         self.update_collapsed_state()
+        self.collapsed_changed.emit(self.is_collapsed)
 
         # Force parent layout recalculation and update spacer
         self.updateGeometry()
@@ -327,27 +375,48 @@ class CollapsiblePanel(QWidget):
             self.setMinimumHeight(HEADER_HEIGHT)
             self.setMaximumHeight(HEADER_HEIGHT)
             self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            # Hide resize handle when collapsed
-            self.resize_handle.hide()
+            if self.resize_handle is not None:
+                self.resize_handle.hide()
         else:
             # Add content back to layout
-            self.panel_layout.insertWidget(1, self.content_container)  # After header
+            stretch = 1 if self.can_expand else 0
+            self.panel_layout.insertWidget(1, self.content_container, stretch)
             self.content_container.show()
             self._apply_content_size_constraints()
             # Use Qt standard icon for expanded state
             self.toggle_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
             min_height = self._minimum_expanded_height()
             preferred_height = self._preferred_expanded_height()
-            self.setMinimumHeight(min_height)
-            self.setMaximumHeight(QWIDGETSIZE_MAX)
-            # Set size policy and constraints based on expandability
             if self.can_expand:
                 self.setSizePolicy(
-                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                    QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
                 )
+                self.setMinimumHeight(min_height)
+                self.setMaximumHeight(QWIDGETSIZE_MAX)
             else:
                 self.setSizePolicy(
                     QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
                 )
-            self.setFixedHeight(max(preferred_height, min_height))
-            self.resize_handle.show()
+                self.setMinimumHeight(min_height)
+                self.setMaximumHeight(preferred_height)
+            if self.resize_handle is not None:
+                self.resize_handle.show()
+            self.refresh_expanded_size()
+
+    def refresh_expanded_size(self):
+        """
+        Recalculate height limits after the inner widget's content changes.
+
+        No-op when collapsed or when the panel is allowed to grow freely.
+        """
+        if self.is_collapsed or self.can_expand:
+            return
+        min_height = self._minimum_expanded_height()
+        preferred_height = self._preferred_expanded_height()
+        self.setMinimumHeight(min_height)
+        self.setMaximumHeight(preferred_height)
+        self.updateGeometry()
+        parent = self.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().invalidate()
+            parent.layout().activate()

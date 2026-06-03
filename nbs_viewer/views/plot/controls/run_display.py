@@ -93,8 +93,6 @@ class RunDisplayWidget(QWidget):
 
         header_layout.addLayout(row_1_layout)
 
-        header_layout.addStretch()
-
         # Run count label
         self._header_label = QLabel("No Runs Selected")
         row_2_layout.addWidget(self._header_label)
@@ -141,14 +139,7 @@ class RunDisplayWidget(QWidget):
         self._clear_button.clicked.connect(self._on_clear_clicked)
         self._clear_button.setEnabled(False)
         button_layout.addWidget(self._clear_button)
-        layout.addStretch(0)  # 0 means minimum stretch
-
-        # Add button layout with some spacing
-        layout.addSpacing(10)  # Add some space above buttons
         layout.addLayout(button_layout)
-        layout.addSpacing(10)  # Add some space below buttons
-
-        # Add vertical spacer with lower stretch factor
 
         self.setLayout(layout)
 
