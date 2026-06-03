@@ -52,6 +52,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_workers = {}
         self._pending_workers = set()
         self._last_2d_plot_key = None
+        self._last_2d_cube_view_spec = None
 
         self._artist_count = 0
         self._autoscale = True
@@ -364,12 +365,64 @@ class MplCanvas(FigureCanvasQTAgg):
         self.updateLegend()
         return artist
 
+    def _image_artist_on_axes(self, artist):
+        """
+        Return whether an image artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib image artist.
+
+        Returns
+        -------
+        bool
+            True if artist is an AxesImage on ``self.axes``.
+        """
+        return isinstance(artist, AxesImage) and artist.axes is self.axes
+
+    def _mesh_artist_on_axes(self, artist):
+        """
+        Return whether a mesh artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib collection artist.
+
+        Returns
+        -------
+        bool
+            True if artist is a collection on ``self.axes`` with mesh data.
+        """
+        return (
+            artist is not None
+            and artist.axes is self.axes
+            and hasattr(artist, "set_array")
+            and not isinstance(artist, (Line2D, AxesImage))
+        )
+
+    def _remove_figure_colorbars(self):
+        """
+        Remove the tracked colorbar and any extra axes on the figure.
+
+        Matplotlib keeps colorbar axes on the figure even when the
+        colorbar object is dropped from application state.
+        """
+        remove_2d_artists(self.axes, self._colorbar_state, self.fig)
+
     def _render_image(self, bundle: PlotBundle, plotData, artist):
-        if isinstance(artist, AxesImage):
+        if self._image_artist_on_axes(artist):
             ImageRenderer.update(
                 artist, bundle, self._autoscale, self._colorbar_state
             )
         else:
+            if artist is not None:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self._remove_figure_colorbars()
             artist, _cbar = ImageRenderer.create(
                 self.axes,
                 self.fig,
@@ -380,23 +433,37 @@ class MplCanvas(FigureCanvasQTAgg):
         return artist
 
     def _render_mesh(self, bundle: PlotBundle, plotData, artist):
-        artist, _cbar = MeshRenderer.create(
-            self.axes,
-            self.fig,
-            bundle,
-            plotData.label,
-            self._colorbar_state,
-        )
+        if self._mesh_artist_on_axes(artist):
+            MeshRenderer.update(
+                artist, bundle, self._autoscale, self._colorbar_state
+            )
+        else:
+            if artist is not None:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self._remove_figure_colorbars()
+            artist, _cbar = MeshRenderer.create(
+                self.axes,
+                self.fig,
+                bundle,
+                plotData.label,
+                self._colorbar_state,
+            )
         return artist
 
     def _prepare_2d_axes(self, plot_key):
+        spec_changed = self._cube_view_spec != self._last_2d_cube_view_spec
         if (
             self._last_2d_plot_key != plot_key
             or self._active_render_mode not in ("image", "mesh")
             or self.currentDim != 2
+            or spec_changed
         ):
             self._reset_plot_axes()
         self._last_2d_plot_key = plot_key
+        self._last_2d_cube_view_spec = self._cube_view_spec
 
     def _reset_plot_axes(self):
         remove_2d_artists(self.axes, self._colorbar_state, self.fig)
@@ -406,8 +473,7 @@ class MplCanvas(FigureCanvasQTAgg):
             except Exception:
                 break
         for model in self.plotArtists.values():
-            if isinstance(model.artist, Line2D):
-                model.artist = None
+            model.artist = None
         self._active_render_mode = None
 
     def _handle_plot_error(self, error_msg):
@@ -431,6 +497,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self._colorbar_state.clear()
         self._last_2d_plot_key = None
+        self._last_2d_cube_view_spec = None
         self.currentDim = 1
         self._active_render_mode = None
         self._artist_count = 0
