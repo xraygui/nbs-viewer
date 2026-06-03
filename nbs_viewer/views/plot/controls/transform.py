@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
 )
 
-from .base import PlotControlWidget
+from .base import PlotControlWidget, apply_minimum_control_heights
 
 
 class TransformControl(PlotControlWidget):
@@ -56,8 +56,7 @@ class TransformControl(PlotControlWidget):
         """
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
         super().__init__(run_list_model, parent)
-        # Set size policy for compact layout
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         # Set initial state from model
         transform_state = self.run_list_model.transform
         self._transform_box.setChecked(transform_state["enabled"])
@@ -106,6 +105,11 @@ class TransformControl(PlotControlWidget):
         row.addWidget(save_transform_btn)
 
         layout.addLayout(row)
+        apply_minimum_control_heights(
+            self._transform_combo,
+            self._transform_text_edit,
+            save_transform_btn,
+        )
 
     def _on_transform_state_changed(self) -> None:
         """Handle transform checkbox state change."""

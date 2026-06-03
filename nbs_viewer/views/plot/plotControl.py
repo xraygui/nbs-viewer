@@ -3,6 +3,7 @@ from qtpy.QtWidgets import (
     QWidget,
     QTabWidget,
     QHBoxLayout,
+    QSizePolicy,
 )
 
 from ..common.panel import CollapsiblePanel
@@ -84,6 +85,13 @@ class PlotControls(QWidget):
 
         plot_settings_layout.addLayout(settings_controls_layout)
         plot_settings_layout.addWidget(self.retain_selection)
+
+        plot_settings_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        )
+        settings_min_height = plot_settings_layout.minimumSize().height()
+        if settings_min_height > 0:
+            plot_settings_widget.setMinimumHeight(settings_min_height)
 
         # Create collapsible plot settings panel (fixed size)
         self.plot_settings_panel = CollapsiblePanel(

@@ -1,6 +1,22 @@
 from qtpy.QtWidgets import QWidget, QSizePolicy
 from qtpy.QtCore import Signal
 
+MIN_CONTROL_HEIGHT = 24
+
+
+def apply_minimum_control_heights(*widgets):
+    """
+    Apply a consistent minimum height to input controls.
+
+    Parameters
+    ----------
+    *widgets : QWidget
+        Widgets such as combo boxes, line edits, and push buttons.
+    """
+    for widget in widgets:
+        if widget is not None:
+            widget.setMinimumHeight(MIN_CONTROL_HEIGHT)
+
 
 class PlotControlWidget(QWidget):
     """

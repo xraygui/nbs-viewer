@@ -74,33 +74,39 @@ class RunDisplayWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header layout with run selection controls
-        header_layout = QHBoxLayout()
+        header_layout = QVBoxLayout()
 
+        row_1_layout = QHBoxLayout()
+        row_2_layout = QHBoxLayout()
         # Link runs checkbox
-        self._link_runs_box = QCheckBox("Link Runs")
-        self._link_runs_box.setChecked(True)
-        self._link_runs_box.clicked.connect(self._on_link_mode_changed)
-        header_layout.addWidget(self._link_runs_box)
 
         # Run selector dropdown
         self._run_selector = QComboBox()
         self._run_selector.setEnabled(False)  # Disabled in linked mode
         self._run_selector.currentIndexChanged.connect(self._on_run_selected)
-        header_layout.addWidget(self._run_selector)
+        row_1_layout.addWidget(self._run_selector)
+
+        self._link_runs_box = QCheckBox("Link Runs")
+        self._link_runs_box.setChecked(True)
+        self._link_runs_box.clicked.connect(self._on_link_mode_changed)
+        row_1_layout.addWidget(self._link_runs_box)
+
+        header_layout.addLayout(row_1_layout)
 
         header_layout.addStretch()
 
         # Run count label
         self._header_label = QLabel("No Runs Selected")
-        header_layout.addWidget(self._header_label)
+        row_2_layout.addWidget(self._header_label)
 
-        layout.addLayout(header_layout)
 
         # Show all checkbox
-        self._show_all_box = QCheckBox("Show All")
+        self._show_all_box = QCheckBox("Show All Keys")
         self._show_all_box.setChecked(False)
         self._show_all_box.clicked.connect(self._on_show_all_changed)
-        header_layout.addWidget(self._show_all_box)
+        row_2_layout.addWidget(self._show_all_box)
+        header_layout.addLayout(row_2_layout)
+        layout.addLayout(header_layout)
 
         # Grid for key selection
         self._grid = QGridLayout()
