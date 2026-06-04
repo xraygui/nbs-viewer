@@ -33,35 +33,30 @@ class RoiPanel(QWidget):
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
-        row1 = QHBoxLayout()
         self.draw_checkbox = QCheckBox("Draw region")
         self.draw_checkbox.toggled.connect(self.draw_toggled.emit)
-        row1.addWidget(self.draw_checkbox)
+        layout.addWidget(self.draw_checkbox)
 
         self.corners_label = QLabel("Corners: —")
         self.corners_label.setWordWrap(True)
-        row1.addWidget(self.corners_label)
-        
-        layout.addLayout(row1)
+        layout.addWidget(self.corners_label)
 
-        row2 = QHBoxLayout()
-        button_row = QWidget()
-        button_layout = QVBoxLayout(button_row)
-        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(4)
         self.clear_button = QPushButton("Clear ROI")
         self.clear_button.clicked.connect(self.clear_requested.emit)
-        button_layout.addWidget(self.clear_button)
-        row2.addWidget(button_row)
+        button_row.addWidget(self.clear_button)
 
         self.create_derivative_button = QPushButton("Create Derivative Plot")
         self.create_derivative_button.setEnabled(False)
         self.create_derivative_button.clicked.connect(
             self.create_derivative_requested.emit
         )
-        row2.addWidget(self.create_derivative_button)
-
-        layout.addLayout(row2)
+        button_row.addWidget(self.create_derivative_button)
+        layout.addLayout(button_row)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)

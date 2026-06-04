@@ -171,8 +171,8 @@ class CollapsiblePanel(QWidget):
         )
         content_layout = QVBoxLayout(self.content_container)
         # Consistent inner padding for all panels (left, top, right, bottom)
-        content_layout.setContentsMargins(8, 6, 8, 6)
-        content_layout.setSpacing(6)
+        content_layout.setContentsMargins(4, 2, 4, 3)
+        content_layout.setSpacing(3)
         stretch = 1 if self.can_expand else 0
         content_layout.addWidget(self.widget, stretch)
         self._apply_content_size_constraints()

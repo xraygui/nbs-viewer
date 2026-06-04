@@ -48,29 +48,38 @@ class _SliceReduceRow(QWidget):
         self._axis_data = axis_data
         self._associated_data = associated_data or {}
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(3)
 
         self.up_button = QPushButton("\u2191")
-        self.up_button.setFixedWidth(28)
+        self.up_button.setFixedWidth(24)
         self.up_button.clicked.connect(self.move_up_requested.emit)
-        layout.addWidget(self.up_button)
+        header_row.addWidget(self.up_button)
 
         self.down_button = QPushButton("\u2193")
-        self.down_button.setFixedWidth(28)
+        self.down_button.setFixedWidth(24)
         self.down_button.clicked.connect(self.move_down_requested.emit)
-        layout.addWidget(self.down_button)
+        header_row.addWidget(self.down_button)
 
         self.name_label = QLabel(f"{dim_name}:")
-        self.name_label.setMinimumWidth(120)
-        layout.addWidget(self.name_label)
+        header_row.addWidget(self.name_label)
 
         self.role_combo = QComboBox()
         for role in SLICE_ROLES:
             self.role_combo.addItem(ROLE_LABELS[role], role)
         self.role_combo.currentIndexChanged.connect(self._emit_changed)
-        layout.addWidget(self.role_combo)
+        header_row.addWidget(self.role_combo)
+        header_row.addStretch(1)
+        outer.addLayout(header_row)
 
+        slider_row = QHBoxLayout()
+        slider_row.setContentsMargins(0, 0, 0, 0)
+        slider_row.setSpacing(4)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(max(0, slider_max))
@@ -78,10 +87,10 @@ class _SliceReduceRow(QWidget):
         self.slider.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         )
-        layout.addWidget(self.slider)
+        slider_row.addWidget(self.slider, 1)
 
         self.value_label = QLabel()
-        layout.addWidget(self.value_label)
+        slider_row.addWidget(self.value_label)
 
         self._assoc_labels = []
         for arr, name in zip(
@@ -89,8 +98,9 @@ class _SliceReduceRow(QWidget):
             self._associated_data.get("names", []),
         ):
             assoc_label = QLabel()
-            layout.addWidget(assoc_label)
+            slider_row.addWidget(assoc_label)
             self._assoc_labels.append((assoc_label, arr, name))
+        outer.addLayout(slider_row)
 
         self._update_value_labels(0)
 
@@ -152,25 +162,25 @@ class _PlotAxisRow(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
 
         self.up_button = QPushButton("\u2191")
-        self.up_button.setFixedWidth(28)
+        self.up_button.setFixedWidth(24)
         self.up_button.clicked.connect(self.move_up_requested.emit)
         layout.addWidget(self.up_button)
 
         self.down_button = QPushButton("\u2193")
-        self.down_button.setFixedWidth(28)
+        self.down_button.setFixedWidth(24)
         self.down_button.clicked.connect(self.move_down_requested.emit)
         layout.addWidget(self.down_button)
 
         self.name_label = QLabel(f"{dim_name}:")
-        self.name_label.setMinimumWidth(120)
+        self.name_label.setMinimumWidth(88)
         layout.addWidget(self.name_label)
 
         self.plot_label = QLabel(plot_label)
-        self.plot_label.setMinimumWidth(72)
+        self.plot_label.setMinimumWidth(52)
         layout.addWidget(self.plot_label)
-        layout.addStretch(1)
 
 
 class PlotDimensionControl(QWidget):
@@ -224,9 +234,13 @@ class PlotDimensionControl(QWidget):
         Initialize the user interface with dimension controls.
         """
         self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(2)
 
         self.dimension_container = QWidget()
         dimension_layout = QHBoxLayout(self.dimension_container)
+        dimension_layout.setContentsMargins(0, 0, 0, 0)
+        dimension_layout.setSpacing(4)
         dimension_label = QLabel("Plot Dimensions:")
         self.dimension_spinbox = QSpinBox()
         self.dimension_spinbox.setMinimum(1)
@@ -250,6 +264,8 @@ class PlotDimensionControl(QWidget):
         """
         self.sliders_container = QWidget()
         self.sliders_layout = QVBoxLayout(self.sliders_container)
+        self.sliders_layout.setContentsMargins(0, 0, 0, 0)
+        self.sliders_layout.setSpacing(2)
         self.layout.addWidget(self.sliders_container)
 
         self.setLayout(self.layout)
@@ -310,7 +326,9 @@ class PlotDimensionControl(QWidget):
             return
 
         slice_header = QLabel("Slice / reduce")
-        slice_header.setStyleSheet("font-weight: bold;")
+        slice_header.setStyleSheet(
+            "font-weight: bold; font-size: 11px; margin: 0; padding: 0;"
+        )
         self.sliders_layout.addWidget(slice_header)
 
         n_slice = self._cube_view_spec.n_slice_axes
@@ -334,10 +352,13 @@ class PlotDimensionControl(QWidget):
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
+        separator.setFixedHeight(1)
         self.sliders_layout.addWidget(separator)
 
         plot_header = QLabel("Plot axes")
-        plot_header.setStyleSheet("font-weight: bold;")
+        plot_header.setStyleSheet(
+            "font-weight: bold; font-size: 11px; margin: 0; padding: 0;"
+        )
         self.sliders_layout.addWidget(plot_header)
 
         plot_labels = (
@@ -493,7 +514,10 @@ class PlotDimensionControl(QWidget):
 
     def get_shape_info(self):
         """
-        Get shape and dimension information from visible runs.
+        Get shape and dimension layout from visible runs for slice controls.
+
+        Axis coordinate arrays are index placeholders; real values are loaded
+        when the plot worker fetches data.
 
         Returns
         -------
@@ -520,10 +544,9 @@ class PlotDimensionControl(QWidget):
 
                 for ykey in y_keys:
                     try:
-                        axis_arrays, axis_names, associated_data = (
-                            run_model._run.get_dimension_axes(ykey, x_keys)
+                        shape, axis_names, axis_arrays, associated_data = (
+                            run_model._run.get_dimension_ui_info(ykey, x_keys)
                         )
-                        shape = tuple(run_model._run.getShape(ykey))
 
                         if (
                             max_shape is None

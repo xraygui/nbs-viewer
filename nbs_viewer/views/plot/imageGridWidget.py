@@ -186,11 +186,9 @@ class ImageGridWidget(QWidget):
         )
 
         try:
-            # Get dimension analysis
-            axis_arrays, axis_names, associated_data = (
-                run_model._run.get_dimension_axes(y_key, x_keys)
+            shape, axis_names, axis_arrays, associated_data = (
+                run_model._run.get_dimension_ui_info(y_key, x_keys)
             )
-            shape = tuple(len(arr) if len(arr) > 0 else 1 for arr in axis_arrays)
 
             print_debug("ImageGridWidget", f"Shape: {shape}")
             print_debug("ImageGridWidget", f"Dimension names: {axis_names}")

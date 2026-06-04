@@ -651,6 +651,41 @@ class CatalogRun(QObject):
             del result["dim_metadata"][old_dim]
         return result
 
+    def get_dimension_ui_info(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Dict[str, Any]]]:
+        """
+        Return shape and placeholder axis coordinates for dimension UI.
+
+        Uses :meth:`analyze_dimensions` only; does not call :meth:`getData` or
+        :meth:`getAxis`. Plot workers load real axis values when rendering.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+        xkeys : list of str
+            X axis keys.
+
+        Returns
+        -------
+        tuple
+            ``(shape, dimension_names, axis_arrays, associated_data)`` with
+            index placeholders per dimension and empty associated data.
+        """
+        dim_info = self.analyze_dimensions(ykey, xkeys)
+        shape = tuple(dim_info["effective_shape"])
+        dim_names = list(dim_info["ordered_dims"])
+        ndim = len(shape)
+        if len(dim_names) < ndim:
+            dim_names = dim_names + [
+                f"dim_{i}" for i in range(len(dim_names), ndim)
+            ]
+        elif len(dim_names) > ndim:
+            dim_names = dim_names[:ndim]
+        axis_arrays = [np.arange(s, dtype=float) for s in shape]
+        return shape, dim_names, axis_arrays, {}
+
     def get_dimension_axes(
         self, ykey: str, xkeys: List[str], slice_info: Optional[tuple] = None
     ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
