@@ -9,7 +9,7 @@ from qtpy.QtCore import QObject, QTimer
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 
 from .derivative_plot_dialog import DerivativePlotDialog
-from .derivative_preview_worker import DerivativePreviewWorker
+from .derivative_preview_canvas import DerivativePreviewWorker
 from .mpl_canvas import MplCanvas
 from .plotDimensionWidget import PlotDimensionControl
 from .roi_panel import RoiPanel
