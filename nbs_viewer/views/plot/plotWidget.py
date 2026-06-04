@@ -10,6 +10,7 @@ from .plotControl import PlotControls
 from .mpl_canvas import MplCanvas, NavigationToolbar
 from .roi_panel import RoiPanel
 from .roi_controller import RoiController
+from .derivative_controller import DerivativeController
 from nbs_viewer.utils import DEBUG_VARIABLES
 from ..common.panel import CollapsiblePanel
 
@@ -55,6 +56,12 @@ class PlotWidget(QWidget):
             self.dimension_control,
             self.roi_panel,
             self.run_list_model,
+            self,
+        )
+        self.derivative_controller = DerivativeController(
+            self.plot_canvas,
+            self.dimension_control,
+            self.roi_panel,
             self,
         )
         self.plot_controls = PlotControls(self.run_list_model)
