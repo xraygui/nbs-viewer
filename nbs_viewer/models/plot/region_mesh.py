@@ -182,6 +182,131 @@ def _cell_y_bounds_mesh(
     return y_lo, y_hi
 
 
+def _mask_from_data_rect_image(
+    frame: PlotViewFrame,
+    x0: float,
+    x1: float,
+    y0: float,
+    y1: float,
+) -> np.ndarray:
+    """
+    Build a rectangular mask on a uniform ``image`` grid using index bounds.
+    """
+    left, right, bottom, top = _data_limits(frame)
+    ny, nx = frame.shape
+    dx = (right - left) / nx if nx else 1.0
+    dy = (top - bottom) / ny if ny else 1.0
+    col0 = int(np.floor((x0 - left) / dx)) if dx else 0
+    col1 = int(np.ceil((x1 - left) / dx)) if dx else nx
+    row0 = int(np.floor((y0 - bottom) / dy)) if dy else 0
+    row1 = int(np.ceil((y1 - bottom) / dy)) if dy else ny
+    col0 = max(0, min(col0, nx))
+    col1 = max(0, min(col1, nx))
+    row0 = max(0, min(row0, ny))
+    row1 = max(0, min(row1, ny))
+    mask = np.zeros((ny, nx), dtype=bool)
+    if row1 > row0 and col1 > col0:
+        mask[row0:row1, col0:col1] = True
+    return mask
+
+
+def _mesh_separable_edge_grids(
+    frame: PlotViewFrame,
+) -> Tuple[np.ndarray, np.ndarray] | None:
+    """
+    Return 1D X and Y edge arrays when the mesh is a separable grid.
+    """
+    mesh_x = frame.mesh_x
+    mesh_y = frame.mesh_y
+    if mesh_x is None or mesh_y is None:
+        return None
+    ny, nx = frame.shape
+    if mesh_x.shape != mesh_y.shape:
+        return None
+    if mesh_x.shape == (ny + 1, nx + 1):
+        x_edges = np.asarray(mesh_x[0, :], dtype=float)
+        y_edges = np.asarray(mesh_y[:, 0], dtype=float)
+        if not (
+            np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
+            and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
+        ):
+            return None
+        return x_edges, y_edges
+    if mesh_x.shape != (ny, nx):
+        return None
+    if not (
+        np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
+        and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
+    ):
+        return None
+    x_edges = np.asarray(mesh_x[0, :], dtype=float)
+    y_edges = np.asarray(mesh_y[:, 0], dtype=float)
+    return x_edges, y_edges
+
+
+def _mask_from_data_rect_mesh_separable(
+    frame: PlotViewFrame,
+    x0: float,
+    x1: float,
+    y0: float,
+    y1: float,
+) -> np.ndarray | None:
+    """
+    Vectorized rectangular mask for separable ``pcolormesh`` edge grids.
+    """
+    edges = _mesh_separable_edge_grids(frame)
+    if edges is None:
+        return None
+    x_edges, y_edges = edges
+    ny, nx = frame.shape
+    if x_edges.size == nx + 1 and y_edges.size == ny + 1:
+        x_lo = x_edges[:-1]
+        x_hi = x_edges[1:]
+        y_lo = y_edges[:-1]
+        y_hi = y_edges[1:]
+    elif x_edges.size == nx and y_edges.size == ny:
+        x_lo = x_hi = x_edges
+        y_lo = y_hi = y_edges
+    else:
+        return None
+    return (
+        (x_lo[None, :] <= x1)
+        & (x_hi[None, :] >= x0)
+        & (y_lo[:, None] <= y1)
+        & (y_hi[:, None] >= y0)
+    )
+
+
+def _mask_from_data_rect_mesh_bbox(
+    frame: PlotViewFrame,
+    x0: float,
+    x1: float,
+    y0: float,
+    y1: float,
+) -> np.ndarray:
+    """
+    Build a mesh mask by scanning only a row/column bounding box.
+    """
+    mesh_x = frame.mesh_x
+    mesh_y = frame.mesh_y
+    ny, nx = frame.shape
+    row_hit = (np.nanmax(mesh_y, axis=1) >= y0) & (np.nanmin(mesh_y, axis=1) <= y1)
+    col_hit = (np.nanmax(mesh_x, axis=0) >= x0) & (np.nanmin(mesh_x, axis=0) <= x1)
+    rows = np.flatnonzero(row_hit)
+    cols = np.flatnonzero(col_hit)
+    mask = np.zeros((ny, nx), dtype=bool)
+    if rows.size == 0 or cols.size == 0:
+        return mask
+    for row in rows:
+        for col in cols:
+            cx0, cx1, cy0, cy1 = _mesh_cell_bounds(frame, int(row), int(col))
+            if _intervals_overlap(x0, x1, cx0, cx1) and _intervals_overlap(
+                y0, y1, cy0, cy1
+            ):
+                mask[row, col] = True
+    return mask
+
+
 def mask_from_data_rect(
     frame: PlotViewFrame,
     x0: float,
@@ -207,21 +332,12 @@ def mask_from_data_rect(
         Boolean mask with shape ``frame.shape``.
     """
     x0, x1, y0, y1 = _normalize_rect(x0, x1, y0, y1)
-    ny, nx = frame.shape
-    mask = np.zeros((ny, nx), dtype=bool)
-    get_bounds = (
-        _image_cell_bounds
-        if frame.render_mode == "image"
-        else _mesh_cell_bounds
-    )
-    for row in range(ny):
-        for col in range(nx):
-            cx0, cx1, cy0, cy1 = get_bounds(frame, row, col)
-            if _intervals_overlap(x0, x1, cx0, cx1) and _intervals_overlap(
-                y0, y1, cy0, cy1
-            ):
-                mask[row, col] = True
-    return mask
+    if frame.render_mode == "image":
+        return _mask_from_data_rect_image(frame, x0, x1, y0, y1)
+    fast = _mask_from_data_rect_mesh_separable(frame, x0, x1, y0, y1)
+    if fast is not None:
+        return fast
+    return _mask_from_data_rect_mesh_bbox(frame, x0, x1, y0, y1)
 
 
 def mask_from_axis_slice(

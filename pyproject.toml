@@ -21,7 +21,7 @@ dependencies = [
 "databroker[client,server,back-compat]",
 "bluesky-tiled-plugins",
 "asteval",
-"tomli >= 2.0.0; python_version < '3.11'",
+"tomli >= 2.0.0; python_version < '3.11'", "pytest>=9.0.3,<10",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

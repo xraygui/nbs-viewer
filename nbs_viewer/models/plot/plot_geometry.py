@@ -277,8 +277,8 @@ def _build_mesh_grids(
     """
     ny, nx = y.shape
     if len(x_axes) >= 2:
-        row_axis = np.asarray(x_axes[-2])
-        col_axis = np.asarray(x_axes[-1])
+        row_axis = np.asarray(x_axes[0])
+        col_axis = np.asarray(x_axes[1])
         if row_axis.ndim == 2 and col_axis.ndim == 2:
             return col_axis, row_axis
         if row_axis.ndim == 2:
@@ -404,15 +404,17 @@ def prepare_2d_bundle(
 
     y_mesh = y.T
     if len(x_axes) >= 2:
-        mesh_axes = [x_axes[-1], x_axes[-2]]
+        mesh_axes = [np.asarray(x_axes[1]), np.asarray(x_axes[0])]
+        mesh_names = [names[1], names[0]]
     else:
         mesh_axes = list(x_axes)
+        mesh_names = names[-2:]
     mesh_x, mesh_y = _build_mesh_grids(y_mesh, mesh_axes)
     return PlotBundle(
         ndim=2,
         y=y_mesh,
         render_mode="mesh",
-        axis_names=names[-2:],
+        axis_names=mesh_names,
         mesh_x=mesh_x,
         mesh_y=mesh_y,
     )

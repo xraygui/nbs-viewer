@@ -24,7 +24,7 @@ class PlotViewFrame:
     render_mode : RenderMode
         ``image`` or ``mesh``.
     axis_names : list of str
-        Names for plot Y then plot X (vertical, horizontal).
+        Names for storage dimension 0 (rows) then dimension 1 (columns).
     plot_x_dim : int
         Storage axis index mapped to the horizontal matplotlib axis.
     plot_y_dim : int
@@ -51,8 +51,8 @@ class PlotViewFrame:
         """
         Return the axis name for the horizontal plot dimension.
         """
-        if len(self.axis_names) >= 2:
-            return self.axis_names[-1]
+        if len(self.axis_names) > self.plot_x_dim:
+            return self.axis_names[self.plot_x_dim]
         return "x"
 
     @property
@@ -60,8 +60,8 @@ class PlotViewFrame:
         """
         Return the axis name for the vertical plot dimension.
         """
-        if len(self.axis_names) >= 2:
-            return self.axis_names[-2]
+        if len(self.axis_names) > self.plot_y_dim:
+            return self.axis_names[self.plot_y_dim]
         return "y"
 
     @property
@@ -77,6 +77,27 @@ class PlotViewFrame:
         Return the number of cells along plot Y.
         """
         return self.shape[self.plot_y_dim]
+
+
+def _infer_mesh_plot_dims(
+    mesh_x: np.ndarray, mesh_y: np.ndarray
+) -> Tuple[int, int]:
+    """
+    Infer which storage axis maps to matplotlib horizontal (X) and vertical (Y).
+    """
+    mesh_x = np.asarray(mesh_x, dtype=float)
+    mesh_y = np.asarray(mesh_y, dtype=float)
+    x_span_col = 0.0
+    x_span_row = 0.0
+    if mesh_x.shape[1] > 1:
+        x_span_col = float(np.nanmax(np.abs(np.diff(mesh_x, axis=1))))
+    if mesh_x.shape[0] > 1:
+        x_span_row = float(np.nanmax(np.abs(np.diff(mesh_x, axis=0))))
+    if x_span_col >= x_span_row:
+        plot_x_dim = 1
+    else:
+        plot_x_dim = 0
+    return plot_x_dim, 1 - plot_x_dim
 
 
 def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
@@ -112,21 +133,30 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
     if bundle.render_mode == "image":
         plot_x_dim = 1
         plot_y_dim = 0
-        return PlotViewFrame(
-            shape=shape,
-            render_mode="image",
-            axis_names=names[-2:],
-            plot_x_dim=plot_x_dim,
-            plot_y_dim=plot_y_dim,
-            extent=bundle.extent,
+        axis_names = names[-2:]
+    else:
+        plot_x_dim, plot_y_dim = _infer_mesh_plot_dims(
+            bundle.mesh_x, bundle.mesh_y
         )
+        axis_names = list(bundle.axis_names)
+        if len(axis_names) < 2:
+            axis_names = names[-2:]
 
     return PlotViewFrame(
         shape=shape,
-        render_mode="mesh",
-        axis_names=names[-2:],
-        plot_x_dim=0,
-        plot_y_dim=1,
-        mesh_x=np.asarray(bundle.mesh_x, dtype=float),
-        mesh_y=np.asarray(bundle.mesh_y, dtype=float),
+        render_mode=bundle.render_mode,
+        axis_names=axis_names,
+        plot_x_dim=plot_x_dim,
+        plot_y_dim=plot_y_dim,
+        extent=bundle.extent if bundle.render_mode == "image" else None,
+        mesh_x=(
+            np.asarray(bundle.mesh_x, dtype=float)
+            if bundle.render_mode == "mesh"
+            else None
+        ),
+        mesh_y=(
+            np.asarray(bundle.mesh_y, dtype=float)
+            if bundle.render_mode == "mesh"
+            else None
+        ),
     )

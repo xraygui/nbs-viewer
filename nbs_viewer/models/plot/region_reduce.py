@@ -58,6 +58,32 @@ def _profile_axis_index(frame: PlotViewFrame, profile_axis: ProfileAxis) -> int:
     raise ValueError(f"Unknown profile axis {profile_axis!r}")
 
 
+def _profile_coords(
+    frame: PlotViewFrame, profile_axis: ProfileAxis, n_profile: int
+) -> np.ndarray:
+    """
+    Return profile bin-center coordinates along one plot axis.
+    """
+    if frame.render_mode == "mesh":
+        from .region_mesh import _mesh_separable_edge_grids
+
+        edges = _mesh_separable_edge_grids(frame)
+        if edges is not None:
+            x_edges, y_edges = edges
+            axis_edges = x_edges if profile_axis == "plot_x" else y_edges
+            if axis_edges.size == n_profile + 1:
+                return 0.5 * (axis_edges[:-1] + axis_edges[1:])
+            if axis_edges.size == n_profile:
+                return np.asarray(axis_edges, dtype=float)
+    return np.array(
+        [
+            _coord_for_profile_index(frame, profile_axis, k)
+            for k in range(n_profile)
+        ],
+        dtype=float,
+    )
+
+
 def _coord_for_profile_index(
     frame: PlotViewFrame, profile_axis: ProfileAxis, index: int
 ) -> float:
@@ -141,10 +167,7 @@ def apply_region_profile(
                     np.nansum(col_vals) if op == "sum" else np.nanmean(col_vals)
                 )
 
-    coords = np.array(
-        [_coord_for_profile_index(frame, profile_axis, k) for k in range(n_profile)],
-        dtype=float,
-    )
+    coords = _profile_coords(frame, profile_axis, n_profile)
     if profile_axis == "plot_x":
         name = frame.plot_x_name
     else:

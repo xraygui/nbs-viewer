@@ -13,6 +13,7 @@ from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 
 from ...models.plot.plot_geometry import PlotBundle
+from ...models.plot.plot_view_frame import frame_from_bundle
 
 
 class LineRenderer:
@@ -78,9 +79,9 @@ class ImageRenderer:
 
     @staticmethod
     def set_labels(axes: Axes, bundle: PlotBundle) -> None:
-        if len(bundle.axis_names) >= 2:
-            axes.set_xlabel(bundle.axis_names[-1])
-            axes.set_ylabel(bundle.axis_names[-2])
+        frame = frame_from_bundle(bundle)
+        axes.set_xlabel(frame.plot_x_name)
+        axes.set_ylabel(frame.plot_y_name)
 
 
 class MeshRenderer:
@@ -132,9 +133,9 @@ class MeshRenderer:
 
     @staticmethod
     def set_labels(axes: Axes, bundle: PlotBundle) -> None:
-        if len(bundle.axis_names) >= 2:
-            axes.set_xlabel(bundle.axis_names[-1])
-            axes.set_ylabel(bundle.axis_names[-2])
+        frame = frame_from_bundle(bundle)
+        axes.set_xlabel(frame.plot_x_name)
+        axes.set_ylabel(frame.plot_y_name)
 
 
 def remove_2d_artists(

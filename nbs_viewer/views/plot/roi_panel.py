@@ -1,5 +1,6 @@
 from qtpy.QtWidgets import (
     QVBoxLayout,
+    QHBoxLayout,
     QWidget,
     QPushButton,
     QCheckBox,
@@ -33,28 +34,34 @@ class RoiPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        row1 = QHBoxLayout()
         self.draw_checkbox = QCheckBox("Draw region")
         self.draw_checkbox.toggled.connect(self.draw_toggled.emit)
-        layout.addWidget(self.draw_checkbox)
+        row1.addWidget(self.draw_checkbox)
 
+        self.corners_label = QLabel("Corners: —")
+        self.corners_label.setWordWrap(True)
+        row1.addWidget(self.corners_label)
+        
+        layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
         button_row = QWidget()
         button_layout = QVBoxLayout(button_row)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        self.clear_button = QPushButton("Clear")
+        self.clear_button = QPushButton("Clear ROI")
         self.clear_button.clicked.connect(self.clear_requested.emit)
         button_layout.addWidget(self.clear_button)
-        layout.addWidget(button_row)
+        row2.addWidget(button_row)
 
         self.create_derivative_button = QPushButton("Create Derivative Plot")
         self.create_derivative_button.setEnabled(False)
         self.create_derivative_button.clicked.connect(
             self.create_derivative_requested.emit
         )
-        layout.addWidget(self.create_derivative_button)
+        row2.addWidget(self.create_derivative_button)
 
-        self.corners_label = QLabel("Corners: —")
-        self.corners_label.setWordWrap(True)
-        layout.addWidget(self.corners_label)
+        layout.addLayout(row2)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -112,7 +119,7 @@ class RoiPanel(QWidget):
         Display normalized rectangle corners in data coordinates.
         """
         self.corners_label.setText(
-            f"Corners: ({x0:g}, {y0:g}) — ({x1:g}, {y1:g})"
+            f"Corners: ({x0:.2f}, {y0:.2f}) — ({x1:.2f}, {y1:.2f})"
         )
 
     def clear_corners(self):
