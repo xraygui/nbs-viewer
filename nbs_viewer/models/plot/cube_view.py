@@ -12,10 +12,13 @@ from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .region import RectRegion
+from .plot_view_frame import PlotViewFrame
+from .region import RectRegion, compile_rect_with_mask_mode
 
 SliceItem = Union[int, slice]
 MaskMode = Literal["inside", "outside"]
+SpatialReduce = Literal["sum", "mean"]
+PlotAxisName = Literal["plot_x", "plot_y"]
 
 
 class DimRole(str, Enum):
@@ -387,44 +390,146 @@ def spec_for_plot_ndim(
     return resolve_roles(spec)
 
 
-def materialize_view(
-    y: np.ndarray,
-    axis_arrays: Sequence[np.ndarray],
-    axis_names: Sequence[str],
-    request: MaterializeRequest,
-) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+def plot_axis_to_storage_axis(parent: CubeViewSpec, plot_axis: PlotAxisName) -> int:
     """
-    Reduce and transpose loaded data to match a materialize request.
+    Map a plot axis name to its storage dimension index on a 2D parent spec.
 
     Parameters
     ----------
-    y : np.ndarray
-        Array loaded with :meth:`CubeViewSpec.to_load_slice_info` for
-        ``request.spec``.
-    axis_arrays : sequence of np.ndarray
-        Per-storage-axis coordinate arrays (full length along each axis).
-    axis_names : sequence of str
-        Names per storage axis.
-    request : MaterializeRequest
-        View specification and optional ROI masking parameters.
+    parent : CubeViewSpec
+        Parent view with ``plot_ndim == 2``.
+    plot_axis : str
+        ``plot_x`` or ``plot_y``.
 
     Returns
     -------
-    tuple
-        ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
-
-    Raises
-    ------
-    ValueError
-        If ``request.region`` is set; ROI materialization is not implemented
-        until a later refactor phase.
+    int
+        Storage axis index for the named plot dimension.
     """
-    if request.region is not None:
-        raise ValueError(
-            "ROI materialization is not implemented yet; use region=None"
-        )
+    if parent.plot_ndim != 2:
+        raise ValueError("plot_axis_to_storage_axis requires a 2D parent spec")
+    plot_order = parent.plot_axis_order()
+    if plot_axis == "plot_x":
+        return plot_order[-1]
+    if plot_axis == "plot_y":
+        return plot_order[-2]
+    raise ValueError(f"Unknown plot axis {plot_axis!r}")
 
-    spec = request.spec
+
+def profile_view_spec(
+    parent: CubeViewSpec,
+    profile_storage_axis: int,
+    spatial_reduce: SpatialReduce,
+) -> CubeViewSpec:
+    """
+    Build a 1D in-plane profile output spec from a 2D parent view.
+
+    Parameters
+    ----------
+    parent : CubeViewSpec
+        Parent cube view with ``plot_ndim == 2``.
+    profile_storage_axis : int
+        Storage axis along which profile coordinates run.
+    spatial_reduce : str
+        ``sum`` or ``mean`` over the orthogonal plot axis within the ROI.
+
+    Returns
+    -------
+    CubeViewSpec
+        Output view with ``plot_ndim == 1``.
+    """
+    if parent.plot_ndim != 2:
+        raise ValueError("profile_view_spec requires a 2D parent spec")
+    parent_plot_axes = set(parent.plot_axis_order())
+    if profile_storage_axis not in parent_plot_axes:
+        raise ValueError(
+            f"profile axis {profile_storage_axis} is not a parent plot axis"
+        )
+    reduce_role = (
+        DimRole.SUM if spatial_reduce == "sum" else DimRole.MEAN
+    )
+    roles = list(parent.roles)
+    orthogonal_axis = next(
+        sa for sa in parent_plot_axes if sa != profile_storage_axis
+    )
+    for storage_axis in parent_plot_axes:
+        if storage_axis == profile_storage_axis:
+            roles[storage_axis] = DimRole.PLOT_X
+        else:
+            roles[storage_axis] = reduce_role
+    axis_order = list(parent.axis_order)
+    axis_order = [
+        storage_axis
+        for storage_axis in axis_order
+        if storage_axis != profile_storage_axis
+    ] + [profile_storage_axis]
+    return CubeViewSpec(
+        ndim=parent.ndim,
+        plot_ndim=1,
+        roles=tuple(roles),
+        indices=tuple(parent.indices),
+        axis_order=tuple(axis_order),
+    )
+
+
+def _spatial_reduce_storage_axes(spec: CubeViewSpec) -> frozenset[int]:
+    """
+    Return storage axes that are reduced over the ROI on the plot plane.
+    """
+    if spec.plot_ndim != 1:
+        return frozenset()
+    profile_axes = [
+        i for i, role in enumerate(spec.roles) if role == DimRole.PLOT_X
+    ]
+    if len(profile_axes) != 1:
+        return frozenset()
+    profile_axis = profile_axes[0]
+    order = spec.axis_order
+    if len(order) < 2:
+        return frozenset()
+    plot_plane = {order[-2], order[-1]}
+    return frozenset(
+        storage_axis
+        for storage_axis in plot_plane
+        if storage_axis != profile_axis
+        and spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+    )
+
+
+def _profile_plot_axis(
+    frame: PlotViewFrame, profile_storage_axis: int
+) -> PlotAxisName:
+    """
+    Return the plot axis name for a profile storage dimension.
+    """
+    if profile_storage_axis == frame.plot_x_dim:
+        return "plot_x"
+    if profile_storage_axis == frame.plot_y_dim:
+        return "plot_y"
+    raise ValueError(
+        f"profile storage axis {profile_storage_axis} is not on the plot plane"
+    )
+
+
+def _reduce_axis_index(
+    remaining: Sequence[int],
+    storage_axis: int,
+) -> int:
+    """
+    Return the tensor axis index for a storage dimension.
+    """
+    return list(remaining).index(storage_axis)
+
+
+def _materialize_without_region(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: CubeViewSpec,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Apply a cube view spec without ROI masking.
+    """
     remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
     arrays = [np.asarray(axis_arrays[i]) for i in remaining]
     names = [axis_names[i] for i in remaining]
@@ -468,6 +573,139 @@ def materialize_view(
         names = names[-2:]
 
     return y, arrays, names
+
+
+def _materialize_in_plane_profile(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: CubeViewSpec,
+    request: MaterializeRequest,
+    region_frame: PlotViewFrame,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Reduce a 2D plot plane to a masked 1D profile using the output view spec.
+    """
+    if spec.plot_ndim != 1:
+        raise ValueError("in-plane profile materialization requires plot_ndim=1")
+    spatial_axes = _spatial_reduce_storage_axes(spec)
+    if len(spatial_axes) != 1:
+        raise ValueError(
+            f"expected exactly one spatial reduce axis, got {sorted(spatial_axes)}"
+        )
+    profile_axes = [
+        i for i, role in enumerate(spec.roles) if role == DimRole.PLOT_X
+    ]
+    if len(profile_axes) != 1:
+        raise ValueError("expected exactly one profile axis in output spec")
+    profile_storage_axis = profile_axes[0]
+    spatial_storage_axis = next(iter(spatial_axes))
+
+    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
+    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
+    names = [axis_names[i] for i in remaining]
+    roles = [spec.roles[i] for i in remaining]
+
+    for j in range(len(remaining) - 1, -1, -1):
+        storage_axis = remaining[j]
+        role = roles[j]
+        if role == DimRole.SUM and storage_axis not in spatial_axes:
+            y = np.sum(y, axis=j)
+            del arrays[j], names[j], roles[j], remaining[j]
+        elif role == DimRole.MEAN and storage_axis not in spatial_axes:
+            y = np.mean(y, axis=j)
+            del arrays[j], names[j], roles[j], remaining[j]
+
+    if y.ndim != 2:
+        raise ValueError(
+            f"expected 2D plot plane before ROI reduction, got shape {y.shape}"
+        )
+    if y.shape != region_frame.shape:
+        raise ValueError(
+            f"plot plane shape {y.shape} does not match region frame {region_frame.shape}"
+        )
+
+    compiled = compile_rect_with_mask_mode(
+        region_frame,
+        request.region.normalized(),
+        request.mask_mode,
+    )
+    if compiled.pixel_count == 0:
+        raise ValueError("ROI does not cover any cells")
+
+    y = np.asarray(y, dtype=float)
+    y = np.where(compiled.mask, y, np.nan)
+
+    spatial_axis = _reduce_axis_index(remaining, spatial_storage_axis)
+    spatial_role = spec.roles[spatial_storage_axis]
+    if spatial_role == DimRole.SUM:
+        profile = np.nansum(y, axis=spatial_axis)
+    elif spatial_role == DimRole.MEAN:
+        profile = np.nanmean(y, axis=spatial_axis)
+    else:
+        raise ValueError(f"unexpected spatial reduce role {spatial_role!r}")
+    empty_bins = np.isnan(y).all(axis=spatial_axis)
+    profile = np.where(empty_bins, np.nan, profile)
+
+    profile_axis = _profile_plot_axis(region_frame, profile_storage_axis)
+    from .region_reduce import _profile_coords
+
+    coords = _profile_coords(region_frame, profile_axis, int(profile.shape[0]))
+    if profile_axis == "plot_x":
+        axis_name = region_frame.plot_x_name
+    else:
+        axis_name = region_frame.plot_y_name
+    return profile, [coords], [axis_name]
+
+
+def materialize_view(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    request: MaterializeRequest,
+    *,
+    region_frame: Optional[PlotViewFrame] = None,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Reduce and transpose loaded data to match a materialize request.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Array loaded with :meth:`CubeViewSpec.to_load_slice_info` for
+        ``request.spec``.
+    axis_arrays : sequence of np.ndarray
+        Per-storage-axis coordinate arrays (full length along each axis).
+    axis_names : sequence of str
+        Names per storage axis.
+    request : MaterializeRequest
+        View specification and optional ROI masking parameters.
+    region_frame : PlotViewFrame, optional
+        Parent 2D view frame required when ``request.region`` is set.
+
+    Returns
+    -------
+    tuple
+        ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
+    """
+    if request.region is None:
+        return _materialize_without_region(
+            y, axis_arrays, axis_names, request.spec
+        )
+    if region_frame is None:
+        raise ValueError("region_frame is required when request.region is set")
+    if request.spec.plot_ndim != 1:
+        raise ValueError(
+            "ROI materialization currently supports 1D profile output only"
+        )
+    return _materialize_in_plane_profile(
+        y,
+        axis_arrays,
+        axis_names,
+        request.spec,
+        request,
+        region_frame,
+    )
 
 
 def apply_cube_view(

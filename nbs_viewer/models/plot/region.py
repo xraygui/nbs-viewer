@@ -107,6 +107,42 @@ class RectRegion(RegionDefinition):
 
 
 PlotAxisName = Literal["plot_x", "plot_y"]
+MaskMode = Literal["inside", "outside"]
+
+
+def compile_rect_with_mask_mode(
+    frame: PlotViewFrame,
+    region: RectRegion,
+    mask_mode: MaskMode = "inside",
+) -> CompiledRegion:
+    """
+    Compile a rectangle ROI, optionally inverting the mask.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        View frame for the parent 2D plot.
+    region : RectRegion
+        Rectangle in matplotlib data coordinates.
+    mask_mode : str
+        ``inside`` or ``outside`` the ROI.
+
+    Returns
+    -------
+    CompiledRegion
+        Compiled mask on the plot plane.
+    """
+    compiled = region.compile(frame)
+    if mask_mode == "inside":
+        return compiled
+    if mask_mode == "outside":
+        mask = ~compiled.mask
+        return CompiledRegion(
+            mask=mask,
+            bbox=_bbox_from_mask(mask),
+            pixel_count=int(mask.sum()),
+        )
+    raise ValueError(f"Unknown mask_mode {mask_mode!r}")
 
 
 def expand_rect_for_profile(

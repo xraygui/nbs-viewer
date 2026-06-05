@@ -9,40 +9,36 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .analysis_region import AnalysisRegion
+from .cube_view import (
+    CubeViewSpec,
+    DimRole,
+    MaterializeRequest,
+    materialize_view,
+    plot_axis_to_storage_axis,
+    profile_view_spec,
+)
 from .derivative_spec import DerivativeSpec
 from .plot_geometry import PlotBundle, prepare_1d_bundle, prepare_2d_bundle
 from .plot_view_frame import frame_from_bundle
 from .region import (
-    CompiledRegion,
     RectRegion,
-    _bbox_from_mask,
+    compile_rect_with_mask_mode,
     expand_rect_for_profile,
 )
-from .region_reduce import apply_region_profile
 
 
 def _compiled_for_mask(
     frame,
     region: RectRegion,
     mask_mode: str,
-) -> CompiledRegion:
+):
     """
     Compile a rectangle region, optionally inverting the mask.
     """
-    compiled = region.compile(frame)
-    if mask_mode == "inside":
-        return compiled
-    if mask_mode == "outside":
-        mask = ~compiled.mask
-        return CompiledRegion(
-            mask=mask,
-            bbox=_bbox_from_mask(mask),
-            pixel_count=int(mask.sum()),
-        )
-    raise ValueError(f"Unknown mask_mode {mask_mode!r}")
+    return compile_rect_with_mask_mode(frame, region, mask_mode)
 
 
-def _require_non_empty(compiled: CompiledRegion) -> None:
+def _require_non_empty(compiled) -> None:
     """
     Raise if the compiled region selects no cells.
     """
@@ -158,6 +154,207 @@ def _axis_centers_for_crop(
             y0, y1 = _cell_y_bounds_mesh(frame, i, 0)
             centers.append(0.5 * (y0 + y1))
     return np.asarray(centers, dtype=float)
+
+
+def _default_parent_spec_2d() -> CubeViewSpec:
+    """
+    Return a trailing-axis 2D parent spec for materializing from a 2D bundle.
+    """
+    return CubeViewSpec(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0),
+    )
+
+
+def display_plane_spec(parent_spec: Optional[CubeViewSpec] = None) -> CubeViewSpec:
+    """
+    Return a 2D cube view spec for the displayed plot plane.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec, optional
+        Full N-D parent view. When ``ndim > 2``, slice and reduce roles on
+        non-plot axes are already reflected in a 2D ``parent_bundle``.
+
+    Returns
+    -------
+    CubeViewSpec
+        Two-axis view with ``plot_ndim == 2``.
+    """
+    if parent_spec is not None and parent_spec.ndim == 2 and parent_spec.plot_ndim == 2:
+        return parent_spec
+    return _default_parent_spec_2d()
+
+
+def _storage_axis_arrays_for_bundle(
+    bundle: PlotBundle, frame
+) -> Tuple[list, list]:
+    """
+    Build per-storage-axis coordinate arrays for a displayed 2D bundle.
+    """
+    names = list(bundle.axis_names)
+    while len(names) < 2:
+        names.append(f"dim_{len(names)}")
+    ny, nx = frame.shape
+    row_axis = np.arange(ny, dtype=float)
+    col_axis = np.arange(nx, dtype=float)
+    if frame.render_mode == "mesh" and bundle.mesh_x is not None:
+        mesh_x = np.asarray(bundle.mesh_x, dtype=float)
+        mesh_y = np.asarray(bundle.mesh_y, dtype=float)
+        if mesh_x.shape == (ny, nx):
+            row_axis = np.nanmean(mesh_y, axis=1)
+            col_axis = np.nanmean(mesh_x, axis=0)
+    axis_arrays = [None, None]
+    axis_arrays[frame.plot_y_dim] = row_axis
+    axis_arrays[frame.plot_x_dim] = col_axis
+    axis_names = [None, None]
+    axis_names[frame.plot_y_dim] = names[0]
+    axis_names[frame.plot_x_dim] = names[1]
+    return axis_arrays, axis_names
+
+
+def materialize_request_for_profile(
+    parent_spec: CubeViewSpec,
+    region: RectRegion,
+    profile_axis: str,
+    spatial_reduce: str,
+    mask_mode: str = "inside",
+    *,
+    parent_frame=None,
+    span_full_profile_axis: bool = False,
+) -> MaterializeRequest:
+    """
+    Build a materialize request for an in-plane ROI profile.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent 2D cube view.
+    region : RectRegion
+        ROI in data coordinates on the parent plot plane.
+    profile_axis : str
+        ``plot_x`` or ``plot_y``.
+    spatial_reduce : str
+        ``sum`` or ``mean`` within the ROI on the orthogonal plot axis.
+    mask_mode : str
+        ``inside`` or ``outside`` the ROI.
+    parent_frame : PlotViewFrame, optional
+        Parent view frame for span-full expansion.
+    span_full_profile_axis : bool
+        Expand the ROI to the full plot extent along ``profile_axis``.
+
+    Returns
+    -------
+    MaterializeRequest
+        Frozen view request for ``materialize_view``.
+    """
+    region = region.normalized()
+    if span_full_profile_axis:
+        if parent_frame is None:
+            raise ValueError("parent_frame is required for span_full_profile_axis")
+        region = expand_rect_for_profile(parent_frame, region, profile_axis)
+    profile_storage_axis = plot_axis_to_storage_axis(parent_spec, profile_axis)
+    output_spec = profile_view_spec(
+        parent_spec, profile_storage_axis, spatial_reduce
+    )
+    return MaterializeRequest(output_spec, region, mask_mode)
+
+
+def fetch_materialized_bundle(
+    request: MaterializeRequest,
+    *,
+    run_model=None,
+    xkeys=None,
+    ykey: str = "",
+    norm_keys=None,
+    slice_info=None,
+    parent_spec: Optional[CubeViewSpec] = None,
+    parent_bundle: Optional[PlotBundle] = None,
+    region_frame=None,
+    label: str = "",
+) -> PlotBundle:
+    """
+    Fetch a plot bundle by applying a materialize request to loaded data.
+
+    Parameters
+    ----------
+    request : MaterializeRequest
+        View and ROI parameters.
+    run_model
+        Object providing ``_fetch_plot_arrays`` or ``get_plot_bundle``.
+    xkeys : list, optional
+        Plot x keys for loading.
+    ykey : str, optional
+        Plot y key for loading.
+    norm_keys : list, optional
+        Normalization keys.
+    slice_info : tuple, optional
+        Legacy slice indices when loading without a cube spec on the request.
+    parent_spec : CubeViewSpec, optional
+        Parent 2D cube view used to interpret a 2D ``parent_bundle``.
+    parent_bundle : PlotBundle, optional
+        Pre-loaded 2D parent plane.
+    region_frame : PlotViewFrame, optional
+        View frame for ROI compilation.
+    label : str
+        Optional display label for 1D output.
+
+    Returns
+    -------
+    PlotBundle
+        Materialized plot payload.
+    """
+    if request.region is None:
+        raise ValueError("fetch_materialized_bundle requires request.region")
+
+    if parent_bundle is not None:
+        if parent_bundle.ndim != 2:
+            raise ValueError("parent_bundle must be 2D for in-plane profile fetch")
+        frame = region_frame or frame_from_bundle(parent_bundle)
+        plane_spec = display_plane_spec(parent_spec)
+        if request.spec.ndim != plane_spec.ndim:
+            raise ValueError(
+                "MaterializeRequest spec ndim must match the displayed 2D plane"
+            )
+        axis_arrays, axis_names = _storage_axis_arrays_for_bundle(
+            parent_bundle, frame
+        )
+        profile, axes, names = materialize_view(
+            parent_bundle.y,
+            axis_arrays,
+            axis_names,
+            request,
+            region_frame=frame,
+        )
+    else:
+        if run_model is None:
+            raise ValueError("run_model or parent_bundle required")
+        if region_frame is None:
+            raise ValueError("region_frame required when loading from run_model")
+        load_slice = request.spec.to_load_slice_info()
+        xlist, axis_names, y = run_model._fetch_plot_arrays(
+            xkeys,
+            ykey,
+            norm_keys,
+            load_slice,
+            cube_view_spec=None,
+        )
+        profile, axes, names = materialize_view(
+            y,
+            xlist,
+            axis_names,
+            request,
+            region_frame=region_frame,
+        )
+
+    if request.spec.plot_ndim != 1:
+        raise ValueError("fetch_materialized_bundle currently supports 1D output only")
+    if not np.isfinite(profile).any():
+        raise ValueError("ROI profile is empty after reduction")
+    display_label = label or names[0]
+    return prepare_1d_bundle(profile, axes, [display_label])
 
 
 def fetch_derived_plane_bundle(
@@ -308,51 +505,52 @@ def fetch_derived_profile_bundle(
         profile_axis = analysis.profile_axis
         reduce = analysis.reduce
         label = analysis.label
+        span_full = False
     elif region is not None and spec is not None:
         mask_mode = spec.mask_mode
         profile_axis = spec.profile_axis
         reduce = spec.reduce
         label = spec.label
+        span_full = spec.span_full_profile_axis
     else:
         raise ValueError("Provide analysis or (region, spec)")
 
-    if parent_bundle is not None:
-        bundle = parent_bundle
-    else:
+    parent_spec = display_plane_spec(cube_view_spec)
+    if parent_bundle is None:
         if run_model is None:
             raise ValueError("run_model or parent_bundle required")
-        bundle = run_model.get_plot_bundle(
+        parent_bundle = run_model.get_plot_bundle(
             [xkey],
             ykey,
             norm_keys,
             slice_info=slice_info,
             cube_view_spec=cube_view_spec,
         )
-    if bundle.ndim != 2:
+    if parent_bundle.ndim != 2:
         raise ValueError("Derived profile requires a 2D parent bundle")
 
-    frame = frame_from_bundle(bundle)
+    frame = frame_from_bundle(parent_bundle)
     region = region.normalized()
-    compiled = _compiled_for_mask(frame, region, mask_mode)
-    _require_non_empty(compiled)
-
-    profile, coords, axis_name = apply_region_profile(
-        bundle.y,
-        frame,
-        compiled,
+    request = materialize_request_for_profile(
+        parent_spec,
+        region,
         profile_axis,
         reduce,
+        mask_mode,
+        parent_frame=frame,
+        span_full_profile_axis=span_full,
     )
-    if not np.isfinite(profile).any():
-        raise ValueError("ROI profile is empty after reduction")
-
-    display_label = label or (
-        spec.default_label(axis_name) if spec is not None else axis_name
+    default_name = (
+        frame.plot_x_name if profile_axis == "plot_x" else frame.plot_y_name
     )
-    return prepare_1d_bundle(
-        profile,
-        [coords],
-        [display_label or axis_name],
+    return fetch_materialized_bundle(
+        request,
+        parent_bundle=parent_bundle,
+        parent_spec=parent_spec,
+        region_frame=frame,
+        label=label or (
+            spec.default_label(default_name) if spec is not None else default_name
+        ),
     )
 
 
@@ -418,7 +616,6 @@ def fetch_derivative_preview_bundle(
         parent_bundle = plot_model.last_bundle
     if parent_bundle is None:
         raise ValueError("No parent 2D bundle available for derivative fetch")
-    region = region_for_derivative_fetch(parent_bundle, region, spec)
 
     if spec.output_kind == "profile":
         return fetch_derived_profile_bundle(
@@ -432,6 +629,7 @@ def fetch_derivative_preview_bundle(
             slice_info=slice_info,
             cube_view_spec=cube_view_spec,
         )
+    region = region_for_derivative_fetch(parent_bundle, region, spec)
     return fetch_derived_plane_bundle(
         parent_bundle=parent_bundle,
         region=region,
