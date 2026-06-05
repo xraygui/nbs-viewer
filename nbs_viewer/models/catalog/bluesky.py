@@ -7,6 +7,7 @@ from databroker.queries import TimeRange
 from .base import CatalogBase
 from ..data import BlueskyRun, NBSRun
 from .chunkCache import ChunkCache
+from .chunk_cache_progress import ChunkCacheProgress
 from nbs_viewer.utils import print_debug
 from .worker_pool import CatalogWorkerPool
 
@@ -34,12 +35,23 @@ class BlueskyCatalog(CatalogBase):
         self._base_catalog = catalog.v2
         self._catalog = catalog.v2
         self._wrapped_runs = {}
-        self._chunk_cache = ChunkCache()
-        # Enable async key discovery by default for Bluesky-based catalogs
+        self._chunk_cache_progress = ChunkCacheProgress(self)
+        self._chunk_cache = ChunkCache(progress=self._chunk_cache_progress)
         try:
             self._worker_pool: CatalogWorkerPool | None = CatalogWorkerPool(self)
         except Exception:
             self._worker_pool = None
+
+    @property
+    def chunk_cache_progress(self) -> ChunkCacheProgress:
+        """
+        Progress notifier for in-flight Tiled chunk fetches.
+
+        Returns
+        -------
+        ChunkCacheProgress
+        """
+        return self._chunk_cache_progress
 
     def __len__(self):
         return len(self._catalog)

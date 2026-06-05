@@ -5548,8 +5548,8 @@ packages:
   timestamp: 1757782706200
 - pypi: ./
   name: nbs-viewer
-  version: 0.3.5.dev44+gf7e275963.d20260604
-  sha256: 938c84ef370f224af8b7e10e1dcbc34d145fb8b14a0581c9b153314c67bbaf78
+  version: 0.3.5.dev52+ged913e274.d20260605
+  sha256: b0f94b2a3ff928cc3796260761822d6e70730fbb7fbd0370dc67f59b56024aca
   requires_dist:
   - asteval
   - bluesky-kafka
@@ -5564,6 +5564,7 @@ packages:
   - qtpy
   - tiled
   - tomli>=2.0.0 ; python_full_version < '3.11'
+  - zarr>=3
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
   sha256: 3fde293232fa3fca98635e1167de6b7c7fda83caf24b9d6c91ec9eefb4f4d586
   md5: 47e340acb35de30501a76c7c799c41d7

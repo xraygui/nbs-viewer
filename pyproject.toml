@@ -11,6 +11,7 @@ readme = "README.md"
 keywords = ["tiled", "viewer"]
 dependencies = [
 "numpy",
+"zarr >= 3",
 "qtpy",
 "matplotlib",
 "tiled",
