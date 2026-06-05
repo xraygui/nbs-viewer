@@ -19,7 +19,6 @@ from ...models.plot.plot_geometry import PlotBundle
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 
 from nbs_viewer.models.plot.derived_fetch import fetch_derivative_preview
-from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.utils import print_debug
 
 
@@ -41,24 +40,18 @@ class DerivativePreviewWorker(QThread):
     def __init__(
         self,
         plot_model,
-        region: RectRegion,
-        output_kind: str,
+        request: MaterializeRequest,
         generation: int,
         parent=None,
         *,
-        request: MaterializeRequest | None = None,
         parent_spec: CubeViewSpec | None = None,
         parent_bundle: PlotBundle | None = None,
-        mask_mode: str = "inside",
     ):
         super().__init__(parent)
         self.plot_model = plot_model
-        self.region = region
-        self.output_kind = output_kind
         self.request = request
         self.parent_spec = parent_spec
         self.parent_bundle = parent_bundle
-        self.mask_mode = mask_mode
         self.generation = generation
 
     def run(self):
@@ -73,10 +66,7 @@ class DerivativePreviewWorker(QThread):
             cached = parent_bundle is not None
             bundle = fetch_derivative_preview(
                 self.plot_model,
-                self.region,
-                output_kind=self.output_kind,
-                request=self.request,
-                mask_mode=self.mask_mode,
+                self.request,
                 parent_spec=self.parent_spec,
                 parent_bundle=parent_bundle,
             )
@@ -85,7 +75,7 @@ class DerivativePreviewWorker(QThread):
                 "DerivativePreviewWorker",
                 f"preview ready in {elapsed:.3f}s "
                 f"(cached_parent={cached}, "
-                f"output={self.output_kind}, "
+                f"plot_ndim={self.request.spec.plot_ndim}, "
                 f"shape={getattr(bundle.y, 'shape', None)})",
                 category="DEBUG_PLOTS",
             )

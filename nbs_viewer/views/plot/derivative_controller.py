@@ -205,23 +205,17 @@ class DerivativeController(QObject):
         if plot_model is None:
             raise ValueError("Select a single 2D dataset")
 
-        output_kind = "profile" if self._dialog.is_profile_output() else "plane"
-        request = None
-        if output_kind == "profile":
-            request = self._dialog.build_profile_request(region)
-            if request is None:
-                raise ValueError("Parent cube view is unavailable")
+        request = self._dialog.build_materialize_request(region)
+        if request is None:
+            raise ValueError("Parent cube view is unavailable")
 
         worker = DerivativePreviewWorker(
             plot_model,
-            region,
-            output_kind,
+            request,
             generation,
             self,
-            request=request,
             parent_spec=self._parent_spec(),
             parent_bundle=self._cached_parent_bundle(plot_model, request),
-            mask_mode=self._dialog.get_mask_mode(),
         )
         return worker
 

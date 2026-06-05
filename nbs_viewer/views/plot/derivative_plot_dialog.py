@@ -29,7 +29,10 @@ from nbs_viewer.models.plot.cube_view import (
     plot_axis_to_storage_axis,
     storage_axis_to_plot_axis,
 )
-from nbs_viewer.models.plot.derived_fetch import materialize_request_for_profile
+from nbs_viewer.models.plot.derived_fetch import (
+    materialize_request_for_plane,
+    materialize_request_for_profile,
+)
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
 from nbs_viewer.models.plot.region import RectRegion
 
@@ -328,6 +331,46 @@ class DerivativePlotDialog(QDialog):
             parent_frame=self._parent_frame,
             span_full_profile_axis=self.span_full_profile_axis(),
         )
+
+    def build_plane_request(self, region: RectRegion):
+        """
+        Build a plane :class:`MaterializeRequest` from dialog controls.
+
+        Parameters
+        ----------
+        region : RectRegion
+            ROI in data coordinates on the parent plot plane.
+
+        Returns
+        -------
+        MaterializeRequest or None
+            Frozen request when parent context is available.
+        """
+        if self._parent_spec is None:
+            return None
+        return materialize_request_for_plane(
+            self._parent_spec,
+            region,
+            self.get_mask_mode(),
+        )
+
+    def build_materialize_request(self, region: RectRegion):
+        """
+        Build the active profile or plane materialize request.
+
+        Parameters
+        ----------
+        region : RectRegion
+            ROI in data coordinates on the parent plot plane.
+
+        Returns
+        -------
+        MaterializeRequest or None
+            Frozen request when parent context is available.
+        """
+        if self.is_profile_output():
+            return self.build_profile_request(region)
+        return self.build_plane_request(region)
 
     def is_preview_enabled(self) -> bool:
         """

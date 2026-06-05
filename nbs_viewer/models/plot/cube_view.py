@@ -949,6 +949,123 @@ def _materialize_roi_profile(
     return np.asarray(profile, dtype=float).reshape(-1), [coords], [axis_name]
 
 
+def _orient_for_plot_ndim(
+    y: np.ndarray,
+    arrays: List[np.ndarray],
+    names: List[str],
+    spec: CubeViewSpec,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Transpose reduced data to match the output plot dimensionality.
+    """
+    roles = list(spec.roles[i] for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX)
+    if len(roles) != y.ndim:
+        roles = [spec.roles[i] for i in range(y.ndim)]
+    non_plot = [
+        j for j, role in enumerate(roles) if role not in (DimRole.PLOT_X, DimRole.PLOT_Y)
+    ]
+    y_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_Y]
+    x_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_X]
+
+    if spec.plot_ndim == 1:
+        perm = non_plot + x_positions
+    else:
+        perm = non_plot + y_positions + x_positions
+
+    if len(perm) != y.ndim:
+        raise ValueError(
+            f"transpose rank {len(perm)} does not match data ndim {y.ndim}"
+        )
+
+    if perm != list(range(y.ndim)):
+        y = np.transpose(y, perm)
+        arrays = [arrays[p] for p in perm]
+        names = [names[p] for p in perm]
+
+    if spec.plot_ndim == 1:
+        arrays = arrays[-1:]
+        names = names[-1:]
+    elif spec.plot_ndim == 2:
+        arrays = arrays[-2:]
+        names = names[-2:]
+
+    return y, arrays, names
+
+
+def _materialize_roi_plane(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: CubeViewSpec,
+    request: MaterializeRequest,
+    region_frame: PlotViewFrame,
+    *,
+    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Apply ROI masking to a 2D plot plane using the output view spec.
+    """
+    if spec.plot_ndim != 2:
+        raise ValueError("ROI plane materialization requires plot_ndim=2")
+
+    if plot_plane_storage_axes is not None:
+        plot_axes = set(plot_plane_storage_axes)
+    else:
+        plot_axes = set(spec.plot_axis_order())
+
+    global_storage_axes = frozenset(
+        storage_axis
+        for storage_axis, role in enumerate(spec.roles)
+        if role in (DimRole.SUM, DimRole.MEAN) and storage_axis not in plot_axes
+    )
+
+    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
+    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
+    names = [axis_names[i] for i in remaining]
+    roles = [spec.roles[i] for i in remaining]
+
+    for j in range(len(remaining) - 1, -1, -1):
+        storage_axis = remaining[j]
+        role = roles[j]
+        if storage_axis in global_storage_axes:
+            y = _reduce_along_axis(y, j, role)
+            del arrays[j], names[j], roles[j], remaining[j]
+
+    if y.ndim < 2:
+        raise ValueError(
+            f"expected at least 2D plot plane before ROI masking, got {y.shape}"
+        )
+    if y.shape[-2:] != region_frame.shape:
+        raise ValueError(
+            f"plot plane shape {y.shape[-2:]} does not match region frame "
+            f"{region_frame.shape}"
+        )
+
+    compiled = compile_rect_with_mask_mode(
+        region_frame,
+        request.region.normalized(),
+        request.mask_mode,
+    )
+    if compiled.pixel_count == 0:
+        raise ValueError("ROI does not cover any cells")
+
+    y = np.asarray(y, dtype=float)
+    lead_shape = y.shape[:-2]
+    if lead_shape:
+        mask = compiled.mask.reshape((1,) * len(lead_shape) + compiled.mask.shape)
+    else:
+        mask = compiled.mask
+    y = np.where(mask, y, np.nan)
+
+    orient_spec = CubeViewSpec(
+        ndim=len(roles),
+        plot_ndim=2,
+        roles=tuple(roles),
+        indices=tuple(0 for _ in roles),
+    )
+    return _orient_for_plot_ndim(y, arrays, names, orient_spec)
+
+
 def materialize_view(
     y: np.ndarray,
     axis_arrays: Sequence[np.ndarray],
@@ -988,9 +1105,19 @@ def materialize_view(
         )
     if region_frame is None:
         raise ValueError("region_frame is required when request.region is set")
+    if request.spec.plot_ndim == 2:
+        return _materialize_roi_plane(
+            y,
+            axis_arrays,
+            axis_names,
+            request.spec,
+            request,
+            region_frame,
+            plot_plane_storage_axes=plot_plane_storage_axes,
+        )
     if request.spec.plot_ndim != 1:
         raise ValueError(
-            "ROI materialization currently supports 1D profile output only"
+            f"ROI materialization supports plot_ndim 1 or 2, got {request.spec.plot_ndim}"
         )
     return _materialize_roi_profile(
         y,

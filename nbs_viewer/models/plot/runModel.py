@@ -5,7 +5,8 @@ from asteval import Interpreter
 import numpy as np
 
 from ..data.base import CatalogRun
-from .cube_view import CubeViewSpec, apply_cube_view
+from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
+from .derived_fetch import assemble_plane_bundle, plot_plane_storage_axes
 from .plot_geometry import (
     PlotBundle,
     get_render_mode_hint,
@@ -138,8 +139,12 @@ class RunModel(QObject):
         norm_keys=None,
         slice_info=None,
         cube_view_spec=None,
+        materialize_request: Optional[MaterializeRequest] = None,
         transform=True,
         preserve_storage_axes: bool = False,
+        *,
+        region_frame=None,
+        parent_spec: Optional[CubeViewSpec] = None,
     ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
         """
         Load and normalize raw x/y arrays for plotting.
@@ -157,18 +162,34 @@ class RunModel(QObject):
         cube_view_spec : CubeViewSpec, optional
             N-D cube view (slice, reduce, axis order). Takes precedence over
             ``slice_info`` when provided.
+        materialize_request : MaterializeRequest, optional
+            Unified view request. When set, takes precedence over
+            ``cube_view_spec``.
         transform : bool
             Whether to apply the user transform expression.
         preserve_storage_axes : bool
             When True, keep one coordinate array per storage axis even if an
             axis was collapsed to length 1 by ``slice_info``.
+        region_frame : PlotViewFrame, optional
+            Parent 2D view frame required when ``materialize_request.region``
+            is set.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view for plot-plane storage axis lookup during ROI
+            materialization.
 
         Returns
         -------
         tuple
             (xlist, axis_names, y)
         """
-        if cube_view_spec is not None:
+        view_spec = None
+        request = materialize_request
+        if request is not None:
+            view_spec = request.spec
+            slice_info = view_spec.to_load_slice_info()
+            preserve_storage_axes = True
+        elif cube_view_spec is not None:
+            view_spec = cube_view_spec
             slice_info = cube_view_spec.to_load_slice_info()
 
         xlist, axis_names, _extra = self._run.get_dimension_axes(
@@ -178,9 +199,21 @@ class RunModel(QObject):
         storage_axes = list(xlist)
         storage_names = list(axis_names)
 
-        if cube_view_spec is not None:
-            y, xlist, axis_names = apply_cube_view(
-                y, storage_axes, storage_names, cube_view_spec
+        if request is not None:
+            y, xlist, axis_names = materialize_view(
+                y,
+                storage_axes,
+                storage_names,
+                request,
+                region_frame=region_frame,
+                plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
+            )
+        elif view_spec is not None:
+            y, xlist, axis_names = materialize_view(
+                y,
+                storage_axes,
+                storage_names,
+                MaterializeRequest(view_spec),
             )
         elif y.size > 1 and not preserve_storage_axes:
             filtered = [(x, n) for x, n in zip(xlist, axis_names) if x.size > 1]
@@ -196,10 +229,23 @@ class RunModel(QObject):
             normlist = [
                 self._run.getData(norm_key, slice_info) for norm_key in norm_keys
             ]
-            if cube_view_spec is not None:
+            if request is not None:
                 for i, norm in enumerate(normlist):
-                    normlist[i], _, _ = apply_cube_view(
-                        norm, storage_axes, storage_names, cube_view_spec
+                    normlist[i], _, _ = materialize_view(
+                        norm,
+                        storage_axes,
+                        storage_names,
+                        request,
+                        region_frame=region_frame,
+                        plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
+                    )
+            elif view_spec is not None:
+                for i, norm in enumerate(normlist):
+                    normlist[i], _, _ = materialize_view(
+                        norm,
+                        storage_axes,
+                        storage_names,
+                        MaterializeRequest(view_spec),
                     )
             norm = np.prod(normlist, axis=0)
         else:
@@ -254,7 +300,12 @@ class RunModel(QObject):
         norm_keys=None,
         slice_info=None,
         cube_view_spec=None,
+        materialize_request: Optional[MaterializeRequest] = None,
         transform=True,
+        *,
+        region_frame=None,
+        parent_spec: Optional[CubeViewSpec] = None,
+        label: str = "",
     ) -> PlotBundle:
         """
         Get a prepared PlotBundle with render mode and coordinates.
@@ -271,20 +322,63 @@ class RunModel(QObject):
             Slice specification.
         cube_view_spec : CubeViewSpec, optional
             N-D cube view specification.
+        materialize_request : MaterializeRequest, optional
+            Unified view request including optional ROI parameters.
         transform : bool
             Whether to apply transforms.
+        region_frame : PlotViewFrame, optional
+            Parent 2D view frame required when ``materialize_request.region``
+            is set.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view for ROI plot-plane axis lookup.
+        label : str
+            Optional display label for 1D ROI output.
 
         Returns
         -------
         PlotBundle
             Prepared plot payload for the view layer.
         """
+        request = materialize_request
+        if request is not None and request.region is not None:
+            if region_frame is None:
+                raise ValueError(
+                    "region_frame is required when materialize_request.region is set"
+                )
+            xlist, axis_names, y = self._fetch_plot_arrays(
+                xkeys,
+                ykey,
+                norm_keys,
+                materialize_request=request,
+                transform=transform,
+                region_frame=region_frame,
+                parent_spec=parent_spec,
+            )
+            if request.spec.plot_ndim == 1:
+                if not np.isfinite(y).any():
+                    raise ValueError("ROI profile is empty after reduction")
+                display_label = label or (axis_names[0] if axis_names else "profile")
+                return prepare_1d_bundle(y, xlist, [display_label])
+            if request.spec.plot_ndim == 2:
+                hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
+                return assemble_plane_bundle(
+                    y,
+                    region_frame,
+                    request,
+                    axis_names=axis_names,
+                    render_mode_hint=hint,
+                )
+            raise ValueError(
+                f"Unsupported materialize_request plot_ndim {request.spec.plot_ndim}"
+            )
+
         xlist, axis_names, y = self._fetch_plot_arrays(
             xkeys,
             ykey,
             norm_keys,
             slice_info=slice_info,
             cube_view_spec=cube_view_spec,
+            materialize_request=request,
             transform=transform,
         )
         hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
