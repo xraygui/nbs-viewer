@@ -47,17 +47,6 @@ def reduce_masked_plane(
     raise ValueError(f"Unknown reduce op {op!r}")
 
 
-def _profile_axis_index(frame: PlotViewFrame, profile_axis: ProfileAxis) -> int:
-    """
-    Return the storage axis index for a profile axis name.
-    """
-    if profile_axis == "plot_x":
-        return frame.plot_x_dim
-    if profile_axis == "plot_y":
-        return frame.plot_y_dim
-    raise ValueError(f"Unknown profile axis {profile_axis!r}")
-
-
 def _profile_coords(
     frame: PlotViewFrame, profile_axis: ProfileAxis, n_profile: int
 ) -> np.ndarray:
@@ -114,62 +103,3 @@ def _coord_for_profile_index(
     return float(index)
 
 
-def apply_region_profile(
-    y: np.ndarray,
-    frame: PlotViewFrame,
-    compiled: CompiledRegion,
-    profile_axis: ProfileAxis,
-    op: ReduceOp,
-) -> Tuple[np.ndarray, np.ndarray, str]:
-    """
-    Reduce masked data along one plot axis, producing a 1D profile.
-
-    Parameters
-    ----------
-    y : np.ndarray
-        Display-oriented 2D data matching ``frame.shape``.
-    frame : PlotViewFrame
-        View frame for coordinate metadata.
-    compiled : CompiledRegion
-        Compiled region mask.
-    profile_axis : str
-        ``plot_x`` or ``plot_y`` — axis along which profile coordinates run.
-    op : str
-        ``sum`` or ``mean``.
-
-    Returns
-    -------
-    tuple
-        ``(profile, coords, axis_name)`` where ``profile`` is 1D, ``coords``
-        are bin-center data coordinates, and ``axis_name`` labels the profile.
-    """
-    y = np.asarray(y, dtype=float)
-    mask = compiled.mask
-    profile_dim = _profile_axis_index(frame, profile_axis)
-    reduce_dim = 1 - profile_dim
-    n_profile = frame.shape[profile_dim]
-    profile = np.full(n_profile, np.nan, dtype=float)
-
-    if profile_dim == 0:
-        for i in range(n_profile):
-            row_mask = mask[i, :]
-            if row_mask.any():
-                row_vals = y[i, row_mask]
-                profile[i] = (
-                    np.nansum(row_vals) if op == "sum" else np.nanmean(row_vals)
-                )
-    else:
-        for j in range(n_profile):
-            col_mask = mask[:, j]
-            if col_mask.any():
-                col_vals = y[col_mask, j]
-                profile[j] = (
-                    np.nansum(col_vals) if op == "sum" else np.nanmean(col_vals)
-                )
-
-    coords = _profile_coords(frame, profile_axis, n_profile)
-    if profile_axis == "plot_x":
-        name = frame.plot_x_name
-    else:
-        name = frame.plot_y_name
-    return profile, coords, name

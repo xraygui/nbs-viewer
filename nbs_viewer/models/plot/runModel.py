@@ -139,6 +139,7 @@ class RunModel(QObject):
         slice_info=None,
         cube_view_spec=None,
         transform=True,
+        preserve_storage_axes: bool = False,
     ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
         """
         Load and normalize raw x/y arrays for plotting.
@@ -158,6 +159,9 @@ class RunModel(QObject):
             ``slice_info`` when provided.
         transform : bool
             Whether to apply the user transform expression.
+        preserve_storage_axes : bool
+            When True, keep one coordinate array per storage axis even if an
+            axis was collapsed to length 1 by ``slice_info``.
 
         Returns
         -------
@@ -178,7 +182,7 @@ class RunModel(QObject):
             y, xlist, axis_names = apply_cube_view(
                 y, storage_axes, storage_names, cube_view_spec
             )
-        elif y.size > 1:
+        elif y.size > 1 and not preserve_storage_axes:
             filtered = [(x, n) for x, n in zip(xlist, axis_names) if x.size > 1]
             if filtered:
                 xlist, axis_names = zip(*filtered)

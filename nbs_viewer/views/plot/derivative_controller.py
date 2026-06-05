@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from qtpy.QtCore import QObject, QTimer
 
+from nbs_viewer.models.plot.cube_view import default_profile_label
+from nbs_viewer.models.plot.derived_fetch import _profile_uses_nd_load
 from nbs_viewer.models.plot.derived_plot_data_model import DerivedPlotDataModel
 from nbs_viewer.models.plot.derived_product import DerivedProduct
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
@@ -62,11 +64,18 @@ class DerivativeController(QObject):
 
         self._update_create_button_enabled()
 
+    def _parent_spec(self):
+        return self.canvas._cube_view_spec
+
+    def _axis_names(self):
+        names = self.dimension_control._dim_names
+        return names if names is not None else ()
+
     def _open_or_raise_dialog(self):
         if self._dialog is None:
             parent_window = self.panel.window()
             self._dialog = DerivativePlotDialog(parent_window)
-            self._dialog.spec_changed.connect(self._schedule_preview)
+            self._dialog.request_changed.connect(self._schedule_preview)
             self._dialog.preview_enabled_changed.connect(
                 self._schedule_preview
             )
@@ -102,7 +111,7 @@ class DerivativeController(QObject):
             return
         self._schedule_preview()
 
-    def _cached_parent_bundle(self, plot_model):
+    def _cached_parent_bundle(self, plot_model, request=None):
         """
         Return the parent :class:`PlotBundle` only when it matches the canvas view.
         """
@@ -113,6 +122,10 @@ class DerivativeController(QObject):
         if plot_model._indices != self.canvas._slice:
             return None
         if self.canvas._active_workers.get(plot_model._key) is not None:
+            return None
+        if request is not None and _profile_uses_nd_load(
+            request, self._parent_spec()
+        ):
             return None
         return plot_model.last_bundle
 
@@ -148,17 +161,19 @@ class DerivativeController(QObject):
                 f"({region.x1:g}, {region.y1:g})"
             )
         self._dialog.set_context(source, roi_text)
-        bundle = None
-        if model is not None:
-            bundle = model.last_bundle
-        if bundle is not None:
+
+        parent_spec = self._parent_spec()
+        parent_frame = None
+        if model is not None and model.last_bundle is not None:
             try:
-                frame = frame_from_bundle(bundle)
-                self._dialog.set_profile_axis_choices(
-                    frame.plot_x_name, frame.plot_y_name
-                )
+                parent_frame = frame_from_bundle(model.last_bundle)
             except ValueError:
-                pass
+                parent_frame = None
+        self._dialog.set_profile_context(
+            parent_spec,
+            self._axis_names(),
+            parent_frame,
+        )
 
     def _schedule_preview(self, *_args):
         if self._dialog is None:
@@ -180,6 +195,35 @@ class DerivativeController(QObject):
             return
         self._dialog.show_preview_message("Updating preview…")
         QTimer.singleShot(0, self._run_preview)
+
+    def _start_preview_worker(self, generation: int, for_commit: bool):
+        region = self.canvas.get_roi_region()
+        if region is None:
+            raise ValueError("Draw an ROI on the parent plot")
+
+        plot_model = self.canvas.get_single_visible_2d_model()
+        if plot_model is None:
+            raise ValueError("Select a single 2D dataset")
+
+        output_kind = "profile" if self._dialog.is_profile_output() else "plane"
+        request = None
+        if output_kind == "profile":
+            request = self._dialog.build_profile_request(region)
+            if request is None:
+                raise ValueError("Parent cube view is unavailable")
+
+        worker = DerivativePreviewWorker(
+            plot_model,
+            region,
+            output_kind,
+            generation,
+            self,
+            request=request,
+            parent_spec=self._parent_spec(),
+            parent_bundle=self._cached_parent_bundle(plot_model, request),
+            mask_mode=self._dialog.get_mask_mode(),
+        )
+        return worker
 
     def _run_preview(self):
         if self._dialog is None:
@@ -208,18 +252,14 @@ class DerivativeController(QObject):
         self._cancel_preview_worker()
         self._generation += 1
         generation = self._generation
-        spec = self._dialog.get_spec()
 
-        worker = DerivativePreviewWorker(
-            plot_model,
-            self.canvas._slice,
-            self.canvas._cube_view_spec,
-            region,
-            spec,
-            generation,
-            self,
-            parent_bundle=self._cached_parent_bundle(plot_model),
-        )
+        try:
+            worker = self._start_preview_worker(generation, for_commit=False)
+        except ValueError as exc:
+            self._dialog.show_preview_message("Preview unavailable")
+            self._dialog.set_status(str(exc))
+            return
+
         worker.preview_ready.connect(self._on_preview_ready)
         worker.error_occurred.connect(self._on_preview_error)
         worker.finished.connect(
@@ -304,8 +344,7 @@ class DerivativeController(QObject):
     def _start_commit(self, pin_only: bool):
         if self._dialog is None:
             return
-        spec = self._dialog.get_spec()
-        if spec.output_kind != "profile":
+        if not self._dialog.is_profile_output():
             if pin_only:
                 self._dialog.set_status(
                     "Pin for comparison applies to 1D profiles only"
@@ -333,6 +372,11 @@ class DerivativeController(QObject):
             self._dialog.set_status("ROI has zero width or height")
             return
 
+        request = self._dialog.build_profile_request(region)
+        if request is None:
+            self._dialog.set_status("Parent cube view is unavailable")
+            return
+
         self._cancel_commit_worker()
         self._commit_generation += 1
         generation = self._commit_generation
@@ -340,16 +384,12 @@ class DerivativeController(QObject):
         action = "Pinning" if pin_only else "Creating"
         self._dialog.set_status(f"{action}…")
 
-        worker = DerivativePreviewWorker(
-            plot_model,
-            self.canvas._slice,
-            self.canvas._cube_view_spec,
-            region,
-            spec,
-            generation,
-            self,
-            parent_bundle=self._cached_parent_bundle(plot_model),
-        )
+        try:
+            worker = self._start_preview_worker(generation, for_commit=True)
+        except ValueError as exc:
+            self._dialog.set_status(str(exc))
+            return
+
         worker.preview_ready.connect(self._on_commit_ready)
         worker.error_occurred.connect(self._on_commit_error)
         worker.finished.connect(
@@ -373,35 +413,21 @@ class DerivativeController(QObject):
         if plot_model is None or region is None:
             return
 
-        spec = self._dialog.get_spec()
-        parent_bundle = plot_model.last_bundle
-        axis_name = ""
-        if parent_bundle is not None:
-            try:
-                frame = frame_from_bundle(parent_bundle)
-                if spec.profile_axis == "plot_x":
-                    axis_name = frame.plot_x_name
-                else:
-                    axis_name = frame.plot_y_name
-            except ValueError:
-                pass
-        label = spec.label or spec.default_label(axis_name)
-        product_id = str(uuid4())
-        fetch_region = region
-        if parent_bundle is not None:
-            from nbs_viewer.models.plot.derived_fetch import (
-                region_for_derivative_fetch,
-            )
+        request = self._dialog.build_profile_request(region)
+        if request is None:
+            return
 
-            fetch_region = region_for_derivative_fetch(
-                parent_bundle, region, spec
-            )
+        label = self._dialog.get_label() or default_profile_label(
+            request,
+            self._axis_names(),
+            parent_spec=self._parent_spec(),
+        )
+        product_id = str(uuid4())
 
         product = DerivedProduct(
             product_id=product_id,
-            spec=spec,
+            request=request,
             source_key=plot_model._key,
-            region=fetch_region,
             bundle=bundle,
             label=label,
             cube_fingerprint=(
@@ -446,6 +472,10 @@ class DerivativeController(QObject):
             if self._dialog is not None:
                 self._dialog.set_status(str(exc))
             return
+        if self._dialog is not None:
+            selected = self._dialog.profile_axis_for_roi_span()
+            if selected is not None:
+                profile_axis = selected
         expanded = expand_rect_for_profile(frame, region, profile_axis)
         self.canvas.apply_roi_from_region(expanded)
         if self._dialog is not None:

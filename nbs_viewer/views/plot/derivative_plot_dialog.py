@@ -4,6 +4,8 @@ Modeless dialog for configuring ROI derivative plots.
 
 from __future__ import annotations
 
+from typing import Optional, Sequence
+
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import (
     QButtonGroup,
@@ -18,10 +20,18 @@ from qtpy.QtWidgets import (
     QPushButton,
     QRadioButton,
     QVBoxLayout,
-    QWidget,
 )
 
-from nbs_viewer.models.plot.derivative_spec import DerivativeSpec
+from nbs_viewer.models.plot.cube_view import (
+    CubeViewSpec,
+    eligible_profile_axes,
+    profile_axis_name,
+    plot_axis_to_storage_axis,
+    storage_axis_to_plot_axis,
+)
+from nbs_viewer.models.plot.derived_fetch import materialize_request_for_profile
+from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
+from nbs_viewer.models.plot.region import RectRegion
 
 from .derivative_preview_canvas import DerivativePreviewCanvas
 
@@ -32,13 +42,13 @@ class DerivativePlotDialog(QDialog):
 
     Signals
     -------
-    spec_changed : DerivativeSpec
+    request_changed : object
         Emitted when any operation control changes.
     preview_enabled_changed : bool
         Emitted when the preview checkbox toggles.
     """
 
-    spec_changed = Signal(object)
+    request_changed = Signal(object)
     preview_enabled_changed = Signal(bool)
     create_requested = Signal()
     pin_requested = Signal()
@@ -50,6 +60,10 @@ class DerivativePlotDialog(QDialog):
         self.setWindowTitle("Create Derivative Plot")
         self.setModal(False)
         self.setMinimumWidth(420)
+
+        self._parent_spec: Optional[CubeViewSpec] = None
+        self._axis_names: Sequence[str] = ()
+        self._parent_frame: Optional[PlotViewFrame] = None
 
         root = QVBoxLayout(self)
 
@@ -88,8 +102,6 @@ class DerivativePlotDialog(QDialog):
 
         profile_form = QFormLayout()
         self.profile_axis_combo = QComboBox()
-        self.profile_axis_combo.addItem("Along plot X", "plot_x")
-        self.profile_axis_combo.addItem("Along plot Y", "plot_y")
         profile_form.addRow("Profile axis:", self.profile_axis_combo)
 
         self.reduce_combo = QComboBox()
@@ -145,13 +157,13 @@ class DerivativePlotDialog(QDialog):
             self.output_profile,
             self.output_plane,
         ):
-            widget.toggled.connect(self._emit_spec_changed)
+            widget.toggled.connect(self._emit_request_changed)
         self.profile_axis_combo.currentIndexChanged.connect(
-            self._emit_spec_changed
+            self._emit_request_changed
         )
-        self.reduce_combo.currentIndexChanged.connect(self._emit_spec_changed)
-        self.label_edit.textChanged.connect(self._emit_spec_changed)
-        self.span_full_checkbox.toggled.connect(self._emit_spec_changed)
+        self.reduce_combo.currentIndexChanged.connect(self._emit_request_changed)
+        self.label_edit.textChanged.connect(self._emit_request_changed)
+        self.span_full_checkbox.toggled.connect(self._emit_request_changed)
         self.preview_checkbox.toggled.connect(self._on_preview_toggled)
         self.create_button.clicked.connect(self.create_requested.emit)
         self.pin_button.clicked.connect(self.pin_requested.emit)
@@ -173,42 +185,148 @@ class DerivativePlotDialog(QDialog):
             self.preview_canvas.show_message("Updating preview…")
         else:
             self.preview_canvas.show_message("Preview disabled")
-        self._emit_spec_changed()
+        self._emit_request_changed()
 
-    def _emit_spec_changed(self):
+    def _emit_request_changed(self):
         self._update_profile_controls_enabled()
-        self.spec_changed.emit(self.get_spec())
+        self.request_changed.emit(None)
 
     def _update_profile_controls_enabled(self):
         profile = self.output_profile.isChecked()
         for widget in self._profile_widgets:
             widget.setEnabled(profile)
         self.pin_button.setEnabled(profile)
-        axis = self.profile_axis_combo.currentData()
-        self.full_width_button.setEnabled(profile and axis == "plot_x")
-        self.full_height_button.setEnabled(profile and axis == "plot_y")
+        in_plane = self._selected_axis_on_plot_plane()
+        self.span_full_checkbox.setEnabled(profile and in_plane)
+        storage_axis = self.get_profile_storage_axis()
+        plot_x_axis = None
+        plot_y_axis = None
+        if self._parent_spec is not None:
+            plot_order = self._parent_spec.plot_axis_order()
+            if len(plot_order) >= 2:
+                plot_y_axis, plot_x_axis = plot_order[-2], plot_order[-1]
+        self.full_width_button.setEnabled(
+            profile and in_plane and storage_axis == plot_x_axis
+        )
+        self.full_height_button.setEnabled(
+            profile and in_plane and storage_axis == plot_y_axis
+        )
 
-    def get_spec(self) -> DerivativeSpec:
+    def _selected_axis_on_plot_plane(self) -> bool:
+        if self._parent_spec is None:
+            return False
+        storage_axis = self.get_profile_storage_axis()
+        return storage_axis in set(self._parent_spec.plot_axis_order())
+
+    def is_profile_output(self) -> bool:
         """
-        Return the current derivative specification from dialog controls.
+        Return whether the dialog is configured for a 1D profile.
         """
-        profile_axis = self.profile_axis_combo.currentData()
-        if profile_axis not in ("plot_x", "plot_y"):
-            profile_axis = "plot_x"
+        return self.output_profile.isChecked()
+
+    def get_mask_mode(self) -> str:
+        """
+        Return the selected ROI mask mode.
+        """
+        return "inside" if self.mask_inside.isChecked() else "outside"
+
+    def get_spatial_reduce(self) -> str:
+        """
+        Return the selected spatial reduce operation.
+        """
         reduce = self.reduce_combo.currentData()
-        if reduce not in ("sum", "mean"):
-            reduce = "sum"
-        return DerivativeSpec(
-            mask_mode=(
-                "inside" if self.mask_inside.isChecked() else "outside"
-            ),
-            output_kind=(
-                "profile" if self.output_profile.isChecked() else "plane"
-            ),
-            profile_axis=profile_axis,
-            reduce=reduce,
-            label=self.label_edit.text().strip(),
-            span_full_profile_axis=self.span_full_checkbox.isChecked(),
+        return reduce if reduce in ("sum", "mean") else "sum"
+
+    def get_label(self) -> str:
+        """
+        Return the optional user label text.
+        """
+        return self.label_edit.text().strip()
+
+    def span_full_profile_axis(self) -> bool:
+        """
+        Return whether the ROI should span the full in-plane profile axis.
+        """
+        return self.span_full_checkbox.isChecked()
+
+    def get_profile_storage_axis(self) -> int:
+        """
+        Return the selected profile storage axis index.
+        """
+        data = self.profile_axis_combo.currentData()
+        if isinstance(data, int):
+            return data
+        if self._parent_spec is not None:
+            return plot_axis_to_storage_axis(self._parent_spec, "plot_x")
+        return 0
+
+    def set_profile_context(
+        self,
+        parent_spec: Optional[CubeViewSpec],
+        axis_names: Sequence[str],
+        parent_frame: Optional[PlotViewFrame] = None,
+    ):
+        """
+        Update parent view metadata used to build profile requests.
+        """
+        self._parent_spec = parent_spec
+        self._axis_names = tuple(axis_names) if axis_names else ()
+        self._parent_frame = parent_frame
+        if parent_spec is None:
+            self.profile_axis_combo.blockSignals(True)
+            self.profile_axis_combo.clear()
+            self.profile_axis_combo.blockSignals(False)
+            return
+
+        current = self.profile_axis_combo.currentData()
+        eligible = eligible_profile_axes(parent_spec)
+        plot_order = parent_spec.plot_axis_order()
+        default_axis = plot_order[-1] if len(plot_order) >= 1 else None
+
+        self.profile_axis_combo.blockSignals(True)
+        self.profile_axis_combo.clear()
+        for storage_axis in eligible:
+            name = profile_axis_name(parent_spec, storage_axis, self._axis_names)
+            self.profile_axis_combo.addItem(f"Along {name}", storage_axis)
+
+        selected_idx = -1
+        if isinstance(current, int) and current in eligible:
+            selected_idx = self.profile_axis_combo.findData(current)
+        if selected_idx < 0 and default_axis is not None:
+            selected_idx = self.profile_axis_combo.findData(default_axis)
+        if selected_idx < 0 and len(plot_order) >= 2:
+            selected_idx = self.profile_axis_combo.findData(plot_order[-2])
+        if selected_idx < 0 and self.profile_axis_combo.count() > 0:
+            selected_idx = 0
+        if selected_idx >= 0:
+            self.profile_axis_combo.setCurrentIndex(selected_idx)
+        self.profile_axis_combo.blockSignals(False)
+        self._update_profile_controls_enabled()
+
+    def build_profile_request(self, region: RectRegion):
+        """
+        Build a profile :class:`MaterializeRequest` from dialog controls.
+
+        Parameters
+        ----------
+        region : RectRegion
+            ROI in data coordinates on the parent plot plane.
+
+        Returns
+        -------
+        MaterializeRequest or None
+            Frozen request when parent context is available.
+        """
+        if self._parent_spec is None:
+            return None
+        return materialize_request_for_profile(
+            self._parent_spec,
+            region,
+            self.get_profile_storage_axis(),
+            self.get_spatial_reduce(),
+            self.get_mask_mode(),
+            parent_frame=self._parent_frame,
+            span_full_profile_axis=self.span_full_profile_axis(),
         )
 
     def is_preview_enabled(self) -> bool:
@@ -216,23 +334,6 @@ class DerivativePlotDialog(QDialog):
         Return whether live preview is enabled.
         """
         return self.preview_checkbox.isChecked()
-
-    def set_profile_axis_choices(self, plot_x_name: str, plot_y_name: str):
-        """
-        Populate profile-axis choices using the parent plot axis names.
-        """
-        current = self.profile_axis_combo.currentData()
-        self.profile_axis_combo.blockSignals(True)
-        self.profile_axis_combo.clear()
-        self.profile_axis_combo.addItem(f"Along {plot_x_name}", "plot_x")
-        self.profile_axis_combo.addItem(f"Along {plot_y_name}", "plot_y")
-        if current in ("plot_x", "plot_y"):
-            idx = self.profile_axis_combo.findData(current)
-            if idx >= 0:
-                self.profile_axis_combo.setCurrentIndex(idx)
-        elif self.profile_axis_combo.count() > 0:
-            self.profile_axis_combo.setCurrentIndex(0)
-        self.profile_axis_combo.blockSignals(False)
 
     def set_context(self, source_text: str, roi_text: str):
         """
@@ -259,3 +360,18 @@ class DerivativePlotDialog(QDialog):
         Show a message in the preview area.
         """
         self.preview_canvas.show_message(message)
+
+    def profile_axis_for_roi_span(self) -> Optional[str]:
+        """
+        Return the plot axis name for full-height or full-width ROI actions.
+        """
+        if self._parent_frame is None or self._parent_spec is None:
+            return None
+        storage_axis = self.get_profile_storage_axis()
+        if storage_axis not in set(self._parent_spec.plot_axis_order()):
+            return None
+        return storage_axis_to_plot_axis(
+            self._parent_frame,
+            storage_axis,
+            parent_spec=self._parent_spec,
+        )

@@ -122,8 +122,9 @@ class CubeViewSpec:
         """
         Build a slice tuple for chunked data loading.
 
-        INDEX dimensions use integer indices; all other roles request the
-        full axis from storage.
+        INDEX dimensions use integer indices. Plot X and all reduce roles
+        request the full axis from storage, including profile-output specs
+        where a former INDEX axis is assigned Plot X.
         """
         items: List[SliceItem] = []
         for i in range(self.ndim):
@@ -416,13 +417,115 @@ def plot_axis_to_storage_axis(parent: CubeViewSpec, plot_axis: PlotAxisName) -> 
     raise ValueError(f"Unknown plot axis {plot_axis!r}")
 
 
+def eligible_profile_axes(spec: CubeViewSpec) -> List[int]:
+    """
+    Return storage axis indices valid as profile axis choices.
+
+    Parameters
+    ----------
+    spec : CubeViewSpec
+        Parent cube view.
+
+    Returns
+    -------
+    list of int
+        Parent plot axes and INDEX axes, excluding SUM and MEAN axes.
+    """
+    if spec.plot_ndim != 2:
+        return []
+    plot_axes = set(spec.plot_axis_order())
+    eligible: List[int] = []
+    for storage_axis in spec.axis_order:
+        role = spec.roles[storage_axis]
+        if role in (DimRole.SUM, DimRole.MEAN):
+            continue
+        if storage_axis in plot_axes or role == DimRole.INDEX:
+            eligible.append(storage_axis)
+    return eligible
+
+
+def default_profile_label(
+    request: MaterializeRequest,
+    axis_names: Sequence[str],
+    *,
+    parent_spec: Optional[CubeViewSpec] = None,
+) -> str:
+    """
+    Return a short default legend label from a profile materialize request.
+
+    Parameters
+    ----------
+    request : MaterializeRequest
+        Frozen profile view request.
+    axis_names : sequence of str
+        Names per parent storage axis.
+    parent_spec : CubeViewSpec, optional
+        Parent cube view for axis naming.
+
+    Returns
+    -------
+    str
+        Label summarizing mask mode, reduce op, and profile axis.
+    """
+    region = "in" if request.mask_mode == "inside" else "out"
+    if request.spec.plot_ndim != 1:
+        return f"2D ({region} ROI)"
+    profile_axis = profile_storage_axis(request.spec)
+    name_spec = parent_spec if parent_spec is not None else request.spec
+    axis_label = profile_axis_name(name_spec, profile_axis, axis_names)
+    plot_plane = (
+        set(parent_spec.plot_axis_order()) if parent_spec is not None else set()
+    )
+    spatial_roles = [
+        request.spec.roles[storage_axis]
+        for storage_axis in plot_plane
+        if storage_axis in request.spec.roles
+        and request.spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+    ]
+    if not spatial_roles:
+        spatial_roles = [
+            role
+            for role in request.spec.roles
+            if role in (DimRole.SUM, DimRole.MEAN)
+        ]
+    reduce = "sum" if spatial_roles and spatial_roles[0] == DimRole.SUM else "mean"
+    return f"{reduce} ({region} ROI) · {axis_label}"
+
+
+def profile_axis_name(
+    spec: CubeViewSpec,
+    storage_axis: int,
+    axis_names: Sequence[str],
+) -> str:
+    """
+    Return a display name for a profile axis dropdown entry.
+
+    Parameters
+    ----------
+    spec : CubeViewSpec
+        Parent cube view.
+    storage_axis : int
+        Storage dimension index.
+    axis_names : sequence of str
+        Names per storage axis.
+
+    Returns
+    -------
+    str
+        Axis label for UI display.
+    """
+    if storage_axis < len(axis_names):
+        return axis_names[storage_axis]
+    return f"axis {storage_axis}"
+
+
 def profile_view_spec(
     parent: CubeViewSpec,
     profile_storage_axis: int,
     spatial_reduce: SpatialReduce,
 ) -> CubeViewSpec:
     """
-    Build a 1D in-plane profile output spec from a 2D parent view.
+    Build a 1D profile output spec from a 2D parent view.
 
     Parameters
     ----------
@@ -431,7 +534,7 @@ def profile_view_spec(
     profile_storage_axis : int
         Storage axis along which profile coordinates run.
     spatial_reduce : str
-        ``sum`` or ``mean`` over the orthogonal plot axis within the ROI.
+        ``sum`` or ``mean`` over plot-plane axes within the ROI.
 
     Returns
     -------
@@ -440,23 +543,28 @@ def profile_view_spec(
     """
     if parent.plot_ndim != 2:
         raise ValueError("profile_view_spec requires a 2D parent spec")
-    parent_plot_axes = set(parent.plot_axis_order())
-    if profile_storage_axis not in parent_plot_axes:
-        raise ValueError(
-            f"profile axis {profile_storage_axis} is not a parent plot axis"
-        )
     reduce_role = (
         DimRole.SUM if spatial_reduce == "sum" else DimRole.MEAN
     )
+    parent_plot_axes = set(parent.plot_axis_order())
     roles = list(parent.roles)
-    orthogonal_axis = next(
-        sa for sa in parent_plot_axes if sa != profile_storage_axis
-    )
-    for storage_axis in parent_plot_axes:
-        if storage_axis == profile_storage_axis:
-            roles[storage_axis] = DimRole.PLOT_X
-        else:
+
+    if profile_storage_axis in parent_plot_axes:
+        for storage_axis in parent_plot_axes:
+            if storage_axis == profile_storage_axis:
+                roles[storage_axis] = DimRole.PLOT_X
+            else:
+                roles[storage_axis] = reduce_role
+    elif parent.roles[profile_storage_axis] == DimRole.INDEX:
+        roles[profile_storage_axis] = DimRole.PLOT_X
+        for storage_axis in parent_plot_axes:
             roles[storage_axis] = reduce_role
+    else:
+        raise ValueError(
+            f"profile axis {profile_storage_axis} must be a parent plot axis "
+            "or INDEX role"
+        )
+
     axis_order = list(parent.axis_order)
     axis_order = [
         storage_axis
@@ -472,18 +580,34 @@ def profile_view_spec(
     )
 
 
-def _spatial_reduce_storage_axes(spec: CubeViewSpec) -> frozenset[int]:
+def profile_storage_axis(spec: CubeViewSpec) -> int:
     """
-    Return storage axes that are reduced over the ROI on the plot plane.
+    Return the storage axis assigned Plot X in a 1D output spec.
     """
-    if spec.plot_ndim != 1:
-        return frozenset()
     profile_axes = [
         i for i, role in enumerate(spec.roles) if role == DimRole.PLOT_X
     ]
     if len(profile_axes) != 1:
+        raise ValueError("expected exactly one profile axis in output spec")
+    return profile_axes[0]
+
+
+def _spatial_reduce_storage_axes(
+    spec: CubeViewSpec,
+    plot_plane_storage_axes: Optional[Tuple[int, int]],
+) -> frozenset[int]:
+    """
+    Return storage axes reduced within the ROI on the parent plot plane.
+    """
+    if spec.plot_ndim != 1:
         return frozenset()
-    profile_axis = profile_axes[0]
+    profile_axis = profile_storage_axis(spec)
+    if plot_plane_storage_axes is not None:
+        return frozenset(
+            storage_axis
+            for storage_axis in plot_plane_storage_axes
+            if spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+        )
     order = spec.axis_order
     if len(order) < 2:
         return frozenset()
@@ -496,12 +620,74 @@ def _spatial_reduce_storage_axes(spec: CubeViewSpec) -> frozenset[int]:
     )
 
 
-def _profile_plot_axis(
-    frame: PlotViewFrame, profile_storage_axis: int
+def _global_reduce_storage_axes(
+    spec: CubeViewSpec,
+    spatial_storage_axes: frozenset[int],
+) -> frozenset[int]:
+    """
+    Return SUM/MEAN storage axes reduced before ROI masking.
+    """
+    return frozenset(
+        storage_axis
+        for storage_axis, role in enumerate(spec.roles)
+        if role in (DimRole.SUM, DimRole.MEAN)
+        and storage_axis not in spatial_storage_axes
+    )
+
+
+def is_plot_plane_storage_axis(
+    parent_spec: CubeViewSpec, storage_axis: int
+) -> bool:
+    """
+    Return whether a storage axis lies on the parent 2D plot plane.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent cube view with ``plot_ndim == 2``.
+    storage_axis : int
+        Storage dimension index.
+
+    Returns
+    -------
+    bool
+        True when ``storage_axis`` is a parent plot Y or plot X axis.
+    """
+    if parent_spec.plot_ndim != 2:
+        return False
+    return storage_axis in set(parent_spec.plot_axis_order())
+
+
+def storage_axis_to_plot_axis(
+    frame: PlotViewFrame,
+    profile_storage_axis: int,
+    *,
+    parent_spec: Optional[CubeViewSpec] = None,
 ) -> PlotAxisName:
     """
     Return the plot axis name for a profile storage dimension.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        Parent 2D view frame.
+    profile_storage_axis : int
+        Storage axis index on the parent cube view.
+    parent_spec : CubeViewSpec, optional
+        Full parent view used to map N-D storage axes to plot X / plot Y.
+
+    Returns
+    -------
+    str
+        ``plot_x`` or ``plot_y``.
     """
+    if parent_spec is not None and parent_spec.plot_ndim == 2:
+        plot_order = parent_spec.plot_axis_order()
+        if len(plot_order) >= 2:
+            if profile_storage_axis == plot_order[-1]:
+                return "plot_x"
+            if profile_storage_axis == plot_order[-2]:
+                return "plot_y"
     if profile_storage_axis == frame.plot_x_dim:
         return "plot_x"
     if profile_storage_axis == frame.plot_y_dim:
@@ -509,6 +695,49 @@ def _profile_plot_axis(
     raise ValueError(
         f"profile storage axis {profile_storage_axis} is not on the plot plane"
     )
+
+
+def display_plane_profile_spec(
+    parent_spec: CubeViewSpec,
+    profile_storage_axis: int,
+    spatial_reduce: SpatialReduce,
+) -> CubeViewSpec:
+    """
+    Build a 2D profile output spec for an already-displayed plot plane.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent cube view with ``plot_ndim == 2``.
+    profile_storage_axis : int
+        Profile axis in parent storage-index space.
+    spatial_reduce : str
+        ``sum`` or ``mean`` over the orthogonal plot axis.
+
+    Returns
+    -------
+    CubeViewSpec
+        Two-axis output view for materializing from a 2D bundle.
+    """
+    plot_order = parent_spec.plot_axis_order()
+    if len(plot_order) < 2:
+        raise ValueError("display_plane_profile_spec requires a 2D parent spec")
+    plot_y_storage, plot_x_storage = plot_order[-2], plot_order[-1]
+    if profile_storage_axis == plot_y_storage:
+        bundle_profile_axis = 0
+    elif profile_storage_axis == plot_x_storage:
+        bundle_profile_axis = 1
+    else:
+        raise ValueError(
+            f"profile axis {profile_storage_axis} is not on the plot plane"
+        )
+    plane_parent = CubeViewSpec(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0),
+    )
+    return profile_view_spec(plane_parent, bundle_profile_axis, spatial_reduce)
 
 
 def _reduce_axis_index(
@@ -575,31 +804,60 @@ def _materialize_without_region(
     return y, arrays, names
 
 
-def _materialize_in_plane_profile(
+def _reduce_along_axis(y: np.ndarray, axis: int, role: DimRole) -> np.ndarray:
+    """
+    Collapse one tensor axis using the spec role semantics.
+    """
+    if role == DimRole.SUM:
+        return np.sum(y, axis=axis)
+    if role == DimRole.MEAN:
+        return np.mean(y, axis=axis)
+    raise ValueError(f"cannot reduce axis with role {role!r}")
+
+
+def _masked_reduce_along_axes(
+    y: np.ndarray,
+    axes: Tuple[int, ...],
+    role: DimRole,
+) -> np.ndarray:
+    """
+    Collapse tensor axes after ROI masking with NaN-aware reducers.
+    """
+    if role == DimRole.SUM:
+        profile = np.nansum(y, axis=axes)
+    elif role == DimRole.MEAN:
+        profile = np.nanmean(y, axis=axes)
+    else:
+        raise ValueError(f"unexpected spatial reduce role {role!r}")
+    empty_bins = np.isnan(y).all(axis=axes)
+    return np.where(empty_bins, np.nan, profile)
+
+
+def _materialize_roi_profile(
     y: np.ndarray,
     axis_arrays: Sequence[np.ndarray],
     axis_names: Sequence[str],
     spec: CubeViewSpec,
     request: MaterializeRequest,
     region_frame: PlotViewFrame,
+    *,
+    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
     """
-    Reduce a 2D plot plane to a masked 1D profile using the output view spec.
+    Reduce masked plot-plane data to a 1D profile using the output view spec.
     """
     if spec.plot_ndim != 1:
-        raise ValueError("in-plane profile materialization requires plot_ndim=1")
-    spatial_axes = _spatial_reduce_storage_axes(spec)
-    if len(spatial_axes) != 1:
-        raise ValueError(
-            f"expected exactly one spatial reduce axis, got {sorted(spatial_axes)}"
-        )
-    profile_axes = [
-        i for i, role in enumerate(spec.roles) if role == DimRole.PLOT_X
-    ]
-    if len(profile_axes) != 1:
-        raise ValueError("expected exactly one profile axis in output spec")
-    profile_storage_axis = profile_axes[0]
-    spatial_storage_axis = next(iter(spatial_axes))
+        raise ValueError("ROI profile materialization requires plot_ndim=1")
+
+    profile_axis_idx = profile_storage_axis(spec)
+    spatial_storage_axes = _spatial_reduce_storage_axes(
+        spec, plot_plane_storage_axes
+    )
+    if not spatial_storage_axes:
+        raise ValueError("expected at least one spatial reduce axis")
+    global_storage_axes = _global_reduce_storage_axes(
+        spec, spatial_storage_axes
+    )
 
     remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
     arrays = [np.asarray(axis_arrays[i]) for i in remaining]
@@ -609,20 +867,18 @@ def _materialize_in_plane_profile(
     for j in range(len(remaining) - 1, -1, -1):
         storage_axis = remaining[j]
         role = roles[j]
-        if role == DimRole.SUM and storage_axis not in spatial_axes:
-            y = np.sum(y, axis=j)
-            del arrays[j], names[j], roles[j], remaining[j]
-        elif role == DimRole.MEAN and storage_axis not in spatial_axes:
-            y = np.mean(y, axis=j)
+        if storage_axis in global_storage_axes:
+            y = _reduce_along_axis(y, j, role)
             del arrays[j], names[j], roles[j], remaining[j]
 
-    if y.ndim != 2:
+    if y.ndim < 2:
         raise ValueError(
-            f"expected 2D plot plane before ROI reduction, got shape {y.shape}"
+            f"expected at least 2D plot plane before ROI reduction, got {y.shape}"
         )
-    if y.shape != region_frame.shape:
+    if y.shape[-2:] != region_frame.shape:
         raise ValueError(
-            f"plot plane shape {y.shape} does not match region frame {region_frame.shape}"
+            f"plot plane shape {y.shape[-2:]} does not match region frame "
+            f"{region_frame.shape}"
         )
 
     compiled = compile_rect_with_mask_mode(
@@ -634,28 +890,63 @@ def _materialize_in_plane_profile(
         raise ValueError("ROI does not cover any cells")
 
     y = np.asarray(y, dtype=float)
-    y = np.where(compiled.mask, y, np.nan)
-
-    spatial_axis = _reduce_axis_index(remaining, spatial_storage_axis)
-    spatial_role = spec.roles[spatial_storage_axis]
-    if spatial_role == DimRole.SUM:
-        profile = np.nansum(y, axis=spatial_axis)
-    elif spatial_role == DimRole.MEAN:
-        profile = np.nanmean(y, axis=spatial_axis)
+    lead_shape = y.shape[:-2]
+    if lead_shape:
+        mask = compiled.mask.reshape((1,) * len(lead_shape) + compiled.mask.shape)
     else:
-        raise ValueError(f"unexpected spatial reduce role {spatial_role!r}")
-    empty_bins = np.isnan(y).all(axis=spatial_axis)
-    profile = np.where(empty_bins, np.nan, profile)
+        mask = compiled.mask
+    y = np.where(mask, y, np.nan)
 
-    profile_axis = _profile_plot_axis(region_frame, profile_storage_axis)
-    from .region_reduce import _profile_coords
+    spatial_tensor_axes = tuple(
+        _reduce_axis_index(remaining, storage_axis)
+        for storage_axis in sorted(spatial_storage_axes)
+    )
+    spatial_roles = {spec.roles[storage_axis] for storage_axis in spatial_storage_axes}
+    if len(spatial_roles) != 1:
+        raise ValueError("mixed spatial reduce roles are not supported")
+    spatial_role = next(iter(spatial_roles))
+    profile = _masked_reduce_along_axes(y, spatial_tensor_axes, spatial_role)
 
-    coords = _profile_coords(region_frame, profile_axis, int(profile.shape[0]))
-    if profile_axis == "plot_x":
-        axis_name = region_frame.plot_x_name
+    if plot_plane_storage_axes is not None:
+        on_plot_plane = profile_axis_idx in plot_plane_storage_axes
     else:
-        axis_name = region_frame.plot_y_name
-    return profile, [coords], [axis_name]
+        on_plot_plane = profile_axis_idx in (
+            region_frame.plot_x_dim,
+            region_frame.plot_y_dim,
+        )
+    if on_plot_plane:
+        if plot_plane_storage_axes is not None:
+            plot_y_storage, plot_x_storage = plot_plane_storage_axes
+            profile_axis = (
+                "plot_x"
+                if profile_axis_idx == plot_x_storage
+                else "plot_y"
+            )
+        else:
+            profile_axis = storage_axis_to_plot_axis(
+                region_frame, profile_axis_idx
+            )
+        from .region_reduce import _profile_coords
+
+        coords = _profile_coords(
+            region_frame, profile_axis, int(profile.shape[-1])
+        )
+        axis_name = (
+            region_frame.plot_x_name
+            if profile_axis == "plot_x"
+            else region_frame.plot_y_name
+        )
+    else:
+        profile_axis_index = _reduce_axis_index(remaining, profile_axis_idx)
+        coords = np.asarray(arrays[profile_axis_index], dtype=float)
+        if coords.shape != profile.shape:
+            raise ValueError(
+                f"profile coordinate length {coords.shape} does not match "
+                f"profile shape {profile.shape}"
+            )
+        axis_name = axis_names[profile_axis_idx]
+
+    return np.asarray(profile, dtype=float).reshape(-1), [coords], [axis_name]
 
 
 def materialize_view(
@@ -665,6 +956,7 @@ def materialize_view(
     request: MaterializeRequest,
     *,
     region_frame: Optional[PlotViewFrame] = None,
+    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
     """
     Reduce and transpose loaded data to match a materialize request.
@@ -682,6 +974,8 @@ def materialize_view(
         View specification and optional ROI masking parameters.
     region_frame : PlotViewFrame, optional
         Parent 2D view frame required when ``request.region`` is set.
+    plot_plane_storage_axes : tuple of int, optional
+        Parent plot Y and plot X storage axis indices for stack profiles.
 
     Returns
     -------
@@ -698,13 +992,14 @@ def materialize_view(
         raise ValueError(
             "ROI materialization currently supports 1D profile output only"
         )
-    return _materialize_in_plane_profile(
+    return _materialize_roi_profile(
         y,
         axis_arrays,
         axis_names,
         request.spec,
         request,
         region_frame,
+        plot_plane_storage_axes=plot_plane_storage_axes,
     )
 
 
