@@ -160,3 +160,45 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
             else None
         ),
     )
+
+
+def view_fingerprint_from_bundle(bundle: PlotBundle) -> tuple:
+    """
+    Build a hashable fingerprint of the 2D coordinate frame.
+
+    Used to decide whether an existing ROI in data coordinates remains valid
+    after a cube-view or slice change.
+
+    Parameters
+    ----------
+    bundle : PlotBundle
+        Prepared 2D plot bundle.
+
+    Returns
+    -------
+    tuple
+        Fingerprint of shape, axis assignment, and coordinate limits.
+    """
+    frame = frame_from_bundle(bundle)
+    parts: list = [
+        frame.shape,
+        frame.render_mode,
+        frame.plot_x_dim,
+        frame.plot_y_dim,
+        tuple(frame.axis_names),
+    ]
+    if frame.extent is not None:
+        parts.append(tuple(round(float(v), 4) for v in frame.extent))
+    if frame.mesh_x is not None and frame.mesh_y is not None:
+        mesh_x = np.asarray(frame.mesh_x, dtype=float)
+        mesh_y = np.asarray(frame.mesh_y, dtype=float)
+        parts.append(
+            (
+                mesh_x.shape,
+                round(float(np.nanmin(mesh_x)), 4),
+                round(float(np.nanmax(mesh_x)), 4),
+                round(float(np.nanmin(mesh_y)), 4),
+                round(float(np.nanmax(mesh_y)), 4),
+            )
+        )
+    return tuple(parts)

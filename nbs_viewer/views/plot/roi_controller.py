@@ -31,12 +31,6 @@ class RoiController(QObject):
         canvas.roi_region_changed.connect(self._on_roi_region_changed)
         canvas.plot_view_updated.connect(self._on_plot_view_updated)
 
-        dimension_control.indicesUpdated.connect(
-            lambda *_: self._invalidate_roi("slice changed")
-        )
-        dimension_control.cubeViewChanged.connect(
-            lambda *_: self._invalidate_roi("view axes changed")
-        )
         dimension_control.dimensionChanged.connect(self._on_dimension_changed)
         run_list_model.selected_keys_changed.connect(
             lambda *_: self._invalidate_roi("field selection changed")
@@ -76,16 +70,33 @@ class RoiController(QObject):
 
     def _on_plot_view_updated(self):
         self._update_region_active()
+        if self.canvas.region_controls_enabled():
+            draw_checked = self.panel.draw_checkbox.isChecked()
+            if draw_checked != self.canvas.is_roi_draw_enabled():
+                self.canvas.set_roi_draw_enabled(draw_checked)
+        self._validate_roi_against_view()
 
     def _on_dimension_changed(self, dimension: int):
         if dimension != 2:
             self._invalidate_roi("switched out of 2D mode")
         self._update_region_active()
 
+    def _validate_roi_against_view(self):
+        if self.canvas.get_roi_region() is None:
+            return
+        stored = self.canvas.get_roi_view_fingerprint()
+        current = self.canvas.current_view_fingerprint()
+        if stored is None or current is None:
+            self._invalidate_roi("view no longer available")
+            return
+        if stored != current:
+            self._invalidate_roi("view coordinates changed")
+
     def _invalidate_roi(self, reason: str):
         if self.canvas.get_roi_region() is None and not self.canvas.is_roi_draw_enabled():
             self._update_region_active()
             return
+        self.canvas.set_roi_draw_enabled(False)
         self.canvas.clear_roi()
         self.panel.set_draw_checked(False)
         self.panel.clear_corners()

@@ -98,7 +98,7 @@ def _coord_for_profile_index(
             return float(left + (index + 0.5) * dx)
         ny = frame.shape[0]
         dy = (top - bottom) / ny if ny else 1.0
-        return float(bottom + (index + 0.5) * dy)
+        return float(top - (index + 0.5) * dy)
 
     if frame.render_mode == "mesh":
         from .region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh

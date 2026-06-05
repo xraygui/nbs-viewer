@@ -11,7 +11,7 @@ from typing import Literal, Tuple
 import numpy as np
 
 from .plot_view_frame import PlotViewFrame
-from .region_mesh import mask_from_axis_slice, mask_from_data_rect
+from .region_mesh import _data_limits, mask_from_axis_slice, mask_from_data_rect
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,47 @@ class RectRegion(RegionDefinition):
 
 
 PlotAxisName = Literal["plot_x", "plot_y"]
+
+
+def expand_rect_for_profile(
+    frame: PlotViewFrame,
+    region: RectRegion,
+    profile_axis: PlotAxisName,
+) -> RectRegion:
+    """
+    Expand an ROI to the full plot extent along the profile axis.
+
+    For a profile along plot X (e.g. en_energy on the horizontal axis), the
+    ROI spans the full plot X range so every profile bin is included. The
+    orthogonal limits are left unchanged so reduction still uses the drawn
+    band on plot Y (e.g. tes_mca_energies).
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        View frame for the parent 2D plot.
+    region : RectRegion
+        User-drawn rectangle in data coordinates.
+    profile_axis : str
+        ``plot_x`` or ``plot_y``.
+
+    Returns
+    -------
+    RectRegion
+        Rectangle with one axis expanded to data limits.
+    """
+    region = region.normalized()
+    x_lo, x_hi, y_lo, y_hi = _data_limits(frame)
+    if profile_axis == "plot_x":
+        return RectRegion(
+            x0=x_lo, x1=x_hi, y0=region.y0, y1=region.y1
+        ).normalized()
+    if profile_axis == "plot_y":
+        return RectRegion(
+            x0=region.x0, x1=region.x1, y0=y_lo, y1=y_hi
+        ).normalized()
+    raise ValueError(f"Unknown profile axis {profile_axis!r}")
+
 
 
 @dataclass(frozen=True)

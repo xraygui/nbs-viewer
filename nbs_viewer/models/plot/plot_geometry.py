@@ -126,6 +126,44 @@ def centers_to_edges(centers: np.ndarray) -> np.ndarray:
     return np.concatenate(([first], mid, [last]))
 
 
+def _orient_image_for_imshow_upper(
+    y: np.ndarray,
+    row_axis: np.ndarray,
+    col_axis: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Orient image storage so row 0 sits at the top under ``origin='upper'``.
+
+    ``imshow`` places storage row 0 at the maximum y extent. Reorder rows and
+    columns when axis centers increase with storage index so displayed
+    coordinates still increase bottom-to-top and left-to-right.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        2D data array.
+    row_axis : np.ndarray
+        Vertical axis center coordinates for each storage row.
+    col_axis : np.ndarray
+        Horizontal axis center coordinates for each storage column.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        Oriented ``y``, ``row_axis``, and ``col_axis``.
+    """
+    y_out = np.asarray(y)
+    row_out = np.asarray(row_axis, dtype=float).ravel()
+    col_out = np.asarray(col_axis, dtype=float).ravel()
+    if row_out.size >= 2 and row_out[1] > row_out[0]:
+        y_out = y_out[::-1, :]
+        row_out = row_out[::-1]
+    if col_out.size >= 2 and col_out[1] < col_out[0]:
+        y_out = y_out[:, ::-1]
+        col_out = col_out[::-1]
+    return y_out, row_out, col_out
+
+
 def _extent_from_uniform_1d(
     x_coords: np.ndarray, y_coords: np.ndarray
 ) -> Tuple[float, float, float, float]:
@@ -142,14 +180,15 @@ def _extent_from_uniform_1d(
     Returns
     -------
     tuple of float
-        Extent as left, right, bottom, top.
+        Extent as left, right, bottom, top with ``bottom < top``.
     """
     x_coords = np.asarray(x_coords, dtype=float).ravel()
     y_coords = np.asarray(y_coords, dtype=float).ravel()
     if x_coords.size >= 2:
-        dx = x_coords[1] - x_coords[0]
-        left = x_coords[0] - dx / 2.0
-        right = x_coords[-1] + dx / 2.0
+        dx = abs(x_coords[1] - x_coords[0])
+        x_lo = min(x_coords[0], x_coords[-1]) - dx / 2.0
+        x_hi = max(x_coords[0], x_coords[-1]) + dx / 2.0
+        left, right = x_lo, x_hi
     elif x_coords.size == 1:
         left = x_coords[0] - 0.5
         right = x_coords[0] + 0.5
@@ -157,9 +196,10 @@ def _extent_from_uniform_1d(
         left, right = 0.0, 1.0
 
     if y_coords.size >= 2:
-        dy = y_coords[1] - y_coords[0]
-        bottom = y_coords[0] - dy / 2.0
-        top = y_coords[-1] + dy / 2.0
+        dy = abs(y_coords[1] - y_coords[0])
+        y_lo = min(y_coords[0], y_coords[-1]) - dy / 2.0
+        y_hi = max(y_coords[0], y_coords[-1]) + dy / 2.0
+        bottom, top = y_lo, y_hi
     elif y_coords.size == 1:
         bottom = y_coords[0] - 0.5
         top = y_coords[0] + 0.5
@@ -384,10 +424,14 @@ def prepare_2d_bundle(
 
     if render_mode == "image":
         ny, nx = y.shape
+        y_image = y
         if len(x_axes) >= 2:
             row_axis = np.asarray(x_axes[-2]).ravel()
             col_axis = np.asarray(x_axes[-1]).ravel()
             if row_axis.size > 1 and col_axis.size > 1:
+                y_image, row_axis, col_axis = _orient_image_for_imshow_upper(
+                    y, row_axis, col_axis
+                )
                 extent = _extent_from_uniform_1d(col_axis, row_axis)
             else:
                 extent = _pixel_extent(ny, nx)
@@ -396,7 +440,7 @@ def prepare_2d_bundle(
 
         return PlotBundle(
             ndim=2,
-            y=y,
+            y=y_image,
             render_mode="image",
             axis_names=names[-2:],
             extent=extent,

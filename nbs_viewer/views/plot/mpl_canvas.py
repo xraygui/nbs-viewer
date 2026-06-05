@@ -14,8 +14,13 @@ from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from ...models.plot.cube_view import CubeViewSpec
 from ...models.plot.plotDataModel import PlotDataModel
+from ...models.plot.derived_plot_data_model import DerivedPlotDataModel
 from ...models.plot.plot_geometry import PlotBundle, RenderMode
-from ...models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
+from ...models.plot.plot_view_frame import (
+    PlotViewFrame,
+    frame_from_bundle,
+    view_fingerprint_from_bundle,
+)
 from ...models.plot.region import RectRegion
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
@@ -66,6 +71,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self.run_list_model = run_list_model
         self.plotArtists = {}
+        self.derived_models: dict[str, DerivedPlotDataModel] = {}
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -87,6 +93,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._roi_selector = None
         self._roi_overlay = None
         self._roi_draw_enabled = False
+        self._roi_view_fingerprint = None
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
@@ -127,7 +134,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 return False
 
         if self._dimension != dimension:
-            self.clear()
+            self.clear(keep_derived=True)
             self._dimension = dimension
 
         view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
@@ -332,6 +339,7 @@ class MplCanvas(FigureCanvasQTAgg):
         plotData.set_artist(artist)
         if bundle.render_mode == "line":
             self._ensure_sibling_lines_on_axes(except_key=plotData._key)
+        self.sync_derived_line_display()
         self._sync_roi_display()
         self.plot_view_updated.emit()
         self.draw()
@@ -500,7 +508,85 @@ class MplCanvas(FigureCanvasQTAgg):
                 break
         for model in self.plotArtists.values():
             model.artist = None
+        for model in self.derived_models.values():
+            model.artist = None
+        self._destroy_roi_selector()
+        self._remove_roi_overlay()
         self._active_render_mode = None
+
+    def add_derived_plot(self, model: DerivedPlotDataModel) -> None:
+        """
+        Register a committed derivative line for 1D comparison overlay.
+        """
+        self.derived_models[model._product_id] = model
+        model.draw_requested.connect(self.draw)
+        model.visibility_changed.connect(lambda *_: self.updateLegend())
+        self._plot_derived_line(model)
+        self.sync_derived_line_display()
+
+    def remove_derived_plot(self, product_id: str) -> None:
+        """
+        Remove a derivative overlay by product id.
+        """
+        model = self.derived_models.pop(product_id, None)
+        if model is None:
+            return
+        model.clear()
+
+    def sync_derived_line_display(self) -> None:
+        """
+        Show or hide pinned derivative lines based on the active view mode.
+        """
+        show = self.currentDim == 1 and self._active_render_mode == "line"
+        for model in self.derived_models.values():
+            if model.artist is None:
+                if show:
+                    self._plot_derived_line(model)
+                continue
+            model.artist.set_visible(show and model._visible)
+        if show:
+            self._ensure_derived_lines_on_axes()
+        self.updateLegend()
+        self.draw_idle()
+
+    def _plot_derived_line(self, model: DerivedPlotDataModel) -> None:
+        bundle = model.get_plot_bundle()
+        if bundle.render_mode != "line":
+            return
+        artist = model.artist
+        if self._line_artist_on_axes(artist):
+            LineRenderer.update(artist, bundle)
+        else:
+            if artist is not None:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            artist = LineRenderer.create(self.axes, bundle, model.label)
+        model.set_artist(artist)
+        self.updateLegend()
+
+    def _ensure_derived_lines_on_axes(self) -> None:
+        for model in self.derived_models.values():
+            if not model._visible:
+                continue
+            artist = model.artist
+            if artist is None or not self._line_artist_on_axes(artist):
+                self._plot_derived_line(model)
+
+    def apply_roi_from_region(self, region) -> None:
+        """
+        Set the canvas ROI from a :class:`RectRegion` in data coordinates.
+        """
+        self._set_roi_region(region.normalized())
+        if self._roi_selector is not None:
+            region = region.normalized()
+            self._roi_selector.extents = (
+                region.x0,
+                region.x1,
+                region.y0,
+                region.y1,
+            )
 
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
@@ -587,6 +673,24 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         return self._roi_region
 
+    def current_view_fingerprint(self):
+        """
+        Return a fingerprint for the active 2D plot coordinate frame.
+        """
+        bundle = self.get_active_plot_bundle()
+        if bundle is None:
+            return None
+        try:
+            return view_fingerprint_from_bundle(bundle)
+        except ValueError:
+            return None
+
+    def get_roi_view_fingerprint(self):
+        """
+        Return the view fingerprint stored when the ROI was committed.
+        """
+        return self._roi_view_fingerprint
+
     def set_roi_draw_enabled(self, enabled: bool):
         """
         Enable or disable interactive rectangle drawing.
@@ -611,6 +715,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         self._roi_region = None
         self._roi_source_key = None
+        self._roi_view_fingerprint = None
         self._destroy_roi_selector()
         self._remove_roi_overlay()
         self.roi_region_changed.emit(None)
@@ -631,6 +736,7 @@ class MplCanvas(FigureCanvasQTAgg):
         model = self.get_single_visible_2d_model()
         self._roi_region = region.normalized()
         self._roi_source_key = model._key if model is not None else None
+        self._roi_view_fingerprint = self.current_view_fingerprint()
         if update_overlay is None:
             update_overlay = not self._roi_draw_enabled
         if update_overlay:
@@ -638,6 +744,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self.roi_region_changed.emit(self._roi_region)
 
     def _on_roi_selected(self, _eclick, _erelease):
+        if not self._roi_draw_enabled:
+            return
         region = self._region_from_selector()
         if region is None:
             return
@@ -693,6 +801,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self._destroy_roi_selector()
 
     def _attach_roi_selector(self):
+        if not self._roi_draw_enabled:
+            return
         self._destroy_roi_selector()
         if not self.region_controls_enabled():
             return
@@ -750,6 +860,19 @@ class MplCanvas(FigureCanvasQTAgg):
         )
         self.axes.add_patch(self._roi_overlay)
 
+    def _roi_selector_is_live(self) -> bool:
+        """
+        Return whether the rectangle selector is attached to the current axes.
+        """
+        selector = self._roi_selector
+        if selector is None:
+            return False
+        ax = getattr(selector, "ax", None)
+        if ax is not self.axes:
+            return False
+        selection = getattr(selector, "_selection_artist", None)
+        return selection is not None and selection.axes is self.axes
+
     def _sync_roi_display(self):
         model = self.get_single_visible_2d_model()
         if self._roi_region is not None:
@@ -759,12 +882,22 @@ class MplCanvas(FigureCanvasQTAgg):
             ):
                 self.clear_roi()
                 return
-            if not self._roi_draw_enabled:
-                self._update_roi_overlay()
-        if self._roi_draw_enabled and self._roi_selector is None:
-            self._attach_roi_selector()
+        if self._roi_draw_enabled:
+            self._remove_roi_overlay()
+            if not self._roi_selector_is_live():
+                self._attach_roi_selector()
+            elif self._roi_region is not None:
+                region = self._roi_region.normalized()
+                self._roi_selector.extents = (
+                    region.x0,
+                    region.x1,
+                    region.y0,
+                    region.y1,
+                )
+        elif self._roi_region is not None:
+            self._update_roi_overlay()
 
-    def clear(self):
+    def clear(self, keep_derived: bool = False):
         print_debug("MplCanvas.clear", "Starting Clear", category="DEBUG_PLOTS")
         self.clear_roi()
 
@@ -790,6 +923,13 @@ class MplCanvas(FigureCanvasQTAgg):
 
         for model in self.plotArtists.values():
             model.artist = None
+        if keep_derived:
+            for model in self.derived_models.values():
+                model.artist = None
+        else:
+            for model in self.derived_models.values():
+                model.clear()
+            self.derived_models.clear()
 
         self.draw()
 

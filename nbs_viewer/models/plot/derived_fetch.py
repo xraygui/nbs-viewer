@@ -12,7 +12,12 @@ from .analysis_region import AnalysisRegion
 from .derivative_spec import DerivativeSpec
 from .plot_geometry import PlotBundle, prepare_1d_bundle, prepare_2d_bundle
 from .plot_view_frame import frame_from_bundle
-from .region import CompiledRegion, RectRegion, _bbox_from_mask
+from .region import (
+    CompiledRegion,
+    RectRegion,
+    _bbox_from_mask,
+    expand_rect_for_profile,
+)
 from .region_reduce import apply_region_profile
 
 
@@ -351,6 +356,35 @@ def fetch_derived_profile_bundle(
     )
 
 
+def region_for_derivative_fetch(
+    parent_bundle: PlotBundle,
+    region: RectRegion,
+    spec: DerivativeSpec,
+) -> RectRegion:
+    """
+    Return the ROI rectangle to use for a derivative fetch.
+
+    Parameters
+    ----------
+    parent_bundle : PlotBundle
+        Parent 2D bundle.
+    region : RectRegion
+        User ROI in data coordinates.
+    spec : DerivativeSpec
+        Derivative operation settings.
+
+    Returns
+    -------
+    RectRegion
+        Possibly expanded rectangle for profile reduction.
+    """
+    region = region.normalized()
+    if spec.output_kind != "profile" or not spec.span_full_profile_axis:
+        return region
+    frame = frame_from_bundle(parent_bundle)
+    return expand_rect_for_profile(frame, region, spec.profile_axis)
+
+
 def fetch_derivative_preview_bundle(
     plot_model,
     slice_info,
@@ -380,9 +414,11 @@ def fetch_derivative_preview_bundle(
     PlotBundle
         Preview payload (1D or 2D).
     """
-    region = region.normalized()
     if parent_bundle is None and plot_model.last_bundle is not None:
         parent_bundle = plot_model.last_bundle
+    if parent_bundle is None:
+        raise ValueError("No parent 2D bundle available for derivative fetch")
+    region = region_for_derivative_fetch(parent_bundle, region, spec)
 
     if spec.output_kind == "profile":
         return fetch_derived_profile_bundle(

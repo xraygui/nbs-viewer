@@ -46,6 +46,7 @@ class DerivativePreviewWorker(QThread):
         spec,
         generation: int,
         parent=None,
+        parent_bundle: PlotBundle | None = None,
     ):
         super().__init__(parent)
         self.plot_model = plot_model
@@ -54,6 +55,7 @@ class DerivativePreviewWorker(QThread):
         self.region = region
         self.spec = spec
         self.generation = generation
+        self.parent_bundle = parent_bundle
 
     def run(self):
         """
@@ -63,7 +65,7 @@ class DerivativePreviewWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t0 = time.perf_counter()
-            parent_bundle = self.plot_model.last_bundle
+            parent_bundle = self.parent_bundle
             cached = parent_bundle is not None
             bundle = fetch_derivative_preview_bundle(
                 self.plot_model,

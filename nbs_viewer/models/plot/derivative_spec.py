@@ -31,6 +31,9 @@ class DerivativeSpec:
         ``sum`` or ``mean`` along the orthogonal axis for profiles.
     label : str
         Optional display label for the derivative product.
+    span_full_profile_axis : bool
+        When ``output_kind`` is ``profile``, expand the ROI to the full plot
+        extent along ``profile_axis`` before reducing.
     """
 
     mask_mode: MaskMode = "inside"
@@ -38,6 +41,7 @@ class DerivativeSpec:
     profile_axis: ProfileAxis = "plot_x"
     reduce: ReduceOp = "sum"
     label: str = ""
+    span_full_profile_axis: bool = True
 
     def default_label(self, profile_axis_name: str = "") -> str:
         """

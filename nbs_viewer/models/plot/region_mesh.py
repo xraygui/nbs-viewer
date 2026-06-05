@@ -54,6 +54,23 @@ def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
     return a0 <= b1 and b0 <= a1
 
 
+def _image_row_y_bounds(
+    frame: PlotViewFrame, row: int
+) -> Tuple[float, float]:
+    """
+    Return vertical data bounds for an image row.
+
+    Matches ``imshow(..., origin="upper")``: storage row 0 is at the top of
+    the axes (near ``top``), increasing row index moves toward ``bottom``.
+    """
+    _, _, bottom, top = _data_limits(frame)
+    ny, _ = frame.shape
+    dy = (top - bottom) / ny if ny else 1.0
+    y_hi = top - row * dy
+    y_lo = top - (row + 1) * dy
+    return y_lo, y_hi
+
+
 def _image_cell_bounds(
     frame: PlotViewFrame, row: int, col: int
 ) -> Tuple[float, float, float, float]:
@@ -61,13 +78,11 @@ def _image_cell_bounds(
     Return x_lo, x_hi, y_lo, y_hi for an image cell at storage (row, col).
     """
     left, right, bottom, top = _data_limits(frame)
-    ny, nx = frame.shape
+    _, nx = frame.shape
     dx = (right - left) / nx if nx else 1.0
-    dy = (top - bottom) / ny if ny else 1.0
     x_lo = left + col * dx
     x_hi = left + (col + 1) * dx
-    y_lo = bottom + row * dy
-    y_hi = bottom + (row + 1) * dy
+    y_lo, y_hi = _image_row_y_bounds(frame, row)
     return x_lo, x_hi, y_lo, y_hi
 
 
@@ -198,8 +213,8 @@ def _mask_from_data_rect_image(
     dy = (top - bottom) / ny if ny else 1.0
     col0 = int(np.floor((x0 - left) / dx)) if dx else 0
     col1 = int(np.ceil((x1 - left) / dx)) if dx else nx
-    row0 = int(np.floor((y0 - bottom) / dy)) if dy else 0
-    row1 = int(np.ceil((y1 - bottom) / dy)) if dy else ny
+    row0 = int(np.floor((top - y1) / dy)) if dy else 0
+    row1 = int(np.ceil((top - y0) / dy)) if dy else ny
     col0 = max(0, min(col0, nx))
     col1 = max(0, min(col1, nx))
     row0 = max(0, min(row0, ny))

@@ -10,6 +10,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QFrame,
 )
+import numpy as np
 from qtpy.QtCore import Qt, Signal
 
 from nbs_viewer.models.plot.cube_view import (
@@ -147,6 +148,26 @@ class _SliceReduceRow(QWidget):
     def get_index(self):
         return self.slider.value()
 
+    def set_axis_data(self, axis_data, associated_data=None):
+        """
+        Replace axis coordinates and refresh the value readout.
+        """
+        axis_data = np.asarray(axis_data, dtype=float).ravel()
+        self._axis_data = axis_data
+        if associated_data is not None:
+            self._associated_data = associated_data
+            arrays = associated_data.get("arrays", [])
+            names = associated_data.get("names", [])
+            updated = []
+            for i, (label, _, old_name) in enumerate(self._assoc_labels):
+                arr = arrays[i] if i < len(arrays) else np.array([])
+                name = names[i] if i < len(names) else old_name
+                updated.append((label, arr, name))
+            self._assoc_labels = updated
+        if axis_data.size > 0:
+            self.slider.setMaximum(max(0, int(axis_data.size) - 1))
+        self._update_value_labels(self.slider.value())
+
 
 class _PlotAxisRow(QWidget):
     """
@@ -226,6 +247,7 @@ class PlotDimensionControl(QWidget):
         self.run_list_model.run_added.connect(self.on_run_added)
         self.run_list_model.run_removed.connect(self.on_run_removed)
         self.run_list_model.selected_keys_changed.connect(self.on_selection_changed)
+        self.canvas.plot_view_updated.connect(self.refresh_axis_coordinates)
 
         self.init_ui()
 
@@ -512,12 +534,57 @@ class PlotDimensionControl(QWidget):
                 cube_view_spec=self._cube_view_spec,
             )
 
+    def refresh_axis_coordinates(self):
+        """
+        Update slice slider readouts with loaded axis coordinate values.
+        """
+        if not self._slice_rows or self._dim_names is None:
+            return
+        shape_info = self.get_shape_info()
+        if not shape_info:
+            return
+        _, dim_names, axis_arrays, associated_data = shape_info
+        self._axis_arrays = axis_arrays
+        self._associated_data = associated_data
+        for row in self._slice_rows:
+            storage_axis = row.storage_axis
+            if storage_axis is None or storage_axis >= len(axis_arrays):
+                continue
+            dim_name = dim_names[storage_axis]
+            row.set_axis_data(
+                axis_arrays[storage_axis],
+                associated_data.get(dim_name, {}),
+            )
+
+    def _axis_coordinates_for_run(self, run_model, ykey, x_keys, shape, dim_names):
+        """
+        Return axis coordinate arrays, preferring loaded data over index placeholders.
+        """
+        _, _, placeholders, _ = run_model._run.get_dimension_ui_info(
+            ykey, x_keys
+        )
+        try:
+            axis_arrays, _, associated_data = run_model._run.get_dimension_axes(
+                ykey, x_keys
+            )
+        except Exception:
+            return placeholders, {}
+
+        aligned = []
+        for i, size in enumerate(shape):
+            arr = np.asarray(axis_arrays[i], dtype=float).ravel()
+            if arr.size == size:
+                aligned.append(arr)
+            else:
+                aligned.append(placeholders[i])
+        return aligned, associated_data
+
     def get_shape_info(self):
         """
         Get shape and dimension layout from visible runs for slice controls.
 
-        Axis coordinate arrays are index placeholders; real values are loaded
-        when the plot worker fetches data.
+        Axis coordinates use loaded motor or axis-hint values when available,
+        otherwise integer index placeholders.
 
         Returns
         -------
@@ -544,8 +611,13 @@ class PlotDimensionControl(QWidget):
 
                 for ykey in y_keys:
                     try:
-                        shape, axis_names, axis_arrays, associated_data = (
+                        shape, axis_names, _, _ = (
                             run_model._run.get_dimension_ui_info(ykey, x_keys)
+                        )
+                        axis_arrays, associated_data = (
+                            self._axis_coordinates_for_run(
+                                run_model, ykey, x_keys, shape, axis_names
+                            )
                         )
 
                         if (
