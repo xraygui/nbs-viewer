@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
+from .region import RectRegion
+
 SliceItem = Union[int, slice]
+MaskMode = Literal["inside", "outside"]
 
 
 class DimRole(str, Enum):
@@ -34,6 +37,26 @@ ROLE_LABELS = {
 }
 
 SLICE_ROLES = (DimRole.INDEX, DimRole.SUM, DimRole.MEAN)
+
+
+@dataclass(frozen=True)
+class MaterializeRequest:
+    """
+    Frozen view request applied to loaded storage-cube arrays.
+
+    Parameters
+    ----------
+    spec : CubeViewSpec
+        Slice, reduce, and orient roles for the output view.
+    region : RectRegion, optional
+        ROI in matplotlib data coordinates on the parent 2D plot plane.
+    mask_mode : str
+        ``inside`` or ``outside`` the ROI when reducing masked data.
+    """
+
+    spec: CubeViewSpec
+    region: Optional[RectRegion] = None
+    mask_mode: MaskMode = "inside"
 
 
 @dataclass(frozen=True)
@@ -364,31 +387,44 @@ def spec_for_plot_ndim(
     return resolve_roles(spec)
 
 
-def apply_cube_view(
+def materialize_view(
     y: np.ndarray,
     axis_arrays: Sequence[np.ndarray],
     axis_names: Sequence[str],
-    spec: CubeViewSpec,
+    request: MaterializeRequest,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
     """
-    Reduce and transpose loaded data to match the cube view spec.
+    Reduce and transpose loaded data to match a materialize request.
 
     Parameters
     ----------
     y : np.ndarray
-        Array loaded with :meth:`CubeViewSpec.to_load_slice_info`.
+        Array loaded with :meth:`CubeViewSpec.to_load_slice_info` for
+        ``request.spec``.
     axis_arrays : sequence of np.ndarray
         Per-storage-axis coordinate arrays (full length along each axis).
     axis_names : sequence of str
         Names per storage axis.
-    spec : CubeViewSpec
-        View specification.
+    request : MaterializeRequest
+        View specification and optional ROI masking parameters.
 
     Returns
     -------
     tuple
         ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
+
+    Raises
+    ------
+    ValueError
+        If ``request.region`` is set; ROI materialization is not implemented
+        until a later refactor phase.
     """
+    if request.region is not None:
+        raise ValueError(
+            "ROI materialization is not implemented yet; use region=None"
+        )
+
+    spec = request.spec
     remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
     arrays = [np.asarray(axis_arrays[i]) for i in remaining]
     names = [axis_names[i] for i in remaining]
@@ -432,3 +468,36 @@ def apply_cube_view(
         names = names[-2:]
 
     return y, arrays, names
+
+
+def apply_cube_view(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: CubeViewSpec,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Reduce and transpose loaded data to match the cube view spec.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Array loaded with :meth:`CubeViewSpec.to_load_slice_info`.
+    axis_arrays : sequence of np.ndarray
+        Per-storage-axis coordinate arrays (full length along each axis).
+    axis_names : sequence of str
+        Names per storage axis.
+    spec : CubeViewSpec
+        View specification.
+
+    Returns
+    -------
+    tuple
+        ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
+    """
+    return materialize_view(
+        y,
+        axis_arrays,
+        axis_names,
+        MaterializeRequest(spec),
+    )
