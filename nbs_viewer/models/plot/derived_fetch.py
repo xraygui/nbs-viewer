@@ -44,6 +44,18 @@ def plot_plane_storage_axes(
     return plot_order[-2], plot_order[-1]
 
 
+def plot_plane_storage_axes_for_frame(
+    parent_spec: Optional[CubeViewSpec],
+    region_frame,
+) -> Optional[Tuple[int, int]]:
+    """
+    Return plot-plane storage axes for materializing from a rendered bundle.
+    """
+    if region_frame is not None:
+        return region_frame.plot_y_dim, region_frame.plot_x_dim
+    return plot_plane_storage_axes(parent_spec)
+
+
 def _require_non_empty(compiled) -> None:
     """
     Raise if the compiled region selects no cells.
@@ -212,6 +224,9 @@ def _storage_axis_arrays_for_bundle(
         if mesh_x.shape == (ny, nx):
             row_axis = np.nanmean(mesh_y, axis=1)
             col_axis = np.nanmean(mesh_x, axis=0)
+    if frame.render_mode == "mesh" and len(names) >= 2:
+        storage_names = [names[1], names[0]]
+        return [col_axis, row_axis], storage_names
     axis_arrays = [None, None]
     axis_arrays[frame.plot_y_dim] = row_axis
     axis_arrays[frame.plot_x_dim] = col_axis
@@ -541,7 +556,9 @@ def fetch_materialized_bundle(
             axis_names,
             materialize_request,
             region_frame=frame,
-            plot_plane_storage_axes=(0, 1),
+            plot_plane_storage_axes=plot_plane_storage_axes_for_frame(
+                parent_spec, frame
+            ),
         )
         if materialize_request.spec.plot_ndim == 1:
             if not np.isfinite(y).any():

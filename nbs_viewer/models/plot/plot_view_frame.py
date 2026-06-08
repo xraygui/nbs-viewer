@@ -69,14 +69,14 @@ class PlotViewFrame:
         """
         Return the number of cells along plot X.
         """
-        return self.shape[self.plot_x_dim]
+        return _plot_axis_length(self, self.plot_x_dim)
 
     @property
     def n_plot_y(self) -> int:
         """
         Return the number of cells along plot Y.
         """
-        return self.shape[self.plot_y_dim]
+        return _plot_axis_length(self, self.plot_y_dim)
 
 
 def _infer_mesh_plot_dims(
@@ -94,10 +94,22 @@ def _infer_mesh_plot_dims(
     if mesh_x.shape[0] > 1:
         x_span_row = float(np.nanmax(np.abs(np.diff(mesh_x, axis=0))))
     if x_span_col >= x_span_row:
-        plot_x_dim = 1
-    else:
         plot_x_dim = 0
+    else:
+        plot_x_dim = 1
     return plot_x_dim, 1 - plot_x_dim
+
+
+def _plot_axis_length(frame: PlotViewFrame, storage_dim: int) -> int:
+    """
+    Return the number of cells along a storage axis on the displayed plane.
+    """
+    ny, nx = frame.shape
+    if frame.render_mode == "mesh":
+        if storage_dim == frame.plot_x_dim:
+            return nx if frame.plot_x_dim == 0 else ny
+        return ny if frame.plot_y_dim == 1 else nx
+    return frame.shape[storage_dim]
 
 
 def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
@@ -138,8 +150,10 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
         plot_x_dim, plot_y_dim = _infer_mesh_plot_dims(
             bundle.mesh_x, bundle.mesh_y
         )
-        axis_names = list(bundle.axis_names)
-        if len(axis_names) < 2:
+        mesh_names = list(bundle.axis_names)
+        if len(mesh_names) >= 2:
+            axis_names = [mesh_names[1], mesh_names[0]]
+        else:
             axis_names = names[-2:]
 
     return PlotViewFrame(

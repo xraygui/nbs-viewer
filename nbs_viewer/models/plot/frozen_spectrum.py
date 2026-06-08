@@ -98,10 +98,13 @@ def _storage_axes_from_bundle(bundle: PlotBundle) -> Tuple[List[np.ndarray], Lis
                 row_axis = 0.5 * (mesh_y[:-1, 0] + mesh_y[1:, 0])
             else:
                 row_axis = mesh_y[:, 0]
+            storage_names = (
+                [names[1], names[0]] if len(names) >= 2 else names[:2]
+            )
             return [
-                np.asarray(row_axis, dtype=float),
                 np.asarray(col_axis, dtype=float),
-            ], names[:2]
+                np.asarray(row_axis, dtype=float),
+            ], storage_names
 
         row_axis = np.arange(y.shape[0], dtype=float)
         col_axis = np.arange(y.shape[1], dtype=float)

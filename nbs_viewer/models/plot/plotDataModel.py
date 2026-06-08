@@ -88,7 +88,9 @@ class PlotDataModel(QObject):
 
     @property
     def label(self):
-        return self._label or f"{self._ykey}.{self._run.scan_id}"
+        if self._label:
+            return self._label
+        return self._run.legend_label_for_ykey(self._ykey)
 
     @property
     def axis_names(self):

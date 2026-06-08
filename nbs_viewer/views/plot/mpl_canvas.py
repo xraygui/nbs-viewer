@@ -2,6 +2,8 @@ import matplotlib
 
 matplotlib.use("qtagg")
 
+from typing import Optional
+
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -75,6 +77,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._pending_workers = set()
         self._last_2d_plot_key = None
         self._last_2d_cube_view_spec = None
+        self._last_view_frame: Optional[PlotViewFrame] = None
 
         self._artist_count = 0
         self._autoscale = True
@@ -317,6 +320,7 @@ class MplCanvas(FigureCanvasQTAgg):
         try:
             if bundle.render_mode == "line":
                 self._last_2d_plot_key = None
+                self._last_view_frame = None
                 artist = self._render_line(bundle, plotData, artist)
                 self.currentDim = 1
                 self._active_render_mode = "line"
@@ -325,11 +329,13 @@ class MplCanvas(FigureCanvasQTAgg):
                 artist = self._render_image(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "image"
+                self._last_view_frame = frame_from_bundle(bundle)
             elif bundle.render_mode == "mesh":
                 self._prepare_2d_axes(plotData._key)
                 artist = self._render_mesh(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "mesh"
+                self._last_view_frame = frame_from_bundle(bundle)
         except Exception as e:
             print(f"[MplCanvas._handle_plot_data] Error: {e}")
             artist = None
@@ -380,15 +386,17 @@ class MplCanvas(FigureCanvasQTAgg):
         return isinstance(artist, Line2D) and artist.axes is self.axes
 
     def _render_line(self, bundle: PlotBundle, plotData, artist):
+        label = plotData.label
         if self._line_artist_on_axes(artist):
             LineRenderer.update(artist, bundle)
+            artist.set_label(label)
         else:
             if isinstance(artist, Line2D):
                 try:
                     artist.remove()
                 except Exception:
                     pass
-            artist = LineRenderer.create(self.axes, bundle, plotData.label)
+            artist = LineRenderer.create(self.axes, bundle, label)
             self._artist_count += 1
         LineRenderer.set_labels(self.axes, bundle)
         if self._autoscale:

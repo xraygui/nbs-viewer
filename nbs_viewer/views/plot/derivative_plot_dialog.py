@@ -27,6 +27,7 @@ from nbs_viewer.models.plot.cube_view import (
     eligible_profile_axes,
     profile_axis_name,
     plot_axis_to_storage_axis,
+    scan_profile_storage_axis,
     storage_axis_to_plot_axis,
 )
 from nbs_viewer.models.plot.derived_fetch import (
@@ -197,18 +198,23 @@ class DerivativePlotDialog(QDialog):
         in_plane = self._selected_axis_on_plot_plane()
         self.span_full_checkbox.setEnabled(profile and in_plane)
         storage_axis = self.get_profile_storage_axis()
-        plot_x_axis = None
-        plot_y_axis = None
-        if self._parent_spec is not None:
-            plot_order = self._parent_spec.plot_axis_order()
-            if len(plot_order) >= 2:
-                plot_y_axis, plot_x_axis = plot_order[-2], plot_order[-1]
-        self.full_width_button.setEnabled(
-            profile and in_plane and storage_axis == plot_x_axis
-        )
-        self.full_height_button.setEnabled(
-            profile and in_plane and storage_axis == plot_y_axis
-        )
+        profile_plot_axis = None
+        if (
+            profile
+            and in_plane
+            and self._parent_frame is not None
+            and self._parent_spec is not None
+        ):
+            try:
+                profile_plot_axis = storage_axis_to_plot_axis(
+                    self._parent_frame,
+                    storage_axis,
+                    parent_spec=self._parent_spec,
+                )
+            except ValueError:
+                profile_plot_axis = None
+        self.full_width_button.setEnabled(profile_plot_axis == "plot_x")
+        self.full_height_button.setEnabled(profile_plot_axis == "plot_y")
 
     def _selected_axis_on_plot_plane(self) -> bool:
         if self._parent_spec is None:
@@ -279,7 +285,9 @@ class DerivativePlotDialog(QDialog):
         current = self.profile_axis_combo.currentData()
         eligible = eligible_profile_axes(parent_spec)
         plot_order = parent_spec.plot_axis_order()
-        default_axis = plot_order[-1] if len(plot_order) >= 1 else None
+        default_axis = scan_profile_storage_axis(parent_spec)
+        if default_axis is None and len(plot_order) >= 1:
+            default_axis = plot_order[-1]
 
         self.profile_axis_combo.blockSignals(True)
         self.profile_axis_combo.clear()

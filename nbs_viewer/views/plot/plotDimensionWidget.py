@@ -403,6 +403,7 @@ class PlotDimensionControl(QWidget):
             self._plot_rows.append(row)
 
         self._apply_view_state()
+        self.refresh_plot_axis_labels()
         self._refresh_parent_panel()
 
     def _refresh_parent_panel(self):
@@ -529,6 +530,23 @@ class PlotDimensionControl(QWidget):
         self.indicesUpdated.emit(slice_info)
         self.cubeViewChanged.emit(self._cube_view_spec)
 
+    def _view_frame_for_labels(self):
+        """
+        Return the rendered 2D view frame used for plot-axis labels.
+
+        Returns
+        -------
+        PlotViewFrame or None
+            Last rendered frame, or None when no 2D plot is available.
+        """
+        frame = getattr(self.canvas, "_last_view_frame", None)
+        if frame is not None:
+            return frame
+        try:
+            return self.canvas.get_view_frame()
+        except ValueError:
+            return None
+
     def _plot_axis_label_for_storage(self, storage_axis: int) -> str:
         """
         Return the Plot X / Plot Y label for a storage axis on the live view.
@@ -543,15 +561,16 @@ class PlotDimensionControl(QWidget):
         str
             Plot axis role label, or empty when unknown.
         """
-        try:
-            frame = self.canvas.get_view_frame()
+        frame = self._view_frame_for_labels()
+        if frame is not None:
             if storage_axis == frame.plot_x_dim:
                 return ROLE_LABELS[DimRole.PLOT_X]
             if storage_axis == frame.plot_y_dim:
                 return ROLE_LABELS[DimRole.PLOT_Y]
-        except ValueError:
-            pass
-        if self._cube_view_spec is not None:
+        if (
+            self._cube_view_spec is not None
+            and self._cube_view_spec.ndim > 2
+        ):
             role = self._cube_view_spec.roles[storage_axis]
             if role == DimRole.PLOT_X:
                 return ROLE_LABELS[DimRole.PLOT_X]

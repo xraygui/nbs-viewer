@@ -118,8 +118,18 @@ def _storage_indices_for_plot_axis(
     frame: PlotViewFrame, axis: str, index: int
 ) -> Tuple[int, int]:
     """
-    Return storage (row, col) indices for a cell index along plot X or Y.
+    Return display (row, col) indices for a cell index along plot X or Y.
     """
+    if frame.render_mode == "mesh":
+        if axis == "plot_x":
+            if frame.plot_x_dim == 0:
+                return 0, index
+            return index, 0
+        if axis == "plot_y":
+            if frame.plot_y_dim == 1:
+                return index, 0
+            return 0, index
+        raise ValueError(f"Unknown axis {axis!r}")
     if axis == "plot_x":
         if frame.plot_x_dim == 0:
             return index, 0

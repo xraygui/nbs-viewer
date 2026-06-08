@@ -857,6 +857,11 @@ def storage_axis_to_plot_axis(
     str
         ``plot_x`` or ``plot_y``.
     """
+    if parent_spec is not None and parent_spec.ndim == 2 and parent_spec.plot_ndim == 2:
+        if profile_storage_axis == frame.plot_x_dim:
+            return "plot_x"
+        if profile_storage_axis == frame.plot_y_dim:
+            return "plot_y"
     if parent_spec is not None and parent_spec.plot_ndim == 2:
         plot_order = parent_spec.plot_axis_order()
         if len(plot_order) >= 2:
@@ -924,6 +929,31 @@ def _reduce_axis_index(
     Return the tensor axis index for a storage dimension.
     """
     return list(remaining).index(storage_axis)
+
+
+def _tensor_axis_for_plane_storage(
+    remaining: Sequence[int],
+    storage_axis: int,
+    region_frame: PlotViewFrame,
+    y_ndim: int,
+) -> int:
+    """
+    Map a plot-plane storage axis to the tensor axis in ``y``.
+
+    Mesh bundles transpose storage axes relative to the displayed ``y`` array.
+    """
+    j = _reduce_axis_index(remaining, storage_axis)
+    if (
+        region_frame.render_mode == "mesh"
+        and len(remaining) >= 2
+        and j >= len(remaining) - 2
+    ):
+        plane_offset = y_ndim - 2
+        if storage_axis == region_frame.plot_x_dim:
+            return plane_offset + 1
+        if storage_axis == region_frame.plot_y_dim:
+            return plane_offset + 0
+    return j
 
 
 def _materialize_without_region(
@@ -1074,7 +1104,9 @@ def _materialize_roi_profile(
     y = np.where(mask, y, np.nan)
 
     spatial_tensor_axes = tuple(
-        _reduce_axis_index(remaining, storage_axis)
+        _tensor_axis_for_plane_storage(
+            remaining, storage_axis, region_frame, y.ndim
+        )
         for storage_axis in sorted(spatial_storage_axes)
     )
     spatial_roles = {spec.roles[storage_axis] for storage_axis in spatial_storage_axes}

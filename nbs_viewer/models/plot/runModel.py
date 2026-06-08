@@ -279,6 +279,25 @@ class RunModel(QObject):
         """
         return list(self._frozen_spectra.values())
 
+    def legend_label_for_ykey(self, ykey: str) -> str:
+        """
+        Return the matplotlib legend label for a Y data key.
+
+        Parameters
+        ----------
+        ykey : str
+            Catalog or synthetic Y key.
+
+        Returns
+        -------
+        str
+            Human-readable legend text.
+        """
+        entry = self._frozen_entry(ykey)
+        if entry is not None:
+            return f"{entry.label}.{self.scan_id}"
+        return f"{ykey}.{self.scan_id}"
+
     def register_frozen_spectrum(self, entry: FrozenSpectrum) -> str:
         """
         Register a frozen synthetic spectrum.

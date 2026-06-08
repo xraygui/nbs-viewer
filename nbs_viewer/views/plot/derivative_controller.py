@@ -12,6 +12,7 @@ from nbs_viewer.models.plot.cube_view import (
     classify_profile_kind,
     default_profile_label,
     is_plot_plane_storage_axis,
+    scan_profile_storage_axis,
 )
 from nbs_viewer.models.plot.derived_fetch import _profile_uses_nd_load
 from nbs_viewer.models.plot.frozen_spectrum import (
@@ -396,10 +397,16 @@ class DerivativeController(QObject):
             return
 
         profile_axis = self._dialog.get_profile_storage_axis()
-        if classify_profile_kind(parent_spec, profile_axis) != "stack_spectrum":
+        profile_kind = classify_profile_kind(parent_spec, profile_axis)
+        if profile_kind == "local_profile":
+            scan_axis = scan_profile_storage_axis(parent_spec)
+            names = self._axis_names()
+            if scan_axis is not None and scan_axis < len(names):
+                hint = names[scan_axis]
+            else:
+                hint = "the leading scan axis"
             self._dialog.set_status(
-                "Save to ROI Profiles is not available yet; "
-                "select the scan axis profile"
+                f"Select a profile along {hint} to save to Run Display"
             )
             return
 
@@ -470,11 +477,14 @@ class DerivativeController(QObject):
         x_keys, _, _ = plot_model._run.get_selected_keys()
         committed_xkey = x_keys[0] if x_keys else ""
 
+        profile_axis = self._dialog.get_profile_storage_axis()
+        profile_kind = classify_profile_kind(parent_spec, profile_axis)
+
         entry = FrozenSpectrum(
             key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
             label=label,
             bundle=copy_plot_bundle(bundle),
-            kind="stack_spectrum",
+            kind=profile_kind,
             source_ykey=plot_model._ykey,
             committed_xkey=committed_xkey,
             request=request,

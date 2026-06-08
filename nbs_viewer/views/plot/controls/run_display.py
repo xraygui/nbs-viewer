@@ -257,8 +257,11 @@ class RunDisplayWidget(QWidget):
             row_index += 1
             separator = QFrame()
             separator.setFrameShape(QFrame.HLine)
-            separator.setFrameShadow(QFrame.Sunken)
+            separator.setFrameShadow(QFrame.Plain)
             separator.setFixedHeight(1)
+            separator.setStyleSheet(
+                "QFrame { color: #505050; background-color: #505050; }"
+            )
             self._grid.addWidget(separator, row_index, 0, 1, 5)
 
             for entry_index, (run_model, key, label_text) in enumerate(
