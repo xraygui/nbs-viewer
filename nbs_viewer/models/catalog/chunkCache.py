@@ -807,6 +807,10 @@ class ChunkCache:
             category="cache",
         )
 
+        shape, _ = self.chunk_info[(run_uid, key)]
+        l2_chunks = self.l2.l2_chunks
+        aligned_seed = self._align_seed_slab(seed, slice_info)
+
         needs_tiled: List[Dict] = []
         for tile_info in tile_infos:
             tile_idx = tile_info["chunk_indices"]
@@ -814,8 +818,15 @@ class ChunkCache:
                 skipped += 1
                 continue
             try:
-                if self._try_materialize_l2_tile_from_seed(
-                    run, key, tile_idx, slice_info, seed
+                if self._materialize_l2_tile_from_slab(
+                    run_uid,
+                    key,
+                    tile_idx,
+                    slice_info,
+                    aligned_seed,
+                    shape,
+                    l2_chunks,
+                    require_full_in_request=True,
                 ):
                     written += 1
                 else:
@@ -828,8 +839,6 @@ class ChunkCache:
                     category="cache",
                 )
 
-        shape, _ = self.chunk_info[(run_uid, key)]
-        l2_chunks = self.l2.l2_chunks
         if needs_tiled:
             fetch_slice = union_l2_tile_fetch_slice(
                 shape,
@@ -852,7 +861,7 @@ class ChunkCache:
                         skipped += 1
                         continue
                     try:
-                        if self._materialize_l2_tile_from_batch_slab(
+                        if self._materialize_l2_tile_from_slab(
                             run_uid,
                             key,
                             tile_idx,
@@ -890,56 +899,55 @@ class ChunkCache:
         )
         return written
 
-    def _try_materialize_l2_tile_from_seed(
-        self,
-        run,
-        key: str,
-        tile_indices: Tuple[int, ...],
-        slice_info: Tuple,
-        seed: np.ndarray,
-    ) -> bool:
-        """
-        Write one L2 tile using only data already present in the seed slab.
-        """
-        run_uid = run.start["uid"]
-        if self._tile_is_complete(run_uid, key, tile_indices):
-            return False
-
-        shape, _ = self.chunk_info[(run_uid, key)]
-        l2_chunks = self.l2.l2_chunks
-        if not self._tile_fully_in_request(
-            shape, l2_chunks, slice_info, tile_indices
-        ):
-            return False
-
-        aligned_seed = self._align_seed_slab(seed, slice_info)
-        tile_data = self._extract_tile_from_slab(
-            aligned_seed, shape, l2_chunks, slice_info, tile_indices
-        )
-        if tile_data is None or not np.all(np.isfinite(tile_data)):
-            return False
-        return self._commit_complete_l2_tile(
-            run_uid, key, tile_indices, tile_data
-        )
-
-    def _materialize_l2_tile_from_batch_slab(
+    def _materialize_l2_tile_from_slab(
         self,
         run_uid: str,
         key: str,
         tile_indices: Tuple[int, ...],
-        batch_slice: Tuple,
+        slab_slice: Tuple,
         aligned_slab: np.ndarray,
         shape: Tuple[int, ...],
         l2_chunks: Tuple[int, ...],
+        *,
+        require_full_in_request: bool = False,
     ) -> bool:
         """
-        Extract one complete tile from a batched Tiled hyperslab and store it.
+        Extract one complete L2 tile from a slab and persist it.
+
+        Parameters
+        ----------
+        run_uid : str
+            Run identifier.
+        key : str
+            Data key.
+        tile_indices : tuple of int
+            Tile index per dimension.
+        slab_slice : tuple
+            Slice request that ``aligned_slab`` was fetched for.
+        aligned_slab : np.ndarray
+            Slab array with indexed dimensions already squeezed.
+        shape : tuple of int
+            Full array shape.
+        l2_chunks : tuple of int
+            L2 tile size per dimension.
+        require_full_in_request : bool, optional
+            When True, skip tiles whose full extent lies outside ``slab_slice``.
+
+        Returns
+        -------
+        bool
+            True when a complete tile was written to L2.
         """
+        if require_full_in_request and not self._tile_fully_in_request(
+            shape, l2_chunks, slab_slice, tile_indices
+        ):
+            return False
+
         tile_data = self._extract_tile_from_slab(
             aligned_slab,
             shape,
             l2_chunks,
-            batch_slice,
+            slab_slice,
             tile_indices,
         )
         if tile_data is None or not np.all(np.isfinite(tile_data)):
