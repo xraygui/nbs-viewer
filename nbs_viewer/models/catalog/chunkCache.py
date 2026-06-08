@@ -14,8 +14,7 @@ from .chunk_cache_progress import ChunkCacheProgress
 from .tile_indices import (
     chunk_grid,
     plan_hyperslab_batches,
-    tile_fully_in_fetch_slice,
-    tile_global_slice,
+    request_dim_bounds,
     tiles_intersecting,
     union_l2_tile_fetch_slice,
 )
@@ -27,10 +26,9 @@ class ChunkCache:
     Central cache for chunked array data across all runs in a catalog.
 
     This cache is designed to efficiently handle chunked array data by:
-    1. Maintaining chunk-level granularity in caching
-    2. Using LRU eviction based on access time and memory pressure
-    3. Tracking chunk access patterns for potential optimization
-    4. Preventing duplicate downloads of in-flight chunk requests
+    1. Maintaining L1 tile and assembled-slab caches with LRU eviction
+    2. Spilling complete tiles to an optional on-disk L2 Zarr cache
+    3. Fetching cold data from Tiled via byte-budgeted hyperslab reads
 
     Parameters
     ----------
@@ -51,12 +49,10 @@ class ChunkCache:
         l2_enabled: bool = True,
         l2_chunks: Tuple[int, ...] = (1, 1, 256, 256),
         sync_seed_tile_limit: int = 64,
-        large_fetch_chunk_threshold: int = 32,
         fetch_batch_target_bytes: int = 15_000_000,
         progress: Optional[ChunkCacheProgress] = None,
     ):
         # Cache storage
-        self.chunks: Dict[Tuple[str, str, Tuple[int, ...]], np.ndarray] = {}
         self.slice_cache: Dict[Tuple, np.ndarray] = {}
         self.tiles: Dict[Tuple[str, str, Tuple[int, ...]], np.ndarray] = {}
         self.partial_l1_tiles: Set[Tuple[str, str, Tuple[int, ...]]] = set()
@@ -79,22 +75,14 @@ class ChunkCache:
             self.l2 = None
         self.progress = progress
         self.sync_seed_tile_limit = sync_seed_tile_limit
-        self.large_fetch_chunk_threshold = large_fetch_chunk_threshold
         self.fetch_batch_target_bytes = fetch_batch_target_bytes
-        self._cache_tiled_fetches = True
 
         # Access tracking
         self.access_times: Dict[Tuple[str, str, Tuple[int, ...]], float] = {}
-        self.access_counts: Dict[Tuple[str, str, Tuple[int, ...]], int] = {}
         self.l1_tile_access_times: Dict[Tuple[str, str, Tuple[int, ...]], float] = {}
-
-        # In-flight request tracking
-        self.in_flight_chunks: Dict[Tuple[str, str, Tuple[int, ...]], bool] = {}
 
         self.fetch_pool = ThreadPoolExecutor(max_workers=4)
         self.background_pool = ThreadPoolExecutor(max_workers=2)
-        self.worker_pool = self.fetch_pool
-        self.active_requests: Dict[Tuple[str, str, Tuple[int, ...]], Future] = {}
         self._active_l2_materialize_jobs: Dict[Tuple[str, str], Future] = {}
         self._l2_materialize_job_seq = 0
         self.request_lock = Lock()
@@ -139,29 +127,22 @@ class ChunkCache:
             if cached_slab is not None:
                 return self._finalize_slice_result(cached_slab, slice_info)
 
+            if self.l2 is not None and self.l2.enabled:
+                return self._finalize_slice_result(
+                    self._get_data_l2_pipeline(
+                        run, key, slice_info, run_uid, shape, chunks
+                    ),
+                    slice_info,
+                )
+
             if self._is_monolithic_chunking(chunks):
                 print_debug(
                     "ChunkCache",
                     f"Monolithic chunking for {key}, using direct slice read",
                     category="cache",
                 )
-                if self.l2 is not None and self.l2.enabled:
-                    return self._finalize_slice_result(
-                        self._get_data_l2_pipeline(
-                            run, key, slice_info, run_uid, shape, chunks
-                        ),
-                        slice_info,
-                    )
                 return self._finalize_slice_result(
                     self._get_data_sliced(run, key, slice_info),
-                    slice_info,
-                )
-
-            if self.l2 is not None and self.l2.enabled:
-                return self._finalize_slice_result(
-                    self._get_data_l2_pipeline(
-                        run, key, slice_info, run_uid, shape, chunks
-                    ),
                     slice_info,
                 )
 
@@ -171,8 +152,6 @@ class ChunkCache:
         except Exception as e:
             print_debug("ChunkCache", f"Error in get_data: {str(e)}")
             raise
-        finally:
-            self._cache_tiled_fetches = True
 
     def _ensure_l2_array(self, run, key: str) -> None:
         """
@@ -230,7 +209,7 @@ class ChunkCache:
                 self._update_l1_tile_access(cache_key)
             elif self.l2.has_chunk(run_uid, key, tile_idx):
                 chunk = self.l2.read_chunk(run_uid, key, tile_idx)
-                self._cache_l1_tile(run_uid, key, tile_idx, chunk)
+                self._store_tile(run_uid, key, tile_idx, chunk)
                 used_l2 = True
             else:
                 self.l2_misses += 1
@@ -299,20 +278,6 @@ class ChunkCache:
             return True
         return False
 
-    def _tile_is_warm(
-        self,
-        run_uid: str,
-        key: str,
-        tile_indices: Tuple[int, ...],
-    ) -> bool:
-        """
-        Return whether a tile is safe to reuse for partial L2 assembly.
-
-        Partial L1 seeds cover only the overlap with one request and must not
-        be treated as complete tiles.
-        """
-        return self._tile_is_complete(run_uid, key, tile_indices)
-
     def _partition_l2_tiles(
         self, run_uid: str, key: str, tile_infos: List[Dict]
     ) -> Tuple[List[Dict], List[Dict]]:
@@ -323,7 +288,7 @@ class ChunkCache:
         cold: List[Dict] = []
         for tile_info in tile_infos:
             tile_idx = tile_info["chunk_indices"]
-            if self._tile_is_warm(run_uid, key, tile_idx):
+            if self._tile_is_complete(run_uid, key, tile_idx):
                 warm.append(tile_info)
             else:
                 cold.append(tile_info)
@@ -344,9 +309,7 @@ class ChunkCache:
         for dim in range(len(shape)):
             if not isinstance(items[dim], slice):
                 continue
-            req_start, req_stop = ChunkCache._request_dim_bounds(
-                items[dim], shape[dim]
-            )
+            req_start, req_stop = request_dim_bounds(items[dim], shape[dim])
             starts: List[int] = []
             stops: List[int] = []
             for tile_info in cold_tiles:
@@ -370,7 +333,7 @@ class ChunkCache:
         out: List[int] = []
         for dim_size, item in zip(shape, slice_info):
             if isinstance(item, slice):
-                start, stop = ChunkCache._request_dim_bounds(item, dim_size)
+                start, stop = request_dim_bounds(item, dim_size)
                 out.append(stop - start)
         return tuple(out)
 
@@ -390,7 +353,7 @@ class ChunkCache:
             f"L2 local read {key} tile={tile_indices} shape={chunk.shape}",
             category="cache",
         )
-        self._cache_l1_tile(run_uid, key, tile_indices, chunk)
+        self._store_tile(run_uid, key, tile_indices, chunk)
         return chunk
 
     def _paste_region(
@@ -455,7 +418,7 @@ class ChunkCache:
         for dim, item in enumerate(slice_info):
             if isinstance(item, int):
                 continue
-            req_start, req_stop = self._request_dim_bounds(item, shape[dim])
+            req_start, req_stop = request_dim_bounds(item, shape[dim])
             tile_start = sum(grid[dim][: tile_idx[dim]])
             tile_end = tile_start + grid[dim][tile_idx[dim]]
             overlap_start = max(req_start, tile_start)
@@ -505,9 +468,9 @@ class ChunkCache:
         for dim, item in enumerate(slice_info):
             if isinstance(item, int):
                 continue
-            req_start, req_stop = self._request_dim_bounds(item, shape[dim])
+            req_start, req_stop = request_dim_bounds(item, shape[dim])
             gap_item = gap_slice[dim]
-            gap_start, gap_stop = self._request_dim_bounds(gap_item, shape[dim])
+            gap_start, gap_stop = request_dim_bounds(gap_item, shape[dim])
             overlap_start = max(req_start, gap_start)
             overlap_stop = min(req_stop, gap_stop)
             if overlap_start >= overlap_stop:
@@ -829,7 +792,7 @@ class ChunkCache:
         tile_infos: List[Dict],
     ) -> int:
         """
-        Materialize incomplete L2 tiles from seed overlap and batched Tiled reads.
+        Materialize incomplete L2 tiles from seed overlap and a full-tile Tiled fetch.
         """
         run_uid = run.start["uid"]
         written = 0
@@ -867,64 +830,23 @@ class ChunkCache:
 
         shape, _ = self.chunk_info[(run_uid, key)]
         l2_chunks = self.l2.l2_chunks
-        batches: List[Tuple] = []
         if needs_tiled:
             fetch_slice = union_l2_tile_fetch_slice(
                 shape,
                 l2_chunks,
                 [tile_info["chunk_indices"] for tile_info in needs_tiled],
             )
-            dtype = self._read_dtype(run, key)
-            batches, _batch_axis = plan_hyperslab_batches(
-                fetch_slice,
-                shape,
-                dtype.itemsize,
-                self.fetch_batch_target_bytes,
-            )
             print_debug(
                 "ChunkCache",
                 f"L2 materialize job={job_id} {key}: "
-                f"{len(needs_tiled)} tiles need Tiled in {len(batches)} batch(es) "
-                f"fetch_slice={fetch_slice}",
+                f"{len(needs_tiled)} tiles need Tiled fetch_slice={fetch_slice}",
                 category="cache",
             )
-
-        progress_total = len(batches) if batches else 0
-        if progress_total:
-            self._notify_tiled_fetch_progress(
-                run_uid,
-                key,
-                active=True,
-                pending_chunks=progress_total,
-                batch_total=progress_total,
-            )
-        try:
-            for batch_index, batch_slice in enumerate(batches):
-                batch_tiles = [
-                    tile_info
-                    for tile_info in needs_tiled
-                    if tile_fully_in_fetch_slice(
-                        shape,
-                        l2_chunks,
-                        tile_info["chunk_indices"],
-                        batch_slice,
-                    )
-                ]
-                if not batch_tiles:
-                    continue
-
-                slab = self._fetch_from_tiled(
-                    run,
-                    key,
-                    batch_slice,
-                    reason=(
-                        f"L2 materialize batch job={job_id} "
-                        f"{batch_index + 1}/{len(batches)}"
-                    ),
-                )
-                tiled_reads += 1
-                aligned = self._align_seed_slab(slab, batch_slice)
-                for tile_info in batch_tiles:
+            try:
+                slab = self._read_tiled_hyperslab(run, key, fetch_slice)
+                tiled_reads = 1
+                aligned = self._align_seed_slab(slab, fetch_slice)
+                for tile_info in needs_tiled:
                     tile_idx = tile_info["chunk_indices"]
                     if self._tile_is_complete(run_uid, key, tile_idx):
                         skipped += 1
@@ -934,7 +856,7 @@ class ChunkCache:
                             run_uid,
                             key,
                             tile_idx,
-                            batch_slice,
+                            fetch_slice,
                             aligned,
                             shape,
                             l2_chunks,
@@ -947,26 +869,15 @@ class ChunkCache:
                         print_debug(
                             "ChunkCache",
                             f"L2 materialize job={job_id} tile={tile_idx} "
-                            f"from batch failed: {exc}",
+                            f"from fetch failed: {exc}",
                             category="cache",
                         )
-
-                if progress_total:
-                    self._notify_tiled_fetch_progress(
-                        run_uid,
-                        key,
-                        active=True,
-                        pending_chunks=max(0, progress_total - batch_index - 1),
-                        batch_total=progress_total,
-                    )
-        finally:
-            if progress_total:
-                self._notify_tiled_fetch_progress(
-                    run_uid,
-                    key,
-                    active=False,
-                    pending_chunks=0,
-                    batch_total=progress_total,
+            except Exception as exc:
+                failed += len(needs_tiled)
+                print_debug(
+                    "ChunkCache",
+                    f"L2 materialize job={job_id} {key} Tiled fetch failed: {exc}",
+                    category="cache",
                 )
 
         elapsed = time.perf_counter() - t0
@@ -1050,7 +961,7 @@ class ChunkCache:
         cache_key = (run_uid, key, tile_indices)
         self._drop_partial_l1_tile(cache_key)
         if self._write_tile_to_l2(run_uid, key, tile_indices, tile_data):
-            self._cache_l1_tile(run_uid, key, tile_indices, tile_data)
+            self._store_tile(run_uid, key, tile_indices, tile_data)
             return True
         return self._store_tile(run_uid, key, tile_indices, tile_data) is not None
 
@@ -1067,19 +978,6 @@ class ChunkCache:
             del self.tiles[cache_key]
             self.l1_tile_access_times.pop(cache_key, None)
         self.partial_l1_tiles.discard(cache_key)
-
-    def _fetch_l2_tile_from_tiled(
-        self, run, key: str, tile_indices: Tuple[int, ...]
-    ) -> np.ndarray:
-        """
-        Read the full storage extent of one L2 tile from Tiled.
-        """
-        run_uid = run.start["uid"]
-        shape, _ = self.chunk_info[(run_uid, key)]
-        global_slice = tile_global_slice(tile_indices, shape, self.l2.l2_chunks)
-        return self._fetch_from_tiled(
-            run, key, global_slice, reason=f"L2 tile {tile_indices}"
-        )
 
     def wait_for_background_materialize(
         self, run_uid: str, key: str, timeout: Optional[float] = None
@@ -1156,10 +1054,6 @@ class ChunkCache:
         pending: List[Dict] = []
         for tile_info in tiles_intersecting(shape, l2_chunks, slice_info):
             tile_idx = tile_info["chunk_indices"]
-            if not self._tile_overlaps_request(
-                shape, l2_chunks, slice_info, tile_idx
-            ):
-                continue
             cache_key = (run_uid, key, tile_idx)
             if cache_key in self.tiles:
                 continue
@@ -1268,28 +1162,6 @@ class ChunkCache:
             f"deferred {len(deferred)} tiles "
             f"(skipped_extract={skipped_extract})",
             category="cache",
-        )
-
-    def _ensure_l2_array_from_meta(
-        self, run_uid: str, key: str, dtype: np.dtype
-    ) -> None:
-        """
-        Register L2 metadata from cached chunk info when no run object exists.
-        """
-        if self.l2 is None or not self.l2.enabled:
-            return
-
-        meta_key = (run_uid, key)
-        if meta_key not in self.chunk_info:
-            return
-
-        shape, tiled_chunks = self.chunk_info[meta_key]
-        self.l2.register_array(
-            run_uid,
-            key,
-            shape,
-            dtype,
-            tiled_chunks=tiled_chunks,
         )
 
     def _store_tile(
@@ -1414,18 +1286,6 @@ class ChunkCache:
         )
         return True
 
-    def _cache_l1_tile(
-        self,
-        run_uid: str,
-        key: str,
-        tile_indices: Tuple[int, ...],
-        data: np.ndarray,
-    ) -> None:
-        """
-        Store one complete L2-aligned tile in the L1 RAM cache.
-        """
-        self._store_tile(run_uid, key, tile_indices, data)
-
     def _update_l1_tile_access(self, cache_key: Tuple[str, str, Tuple[int, ...]]) -> None:
         self.l1_tile_access_times[cache_key] = time.time()
 
@@ -1493,55 +1353,6 @@ class ChunkCache:
         return chunk_count == 1
 
     @staticmethod
-    def _request_dim_bounds(s: Any, dim_size: int) -> Tuple[int, int]:
-        """
-        Return half-open ``[start, stop)`` bounds for one slice request dimension.
-        """
-        if isinstance(s, slice):
-            start = 0 if s.start is None else int(s.start)
-            stop = dim_size if s.stop is None else int(s.stop)
-            return start, stop
-        index = int(s)
-        return index, index + 1
-
-    @staticmethod
-    def _slab_axes_for_array_dims(slice_info: Tuple) -> Dict[int, int]:
-        """
-        Map array dimensions still present in a squeezed slab to axis indices.
-        """
-        mapping: Dict[int, int] = {}
-        axis = 0
-        for dim, item in enumerate(slice_info):
-            if isinstance(item, slice):
-                mapping[dim] = axis
-                axis += 1
-        return mapping
-
-    @staticmethod
-    def _tile_overlaps_request(
-        shape: Tuple[int, ...],
-        l2_chunks: Tuple[int, ...],
-        slice_info: Tuple,
-        tile_indices: Tuple[int, ...],
-    ) -> bool:
-        """
-        Return whether a tile intersects the requested slice.
-        """
-        chunks = chunk_grid(shape, l2_chunks)
-        for dim, tile_idx in enumerate(tile_indices):
-            tile_start = sum(chunks[dim][:tile_idx])
-            tile_end = tile_start + chunks[dim][tile_idx]
-            item = slice_info[dim]
-            if isinstance(item, int):
-                if not (tile_start <= item < tile_end):
-                    return False
-                continue
-            req_start, req_stop = ChunkCache._request_dim_bounds(item, shape[dim])
-            if tile_end <= req_start or tile_start >= req_stop:
-                return False
-        return True
-
-    @staticmethod
     def _tile_fully_in_request(
         shape: Tuple[int, ...],
         l2_chunks: Tuple[int, ...],
@@ -1555,9 +1366,7 @@ class ChunkCache:
         for dim, tile_idx in enumerate(tile_indices):
             tile_start = sum(chunks[dim][:tile_idx])
             tile_end = tile_start + chunks[dim][tile_idx]
-            req_start, req_stop = ChunkCache._request_dim_bounds(
-                slice_info[dim], shape[dim]
-            )
+            req_start, req_stop = request_dim_bounds(slice_info[dim], shape[dim])
             if tile_start < req_start or tile_end > req_stop:
                 return False
         return True
@@ -1627,7 +1436,7 @@ class ChunkCache:
                 )
                 continue
 
-            req_start, req_stop = ChunkCache._request_dim_bounds(item, shape[dim])
+            req_start, req_stop = request_dim_bounds(item, shape[dim])
             overlap_start = max(req_start, tile_start)
             overlap_stop = min(req_stop, tile_end)
             if overlap_start >= overlap_stop:
@@ -1741,7 +1550,7 @@ class ChunkCache:
         chunk : np.ndarray
             Cached or fetched chunk array.
         chunk_info : dict
-            Chunk metadata from get_chunk_indices.
+            Tile metadata from ``tiles_intersecting``.
 
         Returns
         -------
@@ -1910,224 +1719,6 @@ class ChunkCache:
         )
         return result
 
-    def _global_slice_from_chunk(
-        self,
-        run_uid: str,
-        key: str,
-        chunk_indices: Tuple[int, ...],
-        internal_slices: Tuple,
-    ) -> Tuple:
-        """
-        Convert chunk-local indices into a global slice for the Tiled API.
-
-        Parameters
-        ----------
-        run_uid : str
-            Run identifier.
-        key : str
-            Data key.
-        chunk_indices : tuple
-            Chunk index per dimension.
-        internal_slices : tuple
-            Slice within the chunk (from get_chunk_indices).
-
-        Returns
-        -------
-        tuple
-            Global slice tuple for data_accessor.read(slice=...).
-        """
-        shape, chunks = self.chunk_info[(run_uid, key)]
-        global_slice = []
-        for dim, (chunk_idx, internal_s) in enumerate(
-            zip(chunk_indices, internal_slices)
-        ):
-            chunk_start = sum(chunks[dim][:chunk_idx])
-            if isinstance(internal_s, int):
-                global_slice.append(chunk_start + internal_s)
-            elif isinstance(internal_s, slice):
-                start = internal_s.start if internal_s.start is not None else 0
-                stop = (
-                    internal_s.stop
-                    if internal_s.stop is not None
-                    else shape[dim]
-                )
-                global_slice.append(
-                    slice(
-                        chunk_start + start,
-                        chunk_start + stop,
-                        internal_s.step,
-                    )
-                )
-            else:
-                global_slice.append(internal_s)
-        return tuple(global_slice)
-
-    def _fetch_chunk(
-        self, run, key: str, chunk_info: Dict
-    ) -> Optional[np.ndarray]:
-        """
-        Worker function to fetch a single chunk from the data source.
-        Also handles caching the chunk data atomically.
-
-        Parameters
-        ----------
-        run : BlueskyRun
-            The run object containing the data
-        key : str
-            The data key
-        chunk_info : dict
-            Chunk metadata including chunk_indices and internal_slices.
-
-        Returns
-        -------
-        Optional[np.ndarray]
-            The chunk data if successful, None if failed
-        """
-        chunk_idx = chunk_info["chunk_indices"]
-        internal_slices = chunk_info["internal_slices"]
-        try:
-            run_uid = run.start["uid"]
-            global_slice = self._global_slice_from_chunk(
-                run_uid, key, chunk_idx, internal_slices
-            )
-            chunk_data = self._fetch_from_tiled(
-                run,
-                key,
-                global_slice,
-                reason=f"legacy chunk {chunk_idx}",
-            )
-
-            if chunk_data is not None and self._cache_tiled_fetches:
-                cache_key = (
-                    run_uid,
-                    key,
-                    chunk_idx,
-                    self._slice_cache_key(internal_slices),
-                )
-                nbytes = chunk_data.nbytes
-                if nbytes <= self.max_size:
-                    self._store_in_slice_cache(cache_key, chunk_data)
-            print_debug(
-                "ChunkCache",
-                f"Chunk {chunk_idx} fetched shape {chunk_data.shape}",
-                category="cache",
-            )
-            chunk_info["already_sliced"] = True
-            return chunk_data
-        except Exception as e:
-            print(f"Error fetching chunk: {str(e)}")
-            return None
-
-    def _get_or_fetch_chunks(
-        self, run, key: str, chunks_needed: List[Dict]
-    ) -> Dict[Tuple[int, ...], np.ndarray]:
-        """
-        Get chunks from cache or fetch them using the worker pool.
-
-        Parameters
-        ----------
-        run : BlueskyRun
-            The run object containing the data
-        key : str
-            The data key
-        chunks_needed : List[Dict]
-            List of chunk information dictionaries
-
-        Returns
-        -------
-        Dict[Tuple[int, ...], np.ndarray]
-            Dictionary mapping chunk indices to chunk data
-        """
-        result = {}
-        futures_to_wait = []
-        run_uid = run.start["uid"]
-        batch_total = 0
-
-        # First pass: check cache and start fetches for missing chunks
-        with self.request_lock:
-            for chunk_info in chunks_needed:
-                chunk_idx = chunk_info["chunk_indices"]
-                cache_key = (run.start["uid"], key, chunk_idx)
-
-                slice_key = (
-                    run.start["uid"],
-                    key,
-                    chunk_idx,
-                    self._slice_cache_key(chunk_info["internal_slices"]),
-                )
-                if slice_key in self.slice_cache:
-                    result[chunk_idx] = self.slice_cache[slice_key]
-                    chunk_info["already_sliced"] = True
-                    self.hits += 1
-                    continue
-
-                if cache_key in self.chunks:
-                    result[chunk_idx] = self.chunks[cache_key]
-                    self.hits += 1
-                    continue
-
-                if cache_key in self.active_requests:
-                    futures_to_wait.append((chunk_idx, self.active_requests[cache_key]))
-                    continue
-
-                self.misses += 1
-                future = self.worker_pool.submit(
-                    self._fetch_chunk, run, key, chunk_info
-                )
-                self.active_requests[cache_key] = future
-                futures_to_wait.append((chunk_idx, future))
-
-            batch_total = len(futures_to_wait)
-
-        if batch_total > 0:
-            self._notify_tiled_fetch_progress(
-                run_uid,
-                key,
-                active=True,
-                pending_chunks=batch_total,
-                batch_total=batch_total,
-            )
-
-        pending_chunks = batch_total
-        try:
-            for chunk_idx, future in futures_to_wait:
-                print_debug(
-                    "ChunkCache",
-                    f"Waiting for chunk {chunk_idx}",
-                    category="cache",
-                )
-                try:
-                    chunk_data = future.result()
-                    if chunk_data is not None:
-                        result[chunk_idx] = chunk_data
-                except Exception as e:
-                    print(f"Error waiting for chunk {chunk_idx}: {str(e)}")
-                finally:
-                    with self.request_lock:
-                        cache_key = (run_uid, key, chunk_idx)
-                        if cache_key in self.active_requests:
-                            del self.active_requests[cache_key]
-                    pending_chunks = max(0, pending_chunks - 1)
-                    if batch_total > 0:
-                        self._notify_tiled_fetch_progress(
-                            run_uid,
-                            key,
-                            active=True,
-                            pending_chunks=pending_chunks,
-                            batch_total=batch_total,
-                        )
-        finally:
-            if batch_total > 0:
-                self._notify_tiled_fetch_progress(
-                    run_uid,
-                    key,
-                    active=False,
-                    pending_chunks=0,
-                    batch_total=batch_total,
-                )
-
-        return result
-
     @staticmethod
     def _coord_dim_to_array_axis(depth: int, internal_slices: Tuple) -> int:
         """
@@ -2206,99 +1797,6 @@ class ChunkCache:
             raise ValueError("No chunk data to assemble")
         return result
 
-    def get_chunks(
-        self, run_uid: str, key: str, chunk_indices: Tuple[int, ...]
-    ) -> Optional[np.ndarray]:
-        """
-        Get cached chunk data if available.
-
-        Parameters
-        ----------
-        run_uid : str
-            Unique identifier for the run
-        key : str
-            Data key
-        chunk_indices : tuple
-            Indices identifying the chunk
-
-        Returns
-        -------
-        np.ndarray or None
-            Cached chunk data if available, None otherwise
-        """
-        cache_key = (run_uid, key, chunk_indices)
-        chunk = self.chunks.get(cache_key)
-
-        if chunk is not None:
-            self.hits += 1
-            # Update access tracking
-            self._update_access(cache_key)
-            return chunk
-
-        self.misses += 1
-        return None
-
-    def cache_chunk(
-        self, run_uid: str, key: str, chunk_indices: Tuple[int, ...], data: np.ndarray
-    ):
-        """
-        Cache chunk data, managing memory limits.
-
-        Parameters
-        ----------
-        run_uid : str
-            Unique identifier for the run
-        key : str
-            Data key
-        chunk_indices : tuple
-            Indices identifying the chunk
-        data : np.ndarray
-            Chunk data to cache
-        """
-        cache_key = (run_uid, key, chunk_indices)
-
-        # Check memory limits
-        chunk_size = data.nbytes
-        if chunk_size > self.max_size:
-            msg = f"Chunk too large to cache: {chunk_size} bytes"
-            print_debug("ChunkCache", msg, category="cache")
-            return
-
-        # Ensure we have enough memory
-        while (
-            self.current_size + chunk_size > self.max_size
-            or psutil.virtual_memory().percent > (1 - self.min_free_memory) * 100
-        ):
-            if not self._evict_lru():
-                msg = "Cannot free enough memory to cache chunk"
-                print_debug("ChunkCache", msg, category="cache")
-                print_debug("ChunkCache", self.get_stats(), category="cache")
-                return
-
-        # Store the chunk
-        self.chunks[cache_key] = data
-        self.current_size += chunk_size
-        self._update_access(cache_key)
-
-    def set_chunk_info(
-        self, run_uid: str, key: str, shape: Tuple[int, ...], chunks: Tuple[int, ...]
-    ):
-        """
-        Set chunk information for a dataset.
-
-        Parameters
-        ----------
-        run_uid : str
-            Unique identifier for the run
-        key : str
-            Data key
-        shape : tuple
-            Full shape of the dataset
-        chunks : tuple
-            Chunk size for each dimension
-        """
-        self.chunk_info[(run_uid, key)] = (shape, chunks)
-
     def clear_run(self, run_uid: str):
         """
         Clear all cached data for a specific run.
@@ -2308,7 +1806,6 @@ class ChunkCache:
         run_uid : str
             Unique identifier for the run to clear
         """
-        # Remove chunk info
         keys_to_remove = [(r, k) for r, k in self.chunk_info.keys() if r == run_uid]
         for key in keys_to_remove:
             del self.chunk_info[key]
@@ -2318,28 +1815,9 @@ class ChunkCache:
         if self.progress is not None:
             self.progress.clear()
 
-        # Remove chunks and their tracking info
-        chunk_keys = [(r, k, i) for r, k, i in self.chunks.keys() if r == run_uid]
         tile_keys = [(r, k, i) for r, k, i in self.tiles.keys() if r == run_uid]
 
         with self.request_lock:
-            # Cancel any active requests
-            for key in chunk_keys:
-                if key in self.active_requests:
-                    self.active_requests[key].cancel()
-                    del self.active_requests[key]
-
-            # Remove cached chunks
-            for key in chunk_keys:
-                if key in self.chunks:
-                    chunk = self.chunks[key]
-                    self.current_size -= chunk.nbytes
-                    del self.chunks[key]
-                if key in self.access_times:
-                    del self.access_times[key]
-                if key in self.access_counts:
-                    del self.access_counts[key]
-
             for key in tile_keys:
                 if key in self.tiles:
                     self.l1_tile_size -= self.tiles[key].nbytes
@@ -2349,21 +1827,13 @@ class ChunkCache:
                 self.partial_l1_tiles.discard(key)
 
     def clear(self):
-        """Clear all cached data and shutdown worker pool."""
+        """Clear all cached data and shutdown the fetch pool."""
         with self.request_lock:
-            # Cancel all active requests
-            for future in self.active_requests.values():
-                future.cancel()
-            self.active_requests.clear()
-
-            # Clear cache data
-            self.chunks.clear()
             self.tiles.clear()
             self.partial_l1_tiles.clear()
             self.slice_cache.clear()
             self.chunk_info.clear()
             self.access_times.clear()
-            self.access_counts.clear()
             self.l1_tile_access_times.clear()
             self.current_size = 0
             self.l1_tile_size = 0
@@ -2376,15 +1846,12 @@ class ChunkCache:
             if self.progress is not None:
                 self.progress.clear()
 
-        # Shutdown worker pool
-        self.worker_pool.shutdown(wait=True)
-        # Create new worker pool
-        self.worker_pool = ThreadPoolExecutor(max_workers=4)
+        self.fetch_pool.shutdown(wait=True)
+        self.fetch_pool = ThreadPoolExecutor(max_workers=4)
 
     def _update_access(self, cache_key: Tuple[str, str, Tuple[int, ...]]):
-        """Update access time and count for a chunk."""
+        """Update access time for a slice-cache entry."""
         self.access_times[cache_key] = time.time()
-        self.access_counts[cache_key] = self.access_counts.get(cache_key, 0) + 1
 
     def _store_in_slice_cache(
         self, cache_key: Tuple, chunk_data: np.ndarray
@@ -2405,7 +1872,7 @@ class ChunkCache:
 
     def _evict_lru(self) -> bool:
         """
-        Evict the least recently used tiled chunk or slice-cache entry.
+        Evict the least recently used slice-cache entry.
 
         Returns
         -------
@@ -2417,22 +1884,14 @@ class ChunkCache:
 
         lru_key = min(self.access_times.items(), key=lambda x: x[1])[0]
 
-        if lru_key in self.slice_cache:
-            chunk = self.slice_cache[lru_key]
-            del self.slice_cache[lru_key]
-        elif lru_key in self.chunks:
-            chunk = self.chunks[lru_key]
-            del self.chunks[lru_key]
-        else:
+        if lru_key not in self.slice_cache:
             del self.access_times[lru_key]
-            if lru_key in self.access_counts:
-                del self.access_counts[lru_key]
             return True
 
+        chunk = self.slice_cache[lru_key]
+        del self.slice_cache[lru_key]
         self.current_size -= chunk.nbytes
         del self.access_times[lru_key]
-        if lru_key in self.access_counts:
-            del self.access_counts[lru_key]
         return True
 
     def flush_l1_to_l2(
@@ -2501,7 +1960,7 @@ class ChunkCache:
             "size": self.current_size,
             "max_size": self.max_size,
             "l1_max_bytes": self.l1_max_bytes,
-            "chunk_count": len(self.chunks),
+            "slice_cache_count": len(self.slice_cache),
             "l1_tile_count": len(self.tiles),
             "l1_tile_size": self.l1_tile_size,
             "hits": self.hits,
@@ -2537,9 +1996,6 @@ class ChunkCache:
         for name, value in stats.items():
             lines.append(f"  {name}: {value}")
 
-        lines.append("  slice_cache_entries: {}".format(len(self.slice_cache)))
-        lines.append("  tiled_chunk_entries: {}".format(len(self.chunks)))
-
         if self.l2 is not None and self.l2.enabled:
             lines.append("=== L2 Zarr cache ===")
             for entry in self.l2.dataset_entries():
@@ -2551,9 +2007,9 @@ class ChunkCache:
         if datasets:
             lines.append("=== Requested datasets ===")
             for run_uid, key in datasets:
-                fraction = self.l2_completion_fraction(run_uid, key)
-                if self.l2 is not None:
+                if self.l2 is not None and self.l2.enabled:
                     completed, total = self.l2.tile_counts(run_uid, key)
+                    fraction = self.l2.completion_fraction(run_uid, key)
                     lines.append(
                         f"  {run_uid}/{key}: L2 {completed}/{total} "
                         f"({fraction:.1%})"
@@ -2562,23 +2018,3 @@ class ChunkCache:
                     lines.append(f"  {run_uid}/{key}: L2 disabled")
 
         return "\n".join(lines)
-
-    def l2_completion_fraction(self, run_uid: str, key: str) -> float:
-        """
-        Return L2 tile completion fraction for one dataset.
-
-        Parameters
-        ----------
-        run_uid : str
-            Run identifier.
-        key : str
-            Data key.
-
-        Returns
-        -------
-        float
-            Fraction in ``[0, 1]``, or 0 when L2 is disabled.
-        """
-        if self.l2 is None or not self.l2.enabled:
-            return 0.0
-        return self.l2.completion_fraction(run_uid, key)
