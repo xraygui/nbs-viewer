@@ -138,12 +138,8 @@ class ChunkCache:
             if self._is_monolithic_chunking(chunks):
                 print_debug(
                     "ChunkCache",
-                    f"Monolithic chunking for {key}, using direct slice read",
+                    f"Monolithic chunking for {key}, using hyperslab read",
                     category="cache",
-                )
-                return self._finalize_slice_result(
-                    self._get_data_sliced(run, key, slice_info),
-                    slice_info,
                 )
 
             result = self._read_tiled_hyperslab(run, key, slice_info)
@@ -257,11 +253,7 @@ class ChunkCache:
             return l2_result
 
         result = self._read_tiled_hyperslab(run, key, slice_info)
-        aligned = self._align_seed_slab(result, slice_info)
-        print_debug("ChunkCache", f"seeding l1 tiles from slab for {key}:{slice_info}", category="cache")
-        self._seed_l1_tiles_from_slab(run, key, slice_info, aligned)
-        print_debug("ChunkCache", f"queueing l2 materialize for {key}:{slice_info}", category="cache")
-        self._queue_l2_materialize(run, key, slice_info, aligned)
+        self._finish_slab_fetch(run, key, slice_info, result)
         print_debug("ChunkCache", f"returning result for {key}:{slice_info}", category="cache")
         return result
 
@@ -546,12 +538,7 @@ class ChunkCache:
         if not np.isfinite(slab).any():
             return None
 
-        self._seed_l1_tiles_from_slab(
-            run, key, slice_info, self._align_seed_slab(slab, slice_info)
-        )
-        self._queue_l2_materialize(
-            run, key, slice_info, self._align_seed_slab(slab, slice_info)
-        )
+        self._finish_slab_fetch(run, key, slice_info, slab)
         self.hits += 1
         if any(self.l2.has_chunk(run_uid, key, t["chunk_indices"]) for t in warm):
             self.l2_hits += 1
@@ -574,11 +561,9 @@ class ChunkCache:
         Fetch a hyperslab from Tiled using byte-budgeted batch reads.
         """
         run_uid = run.start["uid"]
-        cache_key = self._assembled_slab_cache_key(run_uid, key, slice_info)
-        if cache_key in self.slice_cache:
-            self.hits += 1
-            self._update_access(cache_key)
-            return self.slice_cache[cache_key]
+        cached = self._lookup_assembled_slab(run_uid, key, slice_info)
+        if cached is not None:
+            return cached
 
         shape, _ = self.chunk_info[(run_uid, key)]
         dtype = self._read_dtype(run, key)
@@ -664,11 +649,9 @@ class ChunkCache:
         """
         run_uid = run.start["uid"]
         if store_assembled_slab:
-            cache_key = self._assembled_slab_cache_key(run_uid, key, slice_info)
-            if cache_key in self.slice_cache:
-                self.hits += 1
-                self._update_access(cache_key)
-                return self.slice_cache[cache_key]
+            cached = self._lookup_assembled_slab(run_uid, key, slice_info)
+            if cached is not None:
+                return cached
 
         self.misses += 1
         result = self._fetch_from_tiled(
@@ -1070,6 +1053,41 @@ class ChunkCache:
             pending.append(tile_info)
         return pending
 
+    def _finish_slab_fetch(
+        self,
+        run,
+        key: str,
+        slice_info: Tuple,
+        slab: np.ndarray,
+    ) -> None:
+        """
+        Seed L1 tiles and queue background L2 materialization for one view slab.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            Run containing the data.
+        key : str
+            Data key.
+        slice_info : tuple
+            User slice request that produced ``slab``.
+        slab : np.ndarray
+            Assembled view slab before indexed-dimension squeezing.
+        """
+        aligned = self._align_seed_slab(slab, slice_info)
+        print_debug(
+            "ChunkCache",
+            f"seeding l1 tiles from slab for {key}:{slice_info}",
+            category="cache",
+        )
+        self._seed_l1_tiles_from_slab(run, key, slice_info, aligned)
+        print_debug(
+            "ChunkCache",
+            f"queueing l2 materialize for {key}:{slice_info}",
+            category="cache",
+        )
+        self._queue_l2_materialize(run, key, slice_info, aligned)
+
     def _seed_l1_tiles_from_slab(
         self,
         run,
@@ -1106,26 +1124,36 @@ class ChunkCache:
         if not pending:
             return
 
+        sync_all = len(pending) <= self.sync_seed_tile_limit
+        seeded_l1 = 0
+        seeded_l2 = 0
         skipped_extract = 0
-        if len(pending) <= self.sync_seed_tile_limit:
-            seeded_l1 = 0
-            seeded_l2 = 0
-            skipped_extract = 0
-            for tile_info in pending:
-                tile_idx = tile_info["chunk_indices"]
-                tile_data = self._extract_tile_from_slab(
-                    slab, shape, l2_chunks, slice_info, tile_idx
-                )
-                if tile_data is None:
-                    skipped_extract += 1
+        deferred: List[Dict] = []
+        itemsize = slab.dtype.itemsize
+
+        for tile_info in pending:
+            tile_idx = tile_info["chunk_indices"]
+            if not sync_all:
+                tile_size = int(np.prod(tile_info["chunk_shape"]) * itemsize)
+                if self.l1_tile_size + tile_size > self.l1_max_bytes:
+                    deferred.append(tile_info)
                     continue
-                stored = self._store_seeded_tile(
-                    run_uid, key, tile_idx, tile_data, shape, l2_chunks, slice_info
-                )
-                if stored == "l1":
-                    seeded_l1 += 1
-                elif stored == "l2":
-                    seeded_l2 += 1
+
+            tile_data = self._extract_tile_from_slab(
+                slab, shape, l2_chunks, slice_info, tile_idx
+            )
+            if tile_data is None:
+                skipped_extract += 1
+                continue
+            stored = self._store_seeded_tile(
+                run_uid, key, tile_idx, tile_data, shape, l2_chunks, slice_info
+            )
+            if stored == "l1":
+                seeded_l1 += 1
+            elif stored == "l2":
+                seeded_l2 += 1
+
+        if sync_all:
             if seeded_l1 or seeded_l2:
                 print_debug(
                     "ChunkCache",
@@ -1133,28 +1161,6 @@ class ChunkCache:
                     category="cache",
                 )
             return
-
-        seeded_l1 = 0
-        deferred: List[Dict] = []
-        itemsize = slab.dtype.itemsize
-        for tile_info in pending:
-            tile_idx = tile_info["chunk_indices"]
-            cache_key = (run_uid, key, tile_idx)
-            tile_size = int(np.prod(tile_info["chunk_shape"]) * itemsize)
-            if self.l1_tile_size + tile_size <= self.l1_max_bytes:
-                tile_data = self._extract_tile_from_slab(
-                    slab, shape, l2_chunks, slice_info, tile_idx
-                )
-                if tile_data is None:
-                    skipped_extract += 1
-                    continue
-                stored = self._store_seeded_tile(
-                    run_uid, key, tile_idx, tile_data, shape, l2_chunks, slice_info
-                )
-                if stored == "l1":
-                    seeded_l1 += 1
-            else:
-                deferred.append(tile_info)
 
         if deferred:
             print_debug(
@@ -1679,53 +1685,6 @@ class ChunkCache:
             return
         cache_key = self._assembled_slab_cache_key(run_uid, key, slice_info)
         self._store_in_slice_cache(cache_key, np.asarray(result))
-
-    def _get_data_sliced(self, run, key: str, slice_info: Tuple) -> np.ndarray:
-        """
-        Read only the requested slice via the Tiled client's slice API.
-
-        Parameters
-        ----------
-        run : BlueskyRun
-            Run containing the data.
-        key : str
-            Data key.
-        slice_info : tuple
-            Per-dimension indices or slice objects.
-
-        Returns
-        -------
-        np.ndarray
-            The requested array region.
-        """
-        run_uid = run.start["uid"]
-        cache_key = (run_uid, key, self._slice_cache_key(slice_info))
-        if cache_key in self.slice_cache:
-            self.hits += 1
-            self._update_access(cache_key)
-            return self.slice_cache[cache_key]
-
-        self.misses += 1
-        result = self._fetch_from_tiled(run, key, slice_info, reason="direct slice")
-
-        nbytes = result.nbytes
-        if nbytes <= self.max_size:
-            while (
-                self.current_size + nbytes > self.max_size
-                and not self._evict_lru()
-            ):
-                pass
-            if self.current_size + nbytes <= self.max_size:
-                self.slice_cache[cache_key] = result
-                self.current_size += nbytes
-                self._update_access(cache_key)
-
-        print_debug(
-            "ChunkCache",
-            f"Direct slice read {key} shape {result.shape} ({nbytes / 1e6:.1f} MB)",
-            category="cache",
-        )
-        return result
 
     @staticmethod
     def _coord_dim_to_array_axis(depth: int, internal_slices: Tuple) -> int:
