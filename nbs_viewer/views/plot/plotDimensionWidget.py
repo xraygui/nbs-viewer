@@ -248,6 +248,7 @@ class PlotDimensionControl(QWidget):
         self.run_list_model.run_removed.connect(self.on_run_removed)
         self.run_list_model.selected_keys_changed.connect(self.on_selection_changed)
         self.canvas.plot_view_updated.connect(self.refresh_axis_coordinates)
+        self.canvas.plot_view_updated.connect(self.refresh_plot_axis_labels)
 
         self.init_ui()
 
@@ -383,17 +384,11 @@ class PlotDimensionControl(QWidget):
         )
         self.sliders_layout.addWidget(plot_header)
 
-        plot_labels = (
-            [ROLE_LABELS[DimRole.PLOT_Y], ROLE_LABELS[DimRole.PLOT_X]]
-            if plot_ndim == 2
-            else [ROLE_LABELS[DimRole.PLOT_X]]
-        )
-
         for offset, pos in enumerate(range(n_slice, len(order))):
             storage_axis = order[pos]
             if y_shape[storage_axis] <= 1:
                 continue
-            label = plot_labels[offset] if offset < len(plot_labels) else ""
+            label = self._plot_axis_label_for_storage(storage_axis)
             row = _PlotAxisRow(dim_names[storage_axis], label)
             row.storage_axis = storage_axis
             row.move_up_requested.connect(
@@ -534,6 +529,47 @@ class PlotDimensionControl(QWidget):
         self.indicesUpdated.emit(slice_info)
         self.cubeViewChanged.emit(self._cube_view_spec)
 
+    def _plot_axis_label_for_storage(self, storage_axis: int) -> str:
+        """
+        Return the Plot X / Plot Y label for a storage axis on the live view.
+
+        Parameters
+        ----------
+        storage_axis : int
+            Storage dimension index.
+
+        Returns
+        -------
+        str
+            Plot axis role label, or empty when unknown.
+        """
+        try:
+            frame = self.canvas.get_view_frame()
+            if storage_axis == frame.plot_x_dim:
+                return ROLE_LABELS[DimRole.PLOT_X]
+            if storage_axis == frame.plot_y_dim:
+                return ROLE_LABELS[DimRole.PLOT_Y]
+        except ValueError:
+            pass
+        if self._cube_view_spec is not None:
+            role = self._cube_view_spec.roles[storage_axis]
+            if role == DimRole.PLOT_X:
+                return ROLE_LABELS[DimRole.PLOT_X]
+            if role == DimRole.PLOT_Y:
+                return ROLE_LABELS[DimRole.PLOT_Y]
+        return ""
+
+    def refresh_plot_axis_labels(self):
+        """
+        Refresh plot-axis row labels from the rendered view frame.
+        """
+        for row in self._plot_rows:
+            if row.storage_axis is None:
+                continue
+            row.plot_label.setText(
+                self._plot_axis_label_for_storage(row.storage_axis)
+            )
+
     def refresh_axis_coordinates(self):
         """
         Update slice slider readouts with loaded axis coordinate values.
@@ -560,11 +596,11 @@ class PlotDimensionControl(QWidget):
         """
         Return axis coordinate arrays, preferring loaded data over index placeholders.
         """
-        _, _, placeholders, _ = run_model._run.get_dimension_ui_info(
+        _, _, placeholders, _ = run_model.get_dimension_ui_info(
             ykey, x_keys
         )
         try:
-            axis_arrays, _, associated_data = run_model._run.get_dimension_axes(
+            axis_arrays, _, associated_data = run_model.get_dimension_axes(
                 ykey, x_keys
             )
         except Exception:
@@ -610,9 +646,11 @@ class PlotDimensionControl(QWidget):
                     continue
 
                 for ykey in y_keys:
+                    if run_model.is_synthetic_key(ykey):
+                        continue
                     try:
                         shape, axis_names, _, _ = (
-                            run_model._run.get_dimension_ui_info(ykey, x_keys)
+                            run_model.get_dimension_ui_info(ykey, x_keys)
                         )
                         axis_arrays, associated_data = (
                             self._axis_coordinates_for_run(
@@ -684,11 +722,21 @@ class PlotDimensionControl(QWidget):
         self.dimensionChanged.emit(new_dim)
 
     def on_run_added(self, run_model):
+        run_model.selected_keys_changed.connect(self._on_run_selection_changed)
         self.create_sliders()
 
     def on_run_removed(self, run_model):
+        try:
+            run_model.selected_keys_changed.disconnect(
+                self._on_run_selection_changed
+            )
+        except (TypeError, RuntimeError):
+            pass
         self.create_sliders()
 
     def on_selection_changed(self):
+        self._on_run_selection_changed()
+
+    def _on_run_selection_changed(self, *_args):
         self._cube_view_spec = None
         self.create_sliders()

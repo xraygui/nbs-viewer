@@ -14,7 +14,6 @@ from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from ...models.plot.cube_view import CubeViewSpec
 from ...models.plot.plotDataModel import PlotDataModel
-from ...models.plot.derived_plot_data_model import DerivedPlotDataModel
 from ...models.plot.plot_geometry import PlotBundle, RenderMode
 from ...models.plot.plot_view_frame import (
     PlotViewFrame,
@@ -71,7 +70,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self.run_list_model = run_list_model
         self.plotArtists = {}
-        self.derived_models: dict[str, DerivedPlotDataModel] = {}
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -134,7 +132,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 return False
 
         if self._dimension != dimension:
-            self.clear(keep_derived=True)
+            self.clear()
             self._dimension = dimension
 
         view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
@@ -339,7 +337,6 @@ class MplCanvas(FigureCanvasQTAgg):
         plotData.set_artist(artist)
         if bundle.render_mode == "line":
             self._ensure_sibling_lines_on_axes(except_key=plotData._key)
-        self.sync_derived_line_display()
         self._sync_roi_display()
         self.plot_view_updated.emit()
         self.draw()
@@ -508,71 +505,9 @@ class MplCanvas(FigureCanvasQTAgg):
                 break
         for model in self.plotArtists.values():
             model.artist = None
-        for model in self.derived_models.values():
-            model.artist = None
         self._destroy_roi_selector()
         self._remove_roi_overlay()
         self._active_render_mode = None
-
-    def add_derived_plot(self, model: DerivedPlotDataModel) -> None:
-        """
-        Register a committed derivative line for 1D comparison overlay.
-        """
-        self.derived_models[model._product_id] = model
-        model.draw_requested.connect(self.draw)
-        model.visibility_changed.connect(lambda *_: self.updateLegend())
-        self._plot_derived_line(model)
-        self.sync_derived_line_display()
-
-    def remove_derived_plot(self, product_id: str) -> None:
-        """
-        Remove a derivative overlay by product id.
-        """
-        model = self.derived_models.pop(product_id, None)
-        if model is None:
-            return
-        model.clear()
-
-    def sync_derived_line_display(self) -> None:
-        """
-        Show or hide pinned derivative lines based on the active view mode.
-        """
-        show = self.currentDim == 1 and self._active_render_mode == "line"
-        for model in self.derived_models.values():
-            if model.artist is None:
-                if show:
-                    self._plot_derived_line(model)
-                continue
-            model.artist.set_visible(show and model._visible)
-        if show:
-            self._ensure_derived_lines_on_axes()
-        self.updateLegend()
-        self.draw_idle()
-
-    def _plot_derived_line(self, model: DerivedPlotDataModel) -> None:
-        bundle = model.get_plot_bundle()
-        if bundle.render_mode != "line":
-            return
-        artist = model.artist
-        if self._line_artist_on_axes(artist):
-            LineRenderer.update(artist, bundle)
-        else:
-            if artist is not None:
-                try:
-                    artist.remove()
-                except Exception:
-                    pass
-            artist = LineRenderer.create(self.axes, bundle, model.label)
-        model.set_artist(artist)
-        self.updateLegend()
-
-    def _ensure_derived_lines_on_axes(self) -> None:
-        for model in self.derived_models.values():
-            if not model._visible:
-                continue
-            artist = model.artist
-            if artist is None or not self._line_artist_on_axes(artist):
-                self._plot_derived_line(model)
 
     def apply_roi_from_region(self, region) -> None:
         """
@@ -897,7 +832,7 @@ class MplCanvas(FigureCanvasQTAgg):
         elif self._roi_region is not None:
             self._update_roi_overlay()
 
-    def clear(self, keep_derived: bool = False):
+    def clear(self):
         print_debug("MplCanvas.clear", "Starting Clear", category="DEBUG_PLOTS")
         self.clear_roi()
 
@@ -923,13 +858,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
         for model in self.plotArtists.values():
             model.artist = None
-        if keep_derived:
-            for model in self.derived_models.values():
-                model.artist = None
-        else:
-            for model in self.derived_models.values():
-                model.clear()
-            self.derived_models.clear()
 
         self.draw()
 

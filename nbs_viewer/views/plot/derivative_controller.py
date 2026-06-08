@@ -8,16 +8,22 @@ from uuid import uuid4
 
 from qtpy.QtCore import QObject, QTimer
 
-from nbs_viewer.models.plot.cube_view import default_profile_label
+from nbs_viewer.models.plot.cube_view import (
+    classify_profile_kind,
+    default_profile_label,
+    is_plot_plane_storage_axis,
+)
 from nbs_viewer.models.plot.derived_fetch import _profile_uses_nd_load
-from nbs_viewer.models.plot.derived_plot_data_model import DerivedPlotDataModel
-from nbs_viewer.models.plot.derived_product import DerivedProduct
+from nbs_viewer.models.plot.frozen_spectrum import (
+    SYNTHETIC_KEY_PREFIX,
+    FrozenSpectrum,
+    copy_plot_bundle,
+)
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import expand_rect_for_profile
 
 from .derivative_plot_dialog import DerivativePlotDialog
 from .derivative_preview_canvas import DerivativePreviewWorker
-from .derived_series_registry import DerivedSeriesRegistry
 from .mpl_canvas import MplCanvas
 from .plotDimensionWidget import PlotDimensionControl
 from .roi_panel import RoiPanel
@@ -39,14 +45,13 @@ class DerivativeController(QObject):
         self.canvas = canvas
         self.dimension_control = dimension_control
         self.panel = panel
-        self.registry = DerivedSeriesRegistry(self)
         self._dialog = None
         self._active_worker = None
         self._commit_worker = None
         self._pending_workers = set()
         self._generation = 0
         self._commit_generation = 0
-        self._commit_pin_only = False
+        self._pending_commit_span_full = None
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -58,9 +63,6 @@ class DerivativeController(QObject):
         canvas.plot_view_updated.connect(self._on_parent_plot_updated)
         dimension_control.indicesUpdated.connect(self._on_roi_or_view_changed)
         dimension_control.cubeViewChanged.connect(self._on_roi_or_view_changed)
-        dimension_control.dimensionChanged.connect(
-            self._on_dimension_changed
-        )
 
         self._update_create_button_enabled()
 
@@ -82,8 +84,7 @@ class DerivativeController(QObject):
             self._dialog.preview_enabled_changed.connect(
                 self._schedule_preview
             )
-            self._dialog.create_requested.connect(self._on_create_requested)
-            self._dialog.pin_requested.connect(self._on_pin_requested)
+            self._dialog.save_requested.connect(self._on_save_requested)
             self._dialog.full_height_requested.connect(
                 self._apply_roi_full_height
             )
@@ -101,9 +102,6 @@ class DerivativeController(QObject):
         self._cancel_preview_worker()
         self._cancel_commit_worker()
         self._dialog = None
-
-    def _on_dimension_changed(self, _dimension: int):
-        self.canvas.sync_derived_line_display()
 
     def _on_parent_plot_updated(self):
         if self._dialog is None or not self._dialog.isVisible():
@@ -199,7 +197,22 @@ class DerivativeController(QObject):
         self._dialog.show_preview_message("Updating preview…")
         QTimer.singleShot(0, self._run_preview)
 
-    def _start_preview_worker(self, generation: int, for_commit: bool):
+    def _commit_span_full(self, parent_spec, profile_storage_axis: int) -> bool:
+        """
+        Return whether stack-spectrum save should span the full profile axis.
+        """
+        if classify_profile_kind(parent_spec, profile_storage_axis) != "stack_spectrum":
+            return self._dialog.span_full_profile_axis()
+        if is_plot_plane_storage_axis(parent_spec, profile_storage_axis):
+            return True
+        return self._dialog.span_full_profile_axis()
+
+    def _start_preview_worker(
+        self,
+        generation: int,
+        for_commit: bool,
+        span_full_override=None,
+    ):
         region = self.canvas.get_roi_region()
         if region is None:
             raise ValueError("Draw an ROI on the parent plot")
@@ -209,10 +222,22 @@ class DerivativeController(QObject):
             raise ValueError("Select a single 2D dataset")
 
         parent_spec = self._parent_spec()
-        request = self._dialog.build_materialize_request(
-            region,
-            parent_spec=parent_spec,
-        )
+        if self._dialog.is_profile_output():
+            span_full = (
+                span_full_override
+                if span_full_override is not None
+                else self._dialog.span_full_profile_axis()
+            )
+            request = self._dialog.build_profile_request(
+                region,
+                parent_spec=parent_spec,
+                span_full_profile_axis=span_full,
+            )
+        else:
+            request = self._dialog.build_plane_request(
+                region,
+                parent_spec=parent_spec,
+            )
         if request is None:
             raise ValueError("Parent cube view is unavailable")
 
@@ -336,25 +361,17 @@ class DerivativeController(QObject):
         self._dialog.show_preview_message("Preview unavailable")
         self._dialog.set_status(message)
 
-    def _on_pin_requested(self):
-        self._start_commit(pin_only=True)
+    def _on_save_requested(self):
+        self._start_commit()
 
-    def _on_create_requested(self):
-        self._start_commit(pin_only=False)
-
-    def _start_commit(self, pin_only: bool):
+    def _start_commit(self):
         if self._dialog is None:
             return
         if not self._dialog.is_profile_output():
-            if pin_only:
-                self._dialog.set_status(
-                    "Pin for comparison applies to 1D profiles only"
-                )
-            else:
-                self._dialog.set_status(
-                    "Committed 2D planes are not supported yet; "
-                    "use preview or switch to 1D profile"
-                )
+            self._dialog.set_status(
+                "Committed 2D planes are not supported yet; "
+                "use preview or switch to 1D profile"
+            )
             return
 
         region = self.canvas.get_roi_region()
@@ -373,7 +390,25 @@ class DerivativeController(QObject):
             self._dialog.set_status("ROI has zero width or height")
             return
 
-        request = self._dialog.build_profile_request(region)
+        parent_spec = self._parent_spec()
+        if parent_spec is None:
+            self._dialog.set_status("Parent cube view is unavailable")
+            return
+
+        profile_axis = self._dialog.get_profile_storage_axis()
+        if classify_profile_kind(parent_spec, profile_axis) != "stack_spectrum":
+            self._dialog.set_status(
+                "Save to ROI Profiles is not available yet; "
+                "select the scan axis profile"
+            )
+            return
+
+        span_full = self._commit_span_full(parent_spec, profile_axis)
+        request = self._dialog.build_profile_request(
+            region,
+            parent_spec=parent_spec,
+            span_full_profile_axis=span_full,
+        )
         if request is None:
             self._dialog.set_status("Parent cube view is unavailable")
             return
@@ -381,12 +416,15 @@ class DerivativeController(QObject):
         self._cancel_commit_worker()
         self._commit_generation += 1
         generation = self._commit_generation
-        self._commit_pin_only = pin_only
-        action = "Pinning" if pin_only else "Creating"
-        self._dialog.set_status(f"{action}…")
+        self._pending_commit_span_full = span_full
+        self._dialog.set_status("Saving…")
 
         try:
-            worker = self._start_preview_worker(generation, for_commit=True)
+            worker = self._start_preview_worker(
+                generation,
+                for_commit=True,
+                span_full_override=span_full,
+            )
         except ValueError as exc:
             self._dialog.set_status(str(exc))
             return
@@ -405,7 +443,7 @@ class DerivativeController(QObject):
             return
         if bundle.render_mode != "line" or bundle.ndim != 1:
             self._dialog.set_status(
-                "Committed derivatives must be 1D line profiles"
+                "Saved derivatives must be 1D line profiles"
             )
             return
 
@@ -414,41 +452,40 @@ class DerivativeController(QObject):
         if plot_model is None or region is None:
             return
 
-        request = self._dialog.build_profile_request(region)
+        parent_spec = self._parent_spec()
+        span_full = self._pending_commit_span_full
+        request = self._dialog.build_profile_request(
+            region,
+            parent_spec=parent_spec,
+            span_full_profile_axis=span_full,
+        )
         if request is None:
             return
 
         label = self._dialog.get_label() or default_profile_label(
             request,
             self._axis_names(),
-            parent_spec=self._parent_spec(),
+            parent_spec=parent_spec,
         )
-        product_id = str(uuid4())
+        x_keys, _, _ = plot_model._run.get_selected_keys()
+        committed_xkey = x_keys[0] if x_keys else ""
 
-        product = DerivedProduct(
-            product_id=product_id,
+        entry = FrozenSpectrum(
+            key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
+            label=label,
+            bundle=copy_plot_bundle(bundle),
+            kind="stack_spectrum",
+            source_ykey=plot_model._ykey,
+            committed_xkey=committed_xkey,
             request=request,
             source_key=plot_model._key,
-            bundle=bundle,
-            label=label,
             cube_fingerprint=(
                 tuple(self.canvas._slice) if self.canvas._slice else None,
                 str(self.canvas._cube_view_spec),
             ),
         )
-        self.registry.append(product)
-        model = DerivedPlotDataModel(product_id, bundle, label, self)
-        self.canvas.add_derived_plot(model)
-
-        pin_only = self._commit_pin_only
-        if not pin_only:
-            if self.dimension_control.dimension_spinbox.value() != 1:
-                self.dimension_control.dimension_spinbox.setValue(1)
-            else:
-                self.canvas.sync_derived_line_display()
-
-        verb = "Pinned" if pin_only else "Created"
-        self._dialog.set_status(f"{verb}: {label}")
+        plot_model._run.register_frozen_spectrum(entry)
+        self._dialog.set_status(f"Saved: {label}")
 
     def _on_commit_error(self, message, generation):
         if self._dialog is None or generation != self._commit_generation:

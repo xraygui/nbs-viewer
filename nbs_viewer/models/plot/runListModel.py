@@ -21,6 +21,7 @@ class RunListModel(QStandardItemModel):
     """
 
     available_keys_changed = Signal()
+    frozen_spectra_changed = Signal()
     selected_keys_changed = Signal(list, list, list)
     run_added = Signal(object)  # RunData added to model
     run_removed = Signal(object)  # RunData removed from model
@@ -223,10 +224,10 @@ class RunListModel(QStandardItemModel):
             f"available_keys from first_run.uid {first_run.uid}: {first_run.available_keys}",
             "run",
         )
-        available_keys = first_run.available_keys
+        available_keys = first_run.catalog_keys
         for run in runs:
             available_keys = [
-                key for key in available_keys if key in run.available_keys
+                key for key in available_keys if key in run.catalog_keys
             ]
 
         # Update if changed
@@ -410,15 +411,44 @@ class RunListModel(QStandardItemModel):
         """Get selected keys from all run models."""
         return self._current_x_keys, self._current_y_keys, self._current_norm_keys
 
+    def synthetic_display_entries(self):
+        """
+        Return frozen stack spectra for visible runs.
+
+        Returns
+        -------
+        list of tuple
+            ``(run_model, key, display_label)`` entries for Run Display.
+        """
+        entries = []
+        runs = self.visible_models
+        multi = len(runs) > 1
+        for run_model in runs:
+            for entry in run_model.frozen_spectra():
+                if entry.kind != "stack_spectrum":
+                    continue
+                label = entry.label
+                if multi:
+                    label = f"{run_model.scan_id} · {label}"
+                entries.append((run_model, entry.key, label))
+        return entries
+
     def _connect_run_model(self, run_model: RunModel):
         """Connect signals from a RunModel."""
         run_model.available_keys_changed.connect(self.update_available_keys)
+        run_model.frozen_spectra_changed.connect(self._on_frozen_spectra_changed)
         run_model.plot_update_needed.connect(self.request_plot_update)
 
     def _disconnect_run_model(self, run_model: RunModel):
         """Disconnect signals from a RunModel."""
         run_model.available_keys_changed.disconnect(self.update_available_keys)
+        run_model.frozen_spectra_changed.disconnect(
+            self._on_frozen_spectra_changed
+        )
         run_model.plot_update_needed.disconnect(self.request_plot_update)
+
+    def _on_frozen_spectra_changed(self):
+        self.frozen_spectra_changed.emit()
 
     def add_runs(self, run_list: Union[List[CatalogRun], List[RunModel]]):
         """

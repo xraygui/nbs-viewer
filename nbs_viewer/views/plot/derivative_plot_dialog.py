@@ -53,8 +53,7 @@ class DerivativePlotDialog(QDialog):
 
     request_changed = Signal(object)
     preview_enabled_changed = Signal(bool)
-    create_requested = Signal()
-    pin_requested = Signal()
+    save_requested = Signal()
     full_height_requested = Signal()
     full_width_requested = Signal()
 
@@ -145,12 +144,10 @@ class DerivativePlotDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.create_button = QPushButton("Create")
-        self.pin_button = QPushButton("Pin for comparison")
+        self.save_button = QPushButton("Save")
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
-        button_row.addWidget(self.create_button)
-        button_row.addWidget(self.pin_button)
+        button_row.addWidget(self.save_button)
         button_row.addWidget(self.close_button)
         root.addLayout(button_row)
 
@@ -168,8 +165,7 @@ class DerivativePlotDialog(QDialog):
         self.label_edit.textChanged.connect(self._emit_request_changed)
         self.span_full_checkbox.toggled.connect(self._emit_request_changed)
         self.preview_checkbox.toggled.connect(self._on_preview_toggled)
-        self.create_button.clicked.connect(self.create_requested.emit)
-        self.pin_button.clicked.connect(self.pin_requested.emit)
+        self.save_button.clicked.connect(self.save_requested.emit)
         self.full_height_button.clicked.connect(self.full_height_requested.emit)
         self.full_width_button.clicked.connect(self.full_width_requested.emit)
 
@@ -198,7 +194,6 @@ class DerivativePlotDialog(QDialog):
         profile = self.output_profile.isChecked()
         for widget in self._profile_widgets:
             widget.setEnabled(profile)
-        self.pin_button.setEnabled(profile)
         in_plane = self._selected_axis_on_plot_plane()
         self.span_full_checkbox.setEnabled(profile and in_plane)
         storage_axis = self.get_profile_storage_axis()
@@ -310,6 +305,8 @@ class DerivativePlotDialog(QDialog):
         self,
         region: RectRegion,
         parent_spec: Optional[CubeViewSpec] = None,
+        *,
+        span_full_profile_axis: Optional[bool] = None,
     ):
         """
         Build a profile :class:`MaterializeRequest` from dialog controls.
@@ -329,6 +326,11 @@ class DerivativePlotDialog(QDialog):
         spec = parent_spec if parent_spec is not None else self._parent_spec
         if spec is None:
             return None
+        span_full = (
+            self.span_full_profile_axis()
+            if span_full_profile_axis is None
+            else span_full_profile_axis
+        )
         return materialize_request_for_profile(
             spec,
             region,
@@ -336,7 +338,7 @@ class DerivativePlotDialog(QDialog):
             self.get_spatial_reduce(),
             self.get_mask_mode(),
             parent_frame=self._parent_frame,
-            span_full_profile_axis=self.span_full_profile_axis(),
+            span_full_profile_axis=span_full,
         )
 
     def build_plane_request(

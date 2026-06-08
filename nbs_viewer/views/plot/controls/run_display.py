@@ -60,6 +60,7 @@ class RunDisplayWidget(QWidget):
 
         # Connect signals
         self.run_list_model.available_keys_changed.connect(self._update_display)
+        self.run_list_model.frozen_spectra_changed.connect(self._update_display)
         self.run_list_model.visible_runs_changed.connect(self._build_header)
         self.run_list_model.selected_keys_changed.connect(self._update_checkboxes)
 
@@ -191,7 +192,7 @@ class RunDisplayWidget(QWidget):
             available_keys = ["time"] + [k for k in available_keys if k != "time"]
 
         # Add column headers with alignment
-        for i, label in enumerate(["", "X", "Y", "", "Norm"]):
+        for i, label in enumerate(["", "X", "Y", "", "Norm", ""]):
             header = QLabel(label)
             header.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             if i in [1, 2, 4]:  # X, Y, and Norm columns
@@ -206,8 +207,11 @@ class RunDisplayWidget(QWidget):
         self._norm_group.setExclusive(False)  # Allow multiple norm selections
         self._button_key_map = {}
 
-        # Add key rows
+        row_index = 0
+
+        # Add catalog key rows
         for i, key in enumerate(available_keys):
+            row_index = i + 1
             # Key label with elided text if too long
             label = QLabel(key)
             label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -245,9 +249,61 @@ class RunDisplayWidget(QWidget):
             self._norm_group.addButton(norm_box)
             self._button_key_map[norm_box] = key
 
-            # Connect signals
             for box in [x_box, y_box, norm_box]:
                 box.clicked.connect(self._on_checkbox_changed)
+
+        synthetic_entries = self._synthetic_entries()
+        if synthetic_entries:
+            row_index += 1
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setFrameShadow(QFrame.Sunken)
+            separator.setFixedHeight(1)
+            self._grid.addWidget(separator, row_index, 0, 1, 5)
+
+            for entry_index, (run_model, key, label_text) in enumerate(
+                synthetic_entries
+            ):
+                row_index += 1
+                label = QLabel(label_text)
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                label.setMinimumWidth(100)
+                label.setMaximumWidth(200)
+                label.setStyleSheet("QLabel { font-style: italic; }")
+                self._grid.addWidget(label, row_index, 0)
+
+                x_spacer = QLabel("")
+                self._grid.addWidget(x_spacer, row_index, 1)
+
+                y_box = QCheckBox()
+                y_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
+                y_box.setChecked(key in selected_y)
+                self._grid.addWidget(y_box, row_index, 2)
+                self._y_group.addButton(y_box)
+                self._button_key_map[y_box] = key
+
+                line = QFrame()
+                line.setFrameShape(QFrame.VLine)
+                line.setFixedWidth(10)
+                self._grid.addWidget(line, row_index, 3)
+
+                norm_box = QCheckBox()
+                norm_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
+                norm_box.setChecked(key in selected_norm)
+                self._grid.addWidget(norm_box, row_index, 4)
+                self._norm_group.addButton(norm_box)
+                self._button_key_map[norm_box] = key
+
+                delete_button = QPushButton("Delete")
+                delete_button.clicked.connect(
+                    lambda _checked=False, rm=run_model, k=key: (
+                        self._on_delete_synthetic(rm, k)
+                    )
+                )
+                self._grid.addWidget(delete_button, row_index, 5)
+
+                for box in [y_box, norm_box]:
+                    box.clicked.connect(self._on_checkbox_changed)
 
         # Set grid properties for compact layout
         self._grid.setVerticalSpacing(0)  # Remove vertical spacing
@@ -260,10 +316,46 @@ class RunDisplayWidget(QWidget):
         self._grid.setColumnStretch(2, 0)
         self._grid.setColumnStretch(3, 0)  # Separator stays small
         self._grid.setColumnStretch(4, 0)
+        self._grid.setColumnStretch(5, 0)
 
         # Enable buttons
         self._update_button.setEnabled(True)
         self._clear_button.setEnabled(True)
+
+    def _synthetic_entries(self):
+        """
+        Return synthetic spectrum rows for the current display mode.
+
+        Returns
+        -------
+        list of tuple
+            ``(run_model, key, label)`` entries.
+        """
+        if self._linked_mode:
+            return self.run_list_model.synthetic_display_entries()
+        if self._current_run:
+            return [
+                (self._current_run, entry.key, entry.label)
+                for entry in self._current_run.frozen_spectra()
+                if entry.kind == "stack_spectrum"
+            ]
+        return []
+
+    def _on_delete_synthetic(self, run_model, key: str) -> None:
+        """
+        Remove a frozen synthetic spectrum from a run.
+
+        Parameters
+        ----------
+        run_model : RunModel
+            Run owning the synthetic key.
+        key : str
+            Synthetic key to delete.
+        """
+        if not run_model.remove_frozen_spectrum(key):
+            return
+        self.run_list_model.request_plot_update.emit()
+        self._update_display()
 
     def _clear_grid(self) -> None:
         """Clear all widgets from the grid."""

@@ -761,6 +761,56 @@ def _global_reduce_storage_axes(
     )
 
 
+def scan_profile_storage_axis(parent_spec: CubeViewSpec) -> Optional[int]:
+    """
+    Return the leading scan storage axis in tensor order.
+
+    Among axes that are not globally reduced (SUM or MEAN), returns the
+    minimum storage index. This is the external scan axis for stack spectra,
+    whether its role is INDEX or a plot axis (e.g. mesh ``en_energy``).
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent cube view.
+
+    Returns
+    -------
+    int or None
+        Scan storage axis index, or None when no candidates exist.
+    """
+    candidates = [
+        sa
+        for sa in range(parent_spec.ndim)
+        if parent_spec.roles[sa] not in (DimRole.SUM, DimRole.MEAN)
+    ]
+    return min(candidates) if candidates else None
+
+
+def classify_profile_kind(
+    parent_spec: CubeViewSpec, profile_storage_axis: int
+) -> Literal["stack_spectrum", "local_profile"]:
+    """
+    Classify a profile axis for save routing.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent cube view.
+    profile_storage_axis : int
+        Selected profile storage axis.
+
+    Returns
+    -------
+    str
+        ``stack_spectrum`` for the scan axis; ``local_profile`` otherwise.
+    """
+    scan_axis = scan_profile_storage_axis(parent_spec)
+    if scan_axis is not None and profile_storage_axis == scan_axis:
+        return "stack_spectrum"
+    return "local_profile"
+
+
 def is_plot_plane_storage_axis(
     parent_spec: CubeViewSpec, storage_axis: int
 ) -> bool:

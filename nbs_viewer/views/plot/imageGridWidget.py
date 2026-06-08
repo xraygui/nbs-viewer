@@ -187,7 +187,7 @@ class ImageGridWidget(QWidget):
 
         try:
             shape, axis_names, axis_arrays, associated_data = (
-                run_model._run.get_dimension_ui_info(y_key, x_keys)
+                run_model.get_dimension_ui_info(y_key, x_keys)
             )
 
             print_debug("ImageGridWidget", f"Shape: {shape}")

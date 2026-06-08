@@ -4,6 +4,7 @@ import logging
 from .base import CatalogRun
 from typing import Dict, List, Tuple, Any, Optional, Union
 import numpy as np
+from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.utils import print_debug, time_function
 
 
@@ -232,6 +233,10 @@ class BlueskyRun(CatalogRun):
         tuple
             The shape of the data
         """
+        if is_synthetic_key(key):
+            raise KeyError(
+                f"Synthetic key {key!r} must be accessed via RunModel, not CatalogRun"
+            )
         t_start = time.time()
         if key not in self._shape_cache:
             logging.debug(f"Getting shape for key {key}")

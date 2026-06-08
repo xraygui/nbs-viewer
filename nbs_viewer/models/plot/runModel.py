@@ -7,6 +7,7 @@ import numpy as np
 from ..data.base import CatalogRun
 from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
 from .derived_fetch import assemble_plane_bundle, plot_plane_storage_axes
+from .frozen_spectrum import FrozenSpectrum
 from .plot_geometry import (
     PlotBundle,
     get_render_mode_hint,
@@ -29,6 +30,7 @@ class RunModel(QObject):
     """
 
     available_keys_changed = Signal()
+    frozen_spectra_changed = Signal()
     selected_keys_changed = Signal(list, list, list)
     transform_changed = Signal(dict)
     data_changed = Signal()
@@ -45,7 +47,8 @@ class RunModel(QObject):
         self._selected_norm: List[str] = []
         # self._artists = {}
         self._is_visible = True  # Track overall visibility state
-        self._available_keys = list()  # Track our own copy of available keys
+        self._catalog_keys: List[str] = []
+        self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
 
         self._transform_text = ""
         self._transform = Interpreter()
@@ -64,9 +67,9 @@ class RunModel(QObject):
 
     def _on_keys_event(self, *_):
         # Single place to update keys and default selection on first load
-        previous_empty = len(self._available_keys) == 0
+        previous_empty = len(self._catalog_keys) == 0
         self._update_available_keys()
-        if previous_empty and self._available_keys:
+        if previous_empty and self._catalog_keys:
             # First time keys become available; set defaults if none selected
             if not (self._selected_x or self._selected_y or self._selected_norm):
                 self._set_default_selection()
@@ -105,20 +108,235 @@ class RunModel(QObject):
         return self.run.plan_name
 
     @property
+    def catalog_keys(self) -> List[str]:
+        """Get catalog stream keys from the run."""
+        return self._catalog_keys
+
+    @property
     def available_keys(self) -> List[str]:
-        """Get the set of available keys."""
-        return self._available_keys
+        """Get catalog keys plus frozen synthetic spectrum keys."""
+        return self._catalog_keys + list(self._frozen_spectra.keys())
+
+    def is_synthetic_key(self, key: str) -> bool:
+        """
+        Return whether a key identifies a frozen synthetic spectrum on this run.
+
+        Parameters
+        ----------
+        key : str
+            Run display key.
+
+        Returns
+        -------
+        bool
+            True when the key is a registered synthetic spectrum.
+        """
+        return key in self._frozen_spectra
+
+    def _frozen_entry(self, key: str) -> Optional[FrozenSpectrum]:
+        """
+        Return a frozen spectrum entry when registered.
+
+        Parameters
+        ----------
+        key : str
+            Run display key.
+
+        Returns
+        -------
+        FrozenSpectrum or None
+            Registered frozen entry, if any.
+        """
+        return self._frozen_spectra.get(key)
+
+    def get_data(self, key: str, slice_info=None) -> np.ndarray:
+        """
+        Load array data for a catalog or frozen key.
+
+        Parameters
+        ----------
+        key : str
+            Data key.
+        slice_info : tuple, optional
+            Per-axis slice tuple.
+
+        Returns
+        -------
+        np.ndarray
+            Storage array for the key.
+        """
+        entry = self._frozen_entry(key)
+        if entry is not None:
+            data = entry.get_data(slice_info)
+        else:
+            data = self._run.getData(key, slice_info)
+        if data is None:
+            raise ValueError(f"No data returned for key {key!r}")
+        return np.asarray(data)
+
+    def get_dimension_ui_info(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Any]]:
+        """
+        Return shape and placeholder axis coordinates for dimension UI.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+        xkeys : list of str
+            Selected X-axis keys.
+
+        Returns
+        -------
+        tuple
+            ``(shape, dimension_names, axis_arrays, associated_data)``.
+        """
+        entry = self._frozen_entry(ykey)
+        if entry is not None:
+            shape = entry.get_shape()
+            ndim = len(shape)
+            names = list(entry.bundle.axis_names) if entry.bundle.axis_names else []
+            if entry.label and ndim == 1:
+                names = [entry.label]
+            while len(names) < ndim:
+                names.append(f"dim_{len(names)}")
+            names = names[:ndim]
+            axis_arrays = [np.arange(size, dtype=float) for size in shape]
+            return shape, names, axis_arrays, {}
+        return self._run.get_dimension_ui_info(ykey, xkeys)
+
+    def get_dimension_axes(
+        self, ykey: str, xkeys: List[str], slice_info=None
+    ):
+        """
+        Return axis coordinates for a catalog or frozen Y key.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+        xkeys : list of str
+            Selected X-axis keys.
+        slice_info : tuple, optional
+            Per-axis slice tuple.
+
+        Returns
+        -------
+        tuple
+            ``(axis_arrays, axis_names, associated_data)``.
+        """
+        entry = self._frozen_entry(ykey)
+        if entry is not None:
+            return entry.get_dimension_axes(xkeys, slice_info)
+        return self._run.get_dimension_axes(ykey, xkeys, slice_info)
+
+    def get_shape(self, key: str) -> Tuple[int, ...]:
+        """
+        Return storage shape for a catalog or frozen key.
+
+        Parameters
+        ----------
+        key : str
+            Data key.
+
+        Returns
+        -------
+        tuple of int
+            Storage shape.
+        """
+        entry = self._frozen_entry(key)
+        if entry is not None:
+            return entry.get_shape()
+        return self._run.getShape(key)
+
+    def get_plot_hints(self, ykey: str) -> Dict[str, Any]:
+        """
+        Return plot hints for a catalog or frozen Y key.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+
+        Returns
+        -------
+        dict
+            Plot hints dictionary.
+        """
+        if self._frozen_entry(ykey) is not None:
+            return {}
+        return self._run.getPlotHints()
+
+    def frozen_spectra(self) -> List[FrozenSpectrum]:
+        """
+        Return registered frozen synthetic spectra.
+
+        Returns
+        -------
+        list of FrozenSpectrum
+            Copy of the frozen spectrum list.
+        """
+        return list(self._frozen_spectra.values())
+
+    def register_frozen_spectrum(self, entry: FrozenSpectrum) -> str:
+        """
+        Register a frozen synthetic spectrum.
+
+        Parameters
+        ----------
+        entry : FrozenSpectrum
+            Frozen spectrum to register.
+
+        Returns
+        -------
+        str
+            Synthetic key.
+        """
+        self._frozen_spectra[entry.key] = entry
+        self.available_keys_changed.emit()
+        self.frozen_spectra_changed.emit()
+        return entry.key
+
+    def remove_frozen_spectrum(self, key: str) -> bool:
+        """
+        Remove a frozen synthetic spectrum by key.
+
+        Parameters
+        ----------
+        key : str
+            Synthetic key to remove.
+
+        Returns
+        -------
+        bool
+            True when a spectrum was removed.
+        """
+        if key not in self._frozen_spectra:
+            return False
+        del self._frozen_spectra[key]
+        x_keys, y_keys, norm_keys = self.get_selected_keys()
+        if key in x_keys or key in y_keys or key in norm_keys:
+            self.set_selected_keys(
+                [k for k in x_keys if k != key],
+                [k for k in y_keys if k != key],
+                [k for k in norm_keys if k != key],
+                force_update=True,
+            )
+        self.available_keys_changed.emit()
+        self.frozen_spectra_changed.emit()
+        return True
 
     def _update_available_keys(self) -> None:
-        """Update internal available keys from run."""
+        """Update catalog keys from the run; preserve synthetic keys."""
         new_keys = self._run.available_keys
         print_debug(
             "RunModel._update_available_keys",
             f"available_keys for {self.uid}: {new_keys} from run {id(self._run)}",
             "run",
         )
-        if set(new_keys) != set(self._available_keys):
-            self._available_keys = new_keys
+        if set(new_keys) != set(self._catalog_keys):
+            self._catalog_keys = new_keys
             self.available_keys_changed.emit()
 
     def _set_default_selection(self) -> None:
@@ -185,6 +403,10 @@ class RunModel(QObject):
         view_spec = None
         request = materialize_request
         materialize_frame = region_frame
+        if self._frozen_entry(ykey) is not None:
+            request = None
+            materialize_request = None
+            cube_view_spec = None
         if request is not None:
             view_spec = request.spec
             if request.region is not None:
@@ -203,10 +425,10 @@ class RunModel(QObject):
             view_spec = cube_view_spec
             slice_info = cube_view_spec.to_load_slice_info()
 
-        xlist, axis_names, _extra = self._run.get_dimension_axes(
+        xlist, axis_names, _extra = self.get_dimension_axes(
             ykey, xkeys, slice_info
         )
-        y = self._run.getData(ykey, slice_info)
+        y = self.get_data(ykey, slice_info)
         storage_axes = list(xlist)
         storage_names = list(axis_names)
 
@@ -238,12 +460,14 @@ class RunModel(QObject):
 
         if norm_keys is not None:
             normlist = [
-                self._run.getData(norm_key, slice_info) for norm_key in norm_keys
+                self.get_data(norm_key, slice_info) for norm_key in norm_keys
             ]
             if request is not None:
-                for i, norm in enumerate(normlist):
+                for i, norm_key in enumerate(norm_keys):
+                    if self._frozen_entry(norm_key) is not None:
+                        continue
                     normlist[i], _, _ = materialize_view(
-                        norm,
+                        normlist[i],
                         storage_axes,
                         storage_names,
                         request,
@@ -251,9 +475,11 @@ class RunModel(QObject):
                         plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
                     )
             elif view_spec is not None:
-                for i, norm in enumerate(normlist):
+                for i, norm_key in enumerate(norm_keys):
+                    if self._frozen_entry(norm_key) is not None:
+                        continue
                     normlist[i], _, _ = materialize_view(
-                        norm,
+                        normlist[i],
                         storage_axes,
                         storage_names,
                         MaterializeRequest(view_spec),
@@ -371,7 +597,7 @@ class RunModel(QObject):
                 display_label = label or (axis_names[0] if axis_names else "profile")
                 return prepare_1d_bundle(y, xlist, [display_label])
             if request.spec.plot_ndim == 2:
-                hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
+                hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
                 return assemble_plane_bundle(
                     y,
                     region_frame,
@@ -392,7 +618,12 @@ class RunModel(QObject):
             materialize_request=request,
             transform=transform,
         )
-        hint = get_render_mode_hint(self._run.getPlotHints(), ykey)
+        if y is None:
+            raise ValueError(f"Plot data for {ykey!r} is missing")
+        hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+        frozen = self._frozen_entry(ykey)
+        if frozen is not None and y.ndim == 1:
+            axis_names = [label or frozen.label]
 
         if y.ndim == 1:
             return prepare_1d_bundle(y, xlist, axis_names)
@@ -432,7 +663,11 @@ class RunModel(QObject):
         if self._transform_text:
             self._transform.symtable["y"] = y
             self._transform.symtable["x"] = xlist
-            y = self._transform(self._transform_text)
+            result = self._transform(self._transform_text)
+            if result is not None:
+                y = result
+            else:
+                y = self._transform.symtable.get("y", y)
 
         return xlist, y
 
@@ -513,6 +748,8 @@ class RunModel(QObject):
         # Check if any selections have changed
         x_keys = [key for key in x_keys if key in self.available_keys]
         y_keys = [key for key in y_keys if key in self.available_keys]
+        if norm_keys is None:
+            norm_keys = []
         norm_keys = [key for key in norm_keys if key in self.available_keys]
         if (
             x_keys != self._selected_x

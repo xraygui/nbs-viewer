@@ -15,6 +15,7 @@ import zarr
 from zarr.storage import MemoryStore
 
 from .tile_indices import (
+    l2_chunks_for_shape,
     tile_global_slice,
     tiles_intersecting,
     total_tile_count,
@@ -120,12 +121,13 @@ class ZarrL2Cache:
         cache_key = self._dataset_key(run_uid, key)
         shape_tuple = tuple(int(s) for s in shape)
         dtype = np.dtype(dtype)
+        l2_chunks = l2_chunks_for_shape(shape_tuple, self.l2_chunks)
 
         with self._lock:
             if cache_key not in self._meta:
                 self._meta[cache_key] = _DatasetMeta(
                     shape=shape_tuple,
-                    l2_chunks=self.l2_chunks,
+                    l2_chunks=l2_chunks,
                     dtype=dtype,
                     tiled_chunks=tiled_chunks,
                 )
@@ -138,7 +140,7 @@ class ZarrL2Cache:
             return group.create_array(
                 "data",
                 shape=shape_tuple,
-                chunks=self.l2_chunks,
+                chunks=l2_chunks,
                 dtype=dtype,
             )
 

@@ -62,6 +62,37 @@ def chunk_grid(shape: Sequence[int], tile_chunks: Sequence[int]) -> Tuple[Tuple[
     )
 
 
+def l2_chunks_for_shape(
+    shape: Sequence[int],
+    template: Sequence[int],
+) -> Tuple[int, ...]:
+    """
+    Adapt a nominal L2 chunk template to an array rank.
+
+    Leading ``1`` entries in ``template`` are dropped when the array has fewer
+    dimensions; extra leading ``1`` axes are inserted when the array has more.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Full array shape.
+    template : sequence of int
+        Default nominal tile size per dimension, e.g. ``(1, 1, 256, 256)``.
+
+    Returns
+    -------
+    tuple of int
+        Tile size per dimension with ``len(result) == len(shape)``.
+    """
+    ndim = len(shape)
+    chunks = tuple(int(c) for c in template)
+    if ndim == len(chunks):
+        return chunks
+    if ndim > len(chunks):
+        return (1,) * (ndim - len(chunks)) + chunks
+    return chunks[len(chunks) - ndim :]
+
+
 def tiles_intersecting(
     shape: Sequence[int],
     tile_chunks: Sequence[int],

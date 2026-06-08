@@ -13,6 +13,7 @@ from threading import Lock
 from .chunk_cache_progress import ChunkCacheProgress
 from .tile_indices import (
     chunk_grid,
+    l2_chunks_for_shape,
     plan_hyperslab_batches,
     request_dim_bounds,
     tiles_intersecting,
@@ -124,30 +125,28 @@ class ChunkCache:
             shape, chunks = self.chunk_info[(run_uid, key)]
 
             cached_slab = self._lookup_assembled_slab(run_uid, key, slice_info)
+
             if cached_slab is not None:
-                return self._finalize_slice_result(cached_slab, slice_info)
-
-            if self.l2 is not None and self.l2.enabled:
-                return self._finalize_slice_result(
-                    self._get_data_l2_pipeline(
+                slab = cached_slab
+            elif self.l2 is not None and self.l2.enabled:
+                slab = self._get_data_l2_pipeline(
                         run, key, slice_info, run_uid, shape, chunks
-                    ),
-                    slice_info,
-                )
+                    )
+            else: 
+                slab = self._read_tiled_hyperslab(run, key, slice_info)
 
-            if self._is_monolithic_chunking(chunks):
-                print_debug(
-                    "ChunkCache",
-                    f"Monolithic chunking for {key}, using hyperslab read",
-                    category="cache",
-                )
-
-            result = self._read_tiled_hyperslab(run, key, slice_info)
-            return self._finalize_slice_result(result, slice_info)
+            return self._finalize_slice_result(slab, slice_info)
 
         except Exception as e:
             print_debug("ChunkCache", f"Error in get_data: {str(e)}")
             raise
+
+    def _l2_chunks(self, run_uid: str, key: str) -> Tuple[int, ...]:
+        """
+        Return the L2 tile size tuple adapted to one dataset's rank.
+        """
+        shape, _ = self.chunk_info[(run_uid, key)]
+        return l2_chunks_for_shape(shape, self.l2.l2_chunks)
 
     def _ensure_l2_array(self, run, key: str) -> None:
         """
@@ -158,6 +157,7 @@ class ChunkCache:
 
         run_uid = run.start["uid"]
         shape, tiled_chunks = self.chunk_info[(run_uid, key)]
+        print_debug("ensure_l2_array", f"registering array {key} with shape {shape} and chunks {tiled_chunks}", category="cache")
         data_accessor = run["primary", "data", key]
         dtype = getattr(data_accessor, "dtype", None)
         if dtype is None:
@@ -193,8 +193,9 @@ class ChunkCache:
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
         self._ensure_l2_array(run, key)
+        l2_chunks = self._l2_chunks(run_uid, key)
 
-        tiles_needed = tiles_intersecting(shape, self.l2.l2_chunks, slice_info)
+        tiles_needed = tiles_intersecting(shape, l2_chunks, slice_info)
         chunks_data = {}
         used_l2 = False
         for tile_info in tiles_needed:
@@ -499,13 +500,14 @@ class ChunkCache:
         print_debug("assemble_partial_l2", f"slice info: {slice_info}", category="cache")
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
-        tiles_needed = tiles_intersecting(shape, self.l2.l2_chunks, slice_info)
+        l2_chunks = self._l2_chunks(run_uid, key)
+        tiles_needed = tiles_intersecting(shape, l2_chunks, slice_info)
         warm, cold = self._partition_l2_tiles(run_uid, key, tiles_needed)
         if not warm or not cold:
             return None
 
         gap_slice = self._cold_gap_slice_info(
-            shape, slice_info, cold, self.l2.l2_chunks
+            shape, slice_info, cold, l2_chunks
         )
         if gap_slice == slice_info:
             return None
@@ -523,7 +525,7 @@ class ChunkCache:
                 tile_data,
                 slice_info,
                 shape,
-                self.l2.l2_chunks,
+                l2_chunks,
             )
         print_debug("assemble_partial_l2", f"read tiled hyperslab", category="cache")
 
@@ -705,8 +707,9 @@ class ChunkCache:
 
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
+        l2_chunks = self._l2_chunks(run_uid, key)
         if tiles is None:
-            tiles = tiles_intersecting(shape, self.l2.l2_chunks, slice_info)
+            tiles = tiles_intersecting(shape, l2_chunks, slice_info)
         incomplete = [
             tile_info
             for tile_info in tiles
@@ -791,7 +794,7 @@ class ChunkCache:
         )
 
         shape, _ = self.chunk_info[(run_uid, key)]
-        l2_chunks = self.l2.l2_chunks
+        l2_chunks = self._l2_chunks(run_uid, key)
         aligned_seed = self._align_seed_slab(seed, slice_info)
 
         needs_tiled: List[Dict] = []
@@ -1116,7 +1119,7 @@ class ChunkCache:
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
         self._ensure_l2_array(run, key)
-        l2_chunks = self.l2.l2_chunks
+        l2_chunks = self._l2_chunks(run_uid, key)
         slab = self._align_seed_slab(slab, slice_info)
         pending = self._pending_slab_tiles(
             run_uid, key, shape, l2_chunks, slice_info
