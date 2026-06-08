@@ -306,7 +306,11 @@ class DerivativePlotDialog(QDialog):
         self.profile_axis_combo.blockSignals(False)
         self._update_profile_controls_enabled()
 
-    def build_profile_request(self, region: RectRegion):
+    def build_profile_request(
+        self,
+        region: RectRegion,
+        parent_spec: Optional[CubeViewSpec] = None,
+    ):
         """
         Build a profile :class:`MaterializeRequest` from dialog controls.
 
@@ -314,16 +318,19 @@ class DerivativePlotDialog(QDialog):
         ----------
         region : RectRegion
             ROI in data coordinates on the parent plot plane.
+        parent_spec : CubeViewSpec, optional
+            Live parent cube view. Defaults to the last context snapshot.
 
         Returns
         -------
         MaterializeRequest or None
             Frozen request when parent context is available.
         """
-        if self._parent_spec is None:
+        spec = parent_spec if parent_spec is not None else self._parent_spec
+        if spec is None:
             return None
         return materialize_request_for_profile(
-            self._parent_spec,
+            spec,
             region,
             self.get_profile_storage_axis(),
             self.get_spatial_reduce(),
@@ -332,7 +339,11 @@ class DerivativePlotDialog(QDialog):
             span_full_profile_axis=self.span_full_profile_axis(),
         )
 
-    def build_plane_request(self, region: RectRegion):
+    def build_plane_request(
+        self,
+        region: RectRegion,
+        parent_spec: Optional[CubeViewSpec] = None,
+    ):
         """
         Build a plane :class:`MaterializeRequest` from dialog controls.
 
@@ -340,21 +351,28 @@ class DerivativePlotDialog(QDialog):
         ----------
         region : RectRegion
             ROI in data coordinates on the parent plot plane.
+        parent_spec : CubeViewSpec, optional
+            Live parent cube view. Defaults to the last context snapshot.
 
         Returns
         -------
         MaterializeRequest or None
             Frozen request when parent context is available.
         """
-        if self._parent_spec is None:
+        spec = parent_spec if parent_spec is not None else self._parent_spec
+        if spec is None:
             return None
         return materialize_request_for_plane(
-            self._parent_spec,
+            spec,
             region,
             self.get_mask_mode(),
         )
 
-    def build_materialize_request(self, region: RectRegion):
+    def build_materialize_request(
+        self,
+        region: RectRegion,
+        parent_spec: Optional[CubeViewSpec] = None,
+    ):
         """
         Build the active profile or plane materialize request.
 
@@ -362,6 +380,8 @@ class DerivativePlotDialog(QDialog):
         ----------
         region : RectRegion
             ROI in data coordinates on the parent plot plane.
+        parent_spec : CubeViewSpec, optional
+            Live parent cube view. Defaults to the last context snapshot.
 
         Returns
         -------
@@ -369,8 +389,8 @@ class DerivativePlotDialog(QDialog):
             Frozen request when parent context is available.
         """
         if self.is_profile_output():
-            return self.build_profile_request(region)
-        return self.build_plane_request(region)
+            return self.build_profile_request(region, parent_spec=parent_spec)
+        return self.build_plane_request(region, parent_spec=parent_spec)
 
     def is_preview_enabled(self) -> bool:
         """

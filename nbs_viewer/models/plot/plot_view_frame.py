@@ -202,3 +202,91 @@ def view_fingerprint_from_bundle(bundle: PlotBundle) -> tuple:
             )
         )
     return tuple(parts)
+
+
+def region_frame_for_bbox(
+    frame: PlotViewFrame,
+    bbox: Tuple[int, int, int, int],
+) -> PlotViewFrame:
+    """
+    Crop a view frame to a storage-index bounding box.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        Full parent 2D view frame.
+    bbox : tuple of int
+        Half-open ``(row_start, row_stop, col_start, col_stop)`` indices.
+
+    Returns
+    -------
+    PlotViewFrame
+        View frame whose shape and coordinates match the cropped plane.
+    """
+    r0, r1, c0, c1 = bbox
+    ny = r1 - r0
+    nx = c1 - c0
+    if ny <= 0 or nx <= 0:
+        raise ValueError(f"empty ROI bbox {bbox}")
+
+    new_shape = (ny, nx)
+    if frame.render_mode == "mesh" and frame.mesh_x is not None and frame.mesh_y is not None:
+        mesh_x, mesh_y = _crop_mesh_grids_for_bbox(
+            frame.mesh_x,
+            frame.mesh_y,
+            frame.shape,
+            r0,
+            r1,
+            c0,
+            c1,
+        )
+        return PlotViewFrame(
+            shape=new_shape,
+            render_mode="mesh",
+            axis_names=list(frame.axis_names),
+            plot_x_dim=frame.plot_x_dim,
+            plot_y_dim=frame.plot_y_dim,
+            mesh_x=mesh_x,
+            mesh_y=mesh_y,
+        )
+
+    new_extent = None
+    if frame.render_mode == "image" and frame.extent is not None:
+        from .region_mesh import _image_cell_bounds
+
+        x_lo, _, _, y_hi = _image_cell_bounds(frame, r0, c0)
+        _, x_hi, y_lo, _ = _image_cell_bounds(frame, r1 - 1, c1 - 1)
+        new_extent = (x_lo, x_hi, y_lo, y_hi)
+
+    return PlotViewFrame(
+        shape=new_shape,
+        render_mode=frame.render_mode,
+        axis_names=list(frame.axis_names),
+        plot_x_dim=frame.plot_x_dim,
+        plot_y_dim=frame.plot_y_dim,
+        extent=new_extent,
+    )
+
+
+def _crop_mesh_grids_for_bbox(
+    mesh_x: np.ndarray,
+    mesh_y: np.ndarray,
+    shape: Tuple[int, int],
+    r0: int,
+    r1: int,
+    c0: int,
+    c1: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Crop ``pcolormesh`` coordinate grids to a storage bounding box.
+    """
+    ny, nx = shape
+    mesh_x = np.asarray(mesh_x, dtype=float)
+    mesh_y = np.asarray(mesh_y, dtype=float)
+    if mesh_x.shape == (ny + 1, nx + 1) and mesh_y.shape == (ny + 1, nx + 1):
+        return mesh_x[r0 : r1 + 1, c0 : c1 + 1], mesh_y[r0 : r1 + 1, c0 : c1 + 1]
+    if mesh_x.shape == (ny, nx) and mesh_y.shape == (ny, nx):
+        return mesh_x[r0:r1, c0:c1], mesh_y[r0:r1, c0:c1]
+    raise ValueError(
+        f"Mesh grid shape {mesh_x.shape} does not match cell shape {shape}"
+    )

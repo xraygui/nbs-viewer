@@ -523,9 +523,6 @@ class PlotDimensionControl(QWidget):
             category="dimension",
         )
 
-        self.indicesUpdated.emit(slice_info)
-        self.cubeViewChanged.emit(self._cube_view_spec)
-
         if update_plot:
             self.canvas.update_view_state(
                 slice_info,
@@ -533,6 +530,9 @@ class PlotDimensionControl(QWidget):
                 validate=False,
                 cube_view_spec=self._cube_view_spec,
             )
+
+        self.indicesUpdated.emit(slice_info)
+        self.cubeViewChanged.emit(self._cube_view_spec)
 
     def refresh_axis_coordinates(self):
         """

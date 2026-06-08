@@ -184,9 +184,20 @@ class RunModel(QObject):
         """
         view_spec = None
         request = materialize_request
+        materialize_frame = region_frame
         if request is not None:
             view_spec = request.spec
-            slice_info = view_spec.to_load_slice_info()
+            if request.region is not None:
+                if region_frame is None:
+                    raise ValueError(
+                        "region_frame is required when materialize_request.region is set"
+                    )
+                slice_info, materialize_frame = request.fetch_context(
+                    region_frame=region_frame,
+                    parent_spec=parent_spec,
+                )
+            else:
+                slice_info = view_spec.to_load_slice_info()
             preserve_storage_axes = True
         elif cube_view_spec is not None:
             view_spec = cube_view_spec
@@ -205,7 +216,7 @@ class RunModel(QObject):
                 storage_axes,
                 storage_names,
                 request,
-                region_frame=region_frame,
+                region_frame=materialize_frame,
                 plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
             )
         elif view_spec is not None:
@@ -236,7 +247,7 @@ class RunModel(QObject):
                         storage_axes,
                         storage_names,
                         request,
-                        region_frame=region_frame,
+                        region_frame=materialize_frame,
                         plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
                     )
             elif view_spec is not None:

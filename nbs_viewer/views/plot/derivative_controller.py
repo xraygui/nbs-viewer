@@ -65,6 +65,9 @@ class DerivativeController(QObject):
         self._update_create_button_enabled()
 
     def _parent_spec(self):
+        spec = self.dimension_control._cube_view_spec
+        if spec is not None:
+            return spec
         return self.canvas._cube_view_spec
 
     def _axis_names(self):
@@ -205,7 +208,11 @@ class DerivativeController(QObject):
         if plot_model is None:
             raise ValueError("Select a single 2D dataset")
 
-        request = self._dialog.build_materialize_request(region)
+        parent_spec = self._parent_spec()
+        request = self._dialog.build_materialize_request(
+            region,
+            parent_spec=parent_spec,
+        )
         if request is None:
             raise ValueError("Parent cube view is unavailable")
 
@@ -214,7 +221,7 @@ class DerivativeController(QObject):
             request,
             generation,
             self,
-            parent_spec=self._parent_spec(),
+            parent_spec=parent_spec,
             parent_bundle=self._cached_parent_bundle(plot_model, request),
         )
         return worker
