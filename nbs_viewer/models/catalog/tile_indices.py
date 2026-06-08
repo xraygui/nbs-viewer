@@ -302,6 +302,51 @@ def tile_fully_in_fetch_slice(
     return True
 
 
+def storage_axis_to_result_axis(
+    slice_info: Sequence[SliceItem],
+    storage_axis: int,
+) -> int:
+    """
+    Map a storage dimension index to a result-array axis after indexing.
+
+    Integer indices in ``slice_info`` collapse their storage axes in arrays
+    returned by Tiled slice reads, so a batch split on a storage axis does not
+    share the same index in the concatenated result.
+
+    Parameters
+    ----------
+    slice_info : sequence
+        Per-dimension slice or index request.
+    storage_axis : int
+        Storage dimension chosen for batch splitting.
+
+    Returns
+    -------
+    int
+        Axis index in each fetched batch array suitable for ``np.concatenate``.
+
+    Raises
+    ------
+    ValueError
+        When ``storage_axis`` is out of range or not a slice dimension.
+    """
+    if storage_axis < 0 or storage_axis >= len(slice_info):
+        raise ValueError(
+            f"storage_axis {storage_axis} out of range for "
+            f"{len(slice_info)}-dimensional slice_info"
+        )
+    if not isinstance(slice_info[storage_axis], slice):
+        raise ValueError(
+            f"storage_axis {storage_axis} must refer to a slice dimension"
+        )
+
+    result_axis = 0
+    for dim in range(storage_axis):
+        if isinstance(slice_info[dim], slice):
+            result_axis += 1
+    return result_axis
+
+
 def plan_hyperslab_batches(
     slice_info: Sequence[SliceItem],
     shape: Sequence[int],
@@ -331,7 +376,8 @@ def plan_hyperslab_batches(
     batches : list of tuple
         Slice tuples covering the full request without overlap.
     batch_axis : int or None
-        Storage axis split across batches, or ``None`` when only one batch.
+        Result-array axis for concatenating batch reads after integer-indexed
+        storage dimensions are collapsed, or ``None`` when only one batch.
     """
     if len(slice_info) != len(shape):
         raise ValueError(
@@ -381,7 +427,7 @@ def plan_hyperslab_batches(
         batches.append(tuple(items))
         batch_start = batch_stop
 
-    return batches, batch_axis
+    return batches, storage_axis_to_result_axis(slice_info, batch_axis)
 
 
 def total_tile_count(shape: Sequence[int], tile_chunks: Sequence[int]) -> int:

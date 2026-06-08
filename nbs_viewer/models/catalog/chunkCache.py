@@ -125,6 +125,7 @@ class ChunkCache:
             The requested data
         """
         try:
+            print_debug("ChunkCache", f"get_data {key}:{slice_info}", category="cache")
             # Ensure we have chunk info
             if not self._ensure_chunk_info(run, key):
                 raise ValueError(
@@ -258,22 +259,31 @@ class ChunkCache:
         """
         Phase 3/4 fetch path: L1/L2 tile hits, else Tiled hyperslab + background fill.
         """
+        print_debug("ChunkCache", f"get_data_l2_pipeline {key}:{slice_info}", category="cache")
         self._ensure_l2_array(run, key)
 
+        print_debug("ChunkCache", f"trying to get data from partial l2 for {key}:{slice_info}", category="cache")
         partial = self._try_get_data_partial_l2(run, key, slice_info)
         if partial is not None:
+            print_debug("ChunkCache", f"storing assembled slab for {key}:{slice_info}", category="cache")
             self._store_assembled_slab(run_uid, key, slice_info, partial, shape)
             return partial
 
+        print_debug("ChunkCache", f"Getting data from L2 tiles for {key}:{slice_info}", category="cache")
+
         l2_result = self._try_get_data_from_l2_tiles(run, key, slice_info)
         if l2_result is not None:
+            print_debug("ChunkCache", f"storing assembled slab for {key}:{slice_info}", category="cache")
             self._store_assembled_slab(run_uid, key, slice_info, l2_result, shape)
             return l2_result
 
         result = self._read_tiled_hyperslab(run, key, slice_info)
         aligned = self._align_seed_slab(result, slice_info)
+        print_debug("ChunkCache", f"seeding l1 tiles from slab for {key}:{slice_info}", category="cache")
         self._seed_l1_tiles_from_slab(run, key, slice_info, aligned)
+        print_debug("ChunkCache", f"queueing l2 materialize for {key}:{slice_info}", category="cache")
         self._queue_l2_materialize(run, key, slice_info, aligned)
+        print_debug("ChunkCache", f"returning result for {key}:{slice_info}", category="cache")
         return result
 
     def _tile_is_complete(
@@ -420,6 +430,7 @@ class ChunkCache:
         """
         Copy one L2 tile intersection into a view-aligned output slab.
         """
+
         tile_idx = tile_info["chunk_indices"]
         chunk = tile_data
         applied_internal = False
@@ -484,6 +495,11 @@ class ChunkCache:
         """
         Copy a cold-gap hyperslab into its position within the full view slab.
         """
+        print_debug("paste_gap_into_slab", f"slab shape: {slab.shape}", category="cache")
+        print_debug("paste_gap_into_slab", f"gap data shape: {gap_data.shape}", category="cache")
+        print_debug("paste_gap_into_slab", f"gap slice: {gap_slice}", category="cache")
+        print_debug("paste_gap_into_slab", f"slice info: {slice_info}", category="cache")
+
         dest_slices: List[slice] = []
         src_slices: List[slice] = []
         for dim, item in enumerate(slice_info):
@@ -525,6 +541,7 @@ class ChunkCache:
     def _assemble_partial_l2(
         self, run, key: str, slice_info: Tuple
     ) -> Optional[np.ndarray]:
+        print_debug("assemble_partial_l2", f"slice info: {slice_info}", category="cache")
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
         tiles_needed = tiles_intersecting(shape, self.l2.l2_chunks, slice_info)
@@ -541,7 +558,7 @@ class ChunkCache:
         slab_shape = self._slab_shape(slice_info, shape)
         dtype = self._read_dtype(run, key)
         slab = np.empty(slab_shape, dtype=dtype)
-
+        print_debug("assemble_partial_l2", f"pasting warm tiles into slab: {len(warm)}", category="cache")
         for tile_info in warm:
             tile_idx = tile_info["chunk_indices"]
             tile_data = self._load_l2_tile_array(run_uid, key, tile_idx)
@@ -553,9 +570,14 @@ class ChunkCache:
                 shape,
                 self.l2.l2_chunks,
             )
+        print_debug("assemble_partial_l2", f"read tiled hyperslab", category="cache")
 
         gap_data = self._read_tiled_hyperslab(run, key, gap_slice)
+        print_debug("assemble_partial_l2", f"squeezing gap dims", category="cache")
+
         gap_data = self._squeeze_indexed_dims(gap_data, gap_slice)
+
+        print_debug("assemble_partial_l2", f"pasting gap into slab", category="cache")
         self._paste_gap_into_slab(slab, gap_data, slice_info, gap_slice, shape)
 
         if not np.isfinite(slab).any():
@@ -604,6 +626,7 @@ class ChunkCache:
             self.fetch_batch_target_bytes,
         )
         if len(batches) == 1:
+            print_debug("read_tiled_hyperslab", f"reading one tiled hyperslab batch", category="cache")
             return self._read_tiled_hyperslab_batch(
                 run,
                 key,
@@ -654,10 +677,12 @@ class ChunkCache:
 
         if batch_axis is None or any(part is None for part in parts):
             raise ValueError(f"Failed to assemble batched hyperslab for {key}")
+        print_debug("read_tiled_hyperslab", f"concatenating parts: {len(parts)}, parts shape: {parts[0].shape}, batch axis: {batch_axis}", category="cache")
         result = np.concatenate(parts, axis=batch_axis)
+        print_debug("read_tiled_hyperslab", f"storing assembled slab", category="cache")
         self._store_assembled_slab(run_uid, key, slice_info, result, shape)
         print_debug(
-            "ChunkCache",
+            "read_tiled_hyperslab",
             f"Batched hyperslab read {key} shape {result.shape} "
             f"({result.nbytes / 1e6:.1f} MB in {batch_total} batches)",
             category="cache",
@@ -2102,149 +2127,6 @@ class ChunkCache:
                 )
 
         return result
-
-    def get_chunk_indices(
-        self, run_uid: str, key: str, slice_info: Tuple
-    ) -> Tuple[List[Dict], Tuple[slice, ...]]:
-        """
-        Convert a slice request into chunk indices and internal chunk slices.
-
-        Parameters
-        ----------
-        run_uid : str
-            Unique identifier for the run
-        key : str
-            Data key
-        slice_info : tuple
-            User's slice request
-
-        Returns
-        -------
-        tuple
-            (chunks_needed, full_shape) where chunks_needed is a list of dicts containing:
-            - chunk_indices: tuple of indices for this chunk
-            - chunk_shape: actual shape of this chunk
-            - internal_slices: how to slice this chunk
-            full_shape is the shape of the complete dataset
-        """
-        if (run_uid, key) not in self.chunk_info:
-            raise KeyError(f"No chunk info found for {run_uid}:{key}")
-
-        shape, chunks = self.chunk_info[(run_uid, key)]
-        # print_debug("ChunkCache", f"\nSlice conversion debugging:", category="cache")
-        # print_debug("ChunkCache", f"Input slice_info: {slice_info}", category="cache")
-        # print_debug("ChunkCache", f"Data shape: {shape}", category="cache")
-        # print_debug("ChunkCache", f"Chunk sizes: {chunks}", category="cache")
-
-        # Ensure slice_info matches the data dimensionality
-        if len(slice_info) != len(shape):
-            raise ValueError(
-                f"Slice dimensionality ({len(slice_info)}) does not match "
-                f"data dimensionality ({len(shape)})"
-            )
-
-        # For each dimension, calculate which chunks we need
-        chunks_needed = []
-        base_chunk_indices = []
-
-        for dim, (s, dim_size, chunk_sizes) in enumerate(
-            zip(slice_info, shape, chunks)
-        ):
-            # print_debug(
-            #     "ChunkCache", f"\nProcessing dimension {dim}:", category="cache"
-            # )
-            # Calculate cumulative positions for chunk boundaries
-            positions = [0]
-            for size in chunk_sizes:
-                positions.append(positions[-1] + size)
-
-            dim_chunks = []
-            if isinstance(s, slice):
-                # Handle slice request
-                start = s.start if s.start is not None else 0
-                stop = s.stop if s.stop is not None else dim_size
-                # print_debug(
-                #     "ChunkCache", f"  Slice request {start}:{stop}", category="cache"
-                # )
-
-                # Find chunks that overlap with request
-                for chunk_idx, (chunk_start, chunk_end) in enumerate(
-                    zip(positions[:-1], positions[1:])
-                ):
-                    if chunk_start < stop and chunk_end > start:
-                        dim_chunks.append(chunk_idx)
-                        # print_debug(
-                        #     "ChunkCache",
-                        #     f"  Chunk {chunk_idx}: pos {chunk_start}:{chunk_end}",
-                        #     category="cache",
-                        # )
-            else:
-                # Handle integer index
-                pos = 0
-                for chunk_idx, size in enumerate(chunk_sizes):
-                    if pos <= s < pos + size:
-                        internal_idx = s - pos
-                        dim_chunks.append(chunk_idx)
-                        # print_debug(
-                        #     "ChunkCache",
-                        #     f"  Index {s} in chunk {chunk_idx} at internal position {internal_idx}",
-                        #     category="cache",
-                        # )
-                        break
-                    pos += size
-
-            base_chunk_indices.append(dim_chunks)
-
-        # Generate all combinations of chunk indices
-        from itertools import product
-
-        print_debug(
-            "ChunkCache",
-            f"\nGenerating chunk combinations from: {base_chunk_indices}",
-            category="cache",
-        )
-
-        for chunk_indices in product(*base_chunk_indices):
-            # Calculate the shape and internal slices for this chunk
-            chunk_shape = []
-            internal_slices = []
-
-            for dim, (chunk_idx, s, dim_size) in enumerate(
-                zip(chunk_indices, slice_info, shape)
-            ):
-                # Get actual chunk size for this dimension
-                chunk_size = chunks[dim][chunk_idx]
-                chunk_shape.append(chunk_size)
-
-                # Calculate chunk start position
-                chunk_start = sum(chunks[dim][:chunk_idx])
-
-                # Calculate internal slice
-                if isinstance(s, slice):
-                    start = s.start if s.start is not None else 0
-                    stop = s.stop if s.stop is not None else dim_size
-                    internal_start = max(0, start - chunk_start)
-                    internal_stop = min(chunk_size, stop - chunk_start)
-                    internal_slices.append(slice(internal_start, internal_stop))
-                else:
-                    # For integer index, calculate position within chunk
-                    internal_slices.append(s - chunk_start)
-
-            chunks_needed.append(
-                {
-                    "chunk_indices": chunk_indices,
-                    "chunk_shape": tuple(chunk_shape),
-                    "internal_slices": tuple(internal_slices),
-                }
-            )
-            print_debug("ChunkCache", f"Chunk {chunk_indices}:", category="cache")
-            print_debug(
-                "ChunkCache", f"  Shape: {tuple(chunk_shape)}", category="cache"
-            )
-            msg = f"  Internal slices: {tuple(internal_slices)}"
-            print_debug("ChunkCache", msg, category="cache")
-
-        return chunks_needed, shape
 
     @staticmethod
     def _coord_dim_to_array_axis(depth: int, internal_slices: Tuple) -> int:
