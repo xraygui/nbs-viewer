@@ -69,11 +69,13 @@ class PlotWorker(QThread):
         generation,
         artist=None,
         cube_view_spec=None,
+        view_crop=None,
     ):
         super().__init__()
         self.plot_data = plot_data
         self.slice_info = slice_info
         self.cube_view_spec = cube_view_spec
+        self.view_crop = view_crop
         self.dimension = dimension
         self.generation = generation
         self.artist = artist
@@ -91,6 +93,7 @@ class PlotWorker(QThread):
                 self.slice_info,
                 self.dimension,
                 cube_view_spec=self.cube_view_spec,
+                view_crop=self.view_crop,
             )
             if self.isInterruptionRequested():
                 print_debug(

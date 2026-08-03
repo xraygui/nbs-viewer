@@ -24,6 +24,8 @@ class RoiPanel(QWidget):
 
     draw_toggled = Signal(bool)
     clear_requested = Signal()
+    apply_crop_requested = Signal()
+    clear_crop_requested = Signal()
     create_derivative_requested = Signal()
 
     def __init__(self, parent=None):
@@ -49,6 +51,14 @@ class RoiPanel(QWidget):
         self.clear_button = QPushButton("Clear ROI")
         self.clear_button.clicked.connect(self.clear_requested.emit)
         button_row.addWidget(self.clear_button)
+
+        self.apply_crop_button = QPushButton("Apply crop")
+        self.apply_crop_button.clicked.connect(self.apply_crop_requested.emit)
+        button_row.addWidget(self.apply_crop_button)
+
+        self.clear_crop_button = QPushButton("Clear crop")
+        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
+        button_row.addWidget(self.clear_crop_button)
 
         self.create_derivative_button = QPushButton("Create Derivative Plot")
         self.create_derivative_button.setEnabled(False)
@@ -78,12 +88,28 @@ class RoiPanel(QWidget):
         self.clear_button.setEnabled(active and self._panel_enabled)
         if not active:
             self.create_derivative_button.setEnabled(False)
+            self.apply_crop_button.setEnabled(False)
+            self.clear_crop_button.setEnabled(False)
         if not active:
             if self.draw_checkbox.isChecked():
                 self.draw_checkbox.blockSignals(True)
                 self.draw_checkbox.setChecked(False)
                 self.draw_checkbox.blockSignals(False)
             self.corners_label.setText("Corners: —")
+
+    def set_apply_crop_enabled(self, enabled: bool):
+        """
+        Enable the apply-crop button when an ROI is available.
+        """
+        active = self._panel_enabled and enabled
+        self.apply_crop_button.setEnabled(active)
+
+    def set_clear_crop_enabled(self, enabled: bool):
+        """
+        Enable the clear-crop button when a crop is active.
+        """
+        active = self._panel_enabled and enabled
+        self.clear_crop_button.setEnabled(active)
 
     def set_create_derivative_enabled(self, enabled: bool):
         """

@@ -382,14 +382,16 @@ def plan_hyperslab_batches(
     slice_info: Sequence[SliceItem],
     shape: Sequence[int],
     itemsize: int,
-    target_bytes: int,
+    target_bytes: Optional[int],
 ) -> Tuple[List[Tuple[SliceItem, ...]], Optional[int]]:
     """
     Split a hyperslab request into byte-budgeted batch reads.
 
-    Batches are aligned to contiguous ranges on the longest slice axis in
-    ``slice_info``. Tiled storage chunk geometry is not consulted; callers
-    choose ``target_bytes`` to match expected network latency.
+    Batches are aligned to contiguous ranges on the first (lowest-index)
+    batchable slice axis in ``slice_info``. Tiled storage chunk geometry is
+    not consulted; callers choose ``target_bytes`` to match expected network
+    latency. Pass ``target_bytes=None`` to disable splitting and return a
+    single monolithic batch.
 
     Parameters
     ----------
@@ -399,8 +401,9 @@ def plan_hyperslab_batches(
         Full array shape.
     itemsize : int
         Storage dtype size in bytes.
-    target_bytes : int
-        Approximate maximum bytes per batch read.
+    target_bytes : int or None
+        Approximate maximum bytes per batch read. ``None`` disables
+        auto-batching.
 
     Returns
     -------
@@ -415,7 +418,7 @@ def plan_hyperslab_batches(
             f"slice dimensionality ({len(slice_info)}) does not match "
             f"data dimensionality ({len(shape)})"
         )
-    if target_bytes <= 0:
+    if target_bytes is not None and target_bytes <= 0:
         raise ValueError(f"target_bytes must be positive, got {target_bytes}")
     if itemsize <= 0:
         raise ValueError(f"itemsize must be positive, got {itemsize}")
@@ -431,6 +434,9 @@ def plan_hyperslab_batches(
         batchable = isinstance(item, slice) and length > 1
         spans.append((start, stop, batchable))
 
+    if target_bytes is None:
+        return [tuple(slice_info)], None
+
     total_bytes = element_count * itemsize
     if total_bytes <= target_bytes:
         return [tuple(slice_info)], None
@@ -443,7 +449,7 @@ def plan_hyperslab_batches(
     if not batchable:
         return [tuple(slice_info)], None
 
-    batch_axis = max(batchable, key=lambda item: item[1])[0]
+    batch_axis = batchable[0][0]
     start, stop, _ = spans[batch_axis]
     span_len = stop - start
     other_elements = element_count // span_len

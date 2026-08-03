@@ -6,6 +6,7 @@ import numpy as np
 
 from ..data.base import CatalogRun
 from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
+from .view_crop import ViewCrop, apply_view_crop_to_slice_info, fetch_context_with_view_crop
 from .derived_fetch import assemble_plane_bundle, plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
 from .plot_geometry import (
@@ -377,6 +378,7 @@ class RunModel(QObject):
         slice_info=None,
         cube_view_spec=None,
         materialize_request: Optional[MaterializeRequest] = None,
+        view_crop: Optional[ViewCrop] = None,
         transform=True,
         preserve_storage_axes: bool = False,
         *,
@@ -402,6 +404,8 @@ class RunModel(QObject):
         materialize_request : MaterializeRequest, optional
             Unified view request. When set, takes precedence over
             ``cube_view_spec``.
+        view_crop : ViewCrop, optional
+            Persistent spatial crop applied to plot-plane load slices.
         transform : bool
             Whether to apply the user transform expression.
         preserve_storage_axes : bool
@@ -433,16 +437,27 @@ class RunModel(QObject):
                     raise ValueError(
                         "region_frame is required when materialize_request.region is set"
                     )
-                slice_info, materialize_frame = request.fetch_context(
-                    region_frame=region_frame,
-                    parent_spec=parent_spec,
-                )
+                if view_crop is not None:
+                    slice_info, materialize_frame = fetch_context_with_view_crop(
+                        request,
+                        view_crop,
+                        parent_spec,
+                    )
+                else:
+                    slice_info, materialize_frame = request.fetch_context(
+                        region_frame=region_frame,
+                        parent_spec=parent_spec,
+                    )
             else:
                 slice_info = view_spec.to_load_slice_info()
+                if view_crop is not None:
+                    slice_info = apply_view_crop_to_slice_info(slice_info, view_crop)
             preserve_storage_axes = True
         elif cube_view_spec is not None:
             view_spec = cube_view_spec
             slice_info = cube_view_spec.to_load_slice_info()
+            if view_crop is not None:
+                slice_info = apply_view_crop_to_slice_info(slice_info, view_crop)
 
         xlist, axis_names, _extra = self.get_dimension_axes(
             ykey, xkeys, slice_info
@@ -557,6 +572,7 @@ class RunModel(QObject):
         slice_info=None,
         cube_view_spec=None,
         materialize_request: Optional[MaterializeRequest] = None,
+        view_crop: Optional[ViewCrop] = None,
         transform=True,
         *,
         region_frame=None,
@@ -580,6 +596,8 @@ class RunModel(QObject):
             N-D cube view specification.
         materialize_request : MaterializeRequest, optional
             Unified view request including optional ROI parameters.
+        view_crop : ViewCrop, optional
+            Persistent spatial crop applied to plot-plane load slices.
         transform : bool
             Whether to apply transforms.
         region_frame : PlotViewFrame, optional
@@ -606,6 +624,7 @@ class RunModel(QObject):
                 ykey,
                 norm_keys,
                 materialize_request=request,
+                view_crop=view_crop,
                 transform=transform,
                 region_frame=region_frame,
                 parent_spec=parent_spec,
@@ -635,6 +654,7 @@ class RunModel(QObject):
             slice_info=slice_info,
             cube_view_spec=cube_view_spec,
             materialize_request=request,
+            view_crop=view_crop,
             transform=transform,
         )
         if y is None:
@@ -647,7 +667,9 @@ class RunModel(QObject):
         if y.ndim == 1:
             return prepare_1d_bundle(y, xlist, axis_names)
         if y.ndim == 2:
-            bundle = prepare_2d_bundle(y, xlist, axis_names, render_mode_hint=hint)
+            bundle = prepare_2d_bundle(
+                y, xlist, axis_names, render_mode_hint=hint
+            )
             print_debug(
                 "RunModel.get_plot_bundle",
                 f"{ykey} render_mode={bundle.render_mode} shape={y.shape}",

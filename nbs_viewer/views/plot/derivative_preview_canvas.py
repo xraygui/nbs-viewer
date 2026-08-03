@@ -16,6 +16,7 @@ from qtpy.QtCore import QThread, Signal
 
 from ...models.plot.cube_view import CubeViewSpec, MaterializeRequest
 from ...models.plot.plot_geometry import PlotBundle
+from ...models.plot.view_crop import ViewCrop
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 
 from nbs_viewer.models.plot.derived_fetch import fetch_derivative_preview
@@ -46,12 +47,14 @@ class DerivativePreviewWorker(QThread):
         *,
         parent_spec: CubeViewSpec | None = None,
         parent_bundle: PlotBundle | None = None,
+        view_crop: ViewCrop | None = None,
     ):
         super().__init__(parent)
         self.plot_model = plot_model
         self.request = request
         self.parent_spec = parent_spec
         self.parent_bundle = parent_bundle
+        self.view_crop = view_crop
         self.generation = generation
 
     def run(self):
@@ -69,6 +72,7 @@ class DerivativePreviewWorker(QThread):
                 self.request,
                 parent_spec=self.parent_spec,
                 parent_bundle=parent_bundle,
+                view_crop=self.view_crop,
             )
             elapsed = time.perf_counter() - t0
             print_debug(

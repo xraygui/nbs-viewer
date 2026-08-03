@@ -69,6 +69,13 @@ class ImageRenderer:
         colorbar_state: dict,
     ) -> None:
         artist.set_data(bundle.y)
+        if bundle.extent is not None:
+            artist.set_extent(bundle.extent)
+            axes = artist.axes
+            if axes is not None:
+                left, right, bottom, top = bundle.extent
+                axes.set_xlim(left, right)
+                axes.set_ylim(bottom, top)
         if autoscale:
             finite = bundle.y[np.isfinite(bundle.y)]
             if finite.size > 0:

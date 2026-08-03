@@ -164,6 +164,48 @@ def _orient_image_for_imshow_upper(
     return y_out, row_out, col_out
 
 
+def storage_bbox_from_display_bbox(
+    bbox: Tuple[int, int, int, int],
+    row_axis: np.ndarray,
+    col_axis: np.ndarray,
+    shape: Tuple[int, int],
+) -> Tuple[int, int, int, int]:
+    """
+    Map a bounding box from oriented display rows/cols to storage indices.
+
+    ROI compilation runs on the oriented :class:`PlotViewFrame` produced by
+    :func:`prepare_2d_bundle`, but chunked loads use storage-axis order before
+    :func:`_orient_image_for_imshow_upper` is applied. This inverts the same
+    row/column flips so narrowed ``slice_info`` matches the drawn region.
+
+    Parameters
+    ----------
+    bbox : tuple of int
+        Half-open ``(row_start, row_stop, col_start, col_stop)`` on the
+        oriented display plane.
+    row_axis : np.ndarray
+        Storage row-center coordinates for the full plane.
+    col_axis : np.ndarray
+        Storage column-center coordinates for the full plane.
+    shape : tuple of int
+        Full plane shape ``(n_rows, n_cols)``.
+
+    Returns
+    -------
+    tuple of int
+        Bounding box in storage index space.
+    """
+    r0, r1, c0, c1 = bbox
+    ny, nx = shape
+    row_axis = np.asarray(row_axis, dtype=float).ravel()
+    col_axis = np.asarray(col_axis, dtype=float).ravel()
+    if row_axis.size >= 2 and row_axis[1] > row_axis[0]:
+        r0, r1 = ny - r1, ny - r0
+    if col_axis.size >= 2 and col_axis[1] < col_axis[0]:
+        c0, c1 = nx - c1, nx - c0
+    return r0, r1, c0, c1
+
+
 def _extent_from_uniform_1d(
     x_coords: np.ndarray, y_coords: np.ndarray
 ) -> Tuple[float, float, float, float]:

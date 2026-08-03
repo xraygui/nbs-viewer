@@ -249,6 +249,7 @@ class DerivativeController(QObject):
             self,
             parent_spec=parent_spec,
             parent_bundle=self._cached_parent_bundle(plot_model, request),
+            view_crop=self.canvas.get_view_crop(),
         )
         return worker
 

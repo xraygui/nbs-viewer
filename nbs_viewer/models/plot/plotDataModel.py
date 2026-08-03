@@ -9,6 +9,7 @@ from matplotlib.image import AxesImage
 
 from .cube_view import CubeViewSpec
 from .plot_geometry import PlotBundle, RenderMode
+from .view_crop import ViewCrop
 
 
 class PlotDataModel(QObject):
@@ -103,7 +104,11 @@ class PlotDataModel(QObject):
         return self._render_mode
 
     def get_plot_bundle(
-        self, indices=None, dimension=None, cube_view_spec=None
+        self,
+        indices=None,
+        dimension=None,
+        cube_view_spec=None,
+        view_crop: Optional[ViewCrop] = None,
     ) -> PlotBundle:
         """
         Fetch and prepare plot data as a PlotBundle.
@@ -116,6 +121,8 @@ class PlotDataModel(QObject):
             Plot dimension count (unused; kept for API compatibility).
         cube_view_spec : CubeViewSpec, optional
             N-D cube view specification.
+        view_crop : ViewCrop, optional
+            Persistent spatial crop for plot-plane load slices.
 
         Returns
         -------
@@ -133,6 +140,7 @@ class PlotDataModel(QObject):
             self._norm_keys,
             slice_info=indices,
             cube_view_spec=spec,
+            view_crop=view_crop,
         )
         self._update_render_mode(bundle)
         self.last_bundle = bundle

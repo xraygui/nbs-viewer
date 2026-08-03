@@ -23,6 +23,7 @@ from ...models.plot.plot_view_frame import (
     view_fingerprint_from_bundle,
 )
 from ...models.plot.region import RectRegion
+from ...models.plot.view_crop import ViewCrop
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
@@ -57,11 +58,14 @@ class MplCanvas(FigureCanvasQTAgg):
     -------
     roi_region_changed : object
         Emitted with a :class:`RectRegion` or ``None`` when the ROI changes.
+    view_crop_changed : object
+        Emitted with a :class:`ViewCrop` or ``None`` when the view crop changes.
     plot_view_updated : Signal
         Emitted after the visible plot view is updated.
     """
 
     roi_region_changed = Signal(object)
+    view_crop_changed = Signal(object)
     plot_view_updated = Signal()
 
     def __init__(self, run_list_model, parent=None, width=5, height=4, dpi=100):
@@ -95,6 +99,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self._roi_overlay = None
         self._roi_draw_enabled = False
         self._roi_view_fingerprint = None
+        self._view_crop: Optional[ViewCrop] = None
+        self._last_2d_view_crop = None
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
@@ -284,6 +290,7 @@ class MplCanvas(FigureCanvasQTAgg):
             generation,
             plotData.artist,
             cube_view_spec=self._cube_view_spec,
+            view_crop=self._view_crop_for_model(plotData),
         )
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
@@ -493,16 +500,21 @@ class MplCanvas(FigureCanvasQTAgg):
         return artist
 
     def _prepare_2d_axes(self, plot_key):
+        crop = self._view_crop
+        crop_key = crop.storage_bbox if crop is not None else None
         spec_changed = self._cube_view_spec != self._last_2d_cube_view_spec
+        crop_changed = crop_key != self._last_2d_view_crop
         if (
             self._last_2d_plot_key != plot_key
             or self._active_render_mode not in ("image", "mesh")
             or self.currentDim != 2
             or spec_changed
+            or crop_changed
         ):
             self._reset_plot_axes()
         self._last_2d_plot_key = plot_key
         self._last_2d_cube_view_spec = self._cube_view_spec
+        self._last_2d_view_crop = crop_key
 
     def _reset_plot_axes(self):
         remove_2d_artists(self.axes, self._colorbar_state, self.fig)
@@ -615,6 +627,71 @@ class MplCanvas(FigureCanvasQTAgg):
         RectRegion or None
         """
         return self._roi_region
+
+    def get_view_crop(self) -> Optional[ViewCrop]:
+        """
+        Return the active persistent view crop, if any.
+
+        Returns
+        -------
+        ViewCrop or None
+        """
+        return self._view_crop
+
+    def set_view_crop(self, crop: Optional[ViewCrop]):
+        """
+        Set or clear the persistent view crop and refresh the plot.
+
+        Parameters
+        ----------
+        crop : ViewCrop or None
+            Crop state to apply to the main display fetch path.
+        """
+        self._view_crop = crop
+        self.view_crop_changed.emit(crop)
+        model = self.get_single_visible_2d_model()
+        if model is not None and (
+            crop is None or crop.source_key == model._key
+        ):
+            self.plot_data(model)
+            return
+        self.updatePlot()
+
+    def clear_view_crop(self):
+        """
+        Remove the persistent view crop and refresh the plot.
+        """
+        if self._view_crop is None:
+            return
+        self.set_view_crop(None)
+
+    def get_full_view_frame_for_crop(self) -> PlotViewFrame:
+        """
+        Return the full plot-plane frame used to commit a view crop.
+
+        When a crop is already active, returns the stored pre-crop frame.
+        Otherwise returns the frame for the current displayed bundle.
+
+        Returns
+        -------
+        PlotViewFrame
+
+        Raises
+        ------
+        ValueError
+            If no 2D bundle is available.
+        """
+        if self._view_crop is not None:
+            return self._view_crop.full_frame
+        return self.get_view_frame()
+
+    def _view_crop_for_model(self, plot_data: PlotDataModel) -> Optional[ViewCrop]:
+        crop = self._view_crop
+        if crop is None:
+            return None
+        if crop.source_key != plot_data._key:
+            return None
+        return crop
 
     def current_view_fingerprint(self):
         """

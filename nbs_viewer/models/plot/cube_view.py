@@ -94,6 +94,7 @@ class MaterializeRequest:
         *,
         region_frame: PlotViewFrame,
         parent_spec: Optional[CubeViewSpec] = None,
+        base_slice_info: Optional[Tuple[SliceItem, ...]] = None,
     ) -> Tuple[Tuple[SliceItem, ...], PlotViewFrame]:
         """
         Return fetch slices and the region frame matching a narrowed load.
@@ -109,12 +110,18 @@ class MaterializeRequest:
         parent_spec : CubeViewSpec, optional
             Parent cube view for plot-plane storage axis lookup.
 
+        base_slice_info : tuple, optional
+            Pre-narrowed load slices, for example after a persistent view crop.
+            Defaults to :meth:`CubeViewSpec.to_load_slice_info` for ``spec``.
+
         Returns
         -------
         tuple
             ``(slice_info, region_frame)`` for ``getData`` and materialization.
         """
         if self.region is None:
+            if base_slice_info is not None:
+                return base_slice_info, region_frame
             return self.spec.to_load_slice_info(), region_frame
 
         compiled = compile_rect_with_mask_mode(
@@ -134,7 +141,10 @@ class MaterializeRequest:
             region_frame,
             parent_spec,
         )
-        items = list(self.spec.to_load_slice_info())
+        if base_slice_info is not None:
+            items = list(base_slice_info)
+        else:
+            items = list(self.spec.to_load_slice_info())
         items[plot_y_axis] = _narrow_fetch_slice(
             items[plot_y_axis], r0, r1, region_frame.n_plot_y
         )

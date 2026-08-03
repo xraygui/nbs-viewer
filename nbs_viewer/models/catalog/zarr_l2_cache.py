@@ -247,6 +247,65 @@ class ZarrL2Cache:
             return True
         return all(self.has_chunk(run_uid, key, idx) for idx in l2_chunk_indices)
 
+    def covers_slice(
+        self, run_uid: str, key: str, slice_info: Sequence[SliceItem]
+    ) -> bool:
+        """
+        Return whether every tile intersecting ``slice_info`` is complete.
+
+        Parameters
+        ----------
+        run_uid : str
+            Run identifier.
+        key : str
+            Data key.
+        slice_info : sequence
+            Per-dimension slice or index.
+
+        Returns
+        -------
+        bool
+        """
+        if not self.enabled:
+            return False
+        if self._meta.get(self._dataset_key(run_uid, key)) is None:
+            return False
+        return self.all_complete(
+            run_uid, key, self.chunks_intersecting(run_uid, key, slice_info)
+        )
+
+    def read_hyperslab(
+        self, run_uid: str, key: str, slice_info: Sequence[SliceItem]
+    ) -> np.ndarray:
+        """
+        Read a hyperslab from Zarr when all intersecting tiles are complete.
+
+        Parameters
+        ----------
+        run_uid : str
+            Run identifier.
+        key : str
+            Data key.
+        slice_info : sequence
+            Per-dimension slice or index.
+
+        Returns
+        -------
+        np.ndarray
+            Materialized hyperslab.
+
+        Raises
+        ------
+        KeyError
+            If any intersecting tile is incomplete.
+        """
+        if not self.covers_slice(run_uid, key, slice_info):
+            raise KeyError(
+                f"L2 hyperslab incomplete for {run_uid}:{key}:{slice_info}"
+            )
+        arr = self.open_array(run_uid, key)
+        return np.asarray(arr[tuple(slice_info)])
+
     def read_chunk(
         self, run_uid: str, key: str, l2_chunk_indices: Tuple[int, ...]
     ) -> np.ndarray:

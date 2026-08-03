@@ -27,18 +27,12 @@ class ChunkCache:
     Central cache for chunked array data across all runs in a catalog.
 
     This cache is designed to efficiently handle chunked array data by:
-    1. Maintaining L1 tile and assembled-slab caches with LRU eviction
-    2. Spilling complete tiles to an optional on-disk L2 Zarr cache
+    1. Serving views from an in-memory Zarr store (primary local cache)
+    2. Optionally spilling / persisting tiles via the same Zarr API
     3. Fetching cold data from Tiled via byte-budgeted hyperslab reads
 
-    Parameters
-    ----------
-    max_size_bytes : int, optional
-        Maximum tiled chunk / slice cache size in bytes, by default 512MB
-    l1_max_bytes : int, optional
-        Maximum L1 tile cache size in bytes, by default 128MB
-    min_free_memory : float, optional
-        Minimum free system memory to maintain (as fraction), by default 0.2
+    The older dict-based tile L1 (``self.tiles``) is retained but unused on
+    the hot path; memory Zarr is the effective L1.
     """
 
     def __init__(
@@ -50,7 +44,7 @@ class ChunkCache:
         l2_enabled: bool = True,
         l2_chunks: Tuple[int, ...] = (1, 1, 256, 256),
         sync_seed_tile_limit: int = 64,
-        fetch_batch_target_bytes: int = 15_000_000,
+        fetch_batch_target_bytes: Optional[int] = 15_000_000,
         progress: Optional[ChunkCacheProgress] = None,
     ):
         # Cache storage
@@ -150,14 +144,21 @@ class ChunkCache:
 
     def _ensure_l2_array(self, run, key: str) -> None:
         """
-        Register array metadata with the L2 cache when enabled.
+        Register array metadata with the Zarr local cache when enabled.
         """
         if self.l2 is None or not self.l2.enabled:
             return
 
         run_uid = run.start["uid"]
+        if (run_uid, key) in self.l2._meta:
+            return
+
         shape, tiled_chunks = self.chunk_info[(run_uid, key)]
-        print_debug("ensure_l2_array", f"registering array {key} with shape {shape} and chunks {tiled_chunks}", category="cache")
+        print_debug(
+            "ensure_l2_array",
+            f"registering array {key} with shape {shape} and chunks {tiled_chunks}",
+            category="cache",
+        )
         data_accessor = run["primary", "data", key]
         dtype = getattr(data_accessor, "dtype", None)
         if dtype is None:
@@ -170,11 +171,11 @@ class ChunkCache:
             tiled_chunks=tiled_chunks,
         )
 
-    def _try_get_data_from_l2_tiles(
+    def _try_get_data_from_zarr(
         self, run, key: str, slice_info: Tuple
     ) -> Optional[np.ndarray]:
         """
-        Assemble a result from complete L1/L2 tiles when possible.
+        Serve a view from memory Zarr when all intersecting tiles are complete.
 
         Parameters
         ----------
@@ -188,7 +189,35 @@ class ChunkCache:
         Returns
         -------
         np.ndarray or None
-            Assembled data when every intersecting tile is complete.
+            Hyperslab from Zarr, or None on a miss.
+        """
+        if self.l2 is None or not self.l2.enabled:
+            return None
+
+        run_uid = run.start["uid"]
+        self._ensure_l2_array(run, key)
+        if not self.l2.covers_slice(run_uid, key, slice_info):
+            self.l2_misses += 1
+            return None
+
+        print_debug(
+            "ChunkCache",
+            f"Zarr hyperslab hit {key}:{slice_info}",
+            category="cache",
+        )
+        result = self.l2.read_hyperslab(run_uid, key, slice_info)
+        self.l2_hits += 1
+        self.hits += 1
+        return self._squeeze_indexed_dims(result, slice_info)
+
+    def _try_get_data_from_l2_tiles(
+        self, run, key: str, slice_info: Tuple
+    ) -> Optional[np.ndarray]:
+        """
+        Assemble a result from complete L1/L2 tiles when possible.
+
+        Retained for tests and legacy paths; the hot path uses
+        ``_try_get_data_from_zarr`` instead.
         """
         run_uid = run.start["uid"]
         shape, _ = self.chunk_info[(run_uid, key)]
@@ -233,10 +262,17 @@ class ChunkCache:
         chunks: Tuple,
     ) -> np.ndarray:
         """
-        Phase 3/4 fetch path: L1/L2 tile hits, else Tiled hyperslab + background fill.
+        Memory-Zarr hit path, else partial fill, else Tiled hyperslab + Zarr seed.
         """
         print_debug("ChunkCache", f"get_data_l2_pipeline {key}:{slice_info}", category="cache")
         self._ensure_l2_array(run, key)
+
+        print_debug("ChunkCache", f"trying Zarr hyperslab for {key}:{slice_info}", category="cache")
+        zarr_hit = self._try_get_data_from_zarr(run, key, slice_info)
+        if zarr_hit is not None:
+            print_debug("ChunkCache", f"storing assembled slab for {key}:{slice_info}", category="cache")
+            self._store_assembled_slab(run_uid, key, slice_info, zarr_hit, shape)
+            return zarr_hit
 
         print_debug("ChunkCache", f"trying to get data from partial l2 for {key}:{slice_info}", category="cache")
         partial = self._try_get_data_partial_l2(run, key, slice_info)
@@ -244,14 +280,6 @@ class ChunkCache:
             print_debug("ChunkCache", f"storing assembled slab for {key}:{slice_info}", category="cache")
             self._store_assembled_slab(run_uid, key, slice_info, partial, shape)
             return partial
-
-        print_debug("ChunkCache", f"Getting data from L2 tiles for {key}:{slice_info}", category="cache")
-
-        l2_result = self._try_get_data_from_l2_tiles(run, key, slice_info)
-        if l2_result is not None:
-            print_debug("ChunkCache", f"storing assembled slab for {key}:{slice_info}", category="cache")
-            self._store_assembled_slab(run_uid, key, slice_info, l2_result, shape)
-            return l2_result
 
         result = self._read_tiled_hyperslab(run, key, slice_info)
         self._finish_slab_fetch(run, key, slice_info, result)
@@ -262,11 +290,8 @@ class ChunkCache:
         self, run_uid: str, key: str, tile_indices: Tuple[int, ...]
     ) -> bool:
         """
-        Return whether an L2 tile is available in L1 or L2.
+        Return whether a tile is available in the Zarr local cache.
         """
-        cache_key = (run_uid, key, tile_indices)
-        if cache_key in self.tiles and cache_key not in self.partial_l1_tiles:
-            return True
         if self.l2 is not None and self.l2.has_chunk(run_uid, key, tile_indices):
             return True
         return False
@@ -334,19 +359,14 @@ class ChunkCache:
         self, run_uid: str, key: str, tile_indices: Tuple[int, ...]
     ) -> np.ndarray:
         """
-        Return a complete L2 tile from L1 or L2.
+        Return a complete tile from the Zarr local cache.
         """
-        cache_key = (run_uid, key, tile_indices)
-        if cache_key in self.tiles:
-            self._update_l1_tile_access(cache_key)
-            return self.tiles[cache_key]
         chunk = self.l2.read_chunk(run_uid, key, tile_indices)
         print_debug(
             "ChunkCache",
-            f"L2 local read {key} tile={tile_indices} shape={chunk.shape}",
+            f"Zarr local read {key} tile={tile_indices} shape={chunk.shape}",
             category="cache",
         )
-        self._store_tile(run_uid, key, tile_indices, chunk)
         return chunk
 
     def _paste_region(
@@ -557,15 +577,16 @@ class ChunkCache:
         return np.dtype(dtype)
 
     def _read_tiled_hyperslab(
-        self, run, key: str, slice_info: Tuple
+        self, run, key: str, slice_info: Tuple, store_assembled_slab: bool = True
     ) -> np.ndarray:
         """
         Fetch a hyperslab from Tiled using byte-budgeted batch reads.
         """
         run_uid = run.start["uid"]
-        cached = self._lookup_assembled_slab(run_uid, key, slice_info)
-        if cached is not None:
-            return cached
+        if store_assembled_slab:
+            cached = self._lookup_assembled_slab(run_uid, key, slice_info)
+            if cached is not None:
+                return cached
 
         shape, _ = self.chunk_info[(run_uid, key)]
         dtype = self._read_dtype(run, key)
@@ -581,7 +602,7 @@ class ChunkCache:
                 run,
                 key,
                 slice_info,
-                store_assembled_slab=True,
+                store_assembled_slab=store_assembled_slab,
             )
 
         batch_total = len(batches)
@@ -629,8 +650,9 @@ class ChunkCache:
             raise ValueError(f"Failed to assemble batched hyperslab for {key}")
         print_debug("read_tiled_hyperslab", f"concatenating parts: {len(parts)}, parts shape: {parts[0].shape}, batch axis: {batch_axis}", category="cache")
         result = np.concatenate(parts, axis=batch_axis)
-        print_debug("read_tiled_hyperslab", f"storing assembled slab", category="cache")
-        self._store_assembled_slab(run_uid, key, slice_info, result, shape)
+        if store_assembled_slab:
+            print_debug("read_tiled_hyperslab", f"storing assembled slab", category="cache")
+            self._store_assembled_slab(run_uid, key, slice_info, result, shape)
         print_debug(
             "read_tiled_hyperslab",
             f"Batched hyperslab read {key} shape {result.shape} "
@@ -838,7 +860,9 @@ class ChunkCache:
                 category="cache",
             )
             try:
-                slab = self._read_tiled_hyperslab(run, key, fetch_slice)
+                slab = self._read_tiled_hyperslab(
+                    run, key, fetch_slice, store_assembled_slab=False
+                )
                 tiled_reads = 1
                 aligned = self._align_seed_slab(slab, fetch_slice)
                 for tile_info in needs_tiled:
@@ -950,15 +974,13 @@ class ChunkCache:
         tile_data: np.ndarray,
     ) -> bool:
         """
-        Persist one complete tile to L2 and refresh the L1 copy.
+        Persist one complete tile to the Zarr local cache.
+
+        The dict-based ``self.tiles`` L1 is intentionally not updated.
         """
         cache_key = (run_uid, key, tile_indices)
         self._drop_partial_l1_tile(cache_key)
-        if self._write_tile_to_l2(run_uid, key, tile_indices, tile_data):
-            self._store_tile(run_uid, key, tile_indices, tile_data)
-            return True
-        return self._store_tile(run_uid, key, tile_indices, tile_data) is not None
-
+        return self._write_tile_to_l2(run_uid, key, tile_indices, tile_data)
     def _drop_partial_l1_tile(
         self, cache_key: Tuple[str, str, Tuple[int, ...]]
     ) -> None:
@@ -1064,7 +1086,7 @@ class ChunkCache:
         slab: np.ndarray,
     ) -> None:
         """
-        Seed L1 tiles and queue background L2 materialization for one view slab.
+        Seed memory Zarr from a fetched slab and queue background fills.
 
         Parameters
         ----------
@@ -1080,16 +1102,156 @@ class ChunkCache:
         aligned = self._align_seed_slab(slab, slice_info)
         print_debug(
             "ChunkCache",
-            f"seeding l1 tiles from slab for {key}:{slice_info}",
+            f"seeding Zarr from slab for {key}:{slice_info}",
             category="cache",
         )
-        self._seed_l1_tiles_from_slab(run, key, slice_info, aligned)
+        self._seed_zarr_from_slab(run, key, slice_info, aligned)
         print_debug(
             "ChunkCache",
-            f"queueing l2 materialize for {key}:{slice_info}",
+            f"queueing zarr materialize for {key}:{slice_info}",
             category="cache",
         )
         self._queue_l2_materialize(run, key, slice_info, aligned)
+
+    def _seed_zarr_from_slab(
+        self,
+        run,
+        key: str,
+        slice_info: Tuple,
+        slab: np.ndarray,
+    ) -> None:
+        """
+        Write fully covered tiles from a fetched slab into memory Zarr.
+
+        Partial edge tiles are left for background materialization. The
+        dict-based ``self.tiles`` L1 is not populated.
+
+        Parameters
+        ----------
+        run : BlueskyRun
+            Run containing the data.
+        key : str
+            Data key.
+        slice_info : tuple
+            User slice request that produced ``slab``.
+        slab : np.ndarray
+            Assembled result array (after indexed-dimension squeeze).
+        """
+        if self.l2 is None or not self.l2.enabled:
+            return
+
+        run_uid = run.start["uid"]
+        shape, _ = self.chunk_info[(run_uid, key)]
+        self._ensure_l2_array(run, key)
+        l2_chunks = self._l2_chunks(run_uid, key)
+        slab = self._align_seed_slab(slab, slice_info)
+        pending = self._pending_slab_tiles(
+            run_uid, key, shape, l2_chunks, slice_info
+        )
+        if not pending:
+            return
+
+        if self._can_bulk_seed_zarr(shape, l2_chunks, slice_info, pending):
+            self._bulk_seed_zarr(run_uid, key, slice_info, slab, pending)
+            return
+
+        seeded = 0
+        for tile_info in pending:
+            tile_idx = tile_info["chunk_indices"]
+            if not self._tile_fully_in_request(
+                shape, l2_chunks, slice_info, tile_idx
+            ):
+                continue
+            if self._materialize_l2_tile_from_slab(
+                run_uid,
+                key,
+                tile_idx,
+                slice_info,
+                slab,
+                shape,
+                l2_chunks,
+                require_full_in_request=True,
+            ):
+                seeded += 1
+
+        print_debug(
+            "ChunkCache",
+            f"Seeded {seeded} Zarr tiles from slab for {key}",
+            category="cache",
+        )
+
+    @staticmethod
+    def _can_bulk_seed_zarr(
+        shape: Tuple[int, ...],
+        l2_chunks: Tuple[int, ...],
+        slice_info: Tuple,
+        pending: List[Dict],
+    ) -> bool:
+        """
+        Return whether every pending tile is fully covered by ``slice_info``.
+        """
+        if not pending:
+            return False
+        if not all(isinstance(item, slice) for item in slice_info):
+            return False
+        return all(
+            ChunkCache._tile_fully_in_request(
+                shape, l2_chunks, slice_info, tile["chunk_indices"]
+            )
+            for tile in pending
+        )
+
+    def _bulk_seed_zarr(
+        self,
+        run_uid: str,
+        key: str,
+        slice_info: Tuple,
+        slab: np.ndarray,
+        pending: List[Dict],
+    ) -> None:
+        """
+        Assign a full-rank slab into Zarr and mark covered tiles complete.
+        """
+        shape, _ = self.chunk_info[(run_uid, key)]
+        expected = tuple(
+            request_dim_bounds(item, shape[i])[1]
+            - request_dim_bounds(item, shape[i])[0]
+            for i, item in enumerate(slice_info)
+        )
+        if tuple(slab.shape) != expected:
+            l2_chunks = self._l2_chunks(run_uid, key)
+            seeded = 0
+            for tile_info in pending:
+                if self._materialize_l2_tile_from_slab(
+                    run_uid,
+                    key,
+                    tile_info["chunk_indices"],
+                    slice_info,
+                    slab,
+                    shape,
+                    l2_chunks,
+                    require_full_in_request=True,
+                ):
+                    seeded += 1
+            print_debug(
+                "ChunkCache",
+                f"Seeded {seeded} Zarr tiles from slab for {key}",
+                category="cache",
+            )
+            return
+
+        arr = self.l2.open_array(run_uid, key)
+        with self.l2._lock:
+            arr[tuple(slice_info)] = slab
+            meta = self.l2._require_meta(run_uid, key)
+            for tile_info in pending:
+                meta.completed.add(tuple(tile_info["chunk_indices"]))
+
+        print_debug(
+            "ChunkCache",
+            f"Bulk-seeded {len(pending)} Zarr tiles from slab for {key}",
+            category="cache",
+        )
 
     def _seed_l1_tiles_from_slab(
         self,

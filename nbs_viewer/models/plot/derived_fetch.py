@@ -23,6 +23,7 @@ from .cube_view import (
 )
 from .plot_geometry import PlotBundle, prepare_1d_bundle, prepare_2d_bundle
 from .plot_view_frame import frame_from_bundle
+from .view_crop import ViewCrop
 from .region import (
     RectRegion,
     compile_rect_with_mask_mode,
@@ -491,6 +492,36 @@ def _profile_uses_nd_load(
     return not is_plot_plane_storage_axis(parent_spec, profile_axis)
 
 
+def region_frame_for_derivative(
+    request: MaterializeRequest,
+    parent_spec: Optional[CubeViewSpec],
+    parent_bundle: PlotBundle,
+    view_crop: Optional[ViewCrop] = None,
+):
+    """
+    Select the view frame for ROI compilation in derivative fetch.
+
+    Parameters
+    ----------
+    request : MaterializeRequest
+        Derivative materialize request.
+    parent_spec : CubeViewSpec or None
+        Parent cube view.
+    parent_bundle : PlotBundle
+        Cached parent 2D bundle.
+    view_crop : ViewCrop or None
+        Active main-display crop, if any.
+
+    Returns
+    -------
+    PlotViewFrame
+        Frame for ROI compilation.
+    """
+    if view_crop is not None and _profile_uses_nd_load(request, parent_spec):
+        return view_crop.full_frame
+    return frame_from_bundle(parent_bundle)
+
+
 def fetch_materialized_bundle(
     request: MaterializeRequest,
     *,
@@ -501,6 +532,7 @@ def fetch_materialized_bundle(
     parent_spec: Optional[CubeViewSpec] = None,
     parent_bundle: Optional[PlotBundle] = None,
     region_frame=None,
+    view_crop: Optional[ViewCrop] = None,
     label: str = "",
     transform: bool = True,
 ) -> PlotBundle:
@@ -525,6 +557,8 @@ def fetch_materialized_bundle(
         Pre-loaded 2D parent plane.
     region_frame : PlotViewFrame, optional
         View frame for ROI compilation.
+    view_crop : ViewCrop, optional
+        Active main-display crop applied to ND loads.
     label : str
         Optional display label for 1D output.
     transform : bool
@@ -581,6 +615,7 @@ def fetch_materialized_bundle(
         ykey,
         norm_keys,
         materialize_request=request,
+        view_crop=view_crop,
         region_frame=region_frame,
         parent_spec=parent_spec,
         label=label,
@@ -594,6 +629,7 @@ def fetch_derivative_preview(
     *,
     parent_spec: Optional[CubeViewSpec] = None,
     parent_bundle: Optional[PlotBundle] = None,
+    view_crop: Optional[ViewCrop] = None,
 ) -> PlotBundle:
     """
     Fetch a derivative bundle for dialog preview from a plot data model.
@@ -608,6 +644,8 @@ def fetch_derivative_preview(
         Parent cube view.
     parent_bundle : PlotBundle, optional
         Cached parent 2D bundle when valid for the request.
+    view_crop : ViewCrop, optional
+        Active main-display crop applied to ND loads.
 
     Returns
     -------
@@ -621,13 +659,19 @@ def fetch_derivative_preview(
     if parent_bundle is None:
         raise ValueError("No parent 2D bundle available for derivative fetch")
 
-    frame = frame_from_bundle(parent_bundle)
+    frame = region_frame_for_derivative(
+        request,
+        parent_spec,
+        parent_bundle,
+        view_crop,
+    )
     if not _profile_uses_nd_load(request, parent_spec):
         return fetch_materialized_bundle(
             request,
             parent_bundle=parent_bundle,
             parent_spec=parent_spec,
             region_frame=frame,
+            view_crop=view_crop,
         )
     return fetch_materialized_bundle(
         request,
@@ -637,4 +681,5 @@ def fetch_derivative_preview(
         norm_keys=plot_model._norm_keys,
         parent_spec=parent_spec,
         region_frame=frame,
+        view_crop=view_crop,
     )
