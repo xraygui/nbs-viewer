@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from qtpy.QtCore import QObject, Signal
 from asteval import Interpreter
 import numpy as np
+import time as ttime
 
 from ..data.base import CatalogRun
 from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
@@ -459,13 +460,16 @@ class RunModel(QObject):
             if view_crop is not None:
                 slice_info = apply_view_crop_to_slice_info(slice_info, view_crop)
 
+        t0 = ttime.time()
         xlist, axis_names, _extra = self.get_dimension_axes(
             ykey, xkeys, slice_info
         )
         y = self.get_data(ykey, slice_info)
+        t_load = ttime.time() - t0
         storage_axes = list(xlist)
         storage_names = list(axis_names)
 
+        t0 = ttime.time()
         if request is not None:
             y, xlist, axis_names = materialize_view(
                 y,
@@ -491,7 +495,9 @@ class RunModel(QObject):
             else:
                 xlist = []
                 axis_names = []
+        t_materialize = ttime.time() - t0
 
+        t0 = ttime.time()
         if norm_keys is not None:
             normlist = [
                 self.get_data(norm_key, slice_info) for norm_key in norm_keys
@@ -530,9 +536,20 @@ class RunModel(QObject):
                 while temp_norm.ndim < y.ndim:
                     temp_norm = np.expand_dims(temp_norm, axis=-1)
                 y = y / temp_norm
+        t_norm = ttime.time() - t0
 
+        t0 = ttime.time()
         if transform:
             xlist, y = self.transform_data(xlist, y)
+        t_transform = ttime.time() - t0
+
+        print_debug(
+            "RunModel._fetch_plot_arrays",
+            f"{ykey} shape={getattr(y, 'shape', None)} "
+            f"load={t_load:.4f}s materialize={t_materialize:.4f}s "
+            f"norm={t_norm:.4f}s transform={t_transform:.4f}s",
+            category="plots",
+        )
         return xlist, axis_names, y
 
     def get_plot_data(
@@ -667,13 +684,15 @@ class RunModel(QObject):
         if y.ndim == 1:
             return prepare_1d_bundle(y, xlist, axis_names)
         if y.ndim == 2:
+            t0 = ttime.time()
             bundle = prepare_2d_bundle(
                 y, xlist, axis_names, render_mode_hint=hint
             )
             print_debug(
                 "RunModel.get_plot_bundle",
-                f"{ykey} render_mode={bundle.render_mode} shape={y.shape}",
-                category="DEBUG_PLOTS",
+                f"{ykey} prepare_2d mode={bundle.render_mode} "
+                f"shape={y.shape} {ttime.time() - t0:.4f}s",
+                category="plots",
             )
             return bundle
 

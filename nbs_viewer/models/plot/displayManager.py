@@ -220,7 +220,7 @@ class DisplayManager(QObject):
         print_debug(
             "DisplayManager.add_run_to_display",
             f"Adding run {run.uid} to display {display_id}",
-            category="DEBUG_DISPLAYMANAGER",
+            category="display",
         )
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models[display_id]
@@ -240,7 +240,7 @@ class DisplayManager(QObject):
         print_debug(
             "DisplayManager.remove_run_from_display",
             f"Removing run {run.uid} from display {display_id}",
-            category="DEBUG_DISPLAYMANAGER",
+            category="display",
         )
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models[display_id]

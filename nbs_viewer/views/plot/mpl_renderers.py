@@ -4,6 +4,7 @@ Matplotlib renderers for 1D lines, uniform 2D images, and non-uniform meshes.
 
 from __future__ import annotations
 
+import time as ttime
 from typing import Optional, Tuple
 
 import numpy as np
@@ -14,6 +15,7 @@ from matplotlib.lines import Line2D
 
 from ...models.plot.plot_geometry import PlotBundle
 from ...models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.utils import print_debug
 
 
 class LineRenderer:
@@ -21,13 +23,26 @@ class LineRenderer:
 
     @staticmethod
     def create(axes: Axes, bundle: PlotBundle, label: str) -> Line2D:
+        t0 = ttime.time()
         x = bundle.x_line if bundle.x_line is not None else np.arange(bundle.y.size)
-        return axes.plot(x, bundle.y, clip_on=True, label=label)[0]
+        artist = axes.plot(x, bundle.y, clip_on=True, label=label)[0]
+        print_debug(
+            "LineRenderer.create",
+            f"n={bundle.y.size} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
+        return artist
 
     @staticmethod
     def update(artist: Line2D, bundle: PlotBundle) -> None:
+        t0 = ttime.time()
         x = bundle.x_line if bundle.x_line is not None else np.arange(bundle.y.size)
         artist.set_data(x, bundle.y)
+        print_debug(
+            "LineRenderer.update",
+            f"n={bundle.y.size} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
 
     @staticmethod
     def set_labels(axes: Axes, bundle: PlotBundle) -> None:
@@ -46,6 +61,7 @@ class ImageRenderer:
         label: str,
         colorbar_state: dict,
     ) -> Tuple[AxesImage, object]:
+        t0 = ttime.time()
         extent = bundle.extent
         artist = axes.imshow(
             bundle.y,
@@ -59,6 +75,11 @@ class ImageRenderer:
         cbar.set_label(label)
         colorbar_state["colorbar"] = cbar
         ImageRenderer.set_labels(axes, bundle)
+        print_debug(
+            "ImageRenderer.create",
+            f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
         return artist, cbar
 
     @staticmethod
@@ -68,6 +89,7 @@ class ImageRenderer:
         autoscale: bool,
         colorbar_state: dict,
     ) -> None:
+        t0 = ttime.time()
         artist.set_data(bundle.y)
         if bundle.extent is not None:
             artist.set_extent(bundle.extent)
@@ -83,6 +105,11 @@ class ImageRenderer:
         cbar = colorbar_state.get("colorbar")
         if cbar is not None and autoscale:
             cbar.update_ticks()
+        print_debug(
+            "ImageRenderer.update",
+            f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
 
     @staticmethod
     def set_labels(axes: Axes, bundle: PlotBundle) -> None:
@@ -102,6 +129,7 @@ class MeshRenderer:
         label: str,
         colorbar_state: dict,
     ):
+        t0 = ttime.time()
         mesh = axes.pcolormesh(
             bundle.mesh_x,
             bundle.mesh_y,
@@ -114,6 +142,11 @@ class MeshRenderer:
         colorbar_state["colorbar"] = cbar
         MeshRenderer.set_labels(axes, bundle)
         MeshRenderer._set_limits(axes, bundle)
+        print_debug(
+            "MeshRenderer.create",
+            f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
         return mesh, cbar
 
     @staticmethod
@@ -123,6 +156,7 @@ class MeshRenderer:
         autoscale: bool,
         colorbar_state: dict,
     ) -> None:
+        t0 = ttime.time()
         artist.set_array(bundle.y.ravel())
         if autoscale:
             finite = bundle.y[np.isfinite(bundle.y)]
@@ -131,6 +165,11 @@ class MeshRenderer:
                 vmax = float(np.max(finite))
                 artist.set_clim(vmin=vmin, vmax=vmax)
         MeshRenderer._set_limits(artist.axes, bundle)
+        print_debug(
+            "MeshRenderer.update",
+            f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
 
     @staticmethod
     def _set_limits(axes: Axes, bundle: PlotBundle) -> None:

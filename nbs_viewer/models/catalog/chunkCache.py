@@ -44,7 +44,7 @@ class ChunkCache:
         l2_enabled: bool = True,
         l2_chunks: Tuple[int, ...] = (1, 1, 256, 256),
         sync_seed_tile_limit: int = 64,
-        fetch_batch_target_bytes: Optional[int] = 15_000_000,
+        fetch_batch_target_bytes: Optional[int] = 50_000_000,
         progress: Optional[ChunkCacheProgress] = None,
     ):
         # Cache storage
@@ -123,16 +123,17 @@ class ChunkCache:
             if cached_slab is not None:
                 slab = cached_slab
             elif self.l2 is not None and self.l2.enabled:
+                self.wait_for_background_materialize(run_uid, key)
                 slab = self._get_data_l2_pipeline(
-                        run, key, slice_info, run_uid, shape, chunks
-                    )
-            else: 
+                    run, key, slice_info, run_uid, shape, chunks
+                )
+            else:
                 slab = self._read_tiled_hyperslab(run, key, slice_info)
 
             return self._finalize_slice_result(slab, slice_info)
 
         except Exception as e:
-            print_debug("ChunkCache", f"Error in get_data: {str(e)}")
+            print_debug("ChunkCache", f"Error in get_data: {str(e)}", category="cache")
             raise
 
     def _l2_chunks(self, run_uid: str, key: str) -> Tuple[int, ...]:
@@ -759,12 +760,11 @@ class ChunkCache:
             self._l2_materialize_job_seq += 1
             job_id = self._l2_materialize_job_seq
 
-        seed_copy = np.array(seed, copy=True)
         print_debug(
             "ChunkCache",
             f"L2 materialize queue job={job_id} {key}: "
             f"{len(incomplete)}/{len(tiles)} incomplete tiles, "
-            f"seed shape={seed_copy.shape}",
+            f"seed shape={seed.shape}",
             category="cache",
         )
 
@@ -775,7 +775,7 @@ class ChunkCache:
                 run,
                 key,
                 slice_info,
-                seed_copy,
+                seed,
                 incomplete,
             )
             self._active_l2_materialize_jobs[job_key] = future
@@ -801,6 +801,9 @@ class ChunkCache:
     ) -> int:
         """
         Materialize incomplete L2 tiles from seed overlap and a full-tile Tiled fetch.
+
+        Runs off the plot critical path: seed fully covered tiles from the
+        returned slab, then fetch any remaining partial-edge tiles from Tiled.
         """
         run_uid = run.start["uid"]
         written = 0
@@ -817,35 +820,18 @@ class ChunkCache:
 
         shape, _ = self.chunk_info[(run_uid, key)]
         l2_chunks = self._l2_chunks(run_uid, key)
-        aligned_seed = self._align_seed_slab(seed, slice_info)
+        aligned_seed = np.array(
+            self._align_seed_slab(seed, slice_info), copy=True
+        )
+        self._seed_zarr_from_slab(run, key, slice_info, aligned_seed)
 
         needs_tiled: List[Dict] = []
         for tile_info in tile_infos:
             tile_idx = tile_info["chunk_indices"]
             if self._tile_is_complete(run_uid, key, tile_idx):
-                skipped += 1
-                continue
-            try:
-                if self._materialize_l2_tile_from_slab(
-                    run_uid,
-                    key,
-                    tile_idx,
-                    slice_info,
-                    aligned_seed,
-                    shape,
-                    l2_chunks,
-                    require_full_in_request=True,
-                ):
-                    written += 1
-                else:
-                    needs_tiled.append(tile_info)
-            except Exception as exc:
-                failed += 1
-                print_debug(
-                    "ChunkCache",
-                    f"L2 materialize job={job_id} seed tile={tile_idx} failed: {exc}",
-                    category="cache",
-                )
+                written += 1
+            else:
+                needs_tiled.append(tile_info)
 
         if needs_tiled:
             fetch_slice = union_l2_tile_fetch_slice(
@@ -1086,7 +1072,12 @@ class ChunkCache:
         slab: np.ndarray,
     ) -> None:
         """
-        Seed memory Zarr from a fetched slab and queue background fills.
+        Queue background Zarr seeding from a fetched slab without blocking.
+
+        The caller already has ``slab`` for the plot critical path. L2 tile
+        writes and any remaining edge-tile Tiled fetches run in
+        ``_background_materialize_tiles``. A later ``get_data`` for the same
+        dataset waits for that job before consulting L2 or partial assembly.
 
         Parameters
         ----------
@@ -1100,12 +1091,6 @@ class ChunkCache:
             Assembled view slab before indexed-dimension squeezing.
         """
         aligned = self._align_seed_slab(slab, slice_info)
-        print_debug(
-            "ChunkCache",
-            f"seeding Zarr from slab for {key}:{slice_info}",
-            category="cache",
-        )
-        self._seed_zarr_from_slab(run, key, slice_info, aligned)
         print_debug(
             "ChunkCache",
             f"queueing zarr materialize for {key}:{slice_info}",

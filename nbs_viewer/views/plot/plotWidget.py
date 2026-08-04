@@ -1,4 +1,4 @@
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
@@ -42,7 +42,17 @@ class PlotWidget(QWidget):
 
         self.cache_status_label = QLabel("")
         self.cache_status_label.setObjectName("cacheStatusLabel")
-        self.cache_status_label.hide()
+        self.cache_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.cache_status_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        label_height = max(
+            self.cache_status_label.sizeHint().height(),
+            self.cache_status_label.fontMetrics().height() + 4,
+        )
+        self.cache_status_label.setFixedHeight(label_height)
 
         self.cache_debug_button = QPushButton("Cache Stats")
         self.cache_debug_button.clicked.connect(self._debug_cache_state)
@@ -68,7 +78,7 @@ class PlotWidget(QWidget):
         debug_row.addWidget(self.flush_l1_button)
         if self.debug_button:
             debug_row.addWidget(self.debug_button)
-        debug_row.addStretch(1)
+        debug_row.addWidget(self.cache_status_label, 1)
 
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -77,7 +87,6 @@ class PlotWidget(QWidget):
         plot_layout.setContentsMargins(0, 0, 0, 0)
         plot_layout.setSpacing(0)
         plot_layout.addWidget(plot_pane, 1)
-        plot_layout.addWidget(self.cache_status_label, 0)
         plot_layout.addLayout(debug_row, 0)
 
         self.run_list_model.run_added.connect(self._connect_cache_progress)
@@ -125,22 +134,23 @@ class PlotWidget(QWidget):
 
     def _on_cache_progress_run_removed(self, *_args):
         """
-        Hide cache status when no runs remain; reconnect if runs are left.
+        Clear cache status when no runs remain; reconnect if runs are left.
         """
         if self.run_list_model.available_models:
             self._connect_cache_progress()
             return
         self.cache_status_label.clear()
-        self.cache_status_label.hide()
         self._cache_progress_source = None
 
     def _on_cache_status_changed(self, status):
         """
         Update the cache status label from a Tiled fetch status snapshot.
+
+        Text-only updates keep the reserved label height so the plot canvas
+        does not resize during cold fetches.
         """
         text = status.label_text() if hasattr(status, "label_text") else ""
         self.cache_status_label.setText(text)
-        self.cache_status_label.setVisible(bool(text))
 
     def _debug_cache_state(self):
         """
@@ -174,7 +184,6 @@ class PlotWidget(QWidget):
 
         self.flush_l1_button.setEnabled(False)
         self.cache_status_label.setText("Flushing L1 tiles to L2...")
-        self.cache_status_label.show()
 
         future = chunk_cache.background_pool.submit(chunk_cache.flush_l1_to_l2)
         future.add_done_callback(
@@ -199,7 +208,6 @@ class PlotWidget(QWidget):
         finally:
             self.flush_l1_button.setEnabled(True)
             self.cache_status_label.clear()
-            self.cache_status_label.hide()
 
     def _debug_plot_state(self):
         self.plot_canvas._debug_plot_state()

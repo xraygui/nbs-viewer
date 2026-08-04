@@ -1,29 +1,44 @@
 import time as ttime
 import logging
+from typing import Iterable
 
-# Backwards-compatible debug switches (no-ops with logging but preserved for now)
-# Legacy switches retained for CLI flags; prefer logger configuration.
+# Backwards-compatible debug switches (legacy UI flags; prefer logger topics).
 DEBUG_VARIABLES = {
     "PRINT_DEBUG": True,
-    "DEBUG_CATALOG": True,
-    "DEBUG_PLOTS": True,
-    "DEBUG_RUNLIST": True,
-    "cache": False,
-    "dimension": False,
 }
 
-
-# Map legacy/debug categories to structured logger namespaces
+# Canonical CLI / print_debug topics and their logger namespaces.
+# Legacy DEBUG_* names remain as aliases.
 CATEGORY_MAP = {
     None: "nbs_viewer",
     "": "nbs_viewer",
-    "DEBUG_CATALOG": "nbs_viewer.catalog",
-    "DEBUG_PLOTS": "nbs_viewer.plots",
-    "DEBUG_RUNLIST": "nbs_viewer.runlist",
+    "plots": "nbs_viewer.plots",
     "cache": "nbs_viewer.cache",
+    "catalog": "nbs_viewer.catalog",
+    "runlist": "nbs_viewer.runlist",
+    "run": "nbs_viewer.run",
     "dimension": "nbs_viewer.dimensions",
+    "display": "nbs_viewer.display",
+    "pool": "nbs_viewer.pool",
     "perf": "perf",
+    "DEBUG_PLOTS": "nbs_viewer.plots",
+    "DEBUG_CATALOG": "nbs_viewer.catalog",
+    "DEBUG_RUNLIST": "nbs_viewer.runlist",
+    "DEBUG_RUN": "nbs_viewer.run",
+    "DEBUG_DISPLAYMANAGER": "nbs_viewer.display",
 }
+
+KNOWN_TOPICS = (
+    "plots",
+    "cache",
+    "catalog",
+    "runlist",
+    "run",
+    "dimension",
+    "display",
+    "pool",
+    "perf",
+)
 
 _top_level_model = None
 
@@ -67,6 +82,64 @@ def _resolve_logger_name(category: str | None) -> str:
     return CATEGORY_MAP.get(category, f"nbs_viewer.{category}")
 
 
+def parse_debug_topics(values: Iterable[str] | None) -> list[str]:
+    """
+    Expand CLI topic arguments into a flat list.
+
+    Parameters
+    ----------
+    values : iterable of str or None
+        Topic arguments; each entry may be comma-separated.
+
+    Returns
+    -------
+    list of str
+        Deduplicated topic names in order of first appearance.
+    """
+    topics: list[str] = []
+    seen: set[str] = set()
+    for value in values or ():
+        for part in str(value).split(","):
+            topic = part.strip().lower()
+            if not topic or topic in seen:
+                continue
+            seen.add(topic)
+            topics.append(topic)
+    return topics
+
+
+def enable_debug_topics(
+    topics: Iterable[str],
+    level: int = logging.DEBUG,
+) -> list[str]:
+    """
+    Raise selected topic loggers to the given level.
+
+    Parameters
+    ----------
+    topics : iterable of str
+        Topic names or legacy category aliases (e.g. ``plots``, ``DEBUG_PLOTS``).
+    level : int, optional
+        Logging level to apply. Defaults to ``logging.DEBUG``.
+
+    Returns
+    -------
+    list of str
+        Resolved logger names that were enabled.
+    """
+    resolved: list[str] = []
+    for topic in topics:
+        name = topic.strip()
+        if not name:
+            continue
+        # Accept canonical short names case-insensitively; preserve legacy keys.
+        mapped = CATEGORY_MAP.get(name) or CATEGORY_MAP.get(name.lower())
+        logger_name = mapped if mapped is not None else _resolve_logger_name(name)
+        logging.getLogger(logger_name).setLevel(level)
+        resolved.append(logger_name)
+    return resolved
+
+
 def turn_on_debugging():
     logging.getLogger().setLevel(logging.DEBUG)
 
@@ -85,8 +158,8 @@ def print_debug(function_name, message, category=None, level: str = "DEBUG"):
     message : str
         Message text.
     category : Optional[str]
-        Legacy category (e.g., "DEBUG_CATALOG", "dimension"). This is
-        mapped into a structured logger name, like ``nbs_viewer.catalog``.
+        Topic or legacy category (e.g. ``plots``, ``DEBUG_CATALOG``).
+        Mapped into a structured logger name like ``nbs_viewer.plots``.
     level : str, default "DEBUG"
         Logging level name to use (DEBUG, INFO, WARNING, ERROR).
     """

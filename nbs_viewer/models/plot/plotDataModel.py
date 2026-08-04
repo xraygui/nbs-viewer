@@ -129,10 +129,6 @@ class PlotDataModel(QObject):
         PlotBundle
             Prepared plot payload.
         """
-        print_debug(
-            "PlotDataModel.get_plot_bundle",
-            f"getting plot data for {self.label}",
-        )
         spec = cube_view_spec if cube_view_spec is not None else self._cube_view_spec
         bundle = self._run.get_plot_bundle(
             [self._xkey],
@@ -173,12 +169,40 @@ class PlotDataModel(QObject):
             self.render_mode_changed.emit(self, bundle.render_mode)
 
     def update_data_info(
-        self, norm_keys=None, indices=None, cube_view_spec=None, dimension=None
+        self,
+        norm_keys=None,
+        indices=None,
+        cube_view_spec=None,
+        dimension=None,
+        emit=True,
     ):
+        """
+        Update slice, norm, cube-view, or dimension metadata.
+
+        Parameters
+        ----------
+        norm_keys : list of str, optional
+            Normalization keys.
+        indices : tuple, optional
+            Legacy slice indices.
+        cube_view_spec : CubeViewSpec, optional
+            N-D cube view specification.
+        dimension : int, optional
+            Plot dimensionality.
+        emit : bool, optional
+            If True (default), emit ``data_changed`` when values change so the
+            artist bus can refetch. List-owned updates pass False and start
+            workers explicitly.
+
+        Returns
+        -------
+        bool
+            True if plot data should be refreshed.
+        """
         changed = False
         if self.artist is None:
             changed = True
-        if norm_keys is not None and set(norm_keys) != set(self._norm_keys):
+        if norm_keys is not None and set(norm_keys) != set(self._norm_keys or []):
             self._norm_keys = norm_keys
             changed = True
         if indices is not None and indices != self._indices:
@@ -195,16 +219,12 @@ class PlotDataModel(QObject):
         if changed:
             print_debug(
                 "PlotDataModel.update_data_info",
-                f"Data info changed for {self.label}",
-                category="DEBUG_PLOTS",
+                f"changed for {self.label} emit={emit}",
+                category="plots",
             )
-            self.data_changed.emit(self)
-        else:
-            print_debug(
-                "PlotDataModel.update_data_info",
-                f"Data info not changed for {self.label}, visible: {self._visible}",
-                category="DEBUG_PLOTS",
-            )
+            if emit:
+                self.data_changed.emit(self)
+        return changed
 
     def _on_run_visibility_changed(self, visible):
         xkeys, ykeys, normkeys = self._run.get_selected_keys()
@@ -230,46 +250,30 @@ class PlotDataModel(QObject):
         visible = visible and self._run._is_visible
         self._visible = visible
         if self.artist is not None:
-            print_debug(
-                "PlotDataModel.set_visible",
-                f"Setting {self.label} visible to {visible}",
-                category="DEBUG_PLOTS",
-            )
             was_visible = self.artist.get_visible()
             if was_visible != visible:
+                print_debug(
+                    "PlotDataModel.set_visible",
+                    f"{self.label} {was_visible} -> {visible}",
+                    category="plots",
+                )
                 self.artist.set_visible(visible)
                 self.visibility_changed.emit(self, visible)
                 self.autoscale_requested.emit()
                 self.draw_requested.emit()
-        else:
-            print_debug(
-                "PlotDataModel.set_visible",
-                f"{self.label} has no artist (model._visible={visible})",
-                category="DEBUG_PLOTS",
-            )
 
     def _on_keys_changed(self, xkeys, ykeys, normkeys):
         if self._xkey not in xkeys or self._ykey not in ykeys:
-            print_debug(
-                "PlotDataModel._on_keys_changed",
-                f"Keys changed for {self.label}: not visible",
-                category="DEBUG_PLOTS",
-            )
             self.set_visible(False)
         else:
-            print_debug(
-                "PlotDataModel._on_keys_changed",
-                f"Keys changed for {self.label}: visible",
-                category="DEBUG_PLOTS",
-            )
             self.set_visible(True)
 
     def _on_data_changed(self, *args):
         if self._visible:
             print_debug(
                 "PlotDataModel._on_data_changed",
-                f"Emitting data changed for {self.label}",
-                category="DEBUG_PLOTS",
+                f"data_changed for {self.label}",
+                category="plots",
             )
             self.data_changed.emit(self)
 
@@ -291,7 +295,7 @@ class PlotDataModel(QObject):
         print_debug(
             "PlotDataModel.clear",
             f"Clearing {self.label}",
-            category="DEBUG_PLOTS",
+            category="plots",
         )
         if self.artist is not None:
             try:

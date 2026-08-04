@@ -81,7 +81,7 @@ class DerivativePreviewWorker(QThread):
                 f"(cached_parent={cached}, "
                 f"plot_ndim={self.request.spec.plot_ndim}, "
                 f"shape={getattr(bundle.y, 'shape', None)})",
-                category="DEBUG_PLOTS",
+                category="plots",
             )
             if self.isInterruptionRequested():
                 return
@@ -92,7 +92,7 @@ class DerivativePreviewWorker(QThread):
             print_debug(
                 "DerivativePreviewWorker",
                 str(exc),
-                category="DEBUG_PLOTS",
+                category="plots",
             )
             self.error_occurred.emit(str(exc), self.generation)
 

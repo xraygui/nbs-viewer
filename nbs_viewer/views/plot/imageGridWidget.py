@@ -11,6 +11,7 @@ from qtpy.QtWidgets import (
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from qtpy.QtCore import QTimer
+import time as ttime
 
 from ...utils import print_debug
 from ...models.plot.plotDataModel import PlotDataModel
@@ -87,11 +88,16 @@ class ImageGridWidget(QWidget):
     def _do_draw(self):
         """Actually perform the draw operation (consistent with MplCanvas)."""
         self._draw_pending = False
-        print_debug("ImageGridWidget._do_draw", "Drawing")
+        t0 = ttime.time()
         try:
             self.canvas.draw()
+            print_debug(
+                "ImageGridWidget._do_draw",
+                f"FigureCanvas.draw {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
         except Exception as e:
-            print_debug("ImageGridWidget", f"Error in draw: {e}")
+            print_debug("ImageGridWidget", f"Error in draw: {e}", category="plots")
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -160,10 +166,10 @@ class ImageGridWidget(QWidget):
         tuple or None
             (shape, dim_names, axis_arrays, associated_data) or None if no data
         """
-        print_debug("ImageGridWidget", "Getting shape info")
+        print_debug("ImageGridWidget", "Getting shape info", category="plots")
         visible_models = self.run_list_model.visible_models
         if not visible_models:
-            print_debug("ImageGridWidget", "No visible models")
+            print_debug("ImageGridWidget", "No visible models", category="plots")
             return None
 
         # Get shape information from the first visible model
@@ -173,33 +179,33 @@ class ImageGridWidget(QWidget):
         print_debug(
             "ImageGridWidget",
             f"Selected keys - x: {x_keys}, y: {y_keys}, norm: {norm_keys}",
-        )
+            category="plots")
 
         if not y_keys:
-            print_debug("ImageGridWidget", "No Y keys selected")
+            print_debug("ImageGridWidget", "No Y keys selected", category="plots")
             return None
 
         y_key = y_keys[0]
         print_debug(
             "ImageGridWidget",
             f"Using y_key: {y_key}, x_key: {x_keys[0] if x_keys else 'None'}",
-        )
+            category="plots")
 
         try:
             shape, axis_names, axis_arrays, associated_data = (
                 run_model.get_dimension_ui_info(y_key, x_keys)
             )
 
-            print_debug("ImageGridWidget", f"Shape: {shape}")
-            print_debug("ImageGridWidget", f"Dimension names: {axis_names}")
+            print_debug("ImageGridWidget", f"Shape: {shape}", category="plots")
+            print_debug("ImageGridWidget", f"Dimension names: {axis_names}", category="plots")
             print_debug(
                 "ImageGridWidget",
                 f"Axis arrays lengths: {[len(arr) for arr in axis_arrays]}",
-            )
+                category="plots")
 
             return shape, axis_names, axis_arrays, associated_data
         except Exception as e:
-            print_debug("ImageGridWidget", f"Error getting shape info: {e}")
+            print_debug("ImageGridWidget", f"Error getting shape info: {e}", category="plots")
             return None
 
     def _get_total_images(self, shape):
@@ -217,7 +223,7 @@ class ImageGridWidget(QWidget):
             (total_images, image_shape, non_image_dims) or None if invalid
         """
         if len(shape) < 2:
-            print_debug("ImageGridWidget", f"Data has less than 2 dimensions: {shape}")
+            print_debug("ImageGridWidget", f"Data has less than 2 dimensions: {shape}", category="plots")
             return None
 
         # Last 2 dimensions are always the image (height, width)
@@ -237,7 +243,7 @@ class ImageGridWidget(QWidget):
 
     def _update_grid(self):
         """Update the image grid with current data."""
-        print_debug("ImageGridWidget", "Starting _update_grid")
+        print_debug("ImageGridWidget", "Starting _update_grid", category="plots")
 
         # Clear existing grid
         self._clear_grid()
@@ -245,7 +251,7 @@ class ImageGridWidget(QWidget):
         # Get shape information
         shape_info = self._get_shape_info()
         if not shape_info:
-            print_debug("ImageGridWidget", "No shape info available")
+            print_debug("ImageGridWidget", "No shape info available", category="plots")
             return
 
         shape, dim_names, axis_arrays, associated_data = shape_info
@@ -270,9 +276,9 @@ class ImageGridWidget(QWidget):
             self._current_page = max_pages
             self.page_spinbox.setValue(self._current_page)
 
-        print_debug("ImageGridWidget", f"Will create {total_images} images")
-        print_debug("ImageGridWidget", f"Images per page: {self._images_per_page}")
-        print_debug("ImageGridWidget", f"Current page: {self._current_page}")
+        print_debug("ImageGridWidget", f"Will create {total_images} images", category="plots")
+        print_debug("ImageGridWidget", f"Images per page: {self._images_per_page}", category="plots")
+        print_debug("ImageGridWidget", f"Current page: {self._current_page}", category="plots")
 
         # Calculate start and end indices for current page
 
@@ -343,13 +349,13 @@ class ImageGridWidget(QWidget):
         print_debug(
             "ImageGridWidget._create_subplots_for_page",
             f"Displaying images {start_idx} to {end_idx-1}",
-        )
+            category="plots")
         visible_models = self.run_list_model.visible_models
         if not visible_models:
             return
 
         run_model = visible_models[0]
-        print_debug("ImageGridWidget", f"Run model: {run_model.uid}")
+        print_debug("ImageGridWidget", f"Run model: {run_model.uid}", category="plots")
         x_keys, y_keys, norm_keys = run_model.get_selected_keys()
 
         if not y_keys:
@@ -365,7 +371,7 @@ class ImageGridWidget(QWidget):
         print_debug(
             "ImageGridWidget",
             f"Creating {images_this_page} images in {rows}x{cols} grid",
-        )
+            category="plots")
 
         # Clear existing subplots
         self.figure.clear()
@@ -389,7 +395,7 @@ class ImageGridWidget(QWidget):
                 print_debug(
                     "ImageGridWidget",
                     f"Processing image {image_idx} with indices {slice_info}",
-                )
+                    category="plots")
                 # Create PlotDataModel for this image
                 plot_data = self._create_image_plot_data(
                     run_model, slice_info, image_idx
@@ -403,16 +409,16 @@ class ImageGridWidget(QWidget):
                     print_debug(
                         "ImageGridWidget",
                         f"Moving artist {plot_data.label} to new axes",
-                    )
+                        category="plots")
                     self._move_plot_data_to_axes(plot_data, ax)
 
             except Exception as e:
-                print_debug("ImageGridWidget", f"Error creating image {image_idx}: {e}")
+                print_debug("ImageGridWidget", f"Error creating image {image_idx}: {e}", category="plots")
             self._style_axes(ax, slice_info, image_idx)
         # Adjust layout for better spacing
         self.figure.tight_layout()
         self.canvas.draw()
-        print_debug("ImageGridWidget", "Finished creating subplots")
+        print_debug("ImageGridWidget", "Finished creating subplots", category="plots")
 
     def _create_image_plot_data(self, run_model, slice_info, image_idx):
         """
@@ -439,8 +445,8 @@ class ImageGridWidget(QWidget):
         y_key = y_keys[0]
         if key not in self.plotArtists:
             print_debug(
-                "ImageGridWidget", f"Creating PlotDataModel for image {image_idx}"
-            )
+                "ImageGridWidget", f"Creating PlotDataModel for image {image_idx}",
+                category="plots")
 
             # Create PlotDataModel
             plot_data = PlotDataModel(
@@ -516,7 +522,7 @@ class ImageGridWidget(QWidget):
 
         """
 
-        print_debug("ImageGridWidget", f"Starting worker for image {plot_data.label}")
+        print_debug("ImageGridWidget", f"Starting worker for image {plot_data.label}", category="plots")
         dimension = 2
         if slice_info is None:
             slice_info = plot_data._indices
@@ -567,34 +573,34 @@ class ImageGridWidget(QWidget):
             print_debug(
                 "ImageGridWidget",
                 f"Stale worker gen={generation} for {plot_data.label}, skipping",
-            )
+                category="plots")
             return
         y = bundle.y
         print_debug(
-            "ImageGridWidget", f"Received data for {plot_data.label}: shape {y.shape}"
-        )
+            "ImageGridWidget", f"Received data for {plot_data.label}: shape {y.shape}",
+            category="plots")
 
         if artist is None:
             artist = plot_data.artist
         else:
             plot_data.set_artist(artist)
         if artist is None:
-            print_debug("ImageGridWidget", "No artist found for plot data")
+            print_debug("ImageGridWidget", "No artist found for plot data", category="plots")
             return
 
         try:
             if len(y.shape) == 2:
                 print_debug(
-                    "ImageGridWidget", f"Successfully plotted {plot_data.label}"
-                )
+                    "ImageGridWidget", f"Successfully plotted {plot_data.label}",
+                    category="plots")
                 artist.set_data(y)
                 artist.autoscale()
             else:
-                print_debug("ImageGridWidget", f"Error plotting image data: {y.shape}")
+                print_debug("ImageGridWidget", f"Error plotting image data: {y.shape}", category="plots")
             self.draw()
 
         except Exception as e:
-            print_debug("ImageGridWidget", f"Error plotting image data: {e}")
+            print_debug("ImageGridWidget", f"Error plotting image data: {e}", category="plots")
 
     def _handle_image_draw(self):
         """Handle draw requests from plot data models."""
@@ -603,7 +609,7 @@ class ImageGridWidget(QWidget):
 
     def _handle_image_error(self, error_msg):
         """Handle errors from image workers."""
-        print_debug("ImageGridWidget", f"Image worker error: {error_msg}")
+        print_debug("ImageGridWidget", f"Image worker error: {error_msg}", category="plots")
 
     def _clear_grid(self):
         """Clear all images from the grid."""

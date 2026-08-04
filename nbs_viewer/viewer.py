@@ -11,7 +11,13 @@ from qtpy.QtWidgets import (
 
 from .mainWidget import MainWidget
 from .models.app_model import AppModel
-from .utils import turn_on_debugging, turn_off_debugging, set_top_level_model
+from .utils import (
+    KNOWN_TOPICS,
+    parse_debug_topics,
+    set_top_level_model,
+    turn_off_debugging,
+    turn_on_debugging,
+)
 from .logging_setup import setup_logging
 
 # import logging
@@ -342,7 +348,19 @@ def main():
         "-d",
         "--debug",
         action="store_true",
-        help="Enable debug mode (equivalent to --log-level DEBUG)",
+        help="Enable full debug logging (equivalent to --log-level DEBUG)",
+    )
+    parser.add_argument(
+        "-D",
+        "--debug-topic",
+        action="append",
+        default=[],
+        metavar="TOPIC",
+        help=(
+            "Enable DEBUG for selected topics only (repeatable or comma-separated). "
+            f"Known topics: {', '.join(KNOWN_TOPICS)}. "
+            "Ignored when full debug is on via -d / --log-level DEBUG."
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -357,8 +375,13 @@ def main():
         help="Set logging verbosity (overrides --debug if provided)",
     )
     args = parser.parse_args()
+    topics = parse_debug_topics(args.debug_topic)
     effective_level = args.log_level or ("DEBUG" if args.debug else "INFO")
-    setup_logging(level=effective_level, http_to_file="http_debug.log")
+    setup_logging(
+        level=effective_level,
+        http_to_file="http_debug.log",
+        debug_topics=topics if effective_level != "DEBUG" else None,
+    )
     if effective_level == "DEBUG":
         turn_on_debugging()
     else:

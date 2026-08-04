@@ -4,6 +4,9 @@ matplotlib.use("qtagg")
 
 from typing import Optional
 
+import time as ttime
+import traceback
+
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -29,6 +32,30 @@ from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_
 from .plot_worker import PlotWorker, retire_plot_worker
 
 
+def _draw_caller_summary(skip=2, limit=6):
+    """
+    Return a compact caller chain for temporary draw instrumentation.
+
+    Parameters
+    ----------
+    skip : int, optional
+        Number of leading frames to omit (this helper and its caller).
+    limit : int, optional
+        Maximum number of frames to include.
+
+    Returns
+    -------
+    str
+        Compact ``file:line:func`` frames joined by `` <- ``.
+    """
+    frames = traceback.extract_stack(limit=skip + limit)[:-skip]
+    parts = []
+    for frame in frames[-limit:]:
+        filename = frame.filename.rsplit("/", 1)[-1]
+        parts.append(f"{filename}:{frame.lineno}:{frame.name}")
+    return " <- ".join(parts) if parts else "?"
+
+
 class NavigationToolbar(NavigationToolbar2QT):
     def __init__(self, canvas, parent=None):
         super().__init__(canvas, parent)
@@ -44,6 +71,7 @@ class NavigationToolbar(NavigationToolbar2QT):
         if legend is None or not legend.get_visible():
             self.canvas.updateLegend()
             self.canvas._legend_visible = True
+            self.canvas.draw()
         else:
             legend.set_visible(False)
             self.canvas._legend_visible = False
@@ -53,6 +81,9 @@ class NavigationToolbar(NavigationToolbar2QT):
 class MplCanvas(FigureCanvasQTAgg):
     """
     Matplotlib canvas for run list plots.
+
+    ``autoscale`` and ``updateLegend`` mutate axes state only; callers that
+    need a paint must call :meth:`draw` (coalesced) themselves.
 
     Signals
     -------
@@ -85,7 +116,9 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self._artist_count = 0
         self._autoscale = True
-        self._draw_pending = False
+        self._nbs_draw_pending = False
+        self._nbs_draw_coalesce_count = 0
+        self._nbs_in_do_draw = False
         self._dimension = 1
         self._slice = None
         self._cube_view_spec = None
@@ -122,6 +155,7 @@ class MplCanvas(FigureCanvasQTAgg):
         print_debug(
             "MplCanvas.update_view_state",
             f"indices={indices}, dimension={dimension}, validate={validate}",
+            category="plots",
         )
         if dimension == 2 and validate:
             visible_count = sum(
@@ -153,13 +187,19 @@ class MplCanvas(FigureCanvasQTAgg):
         return True
 
     def updatePlotData(self, runModel, xkey, ykey, norm_keys=None):
+        """
+        Create or refresh a plot model for one x/y key pair.
+
+        List-owned path: updates metadata without emitting ``data_changed`` and
+        starts at most one worker when a refetch is needed.
+        """
         key = (xkey, ykey, runModel.uid)
-        print_debug(
-            "MplCanvas.updatePlotData",
-            f"Updating plot with {xkey} and {ykey}",
-            category="DEBUG_PLOTS",
-        )
         if key not in self.plotArtists:
+            print_debug(
+                "MplCanvas.updatePlotData",
+                f"create {xkey}/{ykey}",
+                category="plots",
+            )
             plotData = PlotDataModel(
                 runModel,
                 xkey,
@@ -172,17 +212,20 @@ class MplCanvas(FigureCanvasQTAgg):
             plotData.data_changed.connect(self.plot_data)
             plotData.draw_requested.connect(self.draw)
             plotData.autoscale_requested.connect(self.autoscale)
-            plotData.visibility_changed.connect(lambda _v: self.updateLegend())
+            plotData.visibility_changed.connect(self._on_artist_visibility_changed)
             plotData.render_mode_changed.connect(self._on_render_mode_changed)
             self.plotArtists[key] = plotData
             self.plot_data(plotData)
         else:
-            self.plotArtists[key].update_data_info(
+            changed = self.plotArtists[key].update_data_info(
                 norm_keys=norm_keys,
                 indices=self._slice,
                 cube_view_spec=self._cube_view_spec,
                 dimension=self._dimension,
+                emit=False,
             )
+            if changed:
+                self.plot_data(self.plotArtists[key])
 
     def _canvas_is_2d(self):
         """
@@ -214,10 +257,16 @@ class MplCanvas(FigureCanvasQTAgg):
         return mode in ("image", "mesh")
 
     def _on_render_mode_changed(self, plot_data, mode):
+        """
+        Prepare axes when switching between 1D and 2D render modes.
+
+        Does not schedule ``updatePlot``; the in-flight worker applies data via
+        ``_handle_plot_data``.
+        """
         print_debug(
             "MplCanvas",
             f"Render mode changed to {mode} for {plot_data.label}",
-            category="DEBUG_PLOTS",
+            category="plots",
         )
         was_2d = self._canvas_is_2d()
         will_be_2d = self._mode_is_2d(mode)
@@ -227,22 +276,38 @@ class MplCanvas(FigureCanvasQTAgg):
         if plot_data.artist is not None:
             plot_data.clear()
         self._reset_plot_axes()
-        self.updatePlot()
         self.plot_view_updated.emit()
+
+    def _on_artist_visibility_changed(self, _plot_data, _visible):
+        """
+        Refresh the legend after an artist show/hide.
+
+        Paint is requested separately via ``draw_requested``.
+        """
+        self.updateLegend()
 
     def _on_run_removed(self, run):
         self.remove_run_data(run.uid)
 
     def updatePlot(self):
         self._update_timer = getattr(self, "_update_timer", None)
+        rescheduled = (
+            self._update_timer is not None and self._update_timer.isActive()
+        )
         if self._update_timer is not None:
             self._update_timer.stop()
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
         self._update_timer.timeout.connect(self._do_update_plot)
         self._update_timer.start(100)
+        print_debug(
+            "MplCanvas.updatePlot",
+            f"{'rescheduled' if rescheduled else 'scheduled'} (100ms)",
+            category="plots",
+        )
 
     def _do_update_plot(self):
+        t0 = ttime.time()
         try:
             visible_keys = set()
             for runModel in self.run_list_model.visible_models:
@@ -259,16 +324,35 @@ class MplCanvas(FigureCanvasQTAgg):
                 else:
                     plotDataModel.set_visible(True)
                     artist = plotDataModel.artist
-                    if artist is None or (
+                    needs_artist = artist is None or (
                         isinstance(artist, Line2D)
                         and not self._line_artist_on_axes(artist)
-                    ):
+                    )
+                    if needs_artist and key not in self._active_workers:
                         self.plot_data(plotDataModel)
+
+            workers_pending = len(self._active_workers) > 0
+            if workers_pending:
+                print_debug(
+                    "MplCanvas._do_update_plot",
+                    f"visible={len(visible_keys)} artists={len(self.plotArtists)} "
+                    f"active_workers={len(self._active_workers)} "
+                    f"skip_paint (workers pending) {ttime.time() - t0:.4f}s",
+                    category="plots",
+                )
+                return
+
             if self._autoscale:
                 self.autoscale()
             self.draw()
+            print_debug(
+                "MplCanvas._do_update_plot",
+                f"visible={len(visible_keys)} artists={len(self.plotArtists)} "
+                f"active_workers=0 {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
         except Exception as e:
-            print_debug("MplCanvas._do_update_plot", str(e), category="DEBUG_PLOTS")
+            print_debug("MplCanvas._do_update_plot", str(e), category="plots")
 
     def plot_data(self, plotData):
         model_key = plotData._key
@@ -276,13 +360,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self._worker_generations[model_key] = generation
 
         old_worker = self._active_workers.pop(model_key, None)
+        retired = old_worker is not None
         retire_plot_worker(old_worker, self._pending_workers)
 
-        print_debug(
-            "MplCanvas.plot_data",
-            f"Worker gen={generation} for {plotData.label}",
-            category="DEBUG_PLOTS",
-        )
         worker = PlotWorker(
             plotData,
             self._slice,
@@ -298,20 +378,27 @@ class MplCanvas(FigureCanvasQTAgg):
             lambda mk=model_key, w=worker: self._on_plot_worker_finished(mk, w)
         )
         self._active_workers[model_key] = worker
+        print_debug(
+            "MplCanvas.plot_data",
+            f"start gen={generation} label={plotData.label} "
+            f"retired_prior={retired} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
+        )
         worker.start()
 
     def _on_plot_worker_finished(self, model_key, worker):
         if self._active_workers.get(model_key) is worker:
             self._active_workers.pop(model_key, None)
 
-    @time_function(function_name="MplCanvas._handle_plot_data", category="DEBUG_PLOTS")
+    @time_function(function_name="MplCanvas._handle_plot_data", category="plots")
     def _handle_plot_data(self, bundle, plotData, artist, generation):
         model_key = plotData._key
         if generation != self._worker_generations.get(model_key):
             print_debug(
                 "MplCanvas._handle_plot_data",
                 f"Stale worker gen={generation}, skipping",
-                category="DEBUG_PLOTS",
+                category="plots",
             )
             return
 
@@ -320,8 +407,10 @@ class MplCanvas(FigureCanvasQTAgg):
 
         print_debug(
             "MplCanvas._handle_plot_data",
-            f"Plotting {plotData.label} mode={bundle.render_mode}",
-            category="DEBUG_PLOTS",
+            f"apply {plotData.label} mode={bundle.render_mode} "
+            f"y.shape={getattr(bundle.y, 'shape', None)} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
         )
 
         try:
@@ -372,7 +461,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 print_debug(
                     "MplCanvas._ensure_sibling_lines_on_axes",
                     f"Re-plotting {model.label}",
-                    category="DEBUG_PLOTS",
+                    category="plots",
                 )
                 self.plot_data(model)
 
@@ -729,9 +818,15 @@ class MplCanvas(FigureCanvasQTAgg):
                     self._set_roi_region(region, update_overlay=True)
             self._detach_roi_selector()
 
-    def clear_roi(self):
+    def clear_roi(self, paint=True):
         """
         Remove the ROI selector, overlay, and stored region.
+
+        Parameters
+        ----------
+        paint : bool, optional
+            If True, schedule a coalesced redraw. Pass False when the caller
+            will paint later (for example during ``clear`` before a refetch).
         """
         self._roi_region = None
         self._roi_source_key = None
@@ -741,7 +836,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self.roi_region_changed.emit(None)
         if self._roi_draw_enabled:
             self._attach_roi_selector()
-        self.draw_idle()
+        if paint:
+            self.draw()
 
     def _region_from_selector(self):
         """
@@ -918,13 +1014,21 @@ class MplCanvas(FigureCanvasQTAgg):
             self._update_roi_overlay()
 
     def clear(self):
-        print_debug("MplCanvas.clear", "Starting Clear", category="DEBUG_PLOTS")
-        self.clear_roi()
+        """
+        Reset axes and artists for a dimension change without painting.
+
+        The previous Agg frame stays on screen until the following refetch
+        paints via ``_handle_plot_data`` or ``_do_update_plot``.
+        """
+        print_debug("MplCanvas.clear", "Starting Clear", category="plots")
+        self.clear_roi(paint=False)
 
         for model_key in list(self._active_workers.keys()):
             worker = self._active_workers.pop(model_key, None)
             retire_plot_worker(worker, self._pending_workers)
         self._worker_generations.clear()
+
+        remove_2d_artists(self.axes, self._colorbar_state, self.fig)
 
         old_axes = self.axes
         self.axes = self.fig.add_subplot(111)
@@ -933,6 +1037,13 @@ class MplCanvas(FigureCanvasQTAgg):
                 self.fig.delaxes(old_axes)
             except Exception as e:
                 print(f"[MplCanvas.clear] Error removing old axes: {e}")
+
+        for ax in list(self.fig.axes):
+            if ax is not self.axes:
+                try:
+                    ax.remove()
+                except Exception:
+                    pass
 
         self._colorbar_state.clear()
         self._last_2d_plot_key = None
@@ -944,9 +1055,13 @@ class MplCanvas(FigureCanvasQTAgg):
         for model in self.plotArtists.values():
             model.artist = None
 
-        self.draw()
-
     def updateLegend(self):
+        """
+        Rebuild the axes legend from visible labeled lines.
+
+        Does not paint; callers that need a refresh must call :meth:`draw`.
+        """
+        t0 = ttime.time()
         legend = self.axes.get_legend()
         if legend is None or not legend.get_visible():
             if not self._legend_visible:
@@ -967,10 +1082,21 @@ class MplCanvas(FigureCanvasQTAgg):
             labels = [line.get_label() for line in visible_lines]
             self.axes.legend(visible_lines, labels)
 
-        self.draw()
+        print_debug(
+            "MplCanvas.updateLegend",
+            f"lines={len(visible_lines)} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
 
     def autoscale(self):
-        if self._active_render_mode == "image":
+        """
+        Adjust clim or axis limits from currently visible artists.
+
+        Does not paint; callers that need a refresh must call :meth:`draw`.
+        """
+        t0 = ttime.time()
+        mode = self._active_render_mode
+        if mode == "image":
             for image in self.axes.images:
                 if image.get_visible():
                     data = image.get_array()
@@ -983,10 +1109,14 @@ class MplCanvas(FigureCanvasQTAgg):
             cbar = self._colorbar_state.get("colorbar")
             if cbar is not None:
                 cbar.update_ticks()
-            self.draw()
+            print_debug(
+                "MplCanvas.autoscale",
+                f"mode=image {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
             return
 
-        if self._active_render_mode == "mesh":
+        if mode == "mesh":
             for collection in self.axes.collections:
                 if collection.get_visible() and hasattr(collection, "get_array"):
                     arr = np.asarray(collection.get_array())
@@ -996,7 +1126,11 @@ class MplCanvas(FigureCanvasQTAgg):
                             collection.set_clim(
                                 float(np.min(finite)), float(np.max(finite))
                             )
-            self.draw()
+            print_debug(
+                "MplCanvas.autoscale",
+                f"mode=mesh {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
             return
 
         visible_lines = [
@@ -1029,23 +1163,82 @@ class MplCanvas(FigureCanvasQTAgg):
         xspan = x_max - x_min
         if xspan > 0:
             self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
-        self.draw()
+        print_debug(
+            "MplCanvas.autoscale",
+            f"mode=line lines={len(visible_lines)} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
+
+    def resizeEvent(self, event):
+        print_debug(
+            "MplCanvas.resizeEvent",
+            f"id={id(self)} size={event.size().width()}x{event.size().height()} "
+            f"nbs_pending={self._nbs_draw_pending} "
+            f"mpl_pending={getattr(self, '_draw_pending', False)} "
+            f"in_do_draw={self._nbs_in_do_draw}",
+            category="plots",
+        )
+        super().resizeEvent(event)
+
+    def draw_idle(self):
+        print_debug(
+            "MplCanvas.draw_idle",
+            f"id={id(self)} nbs_pending={self._nbs_draw_pending} "
+            f"mpl_pending={getattr(self, '_draw_pending', False)} "
+            f"is_drawing={getattr(self, '_is_drawing', False)} "
+            f"in_do_draw={self._nbs_in_do_draw} "
+            f"via={_draw_caller_summary()}",
+            category="plots",
+        )
+        super().draw_idle()
 
     def draw(self):
-        if not self._draw_pending:
-            self._draw_pending = True
+        caller = _draw_caller_summary()
+        if not self._nbs_draw_pending:
+            self._nbs_draw_pending = True
+            self._nbs_draw_coalesce_count = 0
+            print_debug(
+                "MplCanvas.draw",
+                f"scheduled (16ms) id={id(self)} "
+                f"mpl_pending={getattr(self, '_draw_pending', False)} "
+                f"is_drawing={getattr(self, '_is_drawing', False)} "
+                f"in_do_draw={self._nbs_in_do_draw} via={caller}",
+                category="plots",
+            )
             QTimer.singleShot(16, self._do_draw)
+        else:
+            self._nbs_draw_coalesce_count += 1
+            print_debug(
+                "MplCanvas.draw",
+                f"coalesced=#{self._nbs_draw_coalesce_count} id={id(self)} "
+                f"in_do_draw={self._nbs_in_do_draw} via={caller}",
+                category="plots",
+            )
 
     def _do_draw(self):
-        self._draw_pending = False
-        print_debug("MplCanvas._do_draw", "Drawing", category="DEBUG_PLOTS")
-        super().draw()
+        self._nbs_draw_pending = False
+        coalesced = self._nbs_draw_coalesce_count
+        self._nbs_draw_coalesce_count = 0
+        t0 = ttime.time()
+        self._nbs_in_do_draw = True
+        try:
+            super().draw()
+        finally:
+            self._nbs_in_do_draw = False
+        print_debug(
+            "MplCanvas._do_draw",
+            f"FigureCanvas.draw {ttime.time() - t0:.4f}s "
+            f"coalesced_calls={coalesced} "
+            f"id={id(self)} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
+        )
 
     def remove_run_data(self, run_uid):
         print_debug(
             "MplCanvas.remove_run_data",
             f"Removing run {run_uid}",
-            category="DEBUG_PLOTS",
+            category="plots",
         )
         keys_to_remove = [key for key in self.plotArtists if key[2] == run_uid]
 

@@ -283,7 +283,7 @@ class FilterModel(QSortFilterProxyModel):
             "FilterModel._load_next_filter_chunk",
             f"Loaded chunk {start_row}-{end_row}, "
             f"proxy rowCount={self.rowCount()} target={self._filter_target_rows}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
 
         # Schedule a check after the chunk loads
@@ -304,7 +304,7 @@ class FilterModel(QSortFilterProxyModel):
             "FilterModel._check_filter_sufficiency",
             f"proxy rowCount={visible_count} target={self._filter_target_rows} "
             f"loaded_end={self._filter_loaded_end} pattern={pattern!r}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
 
         if visible_count >= self._filter_target_rows:
@@ -450,7 +450,7 @@ class LazyLoadingTableView(QTableView):
             "LazyLoadingTableView._update_visible_rows",
             f"proxy {first_visible}-{last_visible} -> source {source_first}-{source_last} "
             f"proxy rowCount={proxy_row_count}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
 
         model.set_visible_rows(first_visible, last_visible)

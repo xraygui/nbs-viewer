@@ -48,7 +48,7 @@ def _load_chunk(get_chunk, indexes):
             print_debug(
                 "CatalogTableModel",
                 f"Error loading chunk {start}-{end}: {ex}",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
 
 
@@ -174,7 +174,7 @@ class CatalogTableModel(QAbstractTableModel):
                         print_debug(
                             "CatalogTableModel._process_work_queue",
                             f"Adding remaining chunk to work queue: {remaining_chunk}",
-                            category="DEBUG_RUNLIST",
+                            category="runlist",
                         )
                         self._work_queue.append(remaining_chunk)
                         self._loading_chunks.remove(remaining_chunk)
@@ -185,7 +185,7 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel._process_work_queue",
                 f"All {len(chunks_to_load)} chunks were already being loaded",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
 
         # Schedule the next processing
@@ -210,7 +210,7 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel._handle_worker_finished",
                 f"Removing chunk from loading set: {chunk}",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
             self._loading_chunks.discard(chunk)
 
@@ -230,7 +230,7 @@ class CatalogTableModel(QAbstractTableModel):
         print_debug(
             "CatalogTableModel.on_row_loaded",
             f"Row {rowNum} loaded key={key} cols={len(row)}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
         self.dataChanged.emit(
             self.createIndex(rowNum, 0), self.createIndex(rowNum, len(row) - 1), []
@@ -260,7 +260,7 @@ class CatalogTableModel(QAbstractTableModel):
         print_debug(
             "CatalogTableModel.get_chunk",
             f"Getting chunk {start} to {stop}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
 
         # Determine if we need a forward or reverse slice
@@ -296,7 +296,7 @@ class CatalogTableModel(QAbstractTableModel):
                     print_debug(
                         "CatalogTableModel.get_chunk",
                         f"Error in chunk_generator row {count}: {ex}",
-                        category="DEBUG_RUNLIST",
+                        category="runlist",
                     )
                     row = ["x"] * len(self._catalog.columns)
                 yield key, row
@@ -304,7 +304,7 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel.get_chunk",
                 f"Chunk {start}-{stop} yielded {count} rows",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
 
         loaded_chunk = chunk_generator(chunk)
@@ -354,7 +354,7 @@ class CatalogTableModel(QAbstractTableModel):
                 print_debug(
                     "CatalogTableModel.data",
                     f"Chunk {chunk} is already being loaded",
-                    category="DEBUG_RUNLIST",
+                    category="runlist",
                 )
                 # This chunk is already being loaded, no need to request it again
                 return LOADING_PLACEHOLDER
@@ -367,7 +367,7 @@ class CatalogTableModel(QAbstractTableModel):
                 print_debug(
                     "CatalogTableModel.data",
                     f"Chunk {chunk} is already in the work queue",
-                    category="DEBUG_RUNLIST",
+                    category="runlist",
                 )
                 # This chunk is already in the work queue, no need to add it again
                 return LOADING_PLACEHOLDER
@@ -376,7 +376,7 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel.data",
                 f"Requesting chunk for row {row}: {chunk_start}-{chunk_end}",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
             self._work_queue.append(chunk)
 
@@ -482,13 +482,13 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel.set_visible_rows",
                 f"Visible rows updated: {min(new_visible_rows)} to {max(new_visible_rows)}",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
         else:
             print_debug(
                 "CatalogTableModel.set_visible_rows",
                 "No visible rows",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
 
         # If we're in inverted mode, we need to translate the visible rows
@@ -510,7 +510,7 @@ class CatalogTableModel(QAbstractTableModel):
             print_debug(
                 "CatalogTableModel.set_visible_rows",
                 "Visible rows haven't changed",
-                category="DEBUG_RUNLIST",
+                category="runlist",
             )
             return
 
@@ -546,7 +546,7 @@ class CatalogTableModel(QAbstractTableModel):
         print_debug(
             "CatalogTableModel.request_chunk_load",
             f"Requesting rows {start_row}-{end_row}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
 
         chunks = set()

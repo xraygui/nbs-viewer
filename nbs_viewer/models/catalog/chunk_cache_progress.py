@@ -44,12 +44,13 @@ class TiledFetchStatus:
 
     def label_text(self) -> str:
         """
-        Format status text for a plot UI label.
+        Format short status text for a plot UI label.
 
         Returns
         -------
         str
-            Empty when no Tiled chunks are waiting.
+            Empty when no Tiled chunks are waiting, otherwise
+            ``Fetching loaded/total``.
         """
         if not self.active or self.batch_total <= 0:
             return ""
@@ -57,17 +58,7 @@ class TiledFetchStatus:
         if self.pending_chunks <= 0:
             return ""
 
-        loaded = self.loaded_chunks
-        if self.pending_chunks == 1:
-            return (
-                f"Fetching {self.key} from Tiled: 1 chunk remaining "
-                f"({loaded}/{self.batch_total} loaded)"
-            )
-
-        return (
-            f"Fetching {self.key} from Tiled: {self.pending_chunks} chunks "
-            f"remaining ({loaded}/{self.batch_total} loaded)"
-        )
+        return f"Fetching {self.loaded_chunks}/{self.batch_total}"
 
 
 L2CacheStatus = TiledFetchStatus

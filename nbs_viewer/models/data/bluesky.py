@@ -47,7 +47,7 @@ class BlueskyRun(CatalogRun):
 
     METADATA_KEYS = ["scan_id", "plan_name", "num_points", "date", "exit_status", "uid"]
 
-    @time_function(function_name="BlueskyRun.__init__", category="DEBUG_CATALOG")
+    @time_function(function_name="BlueskyRun.__init__", category="catalog")
     def __init__(self, run, key, catalog, parent=None, chunk_cache=None):
         """
         Initialize the BlueskyRun.
@@ -84,7 +84,7 @@ class BlueskyRun(CatalogRun):
         # Defer keys initialization; emit loading/ready/error via background pool
         # Caller (catalog UI) should schedule async key init using AppModel's pool
 
-    @time_function(category="DEBUG_RUN")
+    @time_function(category="run")
     def _check_data_access(self):
         """Check if run has accessible data."""
         try:
@@ -323,11 +323,6 @@ class BlueskyRun(CatalogRun):
         array-like
             The data for the given key, potentially sliced
         """
-        print_debug(
-            "BlueskyRun.getData",
-            f"getting data for {key}, slice_info={slice_info}",
-            category="DEBUG_CATALOG",
-        )
         if not self._has_data:
             return np.array([])  # Return empty array if no data
 
@@ -371,15 +366,20 @@ class BlueskyRun(CatalogRun):
 
         # Use chunk-aware caching
         try:
+            t0 = time.time()
+            result = self._chunk_cache.get_data(self._run, key, slice_info)
             print_debug(
-                "BlueskyRun.getData", "Loading from chunk cache", category="cache"
+                "BlueskyRun.getData",
+                f"chunk_cache {key} slice={slice_info} "
+                f"{time.time() - t0:.4f}s",
+                category="cache",
             )
-            return self._chunk_cache.get_data(self._run, key, slice_info)
+            return result
         except Exception as e:
             print(f"Error reading chunked data for key {key}: {e}")
             return np.array([])
 
-    # @time_function(category="DEBUG_CATALOG")
+    # @time_function(category="catalog")
     def _manage_cache(self, cache, max_items):
         """
         Limit cache size by removing least recently used items.
@@ -450,7 +450,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             "Getting run['/'.join(['primary', 'data'])].keys()",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
         try:
             all_keys = list(self._run["/".join(["primary", "data"])].keys())
@@ -465,7 +465,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
 
         # Initialize dictionaries
@@ -484,7 +484,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Getting dimension hints took: {time.time() - t1:.3f}s",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
         t2 = time.time()
         # Try to get object keys from descriptors
@@ -502,7 +502,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Getting dimension hints from descriptors took: {time.time() - t1:.3f}s",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
 
         # Process dimension hints
@@ -532,7 +532,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Total getRunKeys took: {time.time() - t_start:.3f}s",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
         self._run_keys_cache = (xkeys, ykeys)
         return self._run_keys_cache
@@ -733,7 +733,7 @@ class BlueskyRun(CatalogRun):
             print_debug(
                 "BlueskyRun._resolve_dims",
                 f"Could not read dims for {key}: {ex}",
-                category="DEBUG_CATALOG",
+                category="catalog",
             )
 
         if raw_dims:
@@ -743,7 +743,7 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun._resolve_dims",
             f"Inferred dims for {key} shape {shape}: {inferred}",
-            category="DEBUG_CATALOG",
+            category="catalog",
         )
         return inferred
 

@@ -315,17 +315,24 @@ class RunListModel(QStandardItemModel):
         return all(model.dynamic_update for model in self._run_models.values())
 
     def set_transform(self, transform_state: dict) -> None:
-        """Set transform state and update all plots."""
+        """
+        Set transform state on all run models.
+
+        Visible plot models refetch via ``transform_changed`` on the artist
+        bus; no separate ``request_plot_update`` to avoid a double fetch.
+        """
         self._transform = (
             transform_state.copy()
         )  # Make a copy to prevent external modification
 
-        # Update transform in all run models
         for model in self._run_models.values():
             model.set_transform(self._transform)
 
-        # Force plot update
-        self.request_plot_update.emit()
+        print_debug(
+            "RunListModel.set_transform",
+            "applied (artist bus via transform_changed)",
+            category="plots",
+        )
 
     @property
     def transform(self) -> dict:
@@ -400,6 +407,11 @@ class RunListModel(QStandardItemModel):
         # Notify views of selection change
         self.selected_keys_changed.emit(
             self._current_x_keys, self._current_y_keys, self._current_norm_keys
+        )
+        print_debug(
+            "RunListModel.set_selected_keys",
+            f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
+            category="plots",
         )
         self.request_plot_update.emit()
         # Update plot if auto_add is enabled or force_update is True
@@ -522,7 +534,7 @@ class RunListModel(QStandardItemModel):
         print_debug(
             "RunListModel.remove_uids",
             f"Removing uids {uid_list}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
         for uid in uid_list:
             if uid in self._run_models:
@@ -577,7 +589,7 @@ class RunListModel(QStandardItemModel):
         print_debug(
             "RunListModel.set_uids_visible",
             f"Setting uids {uids} to {is_visible}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
         if self._single_selection_mode and is_visible and uids:
             # In single-selection mode, only the first UID should be visible
@@ -605,6 +617,11 @@ class RunListModel(QStandardItemModel):
 
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
+        print_debug(
+            "RunListModel.set_uids_visible",
+            f"request_plot_update uids={uids} visible={is_visible}",
+            category="plots",
+        )
         self.request_plot_update.emit()
 
     def set_run_visible(self, run: Union[CatalogRun, RunModel], is_visible: bool):

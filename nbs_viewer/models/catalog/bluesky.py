@@ -157,7 +157,7 @@ class BlueskyCatalog(CatalogBase):
         print_debug(
             "BlueskyCatalog.items_slice",
             f"Getting slice {slice_obj}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
         sliced_items = (
             self._catalog.items()[slice_obj] if slice_obj else self._catalog.items()
@@ -177,7 +177,7 @@ class BlueskyCatalog(CatalogBase):
                 print_debug(
                     "BlueskyCatalog.items_slice",
                     f"Error wrapping run {key}: {ex}",
-                    category="DEBUG_RUNLIST",
+                    category="runlist",
                 )
 
     def search(self, query: Dict) -> "BlueskyCatalog":

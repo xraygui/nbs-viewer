@@ -3,7 +3,7 @@ from typing import Optional, Set
 
 from qtpy.QtCore import QThread, Signal
 
-from nbs_viewer.utils import print_debug, time_function
+from nbs_viewer.utils import print_debug
 
 
 def disconnect_plot_worker_signals(worker) -> None:
@@ -79,15 +79,12 @@ class PlotWorker(QThread):
         self.dimension = dimension
         self.generation = generation
         self.artist = artist
-        print_debug("PlotWorker", "Created new worker", category="DEBUG_PLOTS")
 
-    @time_function(function_name="PlotWorker.run", category="DEBUG_PLOTS")
     def run(self):
         """Fetch and prepare the plot data."""
         try:
             if self.isInterruptionRequested():
                 return
-            print_debug("PlotWorker", "Starting data fetch", category="DEBUG_PLOTS")
             t1 = ttime.time()
             bundle = self.plot_data.get_plot_bundle(
                 self.slice_info,
@@ -99,15 +96,15 @@ class PlotWorker(QThread):
                 print_debug(
                     "PlotWorker",
                     "Fetch finished after interruption, discarding",
-                    category="DEBUG_PLOTS",
+                    category="plots",
                 )
                 return
-            t2 = ttime.time()
             print_debug(
-                "PlotWorker",
-                f"Data fetch complete - mode={bundle.render_mode}, "
-                f"y shape={bundle.y.shape}, time: {t2 - t1:.2f}s",
-                category="DEBUG_PLOTS",
+                "PlotWorker.run",
+                f"bundle ready label={self.plot_data.label} "
+                f"mode={bundle.render_mode} y.shape={bundle.y.shape} "
+                f"gen={self.generation} {ttime.time() - t1:.4f}s",
+                category="plots",
             )
             self.data_ready.emit(
                 bundle, self.plot_data, self.artist, self.generation
@@ -116,5 +113,5 @@ class PlotWorker(QThread):
             if self.isInterruptionRequested():
                 return
             error_msg = f"Error fetching plot data: {str(e)}"
-            print_debug("PlotWorker", error_msg, category="DEBUG_PLOTS")
+            print_debug("PlotWorker", error_msg, category="plots")
             self.error_occurred.emit(error_msg)

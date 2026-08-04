@@ -231,7 +231,7 @@ class URISourceModel(SourceModel):
             except Exception as e:
                 auth_failures.append(f"TILED_API_KEY environment variable: {e}")
                 context.api_key = None
-                print_debug("URISourceModel", f"TILED_API_KEY failed: {e}")
+                print_debug("URISourceModel", f"TILED_API_KEY failed: {e}", category="catalog")
 
         # Check for manual API key
         if self.api_key:
@@ -243,7 +243,7 @@ class URISourceModel(SourceModel):
             except Exception as e:
                 auth_failures.append(f"Manual API key: {e}")
                 context.api_key = None
-                print_debug("URISourceModel", f"Manual API key failed: {e}")
+                print_debug("URISourceModel", f"Manual API key failed: {e}", category="catalog")
 
         # Check if we have cached tokens and remember_me is True
         if self.use_cached_tokens:
@@ -276,7 +276,7 @@ class URISourceModel(SourceModel):
                     )
             except Exception as e:
                 auth_failures.append(f"Interactive authentication callback: {e}")
-                print_debug("URISourceModel", f"Authentication callback failed: {e}")
+                print_debug("URISourceModel", f"Authentication callback failed: {e}", category="catalog")
         elif not self.auth_callback:
             auth_failures.append(
                 "Interactive authentication callback: No callback provided"
