@@ -1,5 +1,5 @@
 """
-Manage the derivative plot dialog and debounced preview updates.
+Manage the ROI workbench window and debounced preview updates.
 """
 
 from __future__ import annotations
@@ -21,18 +21,19 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     copy_plot_bundle,
 )
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import expand_rect_for_profile
+from nbs_viewer.models.plot.region import RectRegion, expand_region_for_profile
+from nbs_viewer.models.plot.roi_set import RoiSetModel
 
-from .derivative_plot_dialog import DerivativePlotDialog
 from .derivative_preview_canvas import DerivativePreviewWorker
 from .mpl_canvas import MplCanvas
 from .plotDimensionWidget import PlotDimensionControl
 from .roi_panel import RoiPanel
+from .roi_window import RoiWindow
 
 
 class DerivativeController(QObject):
     """
-    Open the modeless derivative dialog and run debounced preview fetches.
+    Open the ROI window and run debounced preview fetches for the selected ROI.
     """
 
     def __init__(
@@ -40,32 +41,40 @@ class DerivativeController(QObject):
         canvas: MplCanvas,
         dimension_control: PlotDimensionControl,
         panel: RoiPanel,
+        roi_set: RoiSetModel,
         parent=None,
     ):
         super().__init__(parent)
         self.canvas = canvas
         self.dimension_control = dimension_control
         self.panel = panel
-        self._dialog = None
+        self.roi_set = roi_set
+        self._window = None
         self._active_worker = None
         self._commit_worker = None
         self._pending_workers = set()
         self._generation = 0
         self._commit_generation = 0
         self._pending_commit_span_full = None
+        self._pending_commit_entry_id = None
+        self._save_all_queue = []
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.setInterval(150)
         self._debounce_timer.timeout.connect(self._run_preview)
 
-        panel.create_derivative_requested.connect(self._open_or_raise_dialog)
+        panel.roi_window_requested.connect(self._open_or_raise_window)
+        panel.crop_draw_toggled.connect(self._on_panel_crop_draw_toggled)
         canvas.roi_region_changed.connect(self._on_roi_or_view_changed)
         canvas.plot_view_updated.connect(self._on_parent_plot_updated)
         dimension_control.indicesUpdated.connect(self._on_roi_or_view_changed)
         dimension_control.cubeViewChanged.connect(self._on_roi_or_view_changed)
+        roi_set.selection_changed.connect(self._on_selection_changed)
+        roi_set.entry_changed.connect(self._on_entry_changed)
+        roi_set.entries_changed.connect(self._on_roi_or_view_changed)
 
-        self._update_create_button_enabled()
+        self._update_launcher_enabled()
 
     def _parent_spec(self):
         spec = self.dimension_control._cube_view_spec
@@ -77,39 +86,90 @@ class DerivativeController(QObject):
         names = self.dimension_control._dim_names
         return names if names is not None else ()
 
-    def _open_or_raise_dialog(self):
-        if self._dialog is None:
+    def _open_or_raise_window(self):
+        if self._window is None:
             parent_window = self.panel.window()
-            self._dialog = DerivativePlotDialog(parent_window)
-            self._dialog.request_changed.connect(self._schedule_preview)
-            self._dialog.preview_enabled_changed.connect(
-                self._schedule_preview
-            )
-            self._dialog.save_requested.connect(self._on_save_requested)
-            self._dialog.full_height_requested.connect(
-                self._apply_roi_full_height
-            )
-            self._dialog.full_width_requested.connect(
-                self._apply_roi_full_width
-            )
-            self._dialog.finished.connect(self._on_dialog_finished)
-        self._update_dialog_context()
-        self._dialog.show()
-        self._dialog.raise_()
-        self._dialog.activateWindow()
+            self._window = RoiWindow(self.roi_set, parent_window)
+            self._window.draw_toggled.connect(self._on_window_draw_toggled)
+            self._window.clear_requested.connect(self._on_window_clear)
+            self._window.delete_requested.connect(self._on_window_delete)
+            self._window.remove_stale_requested.connect(self._on_window_remove_stale)
+            self._window.add_roi_requested.connect(self._on_add_roi)
+            self._window.operation_changed.connect(self._schedule_preview)
+            self._window.preview_enabled_changed.connect(self._schedule_preview)
+            self._window.save_selected_requested.connect(self._on_save_selected)
+            self._window.save_all_requested.connect(self._on_save_all)
+            self._window.full_height_requested.connect(self._apply_roi_full_height)
+            self._window.full_width_requested.connect(self._apply_roi_full_width)
+            self._window.finished.connect(self._on_window_finished)
+        self._update_window_context()
+        self._window.show()
+        self._window.raise_()
+        self._window.activateWindow()
         self._trigger_initial_preview()
 
-    def _on_dialog_finished(self):
+    def _on_window_finished(self):
         self._cancel_preview_worker()
         self._cancel_commit_worker()
-        self._dialog = None
+        self._save_all_queue.clear()
+        if self._window is not None:
+            self.canvas.set_roi_draw_enabled(False)
+            self._window.set_draw_checked(False)
+        self._window = None
+
+    def _on_window_draw_toggled(self, enabled: bool):
+        if enabled:
+            self.panel.set_crop_draw_checked(False)
+            if self.canvas.is_crop_draw_enabled():
+                self.canvas.set_crop_draw_enabled(False)
+        self.canvas.set_roi_draw_enabled(enabled)
+
+    def _on_panel_crop_draw_toggled(self, enabled: bool):
+        if enabled and self._window is not None:
+            self._window.set_draw_checked(False)
+
+    def _on_window_clear(self):
+        self.canvas.set_roi_draw_enabled(False)
+        if self._window is not None:
+            self._window.set_draw_checked(False)
+        self.roi_set.clear()
+        if self._window is not None:
+            self._window.set_status("Cleared all ROIs")
+            self._window.show_preview_message("No ROI selected")
+
+    def _on_window_delete(self):
+        entry = self.roi_set.selected_entry()
+        if entry is None:
+            return
+        self.roi_set.remove(entry.id)
+        if self._window is not None:
+            self._window.set_status(f"Deleted {entry.display_label}")
+
+    def _on_window_remove_stale(self):
+        removed = self.roi_set.remove_stale()
+        if self._window is not None:
+            if removed:
+                self._window.set_status(f"Removed {removed} stale ROI(s)")
+            else:
+                self._window.set_status("No stale ROIs")
+
+    def _on_add_roi(self, region_type: str):
+        if region_type != "rect":
+            if self._window is not None:
+                self._window.set_status(f"ROI type {region_type!r} is not available yet")
+            return
+        entry_id = self.roi_set.add_placeholder_rect()
+        if self._window is not None:
+            self._window.set_draw_checked(True)
+            self.canvas.set_roi_draw_enabled(True)
+            entry = self.roi_set.get(entry_id)
+            label = entry.display_label if entry is not None else "ROI"
+            self._window.set_status(f"Draw {label} on the parent plot")
 
     def _on_parent_plot_updated(self):
-        if self._dialog is None or not self._dialog.isVisible():
+        if self._window is None or not self._window.isVisible():
             return
-        if not self._dialog.is_preview_enabled():
-            return
-        if self.canvas.get_roi_region() is None:
+        if not self._window.is_preview_enabled():
             return
         self._schedule_preview()
 
@@ -132,37 +192,35 @@ class DerivativeController(QObject):
         return plot_model.last_bundle
 
     def _on_roi_or_view_changed(self, *_args):
-        self._update_create_button_enabled()
-        if self._dialog is None or not self._dialog.isVisible():
+        self._update_launcher_enabled()
+        if self._window is None or not self._window.isVisible():
             return
-        self._update_dialog_context()
+        self._update_window_context()
         self._schedule_preview()
 
-    def _update_create_button_enabled(self):
-        enabled = (
-            self.canvas.region_controls_enabled()
-            and self.canvas.get_roi_region() is not None
-        )
-        self.panel.set_create_derivative_enabled(enabled)
+    def _on_selection_changed(self, *_args):
+        if self._window is None or not self._window.isVisible():
+            return
+        self._update_window_context()
+        self._schedule_preview()
 
-    def _update_dialog_context(self):
-        if self._dialog is None:
+    def _on_entry_changed(self, *_args):
+        if self._window is None or not self._window.isVisible():
+            return
+        self._schedule_preview()
+
+    def _update_launcher_enabled(self):
+        self.panel.set_roi_window_enabled(self.canvas.region_controls_enabled())
+
+    def _update_window_context(self):
+        if self._window is None:
             return
         model = self.canvas.get_single_visible_2d_model()
-        region = self.canvas.get_roi_region()
         if model is None:
             source = "No single 2D dataset selected"
         else:
             source = f"{model.label} · {model._ykey}"
-        if region is None:
-            roi_text = "ROI: —"
-        else:
-            region = region.normalized()
-            roi_text = (
-                f"ROI: ({region.x0:g}, {region.y0:g}) — "
-                f"({region.x1:g}, {region.y1:g})"
-            )
-        self._dialog.set_context(source, roi_text)
+        self._window.set_context(source)
 
         parent_spec = self._parent_spec()
         parent_frame = None
@@ -171,74 +229,74 @@ class DerivativeController(QObject):
                 parent_frame = frame_from_bundle(model.last_bundle)
             except ValueError:
                 parent_frame = None
-        self._dialog.set_profile_context(
+        self._window.set_profile_context(
             parent_spec,
             self._axis_names(),
             parent_frame,
         )
+        if self.canvas.is_roi_draw_enabled() != self._window.draw_button.isChecked():
+            self._window.set_draw_checked(self.canvas.is_roi_draw_enabled())
 
     def _schedule_preview(self, *_args):
-        if self._dialog is None:
+        if self._window is None:
             return
         self._debounce_timer.stop()
         self._debounce_timer.start()
 
     def _trigger_initial_preview(self):
         """
-        Run preview once the dialog is shown and laid out.
-
-        A direct call from ``show()`` can run before Qt reports the dialog
-        visible, so the first fetch is deferred to the next event-loop tick.
+        Run preview once the window is shown and laid out.
         """
-        if self._dialog is None:
+        if self._window is None:
             return
         self._debounce_timer.stop()
-        if not self._dialog.is_preview_enabled():
+        if not self._window.is_preview_enabled():
             return
-        self._dialog.show_preview_message("Updating preview…")
+        self._window.show_preview_message("Updating preview…")
         QTimer.singleShot(0, self._run_preview)
 
-    def _commit_span_full(self, parent_spec, profile_storage_axis: int) -> bool:
+    def _commit_span_full(self, parent_spec, profile_storage_axis: int, span_full: bool) -> bool:
         """
         Return whether stack-spectrum save should span the full profile axis.
         """
         if classify_profile_kind(parent_spec, profile_storage_axis) != "stack_spectrum":
-            return self._dialog.span_full_profile_axis()
+            return span_full
         if is_plot_plane_storage_axis(parent_spec, profile_storage_axis):
             return True
-        return self._dialog.span_full_profile_axis()
+        return span_full
+
+    def _selected_entry_for_preview(self):
+        entry = self.roi_set.selected_entry()
+        if entry is None:
+            raise ValueError("Select an ROI")
+        if entry.stale:
+            raise ValueError("Selected ROI is stale; redraw it before previewing")
+        if not entry.region.has_area():
+            raise ValueError("Draw the selected ROI on the parent plot")
+        return entry
 
     def _start_preview_worker(
         self,
         generation: int,
-        for_commit: bool,
+        entry,
         span_full_override=None,
     ):
-        region = self.canvas.get_roi_region()
-        if region is None:
-            raise ValueError("Draw an ROI on the parent plot")
-
         plot_model = self.canvas.get_single_visible_2d_model()
         if plot_model is None:
             raise ValueError("Select a single 2D dataset")
 
         parent_spec = self._parent_spec()
-        if self._dialog.is_profile_output():
-            span_full = (
-                span_full_override
-                if span_full_override is not None
-                else self._dialog.span_full_profile_axis()
-            )
-            request = self._dialog.build_profile_request(
-                region,
-                parent_spec=parent_spec,
-                span_full_profile_axis=span_full,
-            )
-        else:
-            request = self._dialog.build_plane_request(
-                region,
-                parent_spec=parent_spec,
-            )
+        span_full = (
+            span_full_override
+            if span_full_override is not None
+            else entry.operation.span_full_profile_axis
+        )
+        request = self._window.build_profile_request(
+            entry.region,
+            parent_spec=parent_spec,
+            span_full_profile_axis=span_full,
+            operation=entry.operation,
+        )
         if request is None:
             raise ValueError("Parent cube view is unavailable")
 
@@ -254,27 +312,24 @@ class DerivativeController(QObject):
         return worker
 
     def _run_preview(self):
-        if self._dialog is None:
+        if self._window is None:
             return
-        if not self._dialog.is_preview_enabled():
+        if not self._window.is_preview_enabled():
             self._cancel_preview_worker()
-            self._dialog.show_preview_message("Preview disabled")
+            self._window.show_preview_message("Preview disabled")
             return
 
-        region = self.canvas.get_roi_region()
-        if region is None:
-            self._dialog.show_preview_message(
-                "Draw an ROI on the parent plot"
-            )
-            self._dialog.set_status("")
+        try:
+            entry = self._selected_entry_for_preview()
+        except ValueError as exc:
+            self._window.show_preview_message(str(exc))
+            self._window.set_status("")
             return
 
         plot_model = self.canvas.get_single_visible_2d_model()
         if plot_model is None:
-            self._dialog.show_preview_message(
-                "Select a single 2D dataset"
-            )
-            self._dialog.set_status("")
+            self._window.show_preview_message("Select a single 2D dataset")
+            self._window.set_status("")
             return
 
         self._cancel_preview_worker()
@@ -282,20 +337,18 @@ class DerivativeController(QObject):
         generation = self._generation
 
         try:
-            worker = self._start_preview_worker(generation, for_commit=False)
+            worker = self._start_preview_worker(generation, entry)
         except ValueError as exc:
-            self._dialog.show_preview_message("Preview unavailable")
-            self._dialog.set_status(str(exc))
+            self._window.show_preview_message("Preview unavailable")
+            self._window.set_status(str(exc))
             return
 
         worker.preview_ready.connect(self._on_preview_ready)
         worker.error_occurred.connect(self._on_preview_error)
-        worker.finished.connect(
-            lambda w=worker: self._on_worker_finished(w)
-        )
+        worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
         self._active_worker = worker
         self._pending_workers.add(worker)
-        self._dialog.set_status("Updating preview…")
+        self._window.set_status("Updating preview…")
         worker.start()
 
     def _cancel_preview_worker(self):
@@ -350,54 +403,69 @@ class DerivativeController(QObject):
             self._commit_worker = None
 
     def _on_preview_ready(self, bundle, generation):
-        if self._dialog is None or generation != self._generation:
+        if self._window is None or generation != self._generation:
             return
-        if not self._dialog.is_preview_enabled():
+        if not self._window.is_preview_enabled():
             return
-        self._dialog.show_preview_bundle(bundle)
-        self._dialog.set_status("")
+        self._window.show_preview_bundle(bundle)
+        self._window.set_status("")
 
     def _on_preview_error(self, message, generation):
-        if self._dialog is None or generation != self._generation:
+        if self._window is None or generation != self._generation:
             return
-        self._dialog.show_preview_message("Preview unavailable")
-        self._dialog.set_status(message)
+        self._window.show_preview_message("Preview unavailable")
+        self._window.set_status(message)
 
-    def _on_save_requested(self):
-        self._start_commit()
+    def _on_save_selected(self):
+        self._save_all_queue.clear()
+        self._start_commit(self.roi_set.selected_id)
 
-    def _start_commit(self):
-        if self._dialog is None:
+    def _on_save_all(self):
+        self._save_all_queue = [
+            entry.id
+            for entry in self.roi_set.entries()
+            if not entry.stale and entry.region.has_area()
+        ]
+        if not self._save_all_queue:
+            if self._window is not None:
+                self._window.set_status("No drawable ROIs to save")
             return
-        if not self._dialog.is_profile_output():
-            self._dialog.set_status(
-                "Committed 2D planes are not supported yet; "
-                "use preview or switch to 1D profile"
-            )
+        self._start_commit(self._save_all_queue.pop(0))
+
+    def _start_commit(self, entry_id):
+        if self._window is None or entry_id is None:
             return
 
-        region = self.canvas.get_roi_region()
-        if region is None:
-            self._dialog.set_status("Draw an ROI on the parent plot")
+        entry = self.roi_set.get(entry_id)
+        if entry is None:
+            self._window.set_status("Selected ROI is unavailable")
+            return
+        if entry.stale:
+            self._window.set_status("Selected ROI is stale; redraw it before saving")
+            return
+        if not entry.region.has_area():
+            self._window.set_status("Draw the selected ROI on the parent plot")
             return
 
         plot_model = self.canvas.get_single_visible_2d_model()
         if plot_model is None:
-            self._dialog.set_status("Select a single 2D dataset")
+            self._window.set_status("Select a single 2D dataset")
             return
 
-        width = region.normalized().x1 - region.normalized().x0
-        height = region.normalized().y1 - region.normalized().y0
-        if width == 0.0 or height == 0.0:
-            self._dialog.set_status("ROI has zero width or height")
-            return
+        if isinstance(entry.region, RectRegion):
+            region = entry.region.normalized()
+            if region.x1 - region.x0 == 0.0 or region.y1 - region.y0 == 0.0:
+                self._window.set_status("ROI has zero width or height")
+                return
 
         parent_spec = self._parent_spec()
         if parent_spec is None:
-            self._dialog.set_status("Parent cube view is unavailable")
+            self._window.set_status("Parent cube view is unavailable")
             return
 
-        profile_axis = self._dialog.get_profile_storage_axis()
+        profile_axis = entry.operation.profile_storage_axis
+        if profile_axis is None:
+            profile_axis = self._window.get_profile_storage_axis()
         profile_kind = classify_profile_kind(parent_spec, profile_axis)
         if profile_kind == "local_profile":
             scan_axis = scan_profile_storage_axis(parent_spec)
@@ -406,82 +474,84 @@ class DerivativeController(QObject):
                 hint = names[scan_axis]
             else:
                 hint = "the leading scan axis"
-            self._dialog.set_status(
+            self._window.set_status(
                 f"Select a profile along {hint} to save to Run Display"
             )
+            self._save_all_queue.clear()
             return
 
-        span_full = self._commit_span_full(parent_spec, profile_axis)
-        request = self._dialog.build_profile_request(
-            region,
-            parent_spec=parent_spec,
-            span_full_profile_axis=span_full,
+        span_full = self._commit_span_full(
+            parent_spec,
+            profile_axis,
+            entry.operation.span_full_profile_axis,
         )
-        if request is None:
-            self._dialog.set_status("Parent cube view is unavailable")
-            return
-
         self._cancel_commit_worker()
         self._commit_generation += 1
         generation = self._commit_generation
         self._pending_commit_span_full = span_full
-        self._dialog.set_status("Saving…")
+        self._pending_commit_entry_id = entry_id
+        self._window.set_status(f"Saving {entry.display_label}…")
 
         try:
             worker = self._start_preview_worker(
                 generation,
-                for_commit=True,
+                entry,
                 span_full_override=span_full,
             )
         except ValueError as exc:
-            self._dialog.set_status(str(exc))
+            self._window.set_status(str(exc))
+            self._save_all_queue.clear()
             return
 
         worker.preview_ready.connect(self._on_commit_ready)
         worker.error_occurred.connect(self._on_commit_error)
-        worker.finished.connect(
-            lambda w=worker: self._on_worker_finished(w)
-        )
+        worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
         self._commit_worker = worker
         self._pending_workers.add(worker)
         worker.start()
 
     def _on_commit_ready(self, bundle, generation):
-        if self._dialog is None or generation != self._commit_generation:
+        if self._window is None or generation != self._commit_generation:
             return
         if bundle.render_mode != "line" or bundle.ndim != 1:
-            self._dialog.set_status(
-                "Saved derivatives must be 1D line profiles"
-            )
+            self._window.set_status("Saved derivatives must be 1D line profiles")
+            self._save_all_queue.clear()
             return
 
         plot_model = self.canvas.get_single_visible_2d_model()
-        region = self.canvas.get_roi_region()
-        if plot_model is None or region is None:
+        entry = self.roi_set.get(self._pending_commit_entry_id)
+        if plot_model is None or entry is None:
             return
 
         parent_spec = self._parent_spec()
         span_full = self._pending_commit_span_full
-        request = self._dialog.build_profile_request(
-            region,
+        request = self._window.build_profile_request(
+            entry.region,
             parent_spec=parent_spec,
             span_full_profile_axis=span_full,
+            operation=entry.operation,
         )
         if request is None:
             return
 
-        label = self._dialog.get_label() or default_profile_label(
-            request,
-            self._axis_names(),
-            parent_spec=parent_spec,
+        label = (
+            entry.operation.label
+            or entry.display_label
+            or default_profile_label(
+                request,
+                self._axis_names(),
+                parent_spec=parent_spec,
+            )
         )
         x_keys, _, _ = plot_model._run.get_selected_keys()
         committed_xkey = x_keys[0] if x_keys else ""
 
-        profile_axis = self._dialog.get_profile_storage_axis()
+        profile_axis = entry.operation.profile_storage_axis
+        if profile_axis is None:
+            profile_axis = self._window.get_profile_storage_axis()
         profile_kind = classify_profile_kind(parent_spec, profile_axis)
 
-        entry = FrozenSpectrum(
+        frozen = FrozenSpectrum(
             key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
             label=label,
             bundle=copy_plot_bundle(bundle),
@@ -495,13 +565,18 @@ class DerivativeController(QObject):
                 str(self.canvas._cube_view_spec),
             ),
         )
-        plot_model._run.register_frozen_spectrum(entry)
-        self._dialog.set_status(f"Saved: {label}")
+        plot_model._run.register_frozen_spectrum(frozen)
+        self._window.set_status(f"Saved: {label}")
+
+        if self._save_all_queue:
+            next_id = self._save_all_queue.pop(0)
+            QTimer.singleShot(0, lambda: self._start_commit(next_id))
 
     def _on_commit_error(self, message, generation):
-        if self._dialog is None or generation != self._commit_generation:
+        if self._window is None or generation != self._commit_generation:
             return
-        self._dialog.set_status(message)
+        self._window.set_status(message)
+        self._save_all_queue.clear()
 
     def _apply_roi_full_height(self):
         self._apply_roi_full_span("plot_y")
@@ -511,21 +586,21 @@ class DerivativeController(QObject):
 
     def _apply_roi_full_span(self, profile_axis: str):
         region = self.canvas.get_roi_region()
-        if region is None:
-            if self._dialog is not None:
-                self._dialog.set_status("Draw an ROI on the parent plot first")
+        if region is None or not region.has_area():
+            if self._window is not None:
+                self._window.set_status("Draw an ROI on the parent plot first")
             return
         try:
             frame = self.canvas.get_view_frame()
         except ValueError as exc:
-            if self._dialog is not None:
-                self._dialog.set_status(str(exc))
+            if self._window is not None:
+                self._window.set_status(str(exc))
             return
-        if self._dialog is not None:
-            selected = self._dialog.profile_axis_for_roi_span()
+        if self._window is not None:
+            selected = self._window.profile_axis_for_roi_span()
             if selected is not None:
                 profile_axis = selected
-        expanded = expand_rect_for_profile(frame, region, profile_axis)
+        expanded = expand_region_for_profile(frame, region, profile_axis)
         self.canvas.apply_roi_from_region(expanded)
-        if self._dialog is not None:
+        if self._window is not None:
             self._schedule_preview()

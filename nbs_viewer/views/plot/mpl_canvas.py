@@ -9,6 +9,7 @@ import traceback
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
@@ -26,10 +27,30 @@ from ...models.plot.plot_view_frame import (
     view_fingerprint_from_bundle,
 )
 from ...models.plot.region import RectRegion
+from ...models.plot.roi_set import RoiSetModel
 from ...models.plot.view_crop import ViewCrop
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
+
+_ROI_EDGE_WIDTH = 2.5
+_ROI_HALO_WIDTH = 4.5
+_ROI_FILL_ALPHA = 0.12
+_ROI_STALE_FILL_ALPHA = 0.08
+_CROP_SELECTOR_PROPS = dict(
+    facecolor=to_rgba("#ff7f0e", 0.12),
+    edgecolor="#ff7f0e",
+    fill=True,
+    linewidth=_ROI_EDGE_WIDTH,
+    linestyle="--",
+)
+_CROP_OVERLAY_PROPS = dict(
+    linewidth=_ROI_EDGE_WIDTH,
+    edgecolor="#ff7f0e",
+    facecolor=to_rgba("#ff7f0e", 0.10),
+    fill=True,
+    linestyle="--",
+)
 
 
 def _draw_caller_summary(skip=2, limit=6):
@@ -88,7 +109,9 @@ class MplCanvas(FigureCanvasQTAgg):
     Signals
     -------
     roi_region_changed : object
-        Emitted with a :class:`RectRegion` or ``None`` when the ROI changes.
+        Emitted with the selected ROI geometry or ``None``.
+    crop_region_changed : object
+        Emitted with the draft crop :class:`RectRegion` or ``None``.
     view_crop_changed : object
         Emitted with a :class:`ViewCrop` or ``None`` when the view crop changes.
     plot_view_updated : Signal
@@ -96,6 +119,7 @@ class MplCanvas(FigureCanvasQTAgg):
     """
 
     roi_region_changed = Signal(object)
+    crop_region_changed = Signal(object)
     view_crop_changed = Signal(object)
     plot_view_updated = Signal()
 
@@ -127,12 +151,14 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_render_mode = None
         self._colorbar_state = {}
         self.currentDim = 1
-        self._roi_region = None
-        self._roi_source_key = None
+        self._roi_set: Optional[RoiSetModel] = None
         self._roi_selector = None
-        self._roi_overlay = None
+        self._roi_overlays = {}
         self._roi_draw_enabled = False
-        self._roi_view_fingerprint = None
+        self._crop_draft_region = None
+        self._crop_selector = None
+        self._crop_overlay = None
+        self._crop_draw_enabled = False
         self._view_crop: Optional[ViewCrop] = None
         self._last_2d_view_crop = None
 
@@ -675,17 +701,50 @@ class MplCanvas(FigureCanvasQTAgg):
         for model in self.plotArtists.values():
             model.artist = None
         self._destroy_roi_selector()
-        self._remove_roi_overlay()
+        self._destroy_crop_selector()
+        self._remove_roi_overlays()
+        self._remove_crop_overlay()
         self._active_render_mode = None
         self.axes.set_aspect("auto")
 
+    def set_roi_set_model(self, roi_set: RoiSetModel) -> None:
+        """
+        Attach the ROI set model that owns geometry and selection.
+        """
+        if self._roi_set is not None:
+            try:
+                self._roi_set.entries_changed.disconnect(self._on_roi_set_changed)
+                self._roi_set.entry_changed.disconnect(self._on_roi_entry_changed)
+                self._roi_set.selection_changed.disconnect(
+                    self._on_roi_selection_changed
+                )
+            except (TypeError, RuntimeError):
+                pass
+        self._roi_set = roi_set
+        roi_set.entries_changed.connect(self._on_roi_set_changed)
+        roi_set.entry_changed.connect(self._on_roi_entry_changed)
+        roi_set.selection_changed.connect(self._on_roi_selection_changed)
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+
+    def get_roi_set_model(self) -> Optional[RoiSetModel]:
+        """
+        Return the attached ROI set model, if any.
+        """
+        return self._roi_set
+
     def apply_roi_from_region(self, region) -> None:
         """
-        Set the canvas ROI from a :class:`RectRegion` in data coordinates.
+        Set the selected ROI from a :class:`RectRegion` in data coordinates.
         """
-        self._set_roi_region(region.normalized())
+        if self._roi_set is None:
+            return
+        region = region.normalized()
+        self._roi_set.set_or_replace_single(
+            region,
+            view_fingerprint=self.current_view_fingerprint(),
+        )
         if self._roi_selector is not None:
-            region = region.normalized()
             self._roi_selector.extents = (
                 region.x0,
                 region.x1,
@@ -768,15 +827,48 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         return self._roi_draw_enabled
 
+    def is_crop_draw_enabled(self):
+        """
+        Return whether interactive crop drawing is active.
+        """
+        return self._crop_draw_enabled
+
     def get_roi_region(self):
         """
-        Return the current rectangle region, if any.
+        Return the selected ROI geometry, if any.
+
+        Returns
+        -------
+        RegionDefinition or None
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_region()
+
+    def get_selected_roi_entry(self):
+        """
+        Return the selected :class:`RoiEntry`, if any.
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_entry()
+
+    def is_selected_roi_stale(self) -> bool:
+        """
+        Return whether the selected ROI is marked stale.
+        """
+        entry = self.get_selected_roi_entry()
+        return entry is not None and entry.stale
+
+    def get_crop_region(self):
+        """
+        Return the draft crop rectangle, if any.
 
         Returns
         -------
         RectRegion or None
         """
-        return self._roi_region
+        return self._crop_draft_region
 
     def get_view_crop(self) -> Optional[ViewCrop]:
         """
@@ -857,31 +949,58 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def get_roi_view_fingerprint(self):
         """
-        Return the view fingerprint stored when the ROI was committed.
+        Return the view fingerprint stored with the selected ROI.
         """
-        return self._roi_view_fingerprint
+        entry = self.get_selected_roi_entry()
+        if entry is None:
+            return None
+        return entry.view_fingerprint
 
     def set_roi_draw_enabled(self, enabled: bool):
         """
-        Enable or disable interactive rectangle drawing.
+        Enable or disable interactive ROI rectangle drawing.
         """
         enabled = bool(enabled)
+        if enabled and self._crop_draw_enabled:
+            self.set_crop_draw_enabled(False)
         if enabled == self._roi_draw_enabled:
             return
         self._roi_draw_enabled = enabled
         if self._roi_draw_enabled:
-            self._remove_roi_overlay()
+            self._remove_roi_overlays()
             self._attach_roi_selector()
         else:
             if self._roi_selector is not None:
-                region = self._region_from_selector()
+                region = self._region_from_selector(self._roi_selector)
                 if region is not None:
-                    self._set_roi_region(region, update_overlay=True)
+                    self._commit_roi_region(region)
             self._detach_roi_selector()
+            self._update_roi_overlays()
+
+    def set_crop_draw_enabled(self, enabled: bool):
+        """
+        Enable or disable interactive crop rectangle drawing.
+        """
+        enabled = bool(enabled)
+        if enabled and self._roi_draw_enabled:
+            self.set_roi_draw_enabled(False)
+        if enabled == self._crop_draw_enabled:
+            return
+        self._crop_draw_enabled = enabled
+        if self._crop_draw_enabled:
+            self._remove_crop_overlay()
+            self._attach_crop_selector()
+        else:
+            if self._crop_selector is not None:
+                region = self._region_from_selector(self._crop_selector)
+                if region is not None:
+                    self._set_crop_draft_region(region, update_overlay=True)
+            self._detach_crop_selector()
+            self._update_crop_overlay()
 
     def clear_roi(self, paint=True):
         """
-        Remove the ROI selector, overlay, and stored region.
+        Clear ROI set entries and detach ROI artists.
 
         Parameters
         ----------
@@ -889,51 +1008,75 @@ class MplCanvas(FigureCanvasQTAgg):
             If True, schedule a coalesced redraw. Pass False when the caller
             will paint later (for example during ``clear`` before a refetch).
         """
-        self._roi_region = None
-        self._roi_source_key = None
-        self._roi_view_fingerprint = None
-        self._destroy_roi_selector()
-        self._remove_roi_overlay()
-        self.roi_region_changed.emit(None)
+        if self._roi_set is not None:
+            self._roi_set.clear()
+        else:
+            self._destroy_roi_selector()
+            self._remove_roi_overlays()
+            self.roi_region_changed.emit(None)
         if self._roi_draw_enabled:
             self._attach_roi_selector()
         if paint:
             self.draw()
 
-    def _region_from_selector(self):
+    def clear_crop_draft(self, paint=True):
         """
-        Read the current rectangle from the active selector extents.
+        Clear the draft crop rectangle and detach its artists.
         """
-        if self._roi_selector is None:
+        self._crop_draft_region = None
+        self._destroy_crop_selector()
+        self._remove_crop_overlay()
+        self.crop_region_changed.emit(None)
+        if self._crop_draw_enabled:
+            self._attach_crop_selector()
+        if paint:
+            self.draw()
+
+    def _region_from_selector(self, selector):
+        """
+        Read a rectangle from selector extents.
+        """
+        if selector is None:
             return None
-        x0, x1, y0, y1 = self._roi_selector.extents
+        x0, x1, y0, y1 = selector.extents
         return RectRegion(x0=x0, x1=x1, y0=y0, y1=y1).normalized()
 
-    def _set_roi_region(self, region: RectRegion, update_overlay=None):
-        model = self.get_single_visible_2d_model()
-        self._roi_region = region.normalized()
-        self._roi_source_key = model._key if model is not None else None
-        self._roi_view_fingerprint = self.current_view_fingerprint()
+    def _commit_roi_region(self, region: RectRegion):
+        if self._roi_set is None:
+            return
+        self._roi_set.set_or_replace_single(
+            region.normalized(),
+            view_fingerprint=self.current_view_fingerprint(),
+        )
+
+    def _set_crop_draft_region(self, region: RectRegion, update_overlay=None):
+        self._crop_draft_region = region.normalized()
         if update_overlay is None:
-            update_overlay = not self._roi_draw_enabled
+            update_overlay = not self._crop_draw_enabled
         if update_overlay:
-            self._update_roi_overlay()
-        self.roi_region_changed.emit(self._roi_region)
+            self._update_crop_overlay()
+        self.crop_region_changed.emit(self._crop_draft_region)
 
     def _on_roi_selected(self, _eclick, _erelease):
         if not self._roi_draw_enabled:
             return
-        region = self._region_from_selector()
+        region = self._region_from_selector(self._roi_selector)
         if region is None:
             return
-        self._set_roi_region(region, update_overlay=False)
+        self._commit_roi_region(region)
 
-    def _destroy_roi_selector(self):
+    def _on_crop_selected(self, _eclick, _erelease):
+        if not self._crop_draw_enabled:
+            return
+        region = self._region_from_selector(self._crop_selector)
+        if region is None:
+            return
+        self._set_crop_draft_region(region, update_overlay=False)
+
+    def _destroy_selector(self, selector):
         """
-        Fully remove the RectangleSelector and its artists from the axes.
+        Fully remove a RectangleSelector and its artists from the axes.
         """
-        selector = self._roi_selector
-        self._roi_selector = None
         if selector is None:
             return
         try:
@@ -974,8 +1117,21 @@ class MplCanvas(FigureCanvasQTAgg):
             except Exception:
                 pass
 
+    def _destroy_roi_selector(self):
+        selector = self._roi_selector
+        self._roi_selector = None
+        self._destroy_selector(selector)
+
+    def _destroy_crop_selector(self):
+        selector = self._crop_selector
+        self._crop_selector = None
+        self._destroy_selector(selector)
+
     def _detach_roi_selector(self):
         self._destroy_roi_selector()
+
+    def _detach_crop_selector(self):
+        self._destroy_crop_selector()
 
     def _attach_roi_selector(self):
         if not self._roi_draw_enabled:
@@ -984,6 +1140,8 @@ class MplCanvas(FigureCanvasQTAgg):
         if not self.region_controls_enabled():
             return
 
+        entry = self.get_selected_roi_entry()
+        color = entry.color if entry is not None else "#00ffff"
         self._roi_selector = RectangleSelector(
             self.axes,
             self._on_roi_selected,
@@ -994,15 +1152,15 @@ class MplCanvas(FigureCanvasQTAgg):
             spancoords="data",
             interactive=True,
             props=dict(
-                facecolor="cyan",
-                edgecolor="cyan",
-                alpha=0.2,
+                facecolor=to_rgba(color, _ROI_FILL_ALPHA),
+                edgecolor=color,
                 fill=True,
-                linewidth=1.5,
+                linewidth=_ROI_EDGE_WIDTH,
             ),
         )
-        if self._roi_region is not None:
-            region = self._roi_region.normalized()
+        region = self.get_roi_region()
+        if isinstance(region, RectRegion):
+            region = region.normalized()
             self._roi_selector.extents = (
                 region.x0,
                 region.x1,
@@ -1010,38 +1168,121 @@ class MplCanvas(FigureCanvasQTAgg):
                 region.y1,
             )
 
-    def _remove_roi_overlay(self):
-        if self._roi_overlay is not None:
+    def _attach_crop_selector(self):
+        if not self._crop_draw_enabled:
+            return
+        self._destroy_crop_selector()
+        if not self.region_controls_enabled():
+            return
+
+        self._crop_selector = RectangleSelector(
+            self.axes,
+            self._on_crop_selected,
+            useblit=False,
+            button=[1],
+            minspanx=0,
+            minspany=0,
+            spancoords="data",
+            interactive=True,
+            props=dict(**_CROP_SELECTOR_PROPS),
+        )
+        if self._crop_draft_region is not None:
+            region = self._crop_draft_region.normalized()
+            self._crop_selector.extents = (
+                region.x0,
+                region.x1,
+                region.y0,
+                region.y1,
+            )
+
+    def _remove_roi_overlays(self):
+        for patches in self._roi_overlays.values():
+            for patch in patches:
+                try:
+                    patch.remove()
+                except Exception:
+                    pass
+        self._roi_overlays = {}
+
+    def _remove_crop_overlay(self):
+        if self._crop_overlay is not None:
             try:
-                self._roi_overlay.remove()
+                self._crop_overlay.remove()
             except Exception:
                 pass
-            self._roi_overlay = None
+            self._crop_overlay = None
 
-    def _update_roi_overlay(self):
-        self._remove_roi_overlay()
-        if self._roi_region is None:
-            return
-        region = self._roi_region.normalized()
+    def _rect_overlay_for_region(self, region: RectRegion, *, color: str, stale: bool):
+        """
+        Build ROI overlay patches with an opaque edge and light halo.
+
+        A global patch alpha would fade the border into dark heatmaps, so fill
+        alpha is applied only to the face color.
+        """
+        region = region.normalized()
+        edge = "#bdbdbd" if stale else color
+        face_alpha = _ROI_STALE_FILL_ALPHA if stale else _ROI_FILL_ALPHA
+        xy = (region.x0, region.y0)
         width = region.x1 - region.x0
         height = region.y1 - region.y0
-        self._roi_overlay = Rectangle(
-            (region.x0, region.y0),
+        halo = Rectangle(
+            xy,
             width,
             height,
-            linewidth=1.5,
-            edgecolor="cyan",
-            facecolor="cyan",
-            alpha=0.15,
-            fill=True,
+            linewidth=_ROI_HALO_WIDTH,
+            edgecolor="white",
+            facecolor="none",
+            alpha=0.85 if not stale else 0.45,
+            fill=False,
+            zorder=20,
         )
-        self.axes.add_patch(self._roi_overlay)
+        body = Rectangle(
+            xy,
+            width,
+            height,
+            linewidth=_ROI_EDGE_WIDTH,
+            edgecolor=edge,
+            facecolor=to_rgba(edge, face_alpha),
+            fill=True,
+            zorder=21,
+        )
+        return halo, body
 
-    def _roi_selector_is_live(self) -> bool:
+    def _update_roi_overlays(self):
+        self._remove_roi_overlays()
+        if self._roi_set is None or self._roi_draw_enabled:
+            return
+        for entry in self._roi_set.entries():
+            if not entry.visible or not isinstance(entry.region, RectRegion):
+                continue
+            if not entry.region.has_area():
+                continue
+            patches = self._rect_overlay_for_region(
+                entry.region,
+                color=entry.color,
+                stale=entry.stale,
+            )
+            for patch in patches:
+                self.axes.add_patch(patch)
+            self._roi_overlays[entry.id] = patches
+
+    def _update_crop_overlay(self):
+        self._remove_crop_overlay()
+        if self._crop_draft_region is None or self._crop_draw_enabled:
+            return
+        region = self._crop_draft_region.normalized()
+        self._crop_overlay = Rectangle(
+            (region.x0, region.y0),
+            region.x1 - region.x0,
+            region.y1 - region.y0,
+            **_CROP_OVERLAY_PROPS,
+        )
+        self.axes.add_patch(self._crop_overlay)
+
+    def _selector_is_live(self, selector) -> bool:
         """
-        Return whether the rectangle selector is attached to the current axes.
+        Return whether a rectangle selector is attached to the current axes.
         """
-        selector = self._roi_selector
         if selector is None:
             return False
         ax = getattr(selector, "ax", None)
@@ -1050,39 +1291,67 @@ class MplCanvas(FigureCanvasQTAgg):
         selection = getattr(selector, "_selection_artist", None)
         return selection is not None and selection.axes is self.axes
 
+    def _on_roi_set_changed(self):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
+    def _on_roi_entry_changed(self, _entry_id: str):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
+    def _on_roi_selection_changed(self, _entry_id):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
     def _sync_roi_display(self):
-        model = self.get_single_visible_2d_model()
-        if self._roi_region is not None:
-            if model is None or (
-                self._roi_source_key is not None
-                and model._key != self._roi_source_key
-            ):
-                self.clear_roi()
-                return
         if self._roi_draw_enabled:
-            self._remove_roi_overlay()
-            if not self._roi_selector_is_live():
+            self._remove_roi_overlays()
+            if not self._selector_is_live(self._roi_selector):
                 self._attach_roi_selector()
-            elif self._roi_region is not None:
-                region = self._roi_region.normalized()
-                self._roi_selector.extents = (
+            else:
+                region = self.get_roi_region()
+                if isinstance(region, RectRegion):
+                    region = region.normalized()
+                    self._roi_selector.extents = (
+                        region.x0,
+                        region.x1,
+                        region.y0,
+                        region.y1,
+                    )
+        else:
+            self._update_roi_overlays()
+        if self._crop_draw_enabled:
+            self._remove_crop_overlay()
+            if not self._selector_is_live(self._crop_selector):
+                self._attach_crop_selector()
+            elif self._crop_draft_region is not None:
+                region = self._crop_draft_region.normalized()
+                self._crop_selector.extents = (
                     region.x0,
                     region.x1,
                     region.y0,
                     region.y1,
                 )
-        elif self._roi_region is not None:
-            self._update_roi_overlay()
+        else:
+            self._update_crop_overlay()
 
     def clear(self):
         """
         Reset axes and artists for a dimension change without painting.
 
         The previous Agg frame stays on screen until the following refetch
-        paints via ``_handle_plot_data`` or ``_do_update_plot``.
+        paints via ``_handle_plot_data`` or ``_do_update_plot``. ROI set
+        geometry is kept and marked stale by the controller when the view
+        fingerprint changes.
         """
         print_debug("MplCanvas.clear", "Starting Clear", category="plots")
-        self.clear_roi(paint=False)
+        self._destroy_roi_selector()
+        self._destroy_crop_selector()
+        self._remove_roi_overlays()
+        self._remove_crop_overlay()
 
         for model_key in list(self._active_workers.keys()):
             worker = self._active_workers.pop(model_key, None)

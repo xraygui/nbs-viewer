@@ -14,6 +14,8 @@ from .controls.lock_aspect import LockAspectControl
 from .controls.transform import TransformControl
 from .controls.retain_selection import RetainSelectionControl
 from .plotDimensionWidget import PlotDimensionControl
+from nbs_viewer.models.plot.roi_set import RoiSetModel
+
 from .roi_panel import RoiPanel
 from .roi_controller import RoiController
 from .derivative_controller import DerivativeController
@@ -39,6 +41,7 @@ class PlotControlTab(QWidget):
         self.plot_canvas = plot_canvas
         self.dimension_control = None
         self.roi_panel = None
+        self.roi_set = None
         self.roi_controller = None
         self.derivative_controller = None
         self.setSizePolicy(
@@ -133,24 +136,27 @@ class PlotControlTab(QWidget):
 
         self.roi_panel = RoiPanel(self)
         self.roi_panel_panel = CollapsiblePanel(
-            "Region",
+            "Crop",
             self.roi_panel,
             can_expand=False,
             resizable=False,
         )
         self._tab_layout.addWidget(self.roi_panel_panel, 0)
 
+        self.roi_set = RoiSetModel(self)
         self.roi_controller = RoiController(
             self.plot_canvas,
             self.dimension_control,
             self.roi_panel,
             self.run_list_model,
+            self.roi_set,
             self,
         )
         self.derivative_controller = DerivativeController(
             self.plot_canvas,
             self.dimension_control,
             self.roi_panel,
+            self.roi_set,
             self,
         )
 

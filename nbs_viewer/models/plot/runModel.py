@@ -8,7 +8,7 @@ import time as ttime
 from ..data.base import CatalogRun
 from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
 from .view_crop import ViewCrop, apply_view_crop_to_slice_info, fetch_context_with_view_crop
-from .derived_fetch import assemble_plane_bundle, plot_plane_storage_axes
+from .derived_fetch import plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
 from .plot_geometry import (
     PlotBundle,
@@ -646,23 +646,15 @@ class RunModel(QObject):
                 region_frame=region_frame,
                 parent_spec=parent_spec,
             )
-            if request.spec.plot_ndim == 1:
-                if not np.isfinite(y).any():
-                    raise ValueError("ROI profile is empty after reduction")
-                display_label = label or (axis_names[0] if axis_names else "profile")
-                return prepare_1d_bundle(y, xlist, [display_label])
-            if request.spec.plot_ndim == 2:
-                hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
-                return assemble_plane_bundle(
-                    y,
-                    region_frame,
-                    request,
-                    axis_names=axis_names,
-                    render_mode_hint=hint,
+            if request.spec.plot_ndim != 1:
+                raise ValueError(
+                    f"ROI requests always reduce to a profile, got plot_ndim "
+                    f"{request.spec.plot_ndim}"
                 )
-            raise ValueError(
-                f"Unsupported materialize_request plot_ndim {request.spec.plot_ndim}"
-            )
+            if not np.isfinite(y).any():
+                raise ValueError("ROI profile is empty after reduction")
+            display_label = label or (axis_names[0] if axis_names else "profile")
+            return prepare_1d_bundle(y, xlist, [display_label])
 
         xlist, axis_names, y = self._fetch_plot_arrays(
             xkeys,

@@ -12,21 +12,27 @@ from qtpy.QtCore import Signal
 
 class RoiPanel(QWidget):
     """
-    Controls for drawing and inspecting a single rectangular ROI.
+    Inline crop controls and launcher for the ROI workbench window.
 
     Signals
     -------
-    draw_toggled : bool
-        Emitted when the draw-region toggle changes state.
-    clear_requested : Signal
-        Emitted when the user requests clearing the ROI.
+    crop_draw_toggled : bool
+        Emitted when the draw-crop toggle changes state.
+    clear_crop_draft_requested : Signal
+        Emitted when the user requests clearing the draft crop rectangle.
+    apply_crop_requested : Signal
+        Emitted when the user requests applying the draft crop.
+    clear_crop_requested : Signal
+        Emitted when the user requests clearing the applied view crop.
+    roi_window_requested : Signal
+        Emitted when the user opens the ROI workbench window.
     """
 
-    draw_toggled = Signal(bool)
-    clear_requested = Signal()
+    crop_draw_toggled = Signal(bool)
+    clear_crop_draft_requested = Signal()
     apply_crop_requested = Signal()
     clear_crop_requested = Signal()
-    create_derivative_requested = Signal()
+    roi_window_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,44 +43,39 @@ class RoiPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        self.draw_checkbox = QCheckBox("Draw region")
-        self.draw_checkbox.toggled.connect(self.draw_toggled.emit)
-        layout.addWidget(self.draw_checkbox)
+        self.crop_draw_checkbox = QCheckBox("Draw crop region")
+        self.crop_draw_checkbox.toggled.connect(self.crop_draw_toggled.emit)
+        layout.addWidget(self.crop_draw_checkbox)
 
-        self.corners_label = QLabel("Corners: —")
-        self.corners_label.setWordWrap(True)
-        layout.addWidget(self.corners_label)
+        self.crop_corners_label = QLabel("Crop: —")
+        self.crop_corners_label.setWordWrap(True)
+        layout.addWidget(self.crop_corners_label)
 
-        button_layout = QVBoxLayout()
         button_row1 = QHBoxLayout()
         button_row1.setContentsMargins(0, 0, 0, 0)
         button_row1.setSpacing(4)
-        self.clear_button = QPushButton("Clear ROI")
-        self.clear_button.clicked.connect(self.clear_requested.emit)
-        button_row1.addWidget(self.clear_button)
-
         self.apply_crop_button = QPushButton("Apply crop")
         self.apply_crop_button.clicked.connect(self.apply_crop_requested.emit)
         button_row1.addWidget(self.apply_crop_button)
 
-        button_layout.addLayout(button_row1)
+        self.clear_crop_button = QPushButton("Clear crop")
+        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
+        button_row1.addWidget(self.clear_crop_button)
+        layout.addLayout(button_row1)
+
         button_row2 = QHBoxLayout()
         button_row2.setContentsMargins(0, 0, 0, 0)
         button_row2.setSpacing(4)
-
-        self.create_derivative_button = QPushButton("Create ROI Plot")
-        self.create_derivative_button.setEnabled(False)
-        self.create_derivative_button.clicked.connect(
-            self.create_derivative_requested.emit
+        self.clear_crop_draft_button = QPushButton("Clear crop draft")
+        self.clear_crop_draft_button.clicked.connect(
+            self.clear_crop_draft_requested.emit
         )
-        button_row2.addWidget(self.create_derivative_button)
+        button_row2.addWidget(self.clear_crop_draft_button)
 
-        self.clear_crop_button = QPushButton("Clear crop")
-        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
-        button_row2.addWidget(self.clear_crop_button)
-
-        button_layout.addLayout(button_row2)
-        layout.addLayout(button_layout)
+        self.roi_window_button = QPushButton("ROI Window…")
+        self.roi_window_button.clicked.connect(self.roi_window_requested.emit)
+        button_row2.addWidget(self.roi_window_button)
+        layout.addLayout(button_row2)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -85,46 +86,43 @@ class RoiPanel(QWidget):
 
     def set_region_active(self, active: bool):
         """
-        Enable or disable ROI controls for the current view mode.
+        Enable or disable crop controls for the current view mode.
 
         Parameters
         ----------
         active : bool
             True when a single 2D image or mesh plot is available.
         """
-        self.draw_checkbox.setEnabled(active and self._panel_enabled)
-        self.clear_button.setEnabled(active and self._panel_enabled)
+        enabled = active and self._panel_enabled
+        self.crop_draw_checkbox.setEnabled(enabled)
+        self.clear_crop_draft_button.setEnabled(enabled)
+        self.roi_window_button.setEnabled(enabled)
         if not active:
-            self.create_derivative_button.setEnabled(False)
             self.apply_crop_button.setEnabled(False)
             self.clear_crop_button.setEnabled(False)
-        if not active:
-            if self.draw_checkbox.isChecked():
-                self.draw_checkbox.blockSignals(True)
-                self.draw_checkbox.setChecked(False)
-                self.draw_checkbox.blockSignals(False)
-            self.corners_label.setText("Corners: —")
+            if self.crop_draw_checkbox.isChecked():
+                self.crop_draw_checkbox.blockSignals(True)
+                self.crop_draw_checkbox.setChecked(False)
+                self.crop_draw_checkbox.blockSignals(False)
+            self.crop_corners_label.setText("Crop: —")
 
     def set_apply_crop_enabled(self, enabled: bool):
         """
-        Enable the apply-crop button when an ROI is available.
+        Enable the apply-crop button when a draft crop is available.
         """
-        active = self._panel_enabled and enabled
-        self.apply_crop_button.setEnabled(active)
+        self.apply_crop_button.setEnabled(self._panel_enabled and enabled)
 
     def set_clear_crop_enabled(self, enabled: bool):
         """
         Enable the clear-crop button when a crop is active.
         """
-        active = self._panel_enabled and enabled
-        self.clear_crop_button.setEnabled(active)
+        self.clear_crop_button.setEnabled(self._panel_enabled and enabled)
 
-    def set_create_derivative_enabled(self, enabled: bool):
+    def set_roi_window_enabled(self, enabled: bool):
         """
-        Enable the derivative dialog button when an ROI is available.
+        Enable the ROI window launcher when a 2D view is available.
         """
-        active = self._panel_enabled and enabled
-        self.create_derivative_button.setEnabled(active)
+        self.roi_window_button.setEnabled(self._panel_enabled and enabled)
 
     def set_panel_enabled(self, enabled: bool):
         """
@@ -133,29 +131,29 @@ class RoiPanel(QWidget):
         self._panel_enabled = enabled
         self.setEnabled(enabled)
 
-    def set_draw_checked(self, checked: bool):
+    def set_crop_draw_checked(self, checked: bool):
         """
-        Set the draw toggle without emitting ``draw_toggled``.
+        Set the crop draw toggle without emitting ``crop_draw_toggled``.
         """
-        if self.draw_checkbox.isChecked() == checked:
+        if self.crop_draw_checkbox.isChecked() == checked:
             return
-        self.draw_checkbox.blockSignals(True)
-        self.draw_checkbox.setChecked(checked)
-        self.draw_checkbox.blockSignals(False)
+        self.crop_draw_checkbox.blockSignals(True)
+        self.crop_draw_checkbox.setChecked(checked)
+        self.crop_draw_checkbox.blockSignals(False)
 
-    def set_corners(self, x0, y0, x1, y1):
+    def set_crop_corners(self, x0, y0, x1, y1):
         """
-        Display normalized rectangle corners in data coordinates.
+        Display draft crop corners in data coordinates.
         """
-        self.corners_label.setText(
-            f"Corners: ({x0:.2f}, {y0:.2f}) — ({x1:.2f}, {y1:.2f})"
+        self.crop_corners_label.setText(
+            f"Crop: ({x0:.2f}, {y0:.2f}) — ({x1:.2f}, {y1:.2f})"
         )
 
-    def clear_corners(self):
+    def clear_crop_corners(self):
         """
-        Reset the corner readout.
+        Reset the draft crop corner readout.
         """
-        self.corners_label.setText("Corners: —")
+        self.crop_corners_label.setText("Crop: —")
 
     def set_status(self, message: str):
         """

@@ -18,7 +18,7 @@ from .cube_view import (
 )
 from .plot_geometry import storage_bbox_from_display_bbox
 from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
-from .region import RectRegion, compile_rect_with_mask_mode
+from .region import RectRegion, compile_covering_rect, compile_with_mask_mode
 
 
 @dataclass(frozen=True)
@@ -153,9 +153,9 @@ def fetch_context_with_view_crop(
         raise ValueError("fetch_context_with_view_crop requires request.region")
 
     region_frame = crop.full_frame
-    compiled = compile_rect_with_mask_mode(
+    compiled = compile_with_mask_mode(
         region_frame,
-        request.region.normalized(),
+        request.region,
         request.mask_mode,
     )
     if compiled.pixel_count == 0:
@@ -209,6 +209,9 @@ def view_crop_from_region(
     """
     Commit a drawn rectangle to a persistent view crop.
 
+    Cell-intersects selection is used here rather than the cell-center rule
+    used for ROI reduction, so the cropped plane still covers what was drawn.
+
     Parameters
     ----------
     region : RectRegion
@@ -234,11 +237,7 @@ def view_crop_from_region(
     ValueError
         If the region does not select a non-empty crop area.
     """
-    compiled = compile_rect_with_mask_mode(
-        full_frame,
-        region.normalized(),
-        "inside",
-    )
+    compiled = compile_covering_rect(full_frame, region)
     if compiled.pixel_count == 0:
         raise ValueError("Crop region does not cover any cells")
     display_bbox = compiled.bbox
