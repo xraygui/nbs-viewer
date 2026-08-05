@@ -1,9 +1,7 @@
-from qtpy.QtWidgets import QHBoxLayout, QLabel, QCheckBox
-
-from .base import PlotControlWidget
+from .base import CheckboxFormControl
 
 
-class DynamicUpdateControl(PlotControlWidget):
+class DynamicUpdateControl(CheckboxFormControl):
     """
     Widget for controlling dynamic updates.
 
@@ -18,32 +16,13 @@ class DynamicUpdateControl(PlotControlWidget):
     """
 
     def __init__(self, run_list_model, parent=None):
-        """
-        Initialize the widget.
-
-        Parameters
-        ----------
-        run_list_model : RunListModel
-            The plot model to control
-        parent : QWidget, optional
-            Parent widget, by default None
-        """
         super().__init__(run_list_model, parent)
-        # Set initial state from model
-        self._dynamic_box.setChecked(self.run_list_model.dynamic_update)
+        self._checkbox.setChecked(self.run_list_model.dynamic_update)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        # Dynamic update toggle
-        layout.addWidget(QLabel("Dynamic Update"))
-        self._dynamic_box = QCheckBox()
-        self._dynamic_box.setChecked(False)
-        self._dynamic_box.checkStateChanged.connect(self._on_state_changed)
-        layout.addWidget(self._dynamic_box)
-        self.setLayout(layout)
+        checkbox = self._create_form_checkbox("Dynamic Update", checked=False)
+        checkbox.checkStateChanged.connect(self._on_state_changed)
 
     def get_state(self) -> dict:
         """
@@ -54,7 +33,7 @@ class DynamicUpdateControl(PlotControlWidget):
         dict
             Dictionary with dynamic state
         """
-        return {"dynamic": self._dynamic_box.isChecked()}
+        return {"dynamic": self._checkbox.isChecked()}
 
     def set_state(self, state: dict) -> None:
         """
@@ -66,9 +45,8 @@ class DynamicUpdateControl(PlotControlWidget):
             Dictionary with dynamic state
         """
         if "dynamic" in state:
-            self._dynamic_box.setChecked(state["dynamic"])
+            self._checkbox.setChecked(state["dynamic"])
 
     def _on_state_changed(self, checkState) -> None:
         """Handle state changes."""
-        state = self.get_state()
-        self.run_list_model.set_dynamic_update(state["dynamic"])
+        self.run_list_model.set_dynamic_update(self._checkbox.isChecked())

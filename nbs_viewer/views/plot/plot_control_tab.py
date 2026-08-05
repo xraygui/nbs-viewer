@@ -1,14 +1,16 @@
 from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
-    QHBoxLayout,
+    QFormLayout,
     QSizePolicy,
 )
+from qtpy.QtCore import Qt
 
 from ..common.panel import CollapsiblePanel
 from .controls.run_display import RunDisplayWidget
 from .controls.auto_add import AutoAddControl
 from .controls.dynamic_update import DynamicUpdateControl
+from .controls.lock_aspect import LockAspectControl
 from .controls.transform import TransformControl
 from .controls.retain_selection import RetainSelectionControl
 from .plotDimensionWidget import PlotDimensionControl
@@ -52,29 +54,42 @@ class PlotControlTab(QWidget):
 
     def _setup_panels(self):
         plot_settings_widget = QWidget()
-        plot_settings_layout = QVBoxLayout(plot_settings_widget)
-        plot_settings_layout.setContentsMargins(0, 0, 0, 0)
-        plot_settings_layout.setSpacing(2)
+        form = QFormLayout(plot_settings_widget)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(2)
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        form.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
 
-        settings_controls_layout = QHBoxLayout()
-        settings_controls_layout.setContentsMargins(0, 0, 0, 0)
-        settings_controls_layout.setSpacing(4)
+        self.auto_add = AutoAddControl(self.run_list_model, plot_settings_widget)
+        self.auto_add.add_to_form(form)
 
-        self.auto_add = AutoAddControl(self.run_list_model)
-        settings_controls_layout.addWidget(self.auto_add)
+        self.dynamic_update = DynamicUpdateControl(
+            self.run_list_model, plot_settings_widget
+        )
+        self.dynamic_update.add_to_form(form)
 
-        self.dynamic_update = DynamicUpdateControl(self.run_list_model)
-        settings_controls_layout.addWidget(self.dynamic_update)
+        self.lock_aspect = None
+        if self.plot_canvas is not None:
+            self.lock_aspect = LockAspectControl(
+                self.run_list_model, self.plot_canvas, plot_settings_widget
+            )
+            self.lock_aspect.add_to_form(form)
 
-        self.retain_selection = RetainSelectionControl(self.run_list_model)
-
-        plot_settings_layout.addLayout(settings_controls_layout)
-        plot_settings_layout.addWidget(self.retain_selection)
+        self.retain_selection = RetainSelectionControl(
+            self.run_list_model, plot_settings_widget
+        )
+        self.retain_selection.add_to_form(form)
 
         plot_settings_widget.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
-        settings_min_height = plot_settings_layout.minimumSize().height()
+        settings_min_height = form.minimumSize().height()
         if settings_min_height > 0:
             plot_settings_widget.setMinimumHeight(settings_min_height)
 

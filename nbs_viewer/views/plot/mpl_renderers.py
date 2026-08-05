@@ -60,13 +60,37 @@ class ImageRenderer:
         bundle: PlotBundle,
         label: str,
         colorbar_state: dict,
+        aspect: str = "equal",
     ) -> Tuple[AxesImage, object]:
+        """
+        Create an imshow artist for a 2D image bundle.
+
+        Parameters
+        ----------
+        axes : Axes
+            Target matplotlib axes.
+        fig : Figure
+            Parent figure for the colorbar.
+        bundle : PlotBundle
+            Prepared image bundle.
+        label : str
+            Colorbar / artist label.
+        colorbar_state : dict
+            Mutable dict that stores the colorbar under ``colorbar``.
+        aspect : str, optional
+            Matplotlib aspect mode, by default ``"equal"``.
+
+        Returns
+        -------
+        tuple
+            ``(AxesImage, colorbar)``.
+        """
         t0 = ttime.time()
         extent = bundle.extent
         artist = axes.imshow(
             bundle.y,
             extent=extent,
-            aspect="auto",
+            aspect=aspect,
             origin="upper",
             interpolation="nearest",
             label=label,

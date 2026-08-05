@@ -116,6 +116,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self._artist_count = 0
         self._autoscale = True
+        self._lock_aspect = True
         self._nbs_draw_pending = False
         self._nbs_draw_coalesce_count = 0
         self._nbs_in_do_draw = False
@@ -255,6 +256,61 @@ class MplCanvas(FigureCanvasQTAgg):
             True for image or mesh modes.
         """
         return mode in ("image", "mesh")
+
+    @property
+    def lock_aspect(self) -> bool:
+        """
+        Whether image plots should use equal data aspect.
+
+        Returns
+        -------
+        bool
+            True when image aspect should be locked.
+        """
+        return self._lock_aspect
+
+    def set_lock_aspect(self, locked: bool) -> None:
+        """
+        Set whether image plots use equal data aspect.
+
+        Mesh and line plots always use automatic aspect. Changing this
+        preference redraws when an image is currently shown.
+
+        Parameters
+        ----------
+        locked : bool
+            If True, image plots use ``aspect="equal"``.
+        """
+        locked = bool(locked)
+        if locked == self._lock_aspect:
+            return
+        self._lock_aspect = locked
+        self._apply_aspect()
+        if self._active_render_mode == "image":
+            self.draw()
+
+    def _image_aspect(self) -> str:
+        """
+        Return the matplotlib aspect string for the current image preference.
+
+        Returns
+        -------
+        str
+            ``"equal"`` when locked, otherwise ``"auto"``.
+        """
+        return "equal" if self._lock_aspect else "auto"
+
+    def _apply_aspect(self) -> None:
+        """
+        Apply axis aspect for the active render mode.
+
+        Image mode respects :attr:`lock_aspect`. Mesh and line modes always
+        use ``aspect="auto"``.
+        """
+        if self._active_render_mode == "image":
+            self.axes.set_aspect(self._image_aspect())
+        else:
+            self.axes.set_aspect("auto")
 
     def _on_render_mode_changed(self, plot_data, mode):
         """
@@ -420,18 +476,21 @@ class MplCanvas(FigureCanvasQTAgg):
                 artist = self._render_line(bundle, plotData, artist)
                 self.currentDim = 1
                 self._active_render_mode = "line"
+                self._apply_aspect()
             elif bundle.render_mode == "image":
                 self._prepare_2d_axes(plotData._key)
                 artist = self._render_image(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "image"
                 self._last_view_frame = frame_from_bundle(bundle)
+                self._apply_aspect()
             elif bundle.render_mode == "mesh":
                 self._prepare_2d_axes(plotData._key)
                 artist = self._render_mesh(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "mesh"
                 self._last_view_frame = frame_from_bundle(bundle)
+                self._apply_aspect()
         except Exception as e:
             print(f"[MplCanvas._handle_plot_data] Error: {e}")
             artist = None
@@ -564,6 +623,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 bundle,
                 plotData.label,
                 self._colorbar_state,
+                aspect=self._image_aspect(),
             )
         return artist
 
@@ -617,6 +677,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._destroy_roi_selector()
         self._remove_roi_overlay()
         self._active_render_mode = None
+        self.axes.set_aspect("auto")
 
     def apply_roi_from_region(self, region) -> None:
         """

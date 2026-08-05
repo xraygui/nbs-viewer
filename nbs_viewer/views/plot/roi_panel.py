@@ -45,28 +45,36 @@ class RoiPanel(QWidget):
         self.corners_label.setWordWrap(True)
         layout.addWidget(self.corners_label)
 
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        button_row.setSpacing(4)
+        button_layout = QVBoxLayout()
+        button_row1 = QHBoxLayout()
+        button_row1.setContentsMargins(0, 0, 0, 0)
+        button_row1.setSpacing(4)
         self.clear_button = QPushButton("Clear ROI")
         self.clear_button.clicked.connect(self.clear_requested.emit)
-        button_row.addWidget(self.clear_button)
+        button_row1.addWidget(self.clear_button)
 
         self.apply_crop_button = QPushButton("Apply crop")
         self.apply_crop_button.clicked.connect(self.apply_crop_requested.emit)
-        button_row.addWidget(self.apply_crop_button)
+        button_row1.addWidget(self.apply_crop_button)
 
-        self.clear_crop_button = QPushButton("Clear crop")
-        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
-        button_row.addWidget(self.clear_crop_button)
+        button_layout.addLayout(button_row1)
+        button_row2 = QHBoxLayout()
+        button_row2.setContentsMargins(0, 0, 0, 0)
+        button_row2.setSpacing(4)
 
-        self.create_derivative_button = QPushButton("Create Derivative Plot")
+        self.create_derivative_button = QPushButton("Create ROI Plot")
         self.create_derivative_button.setEnabled(False)
         self.create_derivative_button.clicked.connect(
             self.create_derivative_requested.emit
         )
-        button_row.addWidget(self.create_derivative_button)
-        layout.addLayout(button_row)
+        button_row2.addWidget(self.create_derivative_button)
+
+        self.clear_crop_button = QPushButton("Clear crop")
+        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
+        button_row2.addWidget(self.clear_crop_button)
+
+        button_layout.addLayout(button_row2)
+        layout.addLayout(button_layout)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)

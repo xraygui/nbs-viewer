@@ -1,9 +1,7 @@
-from qtpy.QtWidgets import QHBoxLayout, QLabel, QCheckBox
-
-from .base import PlotControlWidget
+from .base import CheckboxFormControl
 
 
-class AutoAddControl(PlotControlWidget):
+class AutoAddControl(CheckboxFormControl):
     """
     Widget for controlling auto-add behavior.
 
@@ -18,32 +16,13 @@ class AutoAddControl(PlotControlWidget):
     """
 
     def __init__(self, run_list_model, parent=None):
-        """
-        Initialize the widget.
-
-        Parameters
-        ----------
-        run_list_model : RunListModel
-            The plot model to control
-        parent : QWidget, optional
-            Parent widget, by default None
-        """
         super().__init__(run_list_model, parent)
-        # Set initial state from model
-        self._auto_add_box.setChecked(self.run_list_model.auto_add)
+        self._checkbox.setChecked(self.run_list_model.auto_add)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        # Auto add toggle
-        layout.addWidget(QLabel("Auto Add"))
-        self._auto_add_box = QCheckBox()
-        self._auto_add_box.setChecked(True)
-        self._auto_add_box.checkStateChanged.connect(self._on_checkbox_changed)
-        layout.addWidget(self._auto_add_box)
-        self.setLayout(layout)
+        checkbox = self._create_form_checkbox("Auto Add", checked=True)
+        checkbox.checkStateChanged.connect(self._on_checkbox_changed)
 
     def get_state(self) -> dict:
         """
@@ -54,7 +33,7 @@ class AutoAddControl(PlotControlWidget):
         dict
             Dictionary with auto_add state
         """
-        return {"auto_add": self._auto_add_box.isChecked()}
+        return {"auto_add": self._checkbox.isChecked()}
 
     def set_state(self, state: dict) -> None:
         """
@@ -66,9 +45,8 @@ class AutoAddControl(PlotControlWidget):
             Dictionary with auto_add state
         """
         if "auto_add" in state:
-            self._auto_add_box.setChecked(state["auto_add"])
+            self._checkbox.setChecked(state["auto_add"])
 
     def _on_checkbox_changed(self, checkState) -> None:
         """Handle checkbox state changes."""
-        state = self.get_state()
-        self.run_list_model.set_auto_add(state["auto_add"])
+        self.run_list_model.set_auto_add(self._checkbox.isChecked())

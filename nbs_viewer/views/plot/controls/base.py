@@ -1,4 +1,4 @@
-from qtpy.QtWidgets import QWidget, QSizePolicy
+from qtpy.QtWidgets import QWidget, QSizePolicy, QLabel, QCheckBox, QFormLayout
 from qtpy.QtCore import Signal
 
 MIN_CONTROL_HEIGHT = 24
@@ -78,3 +78,51 @@ class PlotControlWidget(QWidget):
             The state to set
         """
         raise NotImplementedError
+
+
+class CheckboxFormControl(PlotControlWidget):
+    """
+    Plot control that contributes a label/checkbox row to a form layout.
+
+    Subclasses create ``_label`` and ``_checkbox`` in ``_setup_ui`` via
+    :meth:`_create_form_checkbox`, then call :meth:`add_to_form` from the
+    parent panel.
+    """
+
+    def _create_form_checkbox(self, label_text, checked=False, tooltip=None):
+        """
+        Create the label and checkbox widgets for a form row.
+
+        Parameters
+        ----------
+        label_text : str
+            Text for the left-hand form label.
+        checked : bool, optional
+            Initial checkbox state, by default False.
+        tooltip : str, optional
+            Shared tooltip for label and checkbox.
+
+        Returns
+        -------
+        QCheckBox
+            The created checkbox.
+        """
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._label = QLabel(label_text)
+        self._checkbox = QCheckBox()
+        self._checkbox.setChecked(checked)
+        if tooltip:
+            self._label.setToolTip(tooltip)
+            self._checkbox.setToolTip(tooltip)
+        return self._checkbox
+
+    def add_to_form(self, form_layout: QFormLayout) -> None:
+        """
+        Add this control's label and checkbox to a form layout.
+
+        Parameters
+        ----------
+        form_layout : QFormLayout
+            Destination form layout.
+        """
+        form_layout.addRow(self._label, self._checkbox)

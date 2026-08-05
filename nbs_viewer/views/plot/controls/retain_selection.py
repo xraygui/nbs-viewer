@@ -1,9 +1,7 @@
-from qtpy.QtWidgets import QHBoxLayout, QLabel, QCheckBox
-
-from .base import PlotControlWidget
+from .base import CheckboxFormControl
 
 
-class RetainSelectionControl(PlotControlWidget):
+class RetainSelectionControl(CheckboxFormControl):
     """
     Widget for controlling selection retention behavior.
 
@@ -18,35 +16,17 @@ class RetainSelectionControl(PlotControlWidget):
     """
 
     def __init__(self, run_list_model, parent=None):
-        """
-        Initialize the widget.
-
-        Parameters
-        ----------
-        run_list_model : RunListModel
-            The plot model to control
-        parent : QWidget, optional
-            Parent widget, by default None
-        """
         super().__init__(run_list_model, parent)
-        # Set initial state from model
-        self._retain_selection_box.setChecked(self.run_list_model._retain_selection)
+        self._checkbox.setChecked(self.run_list_model._retain_selection)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        # Retain selection toggle
-        layout.addWidget(QLabel("Retain Selection"))
-        self._retain_selection_box = QCheckBox()
-        self._retain_selection_box.setChecked(False)
-        self._retain_selection_box.setToolTip(
-            "Keep current plot selections when runs change"
+        checkbox = self._create_form_checkbox(
+            "Retain Selection",
+            checked=False,
+            tooltip="Keep current plot selections when runs change",
         )
-        self._retain_selection_box.checkStateChanged.connect(self._on_checkbox_changed)
-        layout.addWidget(self._retain_selection_box)
-        self.setLayout(layout)
+        checkbox.checkStateChanged.connect(self._on_checkbox_changed)
 
     def get_state(self) -> dict:
         """
@@ -57,7 +37,7 @@ class RetainSelectionControl(PlotControlWidget):
         dict
             Dictionary with retain_selection state
         """
-        return {"retain_selection": self._retain_selection_box.isChecked()}
+        return {"retain_selection": self._checkbox.isChecked()}
 
     def set_state(self, state: dict) -> None:
         """
@@ -69,9 +49,8 @@ class RetainSelectionControl(PlotControlWidget):
             Dictionary with retain_selection state
         """
         if "retain_selection" in state:
-            self._retain_selection_box.setChecked(state["retain_selection"])
+            self._checkbox.setChecked(state["retain_selection"])
 
     def _on_checkbox_changed(self, checkState) -> None:
         """Handle state changes."""
-        state = self.get_state()
-        self.run_list_model.set_retain_selection(state["retain_selection"])
+        self.run_list_model.set_retain_selection(self._checkbox.isChecked())
