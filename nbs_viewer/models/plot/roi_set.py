@@ -13,12 +13,20 @@ from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
 
-from .region import RectRegion, RegionDefinition
+from .region import EllipseRegion, PolygonRegion, RectRegion, RegionDefinition
 
 MaskMode = str
 SpatialReduce = str
 
 PLACEHOLDER_RECT = RectRegion(x0=0.0, x1=0.0, y0=0.0, y1=0.0)
+PLACEHOLDER_ELLIPSE = EllipseRegion(cx=0.0, cy=0.0, rx=0.0, ry=0.0, angle=0.0)
+PLACEHOLDER_POLYGON = PolygonRegion(vertices=())
+
+PLACEHOLDER_BY_TYPE = {
+    "rect": PLACEHOLDER_RECT,
+    "ellipse": PLACEHOLDER_ELLIPSE,
+    "polygon": PLACEHOLDER_POLYGON,
+}
 
 DEFAULT_ROI_COLORS: Tuple[str, ...] = (
     "#1f77b4",
@@ -415,6 +423,37 @@ class RoiSetModel(QObject):
             return entry_id
         return self.add(region, view_fingerprint=view_fingerprint)
 
+    def add_placeholder(
+        self,
+        region_type: str = "rect",
+        *,
+        operation: Optional[RoiOperation] = None,
+    ) -> str:
+        """
+        Add an entry with empty geometry awaiting a draw.
+
+        Parameters
+        ----------
+        region_type : str
+            Registered region type id (``rect``, ``ellipse``, ``polygon``).
+        operation : RoiOperation, optional
+            Initial reduction parameters.
+
+        Returns
+        -------
+        str
+            New entry id.
+
+        Raises
+        ------
+        ValueError
+            If ``region_type`` is unknown.
+        """
+        region = PLACEHOLDER_BY_TYPE.get(region_type)
+        if region is None:
+            raise ValueError(f"Unknown ROI type {region_type!r}")
+        return self.add(region, operation=operation)
+
     def add_placeholder_rect(
         self,
         *,
@@ -433,7 +472,7 @@ class RoiSetModel(QObject):
         str
             New entry id.
         """
-        return self.add(PLACEHOLDER_RECT, operation=operation)
+        return self.add_placeholder("rect", operation=operation)
 
     def entry_is_drawable(self, entry: RoiEntry) -> bool:
         """

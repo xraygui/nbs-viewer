@@ -101,6 +101,9 @@ class DerivativeController(QObject):
             self._window.save_all_requested.connect(self._on_save_all)
             self._window.full_height_requested.connect(self._apply_roi_full_height)
             self._window.full_width_requested.connect(self._apply_roi_full_width)
+            self._window.ellipse_circle_lock_changed.connect(
+                self.canvas.set_ellipse_circle_locked
+            )
             self._window.finished.connect(self._on_window_finished)
         self._update_window_context()
         self._window.show()
@@ -114,6 +117,7 @@ class DerivativeController(QObject):
         self._save_all_queue.clear()
         if self._window is not None:
             self.canvas.set_roi_draw_enabled(False)
+            self.canvas.set_ellipse_circle_locked(False)
             self._window.set_draw_checked(False)
         self._window = None
 
@@ -154,17 +158,25 @@ class DerivativeController(QObject):
                 self._window.set_status("No stale ROIs")
 
     def _on_add_roi(self, region_type: str):
-        if region_type != "rect":
+        try:
+            entry_id = self.roi_set.add_placeholder(region_type)
+        except ValueError:
             if self._window is not None:
-                self._window.set_status(f"ROI type {region_type!r} is not available yet")
+                self._window.set_status(f"ROI type {region_type!r} is not available")
             return
-        entry_id = self.roi_set.add_placeholder_rect()
         if self._window is not None:
             self._window.set_draw_checked(True)
             self.canvas.set_roi_draw_enabled(True)
             entry = self.roi_set.get(entry_id)
             label = entry.display_label if entry is not None else "ROI"
-            self._window.set_status(f"Draw {label} on the parent plot")
+            kind = region_type
+            if region_type == "polygon":
+                self._window.set_status(
+                    f"Draw {label}: click vertices on the parent plot, "
+                    "click the first vertex to close"
+                )
+            else:
+                self._window.set_status(f"Draw {label} ({kind}) on the parent plot")
 
     def _on_parent_plot_updated(self):
         if self._window is None or not self._window.isVisible():

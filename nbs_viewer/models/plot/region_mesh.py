@@ -299,6 +299,48 @@ def mask_from_data_rect(
     )
 
 
+def mask_from_ellipse(
+    frame: PlotViewFrame,
+    cx: float,
+    cy: float,
+    rx: float,
+    ry: float,
+    angle: float = 0.0,
+) -> np.ndarray:
+    """
+    Build a boolean mask for cells whose centers fall inside an ellipse.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        View frame for the displayed plane.
+    cx, cy : float
+        Ellipse center in data coordinates.
+    rx, ry : float
+        Semi-axis lengths along the ellipse's local X and Y.
+    angle : float, optional
+        Rotation of the local X axis in degrees, counter-clockwise.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask with shape ``frame.shape``.
+    """
+    rx = abs(float(rx))
+    ry = abs(float(ry))
+    if rx == 0.0 or ry == 0.0:
+        return np.zeros(frame.shape, dtype=bool)
+    centers_x, centers_y = cell_centers(frame)
+    theta = np.deg2rad(float(angle))
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+    dx = centers_x - float(cx)
+    dy = centers_y - float(cy)
+    local_x = dx * cos_t + dy * sin_t
+    local_y = -dx * sin_t + dy * cos_t
+    return (local_x / rx) ** 2 + (local_y / ry) ** 2 <= 1.0
+
+
 def mask_from_vertices(
     frame: PlotViewFrame,
     vertices,

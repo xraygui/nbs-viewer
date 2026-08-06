@@ -21,6 +21,8 @@ from .region_mesh import (
     mask_covering_data_rect,
     mask_from_axis_slice,
     mask_from_data_rect,
+    mask_from_ellipse,
+    mask_from_vertices,
 )
 
 PlotAxisName = Literal["plot_x", "plot_y"]
@@ -296,6 +298,186 @@ class RectRegion(RegionDefinition):
         if profile_axis == "plot_y":
             return RectRegion(x0=x0, x1=x1, y0=y_lo, y1=y_hi).normalized()
         raise ValueError(f"Unknown profile axis {profile_axis!r}")
+
+
+@register_region_type
+@dataclass(frozen=True)
+class EllipseRegion(RegionDefinition):
+    """
+    Ellipse in matplotlib data coordinates.
+
+    A circle is the constrained case ``rx == ry``.
+
+    Parameters
+    ----------
+    cx, cy : float
+        Center in data coordinates.
+    rx, ry : float
+        Semi-axis lengths along the ellipse local X and Y.
+    angle : float
+        Rotation of the local X axis in degrees, counter-clockwise.
+    """
+
+    region_type: ClassVar[str] = "ellipse"
+
+    cx: float
+    cy: float
+    rx: float
+    ry: float
+    angle: float = 0.0
+
+    def normalized(self) -> "EllipseRegion":
+        """
+        Return a copy with non-negative semi-axes.
+        """
+        return EllipseRegion(
+            cx=float(self.cx),
+            cy=float(self.cy),
+            rx=abs(float(self.rx)),
+            ry=abs(float(self.ry)),
+            angle=float(self.angle),
+        )
+
+    def compile(self, frame: PlotViewFrame) -> CompiledRegion:
+        """
+        Compile the ellipse to a cell mask using cell centers.
+        """
+        region = self.normalized()
+        mask = mask_from_ellipse(
+            frame,
+            region.cx,
+            region.cy,
+            region.rx,
+            region.ry,
+            region.angle,
+        )
+        return self._compile_mask(frame, mask)
+
+    def data_bounds(self) -> Tuple[float, float, float, float]:
+        """
+        Return the axis-aligned bounding box of the rotated ellipse.
+        """
+        region = self.normalized()
+        theta = np.deg2rad(region.angle)
+        cos_t = float(np.cos(theta))
+        sin_t = float(np.sin(theta))
+        half_w = np.hypot(region.rx * cos_t, region.ry * sin_t)
+        half_h = np.hypot(region.rx * sin_t, region.ry * cos_t)
+        return (
+            region.cx - half_w,
+            region.cx + half_w,
+            region.cy - half_h,
+            region.cy + half_h,
+        )
+
+    def describe(self) -> str:
+        """
+        Return a center and radius summary for list displays.
+        """
+        region = self.normalized()
+        if region.rx == region.ry:
+            return (
+                f"Circle ({region.cx:.4g}, {region.cy:.4g}) r={region.rx:.4g}"
+            )
+        return (
+            f"Ellipse ({region.cx:.4g}, {region.cy:.4g}) "
+            f"rx={region.rx:.4g} ry={region.ry:.4g} ∠{region.angle:.3g}°"
+        )
+
+    def has_area(self) -> bool:
+        """
+        Return whether both semi-axes are positive.
+        """
+        region = self.normalized()
+        return region.rx > 0.0 and region.ry > 0.0
+
+    def centroid(self) -> Tuple[float, float]:
+        """
+        Return the ellipse center.
+        """
+        return (float(self.cx), float(self.cy))
+
+
+@register_region_type
+@dataclass(frozen=True)
+class PolygonRegion(RegionDefinition):
+    """
+    Closed polygon in matplotlib data coordinates.
+
+    Parameters
+    ----------
+    vertices : tuple of tuple of float
+        Ordered ``(x, y)`` vertices. The path is closed implicitly.
+    """
+
+    region_type: ClassVar[str] = "polygon"
+
+    vertices: Tuple[Tuple[float, float], ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "PolygonRegion":
+        """
+        Rebuild a polygon from :meth:`to_dict` output.
+        """
+        fields = {k: v for k, v in payload.items() if k != "region_type"}
+        verts = fields.get("vertices", ())
+        fields["vertices"] = tuple(
+            (float(x), float(y)) for x, y in verts
+        )
+        return cls(**fields)
+
+    def compile(self, frame: PlotViewFrame) -> CompiledRegion:
+        """
+        Compile the polygon to a cell mask using cell centers.
+        """
+        if len(self.vertices) < 3:
+            return _compiled_from_mask(np.zeros(frame.shape, dtype=bool))
+        mask = mask_from_vertices(frame, self.vertices)
+        return self._compile_mask(frame, mask)
+
+    def data_bounds(self) -> Tuple[float, float, float, float]:
+        """
+        Return the axis-aligned bounds of the vertices.
+        """
+        if not self.vertices:
+            return (0.0, 0.0, 0.0, 0.0)
+        xs = [float(x) for x, _ in self.vertices]
+        ys = [float(y) for _, y in self.vertices]
+        return (min(xs), max(xs), min(ys), max(ys))
+
+    def describe(self) -> str:
+        """
+        Return a vertex-count summary for list displays.
+        """
+        n = len(self.vertices)
+        if n == 0:
+            return "Polygon (empty)"
+        x0, x1, y0, y1 = self.data_bounds()
+        return f"Polygon {n} verts ({x0:.4g}, {y0:.4g})–({x1:.4g}, {y1:.4g})"
+
+    def has_area(self) -> bool:
+        """
+        Return whether the polygon has at least three vertices and nonzero area.
+        """
+        if len(self.vertices) < 3:
+            return False
+        area = 0.0
+        verts = self.vertices
+        for i, (x0, y0) in enumerate(verts):
+            x1, y1 = verts[(i + 1) % len(verts)]
+            area += float(x0) * float(y1) - float(x1) * float(y0)
+        return abs(area) > 0.0
+
+    def centroid(self) -> Tuple[float, float]:
+        """
+        Return the mean of the polygon vertices.
+        """
+        if not self.vertices:
+            return (0.0, 0.0)
+        xs = [float(x) for x, _ in self.vertices]
+        ys = [float(y) for _, y in self.vertices]
+        n = len(self.vertices)
+        return (sum(xs) / n, sum(ys) / n)
 
 
 @register_region_type

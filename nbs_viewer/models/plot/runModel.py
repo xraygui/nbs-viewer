@@ -214,6 +214,11 @@ class RunModel(QObject):
         """
         Return axis coordinates for a catalog or frozen Y key.
 
+        Stack spectra resolve X from the selected catalog keys so the
+        same frozen Y can be plotted against any scan-length independent
+        (``time``, motor position, etc.). Local profiles keep the frozen
+        profile-axis coordinates from the reduction.
+
         Parameters
         ----------
         ykey : str
@@ -227,11 +232,71 @@ class RunModel(QObject):
         -------
         tuple
             ``(axis_arrays, axis_names, associated_data)``.
+
+        Raises
+        ------
+        ValueError
+            If a catalog X key length does not match the frozen spectrum.
         """
         entry = self._frozen_entry(ykey)
         if entry is not None:
+            if entry.kind == "stack_spectrum" and xkeys:
+                return self._stack_spectrum_dimension_axes(
+                    entry, xkeys, slice_info
+                )
             return entry.get_dimension_axes(xkeys, slice_info)
         return self._run.get_dimension_axes(ykey, xkeys, slice_info)
+
+    def _stack_spectrum_dimension_axes(
+        self,
+        entry: FrozenSpectrum,
+        xkeys: List[str],
+        slice_info=None,
+    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Any]]:
+        """
+        Resolve catalog X coordinates for a frozen stack spectrum.
+
+        Parameters
+        ----------
+        entry : FrozenSpectrum
+            Registered stack-spectrum entry.
+        xkeys : list of str
+            Selected catalog X keys.
+        slice_info : tuple, optional
+            Per-axis slice applied to Y and each X array.
+
+        Returns
+        -------
+        tuple
+            ``(axis_arrays, axis_names, associated_data)``.
+
+        Raises
+        ------
+        ValueError
+            If any X key is not length-compatible with the frozen Y.
+        """
+        y_full = np.asarray(entry.get_data(None))
+        if y_full.ndim != 1:
+            raise ValueError(
+                f"stack spectrum {entry.key!r} must be 1-D, got shape {y_full.shape}"
+            )
+        n_full = int(y_full.shape[0])
+        x_slice = slice(None)
+        if slice_info is not None and len(slice_info) > 0:
+            x_slice = slice_info[0]
+        axis_arrays: List[np.ndarray] = []
+        axis_names: List[str] = []
+        for xkey in xkeys:
+            raw_full = np.asarray(self._run.getData(xkey), dtype=float).ravel()
+            if raw_full.size != n_full:
+                raise ValueError(
+                    f"X key {xkey!r} length {raw_full.size} does not match "
+                    f"frozen spectrum {entry.label!r} length {n_full}"
+                )
+            raw = np.atleast_1d(np.asarray(raw_full[x_slice], dtype=float))
+            axis_arrays.append(raw)
+            axis_names.append(xkey)
+        return axis_arrays, axis_names, {}
 
     def get_shape(self, key: str) -> Tuple[int, ...]:
         """

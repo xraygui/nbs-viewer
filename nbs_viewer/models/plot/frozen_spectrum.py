@@ -217,12 +217,16 @@ class FrozenSpectrum:
         slice_info: Optional[tuple] = None,
     ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
         """
-        Return axis coordinates for each storage dimension.
+        Return frozen axis coordinates from the stored bundle.
+
+        Used for local profiles and as a fallback when no X keys are
+        selected. Stack spectra plotted as Y resolve catalog X keys in
+        :meth:`RunModel.get_dimension_axes` instead.
 
         Parameters
         ----------
         xkeys : list of str
-            Selected X-axis catalog keys.
+            Selected X-axis catalog keys (ignored here).
         slice_info : tuple, optional
             Per-axis slice tuple applied to storage and axis arrays.
 

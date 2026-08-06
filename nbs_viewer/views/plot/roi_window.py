@@ -13,7 +13,6 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -22,6 +21,7 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -41,8 +41,13 @@ from nbs_viewer.models.plot.region import RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation, RoiSetModel
 
 from .derivative_preview_canvas import DerivativePreviewCanvas
-
-_ADD_RECTANGLE = "rect"
+from .roi_types import (
+    DescribeOptionsWidget,
+    EllipseOptionsWidget,
+    ShapeOptionsWidget,
+    get_roi_type,
+    iter_roi_types,
+)
 
 
 class RoiWindow(QDialog):
@@ -86,23 +91,26 @@ class RoiWindow(QDialog):
     save_all_requested = Signal()
     full_height_requested = Signal()
     full_width_requested = Signal()
+    ellipse_circle_lock_changed = Signal(bool)
 
     def __init__(self, roi_set: RoiSetModel, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Regions of Interest")
         self.setModal(False)
-        self.setMinimumSize(720, 560)
+        self.setMinimumSize(760, 640)
         self._roi_set = roi_set
         self._parent_spec: Optional[CubeViewSpec] = None
         self._axis_names: Sequence[str] = ()
         self._parent_frame: Optional[PlotViewFrame] = None
         self._loading_form = False
+        self._shape_options: Optional[ShapeOptionsWidget] = None
 
         root = QVBoxLayout(self)
 
         toolbar = QHBoxLayout()
         self.add_type_combo = QComboBox()
-        self.add_type_combo.addItem("Rectangle", _ADD_RECTANGLE)
+        for spec in iter_roi_types():
+            self.add_type_combo.addItem(spec.display_name, spec.type_id)
         self.add_button = QPushButton("Add ROI")
         self.draw_button = QPushButton("Draw")
         self.draw_button.setCheckable(True)
@@ -119,23 +127,37 @@ class RoiWindow(QDialog):
         root.addLayout(toolbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._controls_splitter = splitter
         self.entry_list = QListWidget()
         self.entry_list.setMinimumWidth(180)
         splitter.addWidget(self.entry_list)
 
         right = QWidget()
+        right.setMinimumWidth(300)
+        right.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self._controls_right = right
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
 
         self.shape_box = QGroupBox("Shape")
-        shape_layout = QVBoxLayout(self.shape_box)
-        self.shape_label = QLabel("—")
-        self.shape_label.setWordWrap(True)
-        shape_layout.addWidget(self.shape_label)
+        self.shape_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self._shape_layout = QVBoxLayout(self.shape_box)
+        self._shape_layout.setSpacing(6)
+        self._shape_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
+        self._shape_options = DescribeOptionsWidget(self)
+        self._shape_options._bound_type_id = None
+        self._shape_layout.addWidget(self._shape_options)
         right_layout.addWidget(self.shape_box)
 
         self.reduction_box = QGroupBox("Reduction")
+        self.reduction_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         reduction_layout = QVBoxLayout(self.reduction_box)
+        reduction_layout.setSpacing(8)
+        reduction_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
 
         mask_row = QHBoxLayout()
         self.mask_inside = QRadioButton("Inside")
@@ -146,21 +168,30 @@ class RoiWindow(QDialog):
         mask_group.addButton(self.mask_outside)
         mask_row.addWidget(self.mask_inside)
         mask_row.addWidget(self.mask_outside)
+        mask_row.addStretch(1)
         reduction_layout.addLayout(mask_row)
 
-        profile_form = QFormLayout()
         self.profile_axis_combo = QComboBox()
-        profile_form.addRow("Profile axis:", self.profile_axis_combo)
+        self.profile_axis_combo.setMinimumHeight(28)
+        self.profile_axis_combo.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Fixed
+        )
+        reduction_layout.addLayout(
+            self._labeled_row("Profile axis:", self.profile_axis_combo)
+        )
+
         self.reduce_combo = QComboBox()
+        self.reduce_combo.setMinimumHeight(28)
+        self.reduce_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.reduce_combo.addItem("Sum", "sum")
         self.reduce_combo.addItem("Mean", "mean")
-        profile_form.addRow("Reduce:", self.reduce_combo)
-        reduction_layout.addLayout(profile_form)
+        reduction_layout.addLayout(self._labeled_row("Reduce:", self.reduce_combo))
 
         self.span_full_checkbox = QCheckBox(
             "Span full profile axis (recommended for comparable 1D spectra)"
         )
         self.span_full_checkbox.setChecked(True)
+        self.span_full_checkbox.setMinimumHeight(24)
         reduction_layout.addWidget(self.span_full_checkbox)
 
         span_button_row = QHBoxLayout()
@@ -172,14 +203,16 @@ class RoiWindow(QDialog):
 
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("Optional label")
+        self.label_edit.setMinimumHeight(28)
         reduction_layout.addWidget(QLabel("Label:"))
         reduction_layout.addWidget(self.label_edit)
         right_layout.addWidget(self.reduction_box)
-        right_layout.addStretch(1)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
         root.addWidget(splitter, stretch=0)
+        self._update_controls_minimum_sizes()
+
 
         preview_header = QHBoxLayout()
         preview_header.addWidget(QLabel("Preview:"))
@@ -227,6 +260,7 @@ class RoiWindow(QDialog):
         self.full_height_button.clicked.connect(self.full_height_requested.emit)
         self.full_width_button.clicked.connect(self.full_width_requested.emit)
         self.preview_checkbox.toggled.connect(self._on_preview_toggled)
+        self._shape_options.region_edited.connect(self._on_shape_region_edited)
 
         for widget in (self.mask_inside, self.mask_outside):
             widget.toggled.connect(self._on_form_changed)
@@ -242,11 +276,128 @@ class RoiWindow(QDialog):
         self.refresh_entry_list()
         self._load_selected_into_form()
         self._update_form_enabled()
+        self._update_controls_minimum_sizes()
+
+    @staticmethod
+    def _labeled_row(label: str, widget: QWidget) -> QHBoxLayout:
+        """
+        Build a non-collapsing label + field row.
+        """
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        text = QLabel(label)
+        text.setMinimumWidth(90)
+        text.setMinimumHeight(28)
+        text.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        row.addWidget(text)
+        row.addWidget(widget, stretch=1)
+        return row
+
+    def _update_controls_minimum_sizes(self):
+        """
+        Force the controls pane to stay tall enough for its contents.
+        """
+        self.shape_box.adjustSize()
+        self.reduction_box.adjustSize()
+        self._controls_right.adjustSize()
+        spacing = self._controls_right.layout().spacing()
+        height = (
+            self.shape_box.sizeHint().height()
+            + self.reduction_box.sizeHint().height()
+            + spacing
+            + 8
+        )
+        self._controls_right.setMinimumHeight(height)
+        self.entry_list.setMinimumHeight(height)
+        self._controls_splitter.setMinimumHeight(height)
+        chrome = 160
+        preview_floor = 160
+        self.setMinimumHeight(height + chrome + preview_floor)
 
     def _on_add_clicked(self):
         region_type = self.add_type_combo.currentData()
-        self.add_roi_requested.emit(region_type or _ADD_RECTANGLE)
+        self.add_roi_requested.emit(region_type or "rect")
 
+    def _on_shape_region_edited(self, region: RegionDefinition):
+        if self._loading_form:
+            return
+        entry = self._roi_set.selected_entry()
+        if entry is None:
+            return
+        self._roi_set.update_region(
+            entry.id,
+            region,
+            view_fingerprint=entry.view_fingerprint,
+            clear_stale=False,
+        )
+        self.operation_changed.emit()
+
+    def _replace_shape_options(
+        self, region: Optional[RegionDefinition], *, sync_circle_lock: bool = False
+    ):
+        type_id = getattr(region, "region_type", None) if region is not None else None
+        spec = get_roi_type(type_id) if type_id else None
+        bound = getattr(self._shape_options, "_bound_type_id", None)
+        wanted = spec.type_id if spec is not None else None
+        if self._shape_options is not None and bound == wanted:
+            if region is not None:
+                if isinstance(self._shape_options, EllipseOptionsWidget):
+                    self._shape_options.set_region(
+                        region, sync_circle_lock=sync_circle_lock
+                    )
+                else:
+                    self._shape_options.set_region(region)
+            elif isinstance(self._shape_options, DescribeOptionsWidget):
+                self._shape_options.clear_summary()
+            return
+        if self._shape_options is not None:
+            try:
+                self._shape_options.region_edited.disconnect(
+                    self._on_shape_region_edited
+                )
+            except TypeError:
+                pass
+            if isinstance(self._shape_options, EllipseOptionsWidget):
+                try:
+                    self._shape_options.circle_lock_changed.disconnect(
+                        self._on_ellipse_circle_lock_changed
+                    )
+                except TypeError:
+                    pass
+            self._shape_layout.removeWidget(self._shape_options)
+            self._shape_options.deleteLater()
+            self._shape_options = None
+        if spec is None:
+            self._shape_options = DescribeOptionsWidget(self)
+            self._shape_options._bound_type_id = None
+            self._shape_options.clear_summary()
+            self.ellipse_circle_lock_changed.emit(False)
+        else:
+            self._shape_options = spec.create_options_widget(self)
+            self._shape_options._bound_type_id = spec.type_id
+            if region is not None:
+                if isinstance(self._shape_options, EllipseOptionsWidget):
+                    self._shape_options.set_region(
+                        region, sync_circle_lock=True
+                    )
+                else:
+                    self._shape_options.set_region(region)
+            if isinstance(self._shape_options, EllipseOptionsWidget):
+                self._shape_options.circle_lock_changed.connect(
+                    self._on_ellipse_circle_lock_changed
+                )
+                self.ellipse_circle_lock_changed.emit(
+                    self._shape_options.is_circle_locked()
+                )
+            else:
+                self.ellipse_circle_lock_changed.emit(False)
+        self._shape_options.region_edited.connect(self._on_shape_region_edited)
+        self._shape_layout.addWidget(self._shape_options)
+        self._update_controls_minimum_sizes()
+
+    def _on_ellipse_circle_lock_changed(self, locked: bool):
+        self.ellipse_circle_lock_changed.emit(locked)
     def _on_preview_toggled(self, enabled: bool):
         self.preview_enabled_changed.emit(enabled)
         if enabled:
@@ -299,8 +450,7 @@ class RoiWindow(QDialog):
         if entry_id == self._roi_set.selected_id:
             entry = self._roi_set.get(entry_id)
             if entry is not None:
-                self.shape_label.setText(entry.region.describe())
-
+                self._replace_shape_options(entry.region)
     def _refresh_list_item(self, entry_id: str):
         entry = self._roi_set.get(entry_id)
         if entry is None:
@@ -345,9 +495,8 @@ class RoiWindow(QDialog):
 
     def _entry_list_text(self, entry: RoiEntry) -> str:
         kind = getattr(entry.region, "region_type", "?")
-        kind_label = {"rect": "Rect", "ellipse": "Ellipse", "polygon": "Polygon"}.get(
-            kind, kind
-        )
+        spec = get_roi_type(kind)
+        kind_label = spec.short_name if spec is not None else kind
         mark = "stale" if entry.stale else "✓"
         return f"{entry.display_label}  {kind_label}  {mark}"
 
@@ -356,10 +505,10 @@ class RoiWindow(QDialog):
         self._loading_form = True
         try:
             if entry is None:
-                self.shape_label.setText("—")
+                self._replace_shape_options(None)
                 self.label_edit.clear()
                 return
-            self.shape_label.setText(entry.region.describe())
+            self._replace_shape_options(entry.region, sync_circle_lock=True)
             op = entry.operation
             self.mask_inside.setChecked(op.mask_mode != "outside")
             self.mask_outside.setChecked(op.mask_mode == "outside")
@@ -394,12 +543,38 @@ class RoiWindow(QDialog):
             self._update_profile_controls_enabled()
 
     def _update_profile_controls_enabled(self):
+        entry = self._roi_set.selected_entry()
+        separable = (
+            entry is not None and entry.region.separable_for_profile
+        )
+        outside = self.get_mask_mode() == "outside"
         in_plane = self._selected_axis_on_plot_plane()
-        self.span_full_checkbox.setEnabled(in_plane)
+        span_ok = separable and in_plane and not outside
+        self.span_full_checkbox.setEnabled(span_ok)
+        if not span_ok:
+            if not separable:
+                self.span_full_checkbox.setToolTip(
+                    "Span-full only applies to rectangles and axis bands; "
+                    "expanding a non-separable shape would discard the drawn geometry."
+                )
+            elif outside:
+                self.span_full_checkbox.setToolTip(
+                    "Span-full is disabled in outside mode; the inverted mask "
+                    "already covers the full profile axis."
+                )
+            else:
+                self.span_full_checkbox.setToolTip(
+                    "Span-full applies only to in-plane profile axes."
+                )
+        else:
+            self.span_full_checkbox.setToolTip(
+                "Expand the ROI along the profile axis so every bin is included."
+            )
         storage_axis = self.get_profile_storage_axis()
         profile_plot_axis = None
         if (
             in_plane
+            and separable
             and self._parent_frame is not None
             and self._parent_spec is not None
         ):
@@ -411,14 +586,13 @@ class RoiWindow(QDialog):
                 )
             except ValueError:
                 profile_plot_axis = None
-        has_selection = self._roi_set.selected_entry() is not None
+        has_selection = entry is not None
         self.full_width_button.setEnabled(
-            has_selection and profile_plot_axis == "plot_x"
+            has_selection and separable and profile_plot_axis == "plot_x"
         )
         self.full_height_button.setEnabled(
-            has_selection and profile_plot_axis == "plot_y"
+            has_selection and separable and profile_plot_axis == "plot_y"
         )
-
     def _selected_axis_on_plot_plane(self) -> bool:
         if self._parent_spec is None:
             return False

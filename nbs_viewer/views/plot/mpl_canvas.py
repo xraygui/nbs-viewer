@@ -15,7 +15,7 @@ from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.widgets import RectangleSelector
-from qtpy.QtCore import QSize, QTimer, Signal
+from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from ...models.plot.cube_view import CubeViewSpec
@@ -26,17 +26,18 @@ from ...models.plot.plot_view_frame import (
     frame_from_bundle,
     view_fingerprint_from_bundle,
 )
-from ...models.plot.region import RectRegion
+from ...models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from ...models.plot.roi_set import RoiSetModel
 from ...models.plot.view_crop import ViewCrop
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
-
-_ROI_EDGE_WIDTH = 2.5
-_ROI_HALO_WIDTH = 4.5
-_ROI_FILL_ALPHA = 0.12
-_ROI_STALE_FILL_ALPHA = 0.08
+from .roi_overlays import _ROI_EDGE_WIDTH
+from .roi_types import (
+    get_roi_type,
+    roi_type_for_region,
+    set_ellipse_selector_circle_lock,
+)
 _CROP_SELECTOR_PROPS = dict(
     facecolor=to_rgba("#ff7f0e", 0.12),
     edgecolor="#ff7f0e",
@@ -153,8 +154,11 @@ class MplCanvas(FigureCanvasQTAgg):
         self.currentDim = 1
         self._roi_set: Optional[RoiSetModel] = None
         self._roi_selector = None
+        self._roi_selector_type: Optional[str] = None
         self._roi_overlays = {}
         self._roi_draw_enabled = False
+        self._ellipse_circle_locked = False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._crop_draft_region = None
         self._crop_selector = None
         self._crop_overlay = None
@@ -735,22 +739,20 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def apply_roi_from_region(self, region) -> None:
         """
-        Set the selected ROI from a :class:`RectRegion` in data coordinates.
+        Set the selected ROI from a region in data coordinates.
         """
         if self._roi_set is None:
             return
-        region = region.normalized()
+        if hasattr(region, "normalized"):
+            region = region.normalized()
         self._roi_set.set_or_replace_single(
             region,
             view_fingerprint=self.current_view_fingerprint(),
         )
         if self._roi_selector is not None:
-            self._roi_selector.extents = (
-                region.x0,
-                region.x1,
-                region.y0,
-                region.y1,
-            )
+            spec = roi_type_for_region(region)
+            if spec is not None:
+                spec.apply_region_to_selector(self._roi_selector, region)
 
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
@@ -956,6 +958,19 @@ class MplCanvas(FigureCanvasQTAgg):
             return None
         return entry.view_fingerprint
 
+    def set_ellipse_circle_locked(self, locked: bool):
+        """
+        Constrain interactive ellipse drawing/resizing to a circle.
+        """
+        locked = bool(locked)
+        self._ellipse_circle_locked = locked
+        if self._roi_selector_type == "ellipse" and self._roi_selector is not None:
+            set_ellipse_selector_circle_lock(self._roi_selector, locked)
+            if locked:
+                region = self._roi_region_from_active_selector()
+                if isinstance(region, EllipseRegion) and region.has_area():
+                    self._commit_roi_region(region)
+
     def set_roi_draw_enabled(self, enabled: bool):
         """
         Enable or disable interactive ROI rectangle drawing.
@@ -964,14 +979,17 @@ class MplCanvas(FigureCanvasQTAgg):
         if enabled and self._crop_draw_enabled:
             self.set_crop_draw_enabled(False)
         if enabled == self._roi_draw_enabled:
+            if enabled:
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
             return
         self._roi_draw_enabled = enabled
         if self._roi_draw_enabled:
             self._remove_roi_overlays()
             self._attach_roi_selector()
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
         else:
             if self._roi_selector is not None:
-                region = self._region_from_selector(self._roi_selector)
+                region = self._roi_region_from_active_selector()
                 if region is not None:
                     self._commit_roi_region(region)
             self._detach_roi_selector()
@@ -992,7 +1010,7 @@ class MplCanvas(FigureCanvasQTAgg):
             self._attach_crop_selector()
         else:
             if self._crop_selector is not None:
-                region = self._region_from_selector(self._crop_selector)
+                region = self._region_from_crop_selector(self._crop_selector)
                 if region is not None:
                     self._set_crop_draft_region(region, update_overlay=True)
             self._detach_crop_selector()
@@ -1032,20 +1050,50 @@ class MplCanvas(FigureCanvasQTAgg):
         if paint:
             self.draw()
 
-    def _region_from_selector(self, selector):
+    def _region_from_crop_selector(self, selector):
         """
-        Read a rectangle from selector extents.
+        Read a crop rectangle from selector extents.
         """
         if selector is None:
             return None
         x0, x1, y0, y1 = selector.extents
         return RectRegion(x0=x0, x1=x1, y0=y0, y1=y1).normalized()
 
-    def _commit_roi_region(self, region: RectRegion):
+    def _roi_region_from_active_selector(self) -> Optional[RegionDefinition]:
+        """
+        Read ROI geometry from the active type-specific selector.
+        """
+        if self._roi_selector is None:
+            return None
+        spec = get_roi_type(self._roi_selector_type or "")
+        if spec is None:
+            return None
+        if self._roi_selector_type == "ellipse":
+            from .roi_types import _region_from_ellipse_selector
+
+            return _region_from_ellipse_selector(
+                self._roi_selector,
+                lock_circle=self._ellipse_circle_locked,
+            )
+        return spec.region_from_selector(self._roi_selector)
+
+    def _commit_roi_region(self, region: RegionDefinition):
         if self._roi_set is None:
             return
+        if isinstance(region, EllipseRegion) and self._ellipse_circle_locked:
+            region = region.normalized()
+            radius = max(region.rx, region.ry)
+            region = EllipseRegion(
+                cx=region.cx,
+                cy=region.cy,
+                rx=radius,
+                ry=radius,
+                angle=region.angle,
+            )
+        elif hasattr(region, "normalized"):
+            region = region.normalized()
         self._roi_set.set_or_replace_single(
-            region.normalized(),
+            region,
             view_fingerprint=self.current_view_fingerprint(),
         )
 
@@ -1057,18 +1105,15 @@ class MplCanvas(FigureCanvasQTAgg):
             self._update_crop_overlay()
         self.crop_region_changed.emit(self._crop_draft_region)
 
-    def _on_roi_selected(self, _eclick, _erelease):
+    def _on_roi_region_drawn(self, region: RegionDefinition):
         if not self._roi_draw_enabled:
-            return
-        region = self._region_from_selector(self._roi_selector)
-        if region is None:
             return
         self._commit_roi_region(region)
 
     def _on_crop_selected(self, _eclick, _erelease):
         if not self._crop_draw_enabled:
             return
-        region = self._region_from_selector(self._crop_selector)
+        region = self._region_from_crop_selector(self._crop_selector)
         if region is None:
             return
         self._set_crop_draft_region(region, update_overlay=False)
@@ -1120,6 +1165,7 @@ class MplCanvas(FigureCanvasQTAgg):
     def _destroy_roi_selector(self):
         selector = self._roi_selector
         self._roi_selector = None
+        self._roi_selector_type = None
         self._destroy_selector(selector)
 
     def _destroy_crop_selector(self):
@@ -1142,31 +1188,24 @@ class MplCanvas(FigureCanvasQTAgg):
 
         entry = self.get_selected_roi_entry()
         color = entry.color if entry is not None else "#00ffff"
-        self._roi_selector = RectangleSelector(
-            self.axes,
-            self._on_roi_selected,
-            useblit=False,
-            button=[1],
-            minspanx=0,
-            minspany=0,
-            spancoords="data",
-            interactive=True,
-            props=dict(
-                facecolor=to_rgba(color, _ROI_FILL_ALPHA),
-                edgecolor=color,
-                fill=True,
-                linewidth=_ROI_EDGE_WIDTH,
-            ),
+        region = entry.region if entry is not None else None
+        type_id = (
+            getattr(region, "region_type", None) if region is not None else "rect"
         )
-        region = self.get_roi_region()
-        if isinstance(region, RectRegion):
-            region = region.normalized()
-            self._roi_selector.extents = (
-                region.x0,
-                region.x1,
-                region.y0,
-                region.y1,
-            )
+        spec = get_roi_type(type_id or "rect")
+        if spec is None:
+            return
+        placeholder = region if region is not None else spec.create_placeholder()
+        self._roi_selector_type = spec.type_id
+        create_kwargs = dict(color=color, region=placeholder)
+        if spec.type_id == "ellipse":
+            create_kwargs["lock_circle"] = self._ellipse_circle_locked
+        self._roi_selector = spec.create_selector(
+            self.axes,
+            self._on_roi_region_drawn,
+            **create_kwargs,
+        )
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _attach_crop_selector(self):
         if not self._crop_draw_enabled:
@@ -1212,52 +1251,19 @@ class MplCanvas(FigureCanvasQTAgg):
                 pass
             self._crop_overlay = None
 
-    def _rect_overlay_for_region(self, region: RectRegion, *, color: str, stale: bool):
-        """
-        Build ROI overlay patches with an opaque edge and light halo.
-
-        A global patch alpha would fade the border into dark heatmaps, so fill
-        alpha is applied only to the face color.
-        """
-        region = region.normalized()
-        edge = "#bdbdbd" if stale else color
-        face_alpha = _ROI_STALE_FILL_ALPHA if stale else _ROI_FILL_ALPHA
-        xy = (region.x0, region.y0)
-        width = region.x1 - region.x0
-        height = region.y1 - region.y0
-        halo = Rectangle(
-            xy,
-            width,
-            height,
-            linewidth=_ROI_HALO_WIDTH,
-            edgecolor="white",
-            facecolor="none",
-            alpha=0.85 if not stale else 0.45,
-            fill=False,
-            zorder=20,
-        )
-        body = Rectangle(
-            xy,
-            width,
-            height,
-            linewidth=_ROI_EDGE_WIDTH,
-            edgecolor=edge,
-            facecolor=to_rgba(edge, face_alpha),
-            fill=True,
-            zorder=21,
-        )
-        return halo, body
-
     def _update_roi_overlays(self):
         self._remove_roi_overlays()
         if self._roi_set is None or self._roi_draw_enabled:
             return
         for entry in self._roi_set.entries():
-            if not entry.visible or not isinstance(entry.region, RectRegion):
+            if not entry.visible:
                 continue
             if not entry.region.has_area():
                 continue
-            patches = self._rect_overlay_for_region(
+            spec = roi_type_for_region(entry.region)
+            if spec is None:
+                continue
+            patches = spec.overlay_artists(
                 entry.region,
                 color=entry.color,
                 stale=entry.stale,
@@ -1281,7 +1287,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def _selector_is_live(self, selector) -> bool:
         """
-        Return whether a rectangle selector is attached to the current axes.
+        Return whether a selector is attached to the current axes.
         """
         if selector is None:
             return False
@@ -1309,18 +1315,20 @@ class MplCanvas(FigureCanvasQTAgg):
     def _sync_roi_display(self):
         if self._roi_draw_enabled:
             self._remove_roi_overlays()
-            if not self._selector_is_live(self._roi_selector):
+            entry = self.get_selected_roi_entry()
+            selected_type = (
+                getattr(entry.region, "region_type", None)
+                if entry is not None
+                else None
+            )
+            type_changed = selected_type != self._roi_selector_type
+            if type_changed or not self._selector_is_live(self._roi_selector):
                 self._attach_roi_selector()
             else:
                 region = self.get_roi_region()
-                if isinstance(region, RectRegion):
-                    region = region.normalized()
-                    self._roi_selector.extents = (
-                        region.x0,
-                        region.x1,
-                        region.y0,
-                        region.y1,
-                    )
+                spec = get_roi_type(self._roi_selector_type or "")
+                if region is not None and spec is not None and region.has_area():
+                    spec.apply_region_to_selector(self._roi_selector, region)
         else:
             self._update_roi_overlays()
         if self._crop_draw_enabled:
@@ -1337,7 +1345,6 @@ class MplCanvas(FigureCanvasQTAgg):
                 )
         else:
             self._update_crop_overlay()
-
     def clear(self):
         """
         Reset axes and artists for a dimension change without painting.
