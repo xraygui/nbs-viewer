@@ -14,7 +14,6 @@ from .controls.lock_aspect import LockAspectControl
 from .controls.transform import TransformControl
 from .controls.retain_selection import RetainSelectionControl
 from .plotDimensionWidget import PlotDimensionControl
-from nbs_viewer.models.plot.roi_set import RoiSetModel
 
 from .roi_panel import RoiPanel
 from .roi_controller import RoiController
@@ -31,13 +30,18 @@ class PlotControlTab(QWidget):
         Model for the active run list and plot settings
     plot_canvas : MplCanvas, optional
         Canvas for dimension and ROI controls; omitted when not applicable
+    plot_model : PlotModel, optional
+        Plot session that owns the ROI set; required when ``plot_canvas`` is set
     parent : QWidget, optional
         Parent widget, by default None
     """
 
-    def __init__(self, run_list_model, plot_canvas=None, parent=None):
+    def __init__(
+        self, run_list_model, plot_canvas=None, plot_model=None, parent=None
+    ):
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self.plot_canvas = plot_canvas
         self.dimension_control = None
         self.roi_panel = None
@@ -123,6 +127,11 @@ class PlotControlTab(QWidget):
         self.spacer = self._tab_layout.addStretch(0)
 
     def _setup_canvas_panels(self):
+        if self.plot_model is None:
+            raise ValueError(
+                "plot_model is required when plot_canvas is provided"
+            )
+
         self.dimension_control = PlotDimensionControl(
             self.run_list_model, self.plot_canvas, self
         )
@@ -143,7 +152,7 @@ class PlotControlTab(QWidget):
         )
         self._tab_layout.addWidget(self.roi_panel_panel, 0)
 
-        self.roi_set = RoiSetModel(self)
+        self.roi_set = self.plot_model.roi_set
         self.roi_controller = RoiController(
             self.plot_canvas,
             self.dimension_control,

@@ -21,18 +21,23 @@ class PlotWidget(QWidget):
     ----------
     run_list_model : RunListModel
         Model managing runs for this display.
+    plot_model : PlotModel
+        Plot session model that owns ROI and (later) plot-data state.
     parent : QWidget, optional
         Parent widget.
     """
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, run_list_model, plot_model, parent=None):
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self._cache_progress_source = None
 
         self.plot_canvas = MplCanvas(self.run_list_model, self, 5, 4, 100)
         self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
-        self.plot_controls = PlotControls(self.run_list_model, self.plot_canvas)
+        self.plot_controls = PlotControls(
+            self.run_list_model, self.plot_canvas, plot_model=self.plot_model
+        )
 
         tab = self.plot_controls.plot_control_tab
         self.dimension_control = tab.dimension_control

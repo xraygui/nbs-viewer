@@ -22,13 +22,18 @@ class PlotControls(QWidget):
         Model for the active run list and plot settings
     plot_canvas : MplCanvas, optional
         Canvas passed to the plot control tab for dimension and ROI widgets
+    plot_model : PlotModel, optional
+        Plot session model; required when ``plot_canvas`` is set
     parent : QWidget, optional
         The parent widget, by default None
     """
 
-    def __init__(self, run_list_model, plot_canvas=None, parent=None):
+    def __init__(
+        self, run_list_model, plot_canvas=None, plot_model=None, parent=None
+    ):
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
@@ -38,7 +43,9 @@ class PlotControls(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
 
-        self.plot_control_tab = PlotControlTab(run_list_model, plot_canvas)
+        self.plot_control_tab = PlotControlTab(
+            run_list_model, plot_canvas, plot_model=plot_model
+        )
 
         self.metadata_tab = QWidget()
         self.metadata_layout = QVBoxLayout(self.metadata_tab)

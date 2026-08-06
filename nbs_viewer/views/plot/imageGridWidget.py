@@ -34,7 +34,7 @@ class ImageGridWidget(QWidget):
     and built-in navigation functionality.
     """
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, run_list_model, plot_model, parent=None):
         """
         Initialize the image grid widget.
 
@@ -42,11 +42,14 @@ class ImageGridWidget(QWidget):
         ----------
         run_list_model : RunListModel
             Model managing the canvas data
+        plot_model : PlotModel
+            Plot session model for this display
         parent : QWidget, optional
             Parent widget, by default None
         """
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
 
         # Initialize state
         self.plotArtists = {}
@@ -71,7 +74,9 @@ class ImageGridWidget(QWidget):
 
     def _create_plot_controls(self):
         """Create plot controls."""
-        self.plot_controls = PlotControls(self.run_list_model)
+        self.plot_controls = PlotControls(
+            self.run_list_model, plot_model=self.plot_model
+        )
 
     def _connect_signals(self):
         """Connect signals to model."""

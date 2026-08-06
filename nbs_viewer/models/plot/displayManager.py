@@ -1,16 +1,19 @@
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 from qtpy.QtCore import QObject, Signal
 from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
 from .displayRegistry import DisplayRegistry
+from ...models.plot.plotModel import PlotModel
 from ...models.plot.runModel import RunModel
 from ...utils import print_debug
 
 
-# TODO: Remove plot_models from this class
 class DisplayManager(QObject):
     """
-    Model managing multiple plot displays and their associated RunListModels.
+    Model managing multiple plot displays and their associated run lists.
+
+    Each display has a :class:`RunListModel` and a 1:1 :class:`PlotModel`
+    bound to that list.
 
     Signals
     -------
@@ -29,7 +32,8 @@ class DisplayManager(QObject):
 
     def __init__(self, display_registry: DisplayRegistry):
         super().__init__()
-        self._run_list_models = {}  # display_id -> RunListModel
+        self._run_list_models: Dict[str, RunListModel] = {}
+        self._plot_models: Dict[str, PlotModel] = {}
         self._run_assignments = {}  # run_uid -> display_id
         self._display_types = {}  # display_id -> display_type
         self._display_registry = display_registry
@@ -41,16 +45,37 @@ class DisplayManager(QObject):
     # Accessors and setters
     ###########################################################################
 
-    def get_run_list_model(self, display_id: str) -> None:
+    def get_run_list_model(self, display_id: str) -> RunListModel:
         """
-        Create a new display and PlotModel.
+        Return the run list model for a display.
 
         Parameters
         ----------
         display_id : str
             Identifier for the display
+
+        Returns
+        -------
+        RunListModel
+            Run list for the display.
         """
         return self._run_list_models[display_id]
+
+    def get_plot_model(self, display_id: str) -> PlotModel:
+        """
+        Return the plot session model for a display.
+
+        Parameters
+        ----------
+        display_id : str
+            Identifier for the display
+
+        Returns
+        -------
+        PlotModel
+            Plot session bound to the display's run list.
+        """
+        return self._plot_models[display_id]
 
     def get_display_ids(self) -> List[str]:
         """
@@ -98,12 +123,16 @@ class DisplayManager(QObject):
         if display_id in self._run_list_models:
             run_list_model = self._run_list_models.pop(display_id)
             self._run_list_models[new_name] = run_list_model
+        if display_id in self._plot_models:
+            plot_model = self._plot_models.pop(display_id)
+            self._plot_models[new_name] = plot_model
         self.display_renamed.emit(display_id, new_name)
 
     def remove_display(self, display_id: str) -> None:
         """Remove a display if it exists and is not the main display."""
         if display_id != "main" and display_id in self._run_list_models:
             self._run_list_models.pop(display_id)
+            self._plot_models.pop(display_id, None)
             if display_id in self._display_types:
                 del self._display_types[display_id]
             self.display_removed.emit(display_id)
@@ -156,7 +185,9 @@ class DisplayManager(QObject):
         run_list_model = RunListModel(
             is_main_display=is_main_display, single_selection_mode=single_selection_mode
         )
+        plot_model = PlotModel(run_list_model, parent=self)
         self._run_list_models[display_id] = run_list_model
+        self._plot_models[display_id] = plot_model
         self.display_added.emit(display_id, run_list_model)
         return display_id
 

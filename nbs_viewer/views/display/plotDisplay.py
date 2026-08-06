@@ -57,6 +57,7 @@ class PlotDisplay(QWidget):
     def setup_models(self):
         # Create widgets
         self.run_list_model = self.display_manager.get_run_list_model(self.display_id)
+        self.plot_model = self.display_manager.get_plot_model(self.display_id)
         self.data_source = RunListView(
             self.run_list_model, self.display_manager, self.display_id
         )
@@ -137,7 +138,7 @@ class PlotDisplay(QWidget):
         QWidget
             The created plot widget
         """
-        return PlotWidget(self.run_list_model)
+        return PlotWidget(self.run_list_model, self.plot_model)
 
 
 class ImageGridDisplay(PlotDisplay):
@@ -154,4 +155,4 @@ class ImageGridDisplay(PlotDisplay):
         self.run_list_model._single_selection_mode = True
 
     def _create_plot_widget(self):
-        return ImageGridWidget(self.run_list_model)
+        return ImageGridWidget(self.run_list_model, self.plot_model)

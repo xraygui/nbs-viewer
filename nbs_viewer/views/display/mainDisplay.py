@@ -14,10 +14,13 @@ class MainDisplay(PlotDisplay):
 
     def setup_models(self):
         run_list_model = self.display_manager.get_run_list_model("main")
+        plot_model = self.display_manager.get_plot_model("main")
+        self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self.data_source = DataSourceSwitcher(
             self.app_model, run_list_model, self.display_id
         )
-        self.plot_widget = PlotWidget(run_list_model)
+        self.plot_widget = PlotWidget(run_list_model, plot_model)
 
         # Create main tab layout with three panels
 
