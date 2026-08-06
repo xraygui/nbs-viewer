@@ -15,6 +15,10 @@ class CombinationMethod(Enum):
     EXPRESSION = "expression"
 
 
+class CombineError(Exception):
+    """Raised when runs cannot be combined."""
+
+
 def make_scan_id(scan_ids: List[int]) -> str:
     """
     Make a scan ID from a list of scan IDs.
@@ -116,10 +120,10 @@ class CombinedRunModel(RunModel):
         return self._plan_name
 
     def _update_available_keys(self) -> None:
-        """Update internal available keys from run."""
+        """Update internal available keys from source runs."""
         new_keys = self._compute_common_keys()
-        if set(new_keys) != set(self._available_keys):
-            self._available_keys = new_keys
+        if set(new_keys) != set(self._catalog_keys):
+            self._catalog_keys = new_keys
             self.available_keys_changed.emit()
 
     def _compute_common_keys(self) -> List[str]:

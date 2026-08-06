@@ -14,7 +14,7 @@ folder moves.
 |------|-------|--------|
 | 0 | Baseline and guardrails | Skipped (optional later) |
 | 1 | Introduce `PlotModel`; own `RoiSetModel` | Done |
-| 2 | Combine / freeze factories on `RunListModel` | Not started |
+| 2 | Combine / freeze factories on `RunListModel` | Done |
 | 3 | Expand `PlotModel`: plot data + key/policy move | Not started |
 | 4 | ROI preview + commit as model APIs | Not started |
 | 5 | Catalog table + source models | Not started |
@@ -112,13 +112,14 @@ Known violations at plan start (inventory baseline for step 0):
 
 | Location | Creates |
 |----------|---------|
-| `views/plot/plot_control_tab.py` | `RoiSetModel` |
 | `views/plot/mpl_canvas.py` | `PlotDataModel` |
 | `views/plot/imageGridWidget.py` | `PlotDataModel` |
-| `views/dataSource/runListView.py` | `CombinedRunModel`, `FrozenRunModel` |
 | `views/plot/derivative_controller.py` | `FrozenSpectrum` |
 | `views/catalog/base.py` | `CatalogTableModel` |
 | `views/dataSource/dataSource.py` | `*SourceModel` |
+
+Cleared in earlier steps: `RoiSetModel` (Step 1), `CombinedRunModel` /
+`FrozenRunModel` (Step 2).
 
 `widgets/kafkaViewerTab.py` also constructs `RunListModel` / `KafkaCatalog`, but
 that package is an intentional external embed surface — **leave alone** (see
@@ -357,28 +358,28 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 
 ## Step 2 — Combine / freeze factories on `RunListModel`
 
-**Status:** Not started
+**Status:** Done
 
 **Depends on:** Step 0; independent of step 1 in principle (can parallelize)
 
 ### Do
 
-- [ ] Add `RunListModel.combine_runs(...)` (method name flexible) that constructs
+- [x] Add `RunListModel.combine_runs(...)` (method name flexible) that constructs
       `CombinedRunModel` and calls `add_run`
-- [ ] Add freeze factory that constructs `FrozenRunModel` and `add_run`
-- [ ] `RunListView` only gathers selection / method / expression and calls APIs
+- [x] Add freeze factory that constructs `FrozenRunModel` and `add_run`
+- [x] `RunListView` only gathers selection / method / expression and calls APIs
 
 ### Testing goals
 
-- [ ] Unit (no widgets): combine adds one combined entry
-- [ ] Unit: freeze adds expected frozen entries
-- [ ] Unit: incompatible combine fails in a way the view can surface
-- [ ] Inventory: no `CombinedRunModel(` / `FrozenRunModel(` in views
+- [x] Unit (no widgets): combine adds one combined entry
+- [x] Unit: freeze adds expected frozen entries
+- [x] Unit: incompatible combine fails in a way the view can surface
+- [x] Inventory: no `CombinedRunModel(` / `FrozenRunModel(` in views
 
 ### Exit criteria
 
-- [ ] Combine/freeze workable from a script holding only `RunListModel`
-- [ ] Step status → Done
+- [x] Combine/freeze workable from a script holding only `RunListModel`
+- [x] Step status → Done
 
 ---
 
@@ -611,6 +612,45 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 - [ ] Implementing band projection (should consume new ROI/plot APIs when added)
 - [ ] Refactoring or relocating `widgets/` (embeddable entrypoints for external
       programs; leave alone; may grow later)
+- [ ] Building a full mock / file-backed catalog as a prerequisite for Step 2
+      (see **Future: catalog fixtures for tests** below)
+
+## Future: catalog fixtures for tests
+
+Not required for Step 2 (combine/freeze factories can use stub `RunModel`s).
+Worth doing soon for headless Milestone B and any test that needs real
+`CatalogRun` / key / `get_plot_data` behavior across multiple runs.
+
+### Option A — Replay Bluesky documents into `KafkaCatalog`
+
+`KafkaCatalog` already ingests `(name, doc)` via `_handle_document` and builds
+`KafkaRun`s. A test dispatcher that reads a saved document stream (JSON/msgpack
+of start / descriptor / event|event_page / stop) and calls the same handler
+would exercise the live Kafka run path without a broker.
+
+**Pros:** Reuses production code; good for streaming/partial-run behavior;
+small surface (dispatcher + fixture files).  
+**Cons:** Fixture capture and refresh; large/image-heavy runs are bulky;
+Kafka-shaped runs may not match Tiled/`BlueskyRun` quirks.
+
+### Option B — File-backed catalog (product + tests)
+
+A `CatalogBase` implementation over on-disk runs (e.g. databroker/tiled
+export, msgpack bundles, or a dedicated package layout). Dual use: offline
+beamline playback and CI fixtures.
+
+**Pros:** Stable, versionable fixtures; can mirror Tiled-like access if
+designed that way; useful outside tests.  
+**Cons:** Larger design/implementation; need a clear run file format and
+key/data API parity with `BlueskyRun` / `KafkaRun`.
+
+### Suggested sequencing
+
+1. Finish Step 2 with stubs (no catalog fixture dependency).
+2. If document replay is easy, add Option A as `tests/fixtures/runs/…` + a
+   tiny replay dispatcher for multi-run combine / selection tests.
+3. Treat Option B as a real feature when offline catalogs are wanted in the
+   app, not only as test scaffolding — tests then consume the same catalog.
 
 ## Modification log
 
@@ -623,3 +663,5 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 | 2026-08-06 | Introduce PlotModel vs RunListModel split; revise steps 1 and 3 |
 | 2026-08-06 | Skip Step 0 for now; begin Step 1 |
 | 2026-08-06 | Step 1 done: PlotModel owns RoiSetModel; views wired |
+| 2026-08-06 | Note future Kafka-replay vs file-backed catalog fixtures |
+| 2026-08-06 | Step 2 done: combine/freeze factories on RunListModel; view calls APIs |

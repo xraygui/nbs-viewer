@@ -5,6 +5,8 @@ from nbs_viewer.models.catalog.base import CatalogRun
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtGui import QStandardItemModel, QStandardItem
 from .runModel import RunModel
+from .combinedRunModel import CombinedRunModel, CombinationMethod, CombineError
+from .frozenRunModel import FrozenRunModel
 from nbs_viewer.utils import print_debug
 
 
@@ -521,6 +523,129 @@ class RunListModel(QStandardItemModel):
     def add_run(self, run: Union[CatalogRun, RunModel]):
         """Add a single CatalogRun to the model."""
         self.add_runs([run])
+
+    def validate_combine(self, runs: List[RunModel]) -> None:
+        """
+        Check whether runs can be combined.
+
+        Parameters
+        ----------
+        runs : list of RunModel
+            Candidate source runs.
+
+        Raises
+        ------
+        CombineError
+            If fewer than two runs are given, they share no keys, shapes
+            disagree, or shape data cannot be read.
+        """
+        if len(runs) < 2:
+            raise CombineError("Please select at least 2 runs to combine")
+
+        try:
+            common_keys = set(runs[0].available_keys)
+            for run in runs[1:]:
+                common_keys &= set(run.available_keys)
+
+            if not common_keys:
+                raise CombineError(
+                    "Selected runs have no common data keys. Cannot combine "
+                    "runs with completely different data structures."
+                )
+
+            preferred_keys = ["time"]
+            test_key = None
+            for key in preferred_keys:
+                if key in common_keys:
+                    test_key = key
+                    break
+            if test_key is None:
+                test_key = list(common_keys)[0]
+
+            shapes = []
+            for run in runs:
+                try:
+                    shapes.append(run.get_shape(test_key))
+                except Exception:
+                    raise CombineError(
+                        f"Could not access data for key '{test_key}' in one "
+                        "or more runs."
+                    ) from None
+
+            if len(set(shapes)) > 1:
+                raise CombineError(
+                    f"Selected runs have different data shapes for key "
+                    f"'{test_key}': {shapes}. All runs must have the same "
+                    "data dimensions to be combined."
+                )
+        except CombineError:
+            raise
+        except Exception as e:
+            raise CombineError(
+                f"Error checking run compatibility: {str(e)}"
+            ) from e
+
+    def combine_runs(
+        self,
+        runs: List[RunModel],
+        method: CombinationMethod = CombinationMethod.AVERAGE,
+        expression: Optional[str] = None,
+    ) -> CombinedRunModel:
+        """
+        Construct a CombinedRunModel from runs and add it to this list.
+
+        Parameters
+        ----------
+        runs : list of RunModel
+            Source runs to combine.
+        method : CombinationMethod, optional
+            Combination method, by default AVERAGE.
+        expression : str, optional
+            Expression used when method is EXPRESSION.
+
+        Returns
+        -------
+        CombinedRunModel
+            The combined run that was added.
+
+        Raises
+        ------
+        CombineError
+            If the runs fail ``validate_combine``.
+        """
+        self.validate_combine(runs)
+        combined = CombinedRunModel(
+            runs=runs, method=method, expression=expression
+        )
+        self.add_run(combined)
+        return combined
+
+    def freeze_runs(self, runs: List[RunModel]) -> List[FrozenRunModel]:
+        """
+        Create FrozenRunModel entries for each selected Y key on each run.
+
+        Parameters
+        ----------
+        runs : list of RunModel
+            Runs whose currently selected Y keys should be frozen.
+
+        Returns
+        -------
+        list of FrozenRunModel
+            Frozen runs that were added to this list.
+        """
+        to_freeze = []
+        for model in runs:
+            _, y_keys, _ = model.get_selected_keys()
+            for key in list(y_keys):
+                to_freeze.append((model.run, key))
+
+        frozen_runs = [
+            FrozenRunModel(catalog_run, key) for catalog_run, key in to_freeze
+        ]
+        if frozen_runs:
+            self.add_runs(frozen_runs)
+        return frozen_runs
 
     def remove_uids(self, uid_list):
         """

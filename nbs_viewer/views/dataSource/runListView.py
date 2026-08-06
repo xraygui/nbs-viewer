@@ -12,9 +12,8 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
-from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
+from ...models.plot.combinedRunModel import CombinationMethod, CombineError
 from ...models.plot.runModel import RunModel
-from ...models.plot.frozenRunModel import FrozenRunModel
 from ..plot.metadataView import FullMetadataBrowser
 from typing import List
 from nbs_viewer.utils import get_top_level_model
@@ -124,86 +123,6 @@ class RunListView(QWidget):
 
         return selected_runs
 
-    def _check_run_compatibility(self, runs: List[RunModel]):
-        """
-        Check if runs are compatible for combination.
-
-        Parameters
-        ----------
-        runs : List[RunModel]
-            List of runs to check for compatibility
-
-        Returns
-        -------
-        bool
-            True if runs are compatible, False otherwise
-        """
-        if len(runs) < 2:
-            return True
-
-        try:
-            # Get common keys across all runs
-            common_keys = set(runs[0].available_keys)
-            for run in runs[1:]:
-                common_keys &= set(run.available_keys)
-
-            if not common_keys:
-                QMessageBox.warning(
-                    self,
-                    "Incompatible Runs",
-                    "Selected runs have no common data keys. Cannot combine runs with completely"
-                    "different data structures.",
-                )
-                return False
-
-            # Try to find a suitable key for shape comparison
-            test_key = None
-            preferred_keys = ["time"]
-
-            # Look for preferred keys first
-            for key in preferred_keys:
-                if key in common_keys:
-                    test_key = key
-                    break
-
-            # If no preferred key found, use the first common key
-            if test_key is None:
-                test_key = list(common_keys)[0]
-
-            # Check if all runs have the same shape for the test key
-            shapes = []
-            for run in runs:
-                try:
-                    shape = run._run.getShape(test_key)
-                    shapes.append(shape)
-                except Exception:
-                    QMessageBox.warning(
-                        self,
-                        "Data Access Error",
-                        f"Could not access data for key '{test_key}' in one or more runs.",
-                    )
-                    return False
-
-            # Check if all shapes are the same
-            if len(set(shapes)) > 1:
-                QMessageBox.warning(
-                    self,
-                    "Incompatible Data Shapes",
-                    f"Selected runs have different data shapes for key '{test_key}': {shapes}. "
-                    "All runs must have the same data dimensions to be combined.",
-                )
-                return False
-
-            return True
-
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Compatibility Check Failed",
-                f"Error checking run compatibility: {str(e)}",
-            )
-            return False
-
     def deselect_all(self):
         """Deselect all items in the list widget."""
         self.list_view.clearSelection()
@@ -243,65 +162,42 @@ class RunListView(QWidget):
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
-        # Get selected items from list view
         selected_runs = self.get_selected_runs()
-        if len(selected_runs) < 2:
-            QMessageBox.warning(
-                self, "Cannot Combine", "Please select at least 2 runs to combine"
-            )
+        try:
+            self.run_list_model.validate_combine(selected_runs)
+        except CombineError as e:
+            QMessageBox.warning(self, "Cannot Combine", str(e))
             return
 
-        # Check run compatibility
-        if not self._check_run_compatibility(selected_runs):
-            return
-
-        # Get selected combination method from dropdown
         method_text = self.combine_method_combo.currentText()
 
         if method_text == "Custom Expression":
-            # Show expression builder dialog
             dialog = ExpressionBuilderDialog(selected_runs, self)
-            if dialog.exec_() == QDialog.Accepted:
-                # For now, create a simple combined run with the expression
-                # TODO: Implement actual expression parsing and evaluation
-                combined_run = CombinedRunModel(
-                    runs=selected_runs,
-                    method=CombinationMethod.EXPRESSION,
-                    expression=dialog.expression,  # Placeholder
-                )
-
-                # Add to plot model
-                self.run_list_model.add_run(combined_run)
-
-                # Clear selection
-                self.list_view.clearSelection()
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            method = CombinationMethod.EXPRESSION
+            expression = dialog.expression
         else:
-            # Handle simple methods (Sum, Average)
             method_mapping = {
                 "Sum": CombinationMethod.SUM,
                 "Average": CombinationMethod.AVERAGE,
             }
-            selected_method = method_mapping[method_text]
+            method = method_mapping[method_text]
+            expression = None
 
-            # Create combined run
-            combined_run = CombinedRunModel(runs=selected_runs, method=selected_method)
+        try:
+            self.run_list_model.combine_runs(
+                selected_runs, method=method, expression=expression
+            )
+        except CombineError as e:
+            QMessageBox.warning(self, "Cannot Combine", str(e))
+            return
 
-            # Add to plot model
-            self.run_list_model.add_run(combined_run)
-
-            # Clear selection
-            self.list_view.clearSelection()
+        self.list_view.clearSelection()
 
     def _freeze_selected_runs(self):
         """Freeze selected runs."""
-        runs = self.get_selected_runs()
-        for model in runs:
-            # uid = model.uid
-            run = model.run
-            for key in model._selected_y:
-                frozen_run = FrozenRunModel(run, key)
-                print(f"Adding frozen run: {frozen_run.display_name}")
-                self.run_list_model.add_run(frozen_run)
+        self.run_list_model.freeze_runs(self.get_selected_runs())
 
     def uncheck_selected_runs(self):
         """Uncheck all selected runs."""
