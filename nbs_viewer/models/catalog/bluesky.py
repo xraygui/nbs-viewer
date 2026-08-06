@@ -6,8 +6,7 @@ from databroker.queries import TimeRange
 
 from .base import CatalogBase
 from ..data import BlueskyRun, NBSRun
-from .chunkCache import ChunkCache
-from .chunk_cache_progress import ChunkCacheProgress
+from nbs_viewer.models.cache import ChunkCache, ChunkCacheProgress
 from nbs_viewer.utils import print_debug
 from .worker_pool import CatalogWorkerPool
 
