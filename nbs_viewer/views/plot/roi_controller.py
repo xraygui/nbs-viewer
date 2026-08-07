@@ -45,7 +45,7 @@ class RoiController(QObject):
 
         dimension_control.dimensionChanged.connect(self._on_dimension_changed)
         dimension_control.cubeViewChanged.connect(self._on_cube_view_changed)
-        run_list_model.selected_keys_changed.connect(
+        canvas.plot_model.selected_keys_changed.connect(
             lambda *_: self._invalidate_all("field selection changed")
         )
 

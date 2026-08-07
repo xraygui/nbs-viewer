@@ -128,5 +128,15 @@ class DisplayControlWidget(QWidget):
         visible_uids = set(self.run_list_model.visible_runs)
         if visible_uids:
             self.run_list_model.set_uids_visible(visible_uids, False)
-            # Reset key selection
-            self.run_list_model.set_selected_keys([], [], [], force_update=True)
+            plot_model = self._plot_model_for_list()
+            if plot_model is not None:
+                plot_model.set_selected_keys([], [], [], force_update=True)
+
+    def _plot_model_for_list(self):
+        for display_id in self.display_manager.get_display_ids():
+            if (
+                self.display_manager.get_run_list_model(display_id)
+                is self.run_list_model
+            ):
+                return self.display_manager.get_plot_model(display_id)
+        return None

@@ -23,8 +23,8 @@ class TransformControl(PlotControlWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The plot model to control
+    plot_model : PlotModel
+        The plot session to control
     parent : QWidget, optional
         Parent widget, by default None
     """
@@ -43,22 +43,23 @@ class TransformControl(PlotControlWidget):
         "Log(1/y)": "log(1/y)",
     }
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, plot_model, parent=None):
         """
         Initialize the widget.
 
         Parameters
         ----------
-        run_list_model : RunListModel
-            The run list model to control
+        plot_model : PlotModel
+            The plot session to control
         parent : QWidget, optional
             Parent widget, by default None
         """
+        self.plot_model = plot_model
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
-        super().__init__(run_list_model, parent)
+        super().__init__(plot_model, parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         # Set initial state from model
-        transform_state = self.run_list_model.transform
+        transform_state = self.plot_model.transform
         self._transform_box.setChecked(transform_state["enabled"])
         if transform_state["text"]:
             self._transform_text_edit.setText(transform_state["text"])
@@ -198,4 +199,4 @@ class TransformControl(PlotControlWidget):
     def state_changed(self) -> None:
         """Handle state changes."""
         state = self.get_state()
-        self.run_list_model.set_transform(state)
+        self.plot_model.set_transform(state)

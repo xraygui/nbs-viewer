@@ -46,11 +46,12 @@ class RunDisplayWidget(QWidget):
 
     selection_changed = Signal(list, list, list)
 
-    def __init__(self, run_list_model, parent: Optional[QWidget] = None):
+    def __init__(self, run_list_model, plot_model, parent: Optional[QWidget] = None):
         super().__init__(parent)
         # Allow full expansion within the panel
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self._show_all = False
         self._linked_mode = True
         self._current_run = None
@@ -62,7 +63,7 @@ class RunDisplayWidget(QWidget):
         self.run_list_model.available_keys_changed.connect(self._update_display)
         self.run_list_model.frozen_spectra_changed.connect(self._update_display)
         self.run_list_model.visible_runs_changed.connect(self._build_header)
-        self.run_list_model.selected_keys_changed.connect(self._update_checkboxes)
+        self.plot_model.selected_keys_changed.connect(self._update_checkboxes)
 
         # Initial update
         self._update_display()
@@ -174,7 +175,7 @@ class RunDisplayWidget(QWidget):
         if self._linked_mode:
             available_keys = self.run_list_model.available_keys
             selected_x, selected_y, selected_norm = (
-                self.run_list_model.get_selected_keys()
+                self.plot_model.get_selected_keys()
             )
         elif self._current_run:
             available_keys = self._current_run.available_keys
@@ -357,7 +358,7 @@ class RunDisplayWidget(QWidget):
         """
         if not run_model.remove_frozen_spectrum(key):
             return
-        self.run_list_model.request_plot_update.emit()
+        self.plot_model.request_plot_update.emit()
         self._update_display()
 
     def _clear_grid(self) -> None:
@@ -403,7 +404,7 @@ class RunDisplayWidget(QWidget):
         ]
 
         if self._linked_mode:
-            self.run_list_model.set_selected_keys(
+            self.plot_model.set_selected_keys(
                 x_keys, y_keys, norm_keys, force_update=False
             )
         elif self._current_run:
@@ -435,8 +436,8 @@ class RunDisplayWidget(QWidget):
         ]
 
         # Force update the plot with current selection
-        if hasattr(self.run_list_model, "set_selected_keys"):
-            self.run_list_model.set_selected_keys(
+        if self.plot_model is not None:
+            self.plot_model.set_selected_keys(
                 x_keys, y_keys, norm_keys, force_update=True
             )
         else:
@@ -494,7 +495,7 @@ class RunDisplayWidget(QWidget):
                 norm_selections &= set(new_norm)
 
         # Apply common selections
-        self.run_list_model.set_selected_keys(
+        self.plot_model.set_selected_keys(
             list(x_selections),
             list(y_selections),
             list(norm_selections),

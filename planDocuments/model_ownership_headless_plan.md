@@ -15,7 +15,7 @@ folder moves.
 | 0 | Baseline and guardrails | Skipped (optional later) |
 | 1 | Introduce `PlotModel`; own `RoiSetModel` | Done |
 | 2 | Combine / freeze factories on `RunListModel` | Done |
-| 3 | Expand `PlotModel`: plot data + key/policy move | Not started |
+| 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Not started |
 | 5 | Catalog table + source models | Not started |
 | 6 | Display registry / no `QtWidgets` in models | Not started |
@@ -112,14 +112,14 @@ Known violations at plan start (inventory baseline for step 0):
 
 | Location | Creates |
 |----------|---------|
-| `views/plot/mpl_canvas.py` | `PlotDataModel` |
-| `views/plot/imageGridWidget.py` | `PlotDataModel` |
+| `views/plot/imageGridWidget.py` | `PlotDataModel` (temporary exception) |
 | `views/plot/derivative_controller.py` | `FrozenSpectrum` |
 | `views/catalog/base.py` | `CatalogTableModel` |
 | `views/dataSource/dataSource.py` | `*SourceModel` |
 
 Cleared in earlier steps: `RoiSetModel` (Step 1), `CombinedRunModel` /
-`FrozenRunModel` (Step 2).
+`FrozenRunModel` (Step 2), `PlotDataModel` in canvas (Step 3; ImageGrid
+deferred).
 
 `widgets/kafkaViewerTab.py` also constructs `RunListModel` / `KafkaCatalog`, but
 that package is an intentional external embed surface — **leave alone** (see
@@ -139,11 +139,12 @@ list.”
 |---------|--------|
 | Add/remove/combine/freeze runs | `RunListModel` |
 | Run checked / visible for plotting | `RunListModel` |
+| Auto-add (check newly added runs) | `RunListModel` |
 | Intersection of catalog keys (available key universe) | `RunListModel` (derived from visible runs) |
-| Selected x / y / norm keys | `PlotModel` |
-| Transform, auto-add, retain-selection | `PlotModel` |
+| Selected x / y / norm keys (incl. default selection) | `PlotModel` |
+| Transform, retain-selection | `PlotModel` |
 | `PlotDataModel` map (`ensure_plot_data`) | `PlotModel` |
-| `RoiSetModel`, cube spec, view crop | `PlotModel` |
+| `RoiSetModel`, cube spec, slice, view crop | `PlotModel` |
 | Qt list rows for the run sidebar | `RunListModel` (it is already a `QStandardItemModel`) |
 
 `RunModel` remains a per-run wrapper (data, frozen spectra, fetch). It should
@@ -385,53 +386,69 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 
 ## Step 3 — Expand `PlotModel`: plot data + key/policy move
 
-**Status:** Not started
+**Status:** Done
 
 **Depends on:** Step 1 (`PlotModel` exists); Step 0
 
 ### Do
 
-- [ ] Move `PlotDataModel` map onto `PlotModel` (`ensure_plot_data`); canvas /
+- [x] Move `PlotDataModel` map onto `PlotModel` (`ensure_plot_data`); canvas /
       image grid request models from `plot_model`, do not construct them
-- [ ] Implement the run-list → plot-model add/remove/visibility protocol in
+      (ImageGrid temporary exception)
+- [x] Implement the run-list → plot-model add/remove/visibility protocol in
       **“Run list vs plot session”** (document choices in the decision log)
-- [ ] Move plot policy onto `PlotModel`: selected x/y/norm keys, transform,
-      auto_add, retain-selection (leave **available key intersection** on
-      `RunListModel`)
-- [ ] Update controls (`run_display`, transform, auto_add, retain) to talk to
-      `PlotModel` where appropriate; run sidebar still uses `RunListModel`
-- [ ] Keep redraw signal wiring in the view (canvas connects to plot-data
+- [x] Move plot policy onto `PlotModel`: selected x/y/norm keys, transform,
+      retain-selection (leave **available key intersection** and **auto-add**
+      on `RunListModel`)
+- [x] Update controls (`run_display`, transform, retain) to talk to
+      `PlotModel` where appropriate; auto-add + run sidebar stay on
+      `RunListModel`
+- [x] Keep redraw signal wiring in the view (canvas connects to plot-data
       signals); models stay widget-free
-- [ ] Transitional: if `RunModel.set_selected_keys` sync remains for
+- [x] Transitional: if `RunModel.set_selected_keys` sync remains for
       compatibility, document it as temporary; `PlotModel` is source of truth
 
 **Decision log**
 
 - Owner of `PlotDataModel` map: **`PlotModel`** (not `RunListModel`)
-- Hide vs drop plot-data when a run is unchecked: _TBD in implementation_
-- Whether key selection moves in the same PR as `ensure_plot_data` or in two
-  stacked PRs under Step 3: _prefer one conceptual step; split PRs OK if
-  reviewed as Step 3a (map) / 3b (keys+policy)_
+- When a run is **unchecked** but still in the list: **keep** `PlotDataModel`s
+  in the map; stop plotting them (views/plot only use visible runs)
+- When a run is **removed** from `RunListModel`: **drop** that uid’s
+  `PlotDataModel`s from the map
+- One PR for map + keys/policy + cube/crop/slice (not 3a/3b)
+- Cube / crop / slice ownership: **`PlotModel`** in Step 3 (canvas consumer;
+  Step 8 can still slim draw helpers)
+- Auto-add: **stays on `RunListModel`**; drives visibility for newly added runs
+- Transform, retain-selection: **`PlotModel`**
+- Default x/y selection on first run: **`PlotModel`** (per-plot defaults)
+- `available_keys` universe: **`RunListModel`**; `PlotModel` filters its
+  selected keys on `available_keys_changed` (honor retain-selection)
+- Image grid: **temporary exception** — may still construct `PlotDataModel`
+  until a later rework; Step 3 clears canvas construction
+- `RunModel.set_selected_keys` sync: **kept as temporary** compatibility
+  bridge (documented on `PlotModel`)
 
 ### Testing goals
 
-- [ ] Unit: `ensure_plot_data` twice with same keys returns same instance
-- [ ] Unit: different keys → different instances
-- [ ] Unit: removing a run from the list drops that uid’s plot-data entries
-- [ ] Unit: visibility / auto-add creates plot-data for newly visible runs
+- [x] Unit: `ensure_plot_data` twice with same keys returns same instance
+- [x] Unit: different keys → different instances
+- [x] Unit: removing a run from the list drops that uid’s plot-data entries
+- [x] Unit: visibility / auto-add creates plot-data for newly visible runs
       when keys are selected
-- [ ] Unit: two `PlotModel`s on one `RunListModel` keep independent key
+- [x] Unit: two `PlotModel`s on one `RunListModel` keep independent key
       selections and independent plot-data maps (even if UI is still 1:1)
-- [ ] Unit: updating slice / `cube_view_spec` on the plot model does not
+- [x] Unit: updating slice / `cube_view_spec` on the plot model does not
       require a canvas
-- [ ] Regression: `test_plot_geometry`, plot-dimension tests still pass
-- [ ] Inventory: no `PlotDataModel(` in views
+- [x] Regression: `test_plot_geometry`, plot-dimension tests still pass
+- [x] Inventory: no `PlotDataModel(` in views except temporary
+      `imageGridWidget.py` exception
+- [x] Unit: uncheck keeps plot-data in map; remove drops it
 
 ### Exit criteria
 
-- [ ] Headless: `RunListModel` + `PlotModel` → select keys →
+- [x] Headless: `RunListModel` + `PlotModel` → select keys →
       `ensure_plot_data` → fetch/bundle without `MplCanvas`
-- [ ] Step status → Done
+- [x] Step status → Done
 
 ---
 
@@ -665,3 +682,6 @@ key/data API parity with `BlueskyRun` / `KafkaRun`.
 | 2026-08-06 | Step 1 done: PlotModel owns RoiSetModel; views wired |
 | 2026-08-06 | Note future Kafka-replay vs file-backed catalog fixtures |
 | 2026-08-06 | Step 2 done: combine/freeze factories on RunListModel; view calls APIs |
+| 2026-08-07 | Step 3 decisions: one PR; drop on remove; cube/crop/slice on PlotModel; auto-add stays on RunListModel; defaults on PlotModel; ImageGrid deferred |
+| 2026-08-07 | Step 3: uncheck keeps plot-data (stop plotting); transform+retain on PlotModel; ImageGrid temporary exception; available_keys filter on PlotModel |
+| 2026-08-07 | Step 3 done: PlotModel owns keys, transform, retain, cube/crop/slice, plot-data map; canvas uses ensure_plot_data |

@@ -1,4 +1,4 @@
-"""Plot model managing run controllers and their associated plot artists."""
+"""Run list model managing run membership, visibility, and available keys."""
 
 from typing import List, Optional, Union, Set
 from nbs_viewer.models.catalog.base import CatalogRun
@@ -12,26 +12,20 @@ from nbs_viewer.utils import print_debug
 
 class RunListModel(QStandardItemModel):
     """
-    Model coordinating between run data and plot artists.
+    Model for run membership, visibility, and the available key universe.
 
-    This class handles the high-level coordination between data sources
-    and their visual representation, managing RunModels and delegating
-    actual artist management to PlotDataModel.
-
-    Badly needs simplification. Should not add CatalogRun objects via signal/slot,
-    in add_runs. Needs typing to distinguish between CatalogRun and RunModel.
+    Plot-session state (selected keys, transform, retain-selection, plot-data
+    maps, cube/crop) lives on :class:`PlotModel`. Auto-add here only controls
+    whether newly added runs become visible.
     """
 
     available_keys_changed = Signal()
     frozen_spectra_changed = Signal()
-    selected_keys_changed = Signal(list, list, list)
-    run_added = Signal(object)  # RunData added to model
-    run_removed = Signal(object)  # RunData removed from model
-    available_runs_changed = Signal(list)  # List of Run UIDs
-    visible_runs_changed = Signal(set)  # Set of visible Run UIDs
+    run_added = Signal(object)
+    run_removed = Signal(object)
+    available_runs_changed = Signal(list)
+    visible_runs_changed = Signal(set)
     add_runs_to_display = Signal(list, str)
-
-    request_plot_update = Signal()
 
     def __init__(self, is_main_display=False, single_selection_mode=False):
         """
@@ -50,14 +44,8 @@ class RunListModel(QStandardItemModel):
         self._single_selection_mode = single_selection_mode
 
         self.available_keys = list()
-        self._current_x_keys = []
-        self._current_y_keys = []
-        self._current_norm_keys = []
-
         self._auto_add = True
-        self._retain_selection = False
-        self._transform = {"enabled": False, "text": ""}
-        self._visible_runs = set()  # Track visible run UIDs
+        self._visible_runs = set()
 
         self.run_added.connect(self._on_run_added)
         self.run_removed.connect(self._on_run_removed)
@@ -209,17 +197,16 @@ class RunListModel(QStandardItemModel):
             return f"Multiple Runs Selected ({len(models)})"
 
     def update_available_keys(self) -> None:
-        """Update available keys and maintain selection state."""
-        # print("Updating available keys in RunListModel")
+        """
+        Update the intersection of catalog keys among visible runs.
+        """
         runs = self.visible_models
         if not runs:
-            if not self._retain_selection:
+            if self.available_keys:
                 self.available_keys = []
-                # Clear selection if not retaining
-                self.set_selected_keys([], [], [], force_update=False)
+                self.available_keys_changed.emit()
             return
 
-        # Get intersection of keys from all models
         first_run = runs[0]
         print_debug(
             "RunListModel.update_available_keys",
@@ -232,36 +219,9 @@ class RunListModel(QStandardItemModel):
                 key for key in available_keys if key in run.catalog_keys
             ]
 
-        # Update if changed
         if set(available_keys) != set(self.available_keys):
             self.available_keys = available_keys
-
-            # Filter current selection to valid keys
-            valid_x = [k for k in self._current_x_keys if k in available_keys]
-            valid_y = [k for k in self._current_y_keys if k in available_keys]
-            valid_norm = [k for k in self._current_norm_keys if k in available_keys]
-
-            if (
-                valid_x != self._current_x_keys
-                or valid_y != self._current_y_keys
-                or valid_norm != self._current_norm_keys
-            ):
-                # Update selection if keys were removed
-                self.set_selected_keys(valid_x, valid_y, valid_norm)
-
             self.available_keys_changed.emit()
-        # print(f"Available keys changed {self._available_keys}")
-
-    def set_retain_selection(self, enabled: bool) -> None:
-        """
-        Set whether to retain the current key selection when runs change.
-
-        Parameters
-        ----------
-        enabled : bool
-            Whether to retain the current selection when runs change
-        """
-        self._retain_selection = enabled
 
     @property
     def available_runs(self) -> List[CatalogRun]:
@@ -280,24 +240,19 @@ class RunListModel(QStandardItemModel):
 
     @property
     def auto_add(self) -> bool:
-        """Whether auto-add is enabled."""
+        """Whether newly added runs are automatically made visible."""
         return self._auto_add
 
     def set_auto_add(self, enabled: bool) -> None:
         """
-        Set auto-add state and update plots if needed.
+        Set whether newly added runs become visible automatically.
 
         Parameters
         ----------
         enabled : bool
-            Whether to automatically add new selections
+            When True, new runs are checked/visible on add.
         """
         self._auto_add = enabled
-        if enabled and (self._current_x_keys and self._current_y_keys):
-            # If enabling auto_add with existing selection, update all plots
-            self.selected_keys_changed.emit(
-                self._current_x_keys, self._current_y_keys, self._current_norm_keys
-            )
 
     def set_dynamic_update(self, enabled: bool) -> None:
         """
@@ -315,115 +270,6 @@ class RunListModel(QStandardItemModel):
     def dynamic_update(self) -> bool:
         """Whether dynamic update is enabled."""
         return all(model.dynamic_update for model in self._run_models.values())
-
-    def set_transform(self, transform_state: dict) -> None:
-        """
-        Set transform state on all run models.
-
-        Visible plot models refetch via ``transform_changed`` on the artist
-        bus; no separate ``request_plot_update`` to avoid a double fetch.
-        """
-        self._transform = (
-            transform_state.copy()
-        )  # Make a copy to prevent external modification
-
-        for model in self._run_models.values():
-            model.set_transform(self._transform)
-
-        print_debug(
-            "RunListModel.set_transform",
-            "applied (artist bus via transform_changed)",
-            category="plots",
-        )
-
-    @property
-    def transform(self) -> dict:
-        """Current transform state with default values if not set."""
-        default_state = {"enabled": False, "text": ""}
-        # Merge current state with defaults
-        return {**default_state, **self._transform}
-
-    @property
-    def selected_keys(self) -> tuple:
-        """Get current key selection state."""
-        return (
-            self._current_x_keys.copy(),
-            self._current_y_keys.copy(),
-            self._current_norm_keys.copy(),
-        )
-
-    def is_key_selected(self, key: str, axis: str) -> bool:
-        """
-        Check if a key is selected for a given axis.
-
-        Parameters
-        ----------
-        key : str
-            The key to check
-        axis : str
-            The axis type ('x', 'y', or 'norm')
-        """
-        if axis == "x":
-            return key in self._current_x_keys
-        elif axis == "y":
-            return key in self._current_y_keys
-        elif axis == "norm":
-            return key in self._current_norm_keys
-        return False
-
-    def set_selected_keys(
-        self,
-        x_keys: List[str],
-        y_keys: List[str],
-        norm_keys: Optional[List[str]] = None,
-        force_update: bool = False,
-    ) -> None:
-        """
-        Set selection for all run models and handle plotting.
-
-        This is the central method for handling all selection changes.
-        It updates the internal state, synchronizes all run models,
-        and handles plotting based on auto_add and force_update settings.
-
-        Parameters
-        ----------
-        x_keys : List[str]
-            Keys to select for x-axis
-        y_keys : List[str]
-            Keys to select for y-axis
-        norm_keys : Optional[List[str]], optional
-            Keys to select for normalization
-        force_update : bool, optional
-            Whether to force update the plot regardless of auto_add setting
-        """
-        # print("RunListModel set_selection")
-        # Always update internal state
-        self._current_x_keys = x_keys
-        self._current_y_keys = y_keys
-        self._current_norm_keys = norm_keys or []
-
-        # Update selection in all run models (without triggering plot updates)
-        for model in self._run_models.values():
-            model.set_selected_keys(x_keys, y_keys, norm_keys, force_update=False)
-
-        # Notify views of selection change
-        self.selected_keys_changed.emit(
-            self._current_x_keys, self._current_y_keys, self._current_norm_keys
-        )
-        print_debug(
-            "RunListModel.set_selected_keys",
-            f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
-            category="plots",
-        )
-        self.request_plot_update.emit()
-        # Update plot if auto_add is enabled or force_update is True
-        # if self._auto_add or force_update:
-        #     print("RunListModel set_selection calling _update_plot")
-        #     self.request_plot_update.emit()
-
-    def get_selected_keys(self):
-        """Get selected keys from all run models."""
-        return self._current_x_keys, self._current_y_keys, self._current_norm_keys
 
     def synthetic_display_entries(self):
         """
@@ -451,7 +297,6 @@ class RunListModel(QStandardItemModel):
         """Connect signals from a RunModel."""
         run_model.available_keys_changed.connect(self.update_available_keys)
         run_model.frozen_spectra_changed.connect(self._on_frozen_spectra_changed)
-        run_model.plot_update_needed.connect(self.request_plot_update)
 
     def _disconnect_run_model(self, run_model: RunModel):
         """Disconnect signals from a RunModel."""
@@ -459,19 +304,18 @@ class RunListModel(QStandardItemModel):
         run_model.frozen_spectra_changed.disconnect(
             self._on_frozen_spectra_changed
         )
-        run_model.plot_update_needed.disconnect(self.request_plot_update)
 
     def _on_frozen_spectra_changed(self):
         self.frozen_spectra_changed.emit()
 
     def add_runs(self, run_list: Union[List[CatalogRun], List[RunModel]]):
         """
-        Add a list of CatalogRun to the model and handle key selection.
+        Add CatalogRun or RunModel instances to the list.
 
         Parameters
         ----------
-        run : CatalogRun
-            Run to add to the model
+        run_list : list of CatalogRun or RunModel
+            Runs to add.
         """
         print_debug("RunListModel.add_runs", f"Adding {len(run_list)} runs", "run")
         run_list = sorted(run_list, key=lambda x: x.scan_id)
@@ -485,40 +329,20 @@ class RunListModel(QStandardItemModel):
                 )
                 continue
 
-            # Create and connect new run model
             if not isinstance(run, RunModel):
                 run_model = RunModel(run)
             else:
                 run_model = run
-            run_model.set_transform(self._transform)
             self._connect_run_model(run_model)
             self._run_models[uid] = run_model
             self.run_added.emit(run_model)
 
-            # Update available keys first
         self.update_available_keys()
 
         if self._is_main_display or self._auto_add:
             self.set_uids_visible(uid_list, True)
-        # Determine key selection
-        if len(self._run_models) == 1 and not self._retain_selection:
-            # First run, get default selection
-            run = self._run_models[uid_list[0]].run
-            x_keys, y_keys, norm_keys = run.get_default_selection()
-            self.set_selected_keys(x_keys, y_keys, norm_keys)
-        else:
-            # Apply current selection and transform to new run
-            self.set_selected_keys(
-                self._current_x_keys, self._current_y_keys, self._current_norm_keys
-            )
 
-        # Emit signals in correct order
-
-        # Handle main display auto-selection
-
-        # Force plot update and legend refresh
         self.available_runs_changed.emit(self.available_runs)
-        self.request_plot_update.emit()
 
     def add_run(self, run: Union[CatalogRun, RunModel]):
         """Add a single CatalogRun to the model."""
@@ -676,7 +500,6 @@ class RunListModel(QStandardItemModel):
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
         self.available_runs_changed.emit(self.available_runs)
-        self.request_plot_update.emit()
 
     def remove_run(self, run: Union[CatalogRun, RunModel]):
         """Remove a single CatalogRun from the model via UID."""
@@ -744,10 +567,9 @@ class RunListModel(QStandardItemModel):
         self.visible_runs_changed.emit(self.visible_runs)
         print_debug(
             "RunListModel.set_uids_visible",
-            f"request_plot_update uids={uids} visible={is_visible}",
+            f"visible_runs_changed uids={uids} visible={is_visible}",
             category="plots",
         )
-        self.request_plot_update.emit()
 
     def set_run_visible(self, run: Union[CatalogRun, RunModel], is_visible: bool):
         """

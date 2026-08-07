@@ -216,16 +216,18 @@ class PlotDimensionControl(QWidget):
     cubeViewChanged = Signal(object)
     dimensionChanged = Signal(int)
 
-    def __init__(self, run_list_model, canvas, parent=None):
+    def __init__(self, run_list_model, canvas, plot_model, parent=None):
         """
         Initialize the dimension control widget.
 
         Parameters
         ----------
         run_list_model : RunListModel
-            The plot data model to control.
+            Run membership and available keys.
         canvas : MplCanvas
             Canvas receiving view state updates.
+        plot_model : PlotModel
+            Plot session owning key selection and cube view state.
         parent : QWidget, optional
             Parent widget, by default None.
         """
@@ -234,6 +236,7 @@ class PlotDimensionControl(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
         self.run_list_model = run_list_model
+        self.plot_model = plot_model
         self.canvas = canvas
         self._slice_rows = []
         self._plot_rows = []
@@ -246,7 +249,7 @@ class PlotDimensionControl(QWidget):
 
         self.run_list_model.run_added.connect(self.on_run_added)
         self.run_list_model.run_removed.connect(self.on_run_removed)
-        self.run_list_model.selected_keys_changed.connect(self.on_selection_changed)
+        self.plot_model.selected_keys_changed.connect(self.on_selection_changed)
         self.canvas.plot_view_updated.connect(self.refresh_axis_coordinates)
         self.canvas.plot_view_updated.connect(self.refresh_plot_axis_labels)
 

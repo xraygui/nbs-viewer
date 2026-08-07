@@ -124,14 +124,15 @@ class MplCanvas(FigureCanvasQTAgg):
     view_crop_changed = Signal(object)
     plot_view_updated = Signal()
 
-    def __init__(self, run_list_model, parent=None, width=5, height=4, dpi=100):
+    def __init__(self, run_list_model, plot_model, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
 
         self.run_list_model = run_list_model
-        self.plotArtists = {}
+        self.plot_model = plot_model
+        self._connected_plot_data = set()
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -145,9 +146,6 @@ class MplCanvas(FigureCanvasQTAgg):
         self._nbs_draw_pending = False
         self._nbs_draw_coalesce_count = 0
         self._nbs_in_do_draw = False
-        self._dimension = 1
-        self._slice = None
-        self._cube_view_spec = None
         self._legend_visible = True
         self._active_render_mode = None
         self._colorbar_state = {}
@@ -163,14 +161,37 @@ class MplCanvas(FigureCanvasQTAgg):
         self._crop_selector = None
         self._crop_overlay = None
         self._crop_draw_enabled = False
-        self._view_crop: Optional[ViewCrop] = None
         self._last_2d_view_crop = None
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
 
         self.run_list_model.run_removed.connect(self._on_run_removed)
-        self.run_list_model.request_plot_update.connect(self.updatePlot)
+        self.plot_model.request_plot_update.connect(self.updatePlot)
+        self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
+
+    @property
+    def plotArtists(self):
+        return self.plot_model.plot_data_map
+
+    @property
+    def _dimension(self):
+        return self.plot_model.dimension
+
+    @property
+    def _slice(self):
+        return self.plot_model.slice
+
+    @property
+    def _cube_view_spec(self):
+        return self.plot_model.cube_view_spec
+
+    @property
+    def _view_crop(self):
+        return self.plot_model.view_crop
+
+    def _on_plot_view_crop_changed(self, crop):
+        self.view_crop_changed.emit(crop)
 
     def sizeHint(self):
         width = self.width()
@@ -207,12 +228,16 @@ class MplCanvas(FigureCanvasQTAgg):
 
         if self._dimension != dimension:
             self.clear()
-            self._dimension = dimension
 
         view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
+        self.plot_model.set_view_state(
+            indices=indices,
+            dimension=dimension,
+            cube_view_spec=cube_view_spec,
+        )
+        self.currentDim = dimension
+
         if view_changed:
-            self._slice = indices
-            self._cube_view_spec = cube_view_spec
             self.updatePlot()
 
         return True
@@ -225,30 +250,25 @@ class MplCanvas(FigureCanvasQTAgg):
         starts at most one worker when a refetch is needed.
         """
         key = (xkey, ykey, runModel.uid)
-        if key not in self.plotArtists:
+        is_new = key not in self._connected_plot_data
+        plotData = self.plot_model.ensure_plot_data(
+            runModel, xkey, ykey, norm_keys=norm_keys
+        )
+        if is_new:
             print_debug(
                 "MplCanvas.updatePlotData",
-                f"create {xkey}/{ykey}",
+                f"connect {xkey}/{ykey}",
                 category="plots",
-            )
-            plotData = PlotDataModel(
-                runModel,
-                xkey,
-                ykey,
-                norm_keys=norm_keys,
-                indices=self._slice,
-                cube_view_spec=self._cube_view_spec,
-                dimension=self._dimension,
             )
             plotData.data_changed.connect(self.plot_data)
             plotData.draw_requested.connect(self.draw)
             plotData.autoscale_requested.connect(self.autoscale)
             plotData.visibility_changed.connect(self._on_artist_visibility_changed)
             plotData.render_mode_changed.connect(self._on_render_mode_changed)
-            self.plotArtists[key] = plotData
+            self._connected_plot_data.add(key)
             self.plot_data(plotData)
         else:
-            changed = self.plotArtists[key].update_data_info(
+            changed = plotData.update_data_info(
                 norm_keys=norm_keys,
                 indices=self._slice,
                 cube_view_spec=self._cube_view_spec,
@@ -256,7 +276,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 emit=False,
             )
             if changed:
-                self.plot_data(self.plotArtists[key])
+                self.plot_data(plotData)
 
     def _canvas_is_2d(self):
         """
@@ -396,8 +416,8 @@ class MplCanvas(FigureCanvasQTAgg):
         t0 = ttime.time()
         try:
             visible_keys = set()
+            xkeys, ykeys, normkeys = self.plot_model.get_selected_keys()
             for runModel in self.run_list_model.visible_models:
-                xkeys, ykeys, normkeys = runModel.get_selected_keys()
                 for xkey in xkeys:
                     for ykey in ykeys:
                         visible_keys.add((xkey, ykey, runModel.uid))
@@ -880,7 +900,7 @@ class MplCanvas(FigureCanvasQTAgg):
         -------
         ViewCrop or None
         """
-        return self._view_crop
+        return self.plot_model.view_crop
 
     def set_view_crop(self, crop: Optional[ViewCrop]):
         """
@@ -891,8 +911,7 @@ class MplCanvas(FigureCanvasQTAgg):
         crop : ViewCrop or None
             Crop state to apply to the main display fetch path.
         """
-        self._view_crop = crop
-        self.view_crop_changed.emit(crop)
+        self.plot_model.set_view_crop(crop)
         model = self.get_single_visible_2d_model()
         if model is not None and (
             crop is None or crop.source_key == model._key
@@ -905,7 +924,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Remove the persistent view crop and refresh the plot.
         """
-        if self._view_crop is None:
+        if self.plot_model.view_crop is None:
             return
         self.set_view_crop(None)
 
@@ -1577,7 +1596,9 @@ class MplCanvas(FigureCanvasQTAgg):
             f"Removing run {run_uid}",
             category="plots",
         )
-        keys_to_remove = [key for key in self.plotArtists if key[2] == run_uid]
+        keys_to_remove = [
+            key for key in list(self._connected_plot_data) if key[2] == run_uid
+        ]
 
         for key in keys_to_remove:
             self._worker_generations.pop(key, None)
@@ -1585,20 +1606,29 @@ class MplCanvas(FigureCanvasQTAgg):
             retire_plot_worker(worker, self._pending_workers)
 
         for key in keys_to_remove:
-            plot_data = self.plotArtists[key]
-            plot_data.data_changed.disconnect(self.plot_data)
-            plot_data.draw_requested.disconnect(self.draw)
-            plot_data.autoscale_requested.disconnect(self.autoscale)
-            try:
-                plot_data.render_mode_changed.disconnect(
-                    self._on_render_mode_changed
-                )
-            except Exception:
-                pass
-            plot_data.visibility_changed.disconnect()
-            del self.plotArtists[key]
-            plot_data.clear()
+            plot_data = self.plotArtists.get(key)
+            if plot_data is not None:
+                try:
+                    plot_data.data_changed.disconnect(self.plot_data)
+                    plot_data.draw_requested.disconnect(self.draw)
+                    plot_data.autoscale_requested.disconnect(self.autoscale)
+                    plot_data.render_mode_changed.disconnect(
+                        self._on_render_mode_changed
+                    )
+                    plot_data.visibility_changed.disconnect(
+                        self._on_artist_visibility_changed
+                    )
+                except (TypeError, RuntimeError):
+                    pass
+            self._connected_plot_data.discard(key)
 
+        self.draw()
+        self.updateLegend()
+        print_debug(
+            "MplCanvas.remove_run_data",
+            "Completed cleanup",
+            category="plots",
+        )
         if keys_to_remove:
             self._reset_plot_axes()
             self.updateLegend()

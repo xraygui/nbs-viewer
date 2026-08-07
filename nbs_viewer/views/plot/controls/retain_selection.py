@@ -9,15 +9,16 @@ class RetainSelectionControl(CheckboxFormControl):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The plot model to control
+    plot_model : PlotModel
+        The plot session to control
     parent : QWidget, optional
         Parent widget, by default None
     """
 
-    def __init__(self, run_list_model, parent=None):
-        super().__init__(run_list_model, parent)
-        self._checkbox.setChecked(self.run_list_model._retain_selection)
+    def __init__(self, plot_model, parent=None):
+        self.plot_model = plot_model
+        super().__init__(plot_model, parent)
+        self._checkbox.setChecked(self.plot_model.retain_selection)
 
     def _setup_ui(self) -> None:
         """Setup the widget UI."""
@@ -53,4 +54,4 @@ class RetainSelectionControl(CheckboxFormControl):
 
     def _on_checkbox_changed(self, checkState) -> None:
         """Handle state changes."""
-        self.run_list_model.set_retain_selection(self._checkbox.isChecked())
+        self.plot_model.set_retain_selection(self._checkbox.isChecked())

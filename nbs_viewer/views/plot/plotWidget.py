@@ -33,7 +33,9 @@ class PlotWidget(QWidget):
         self.plot_model = plot_model
         self._cache_progress_source = None
 
-        self.plot_canvas = MplCanvas(self.run_list_model, self, 5, 4, 100)
+        self.plot_canvas = MplCanvas(
+            self.run_list_model, self.plot_model, self, 5, 4, 100
+        )
         self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
         self.plot_controls = PlotControls(
             self.run_list_model, self.plot_canvas, plot_model=self.plot_model

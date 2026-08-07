@@ -80,9 +80,9 @@ class ImageGridWidget(QWidget):
 
     def _connect_signals(self):
         """Connect signals to model."""
-        self.run_list_model.selected_keys_changed.connect(self._on_selection_changed)
+        self.plot_model.selected_keys_changed.connect(self._on_selection_changed)
         self.run_list_model.visible_runs_changed.connect(self._on_visible_runs_changed)
-        self.run_list_model.request_plot_update.connect(self._update_grid)
+        self.plot_model.request_plot_update.connect(self._update_grid)
 
     def draw(self):
         """Draw the figure with throttling (consistent with MplCanvas)."""

@@ -60,6 +60,9 @@ class PlotControlTab(QWidget):
         self._update_panel_layout()
 
     def _setup_panels(self):
+        if self.plot_model is None:
+            raise ValueError("plot_model is required for PlotControlTab")
+
         plot_settings_widget = QWidget()
         form = QFormLayout(plot_settings_widget)
         form.setContentsMargins(0, 0, 0, 0)
@@ -89,7 +92,7 @@ class PlotControlTab(QWidget):
             self.lock_aspect.add_to_form(form)
 
         self.retain_selection = RetainSelectionControl(
-            self.run_list_model, plot_settings_widget
+            self.plot_model, plot_settings_widget
         )
         self.retain_selection.add_to_form(form)
 
@@ -108,13 +111,15 @@ class PlotControlTab(QWidget):
         if self.plot_canvas is not None:
             self._setup_canvas_panels()
 
-        self.transform = TransformControl(self.run_list_model)
+        self.transform = TransformControl(self.plot_model)
         self.transform_panel = CollapsiblePanel(
             "Transform", self.transform, can_expand=False, resizable=False
         )
         self._tab_layout.addWidget(self.transform_panel, 0)
 
-        self.run_display = RunDisplayWidget(self.run_list_model)
+        self.run_display = RunDisplayWidget(
+            self.run_list_model, plot_model=self.plot_model
+        )
         self.run_display_panel = CollapsiblePanel(
             "Run Display",
             self.run_display,
@@ -133,7 +138,7 @@ class PlotControlTab(QWidget):
             )
 
         self.dimension_control = PlotDimensionControl(
-            self.run_list_model, self.plot_canvas, self
+            self.run_list_model, self.plot_canvas, self.plot_model, self
         )
         self.dimension_control_panel = CollapsiblePanel(
             "Dimension Control",
