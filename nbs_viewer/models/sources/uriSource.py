@@ -1,9 +1,44 @@
+from contextlib import contextmanager
 from typing import Any, Tuple, List
 import os
 from tiled.client import Context, from_context
 from ..catalog.base import CatalogBase
 from nbs_viewer.utils import print_debug
 from .base import SourceModel, CatalogLoadError, AuthenticationRejected
+
+
+@contextmanager
+def tiled_retry_budget(attempts=1, timeout=5.0):
+    """
+    Temporarily tighten Tiled client HTTP retry limits.
+
+    Tiled retries 5xx responses for up to ~45s with a terminal Rich
+    ``Retrying…`` spinner. In a Qt GUI that freezes the event loop, so
+    interactive connect/auth paths should fail fast and fall through to
+    the auth dialog instead.
+
+    Parameters
+    ----------
+    attempts : int, optional
+        Maximum HTTP attempts. Default is 1 (no retries).
+    timeout : float, optional
+        Maximum total retry budget in seconds. Default is 5.0.
+
+    Yields
+    ------
+    None
+    """
+    import tiled.client.utils as tiled_utils
+
+    old_attempts = tiled_utils.TILED_RETRY_ATTEMPTS
+    old_timeout = tiled_utils.TILED_RETRY_TIMEOUT
+    tiled_utils.TILED_RETRY_ATTEMPTS = int(attempts)
+    tiled_utils.TILED_RETRY_TIMEOUT = float(timeout)
+    try:
+        yield
+    finally:
+        tiled_utils.TILED_RETRY_ATTEMPTS = old_attempts
+        tiled_utils.TILED_RETRY_TIMEOUT = old_timeout
 
 
 class URISourceModel(SourceModel):
@@ -261,16 +296,15 @@ class URISourceModel(SourceModel):
         if not self.uri:
             raise ValueError("URI is required")
 
-        # Create context using new approach
-        context, node_path_parts = self._create_context()
+        with tiled_retry_budget():
+            context, node_path_parts = self._create_context()
 
-        # Check if authentication is required and handle it
-        auth_is_required = context.server_info.authentication.required
+            auth_is_required = context.server_info.authentication.required
 
-        if auth_is_required:
-            success = self._handle_authentication(context, interactive_auth)
-            if not success:
-                raise AuthenticationRejected("Authentication failed")
+            if auth_is_required:
+                success = self._handle_authentication(context, interactive_auth)
+                if not success:
+                    raise AuthenticationRejected("Authentication failed")
 
         return context, node_path_parts
 
@@ -294,8 +328,8 @@ class URISourceModel(SourceModel):
             - The catalog client
             - The label for the catalog
         """
-        # Create client from context
-        client = from_context(context, node_path_parts=node_path_parts)
+        with tiled_retry_budget():
+            client = from_context(context, node_path_parts=node_path_parts)
 
         label = f"Tiled: {self.uri}"
 
@@ -303,7 +337,6 @@ class URISourceModel(SourceModel):
             client = client[self.profile]
             label += ":" + self.profile
 
-        # Navigate through selected keys
         for key in self.selected_keys:
             client = client[key]
             label += ":" + key

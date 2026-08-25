@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QCheckBox,
 )
-from tiled.client import from_uri, from_profile
+from tiled.profiles import list_profiles
 
 from ..catalog.catalogTree import CatalogPicker
 from ..catalog.base import CatalogTableView
@@ -27,7 +27,6 @@ from ...models.sources import (
     ZMQSourceModel,
 )
 from ...models.catalog.kafka import KafkaCatalog
-from tiled.profiles import list_profiles
 
 try:
     import tomllib  # Python 3.11+
@@ -322,10 +321,14 @@ class ProfileSourceView(SourceView):
 
         Parameters
         ----------
+        profiles : dict
+            Mapping of profile name to source path
+        display_id : str
+            Display identifier for the catalog view
         parent : QWidget, optional
             The parent widget
         """
-        model = ProfileSourceModel()
+        model = ProfileSourceModel(auth_callback=handle_authentication)
         self.profiles = profiles
 
         super().__init__(model, display_id, parent)
@@ -344,6 +347,17 @@ class ProfileSourceView(SourceView):
         self.source_label = QLabel("Profile location", self)
         self.source_path = QLabel("")
 
+        self.cached_tokens_label = QLabel("Use Cached Credentials", self)
+        self.cached_tokens_checkbox = QCheckBox(self)
+        self.cached_tokens_checkbox.setToolTip(
+            "If checked, already-cached credentials will be used if available."
+        )
+        self.cached_tokens_checkbox.setChecked(self.model.use_cached_tokens)
+
+        cached_tokens_hbox = QHBoxLayout()
+        cached_tokens_hbox.addWidget(self.cached_tokens_label)
+        cached_tokens_hbox.addWidget(self.cached_tokens_checkbox)
+
         self.profile_edit.currentTextChanged.connect(self.update_source_path)
         self.update_source_path()
 
@@ -353,6 +367,7 @@ class ProfileSourceView(SourceView):
         layout = QVBoxLayout()
         layout.addLayout(profile_hbox)
         layout.addLayout(source_hbox)
+        layout.addLayout(cached_tokens_hbox)
         self.setLayout(layout)
 
     def update_source_path(self):
@@ -367,13 +382,14 @@ class ProfileSourceView(SourceView):
     def update_model(self):
         """Update the model with values from the UI."""
         self.model.set_profile(self.profile_edit.currentText())
+        self.model.use_cached_tokens = self.cached_tokens_checkbox.isChecked()
 
     def get_source(self, **kwargs):
         """
         Get a source from the model and create the appropriate view.
 
-        This overrides the base implementation to handle nested catalogs
-        and model selection.
+        Uses the same staged connect/auth path as URI sources so profile
+        login goes through the Qt dialog instead of Tiled's terminal flow.
 
         Returns
         -------
@@ -389,37 +405,40 @@ class ProfileSourceView(SourceView):
             return None, None, None
 
         try:
-            # Get the initial catalog without applying a model
+            context, node_path_parts = self.model.connect_and_authenticate(**kwargs)
+            client, label = self.model.navigate_catalog_tree(
+                context, node_path_parts
+            )
 
-            catalog = from_profile(self.model.profile)
-            label = f"Profile: {self.model.profile}"
+            try:
+                test_uid = client.items_indexer[0][0]
+                typical_uid4_len = 36
+                if len(test_uid) < typical_uid4_len:
+                    picker = CatalogPicker(client, self)
+                    if picker.exec_():
+                        selected_keys = picker.selected_entry
+                        self.model.set_selected_keys(selected_keys)
+                        for key in selected_keys:
+                            client = client[key]
+                            label += ":" + key
+                    else:
+                        return None, None, None
+            except IndexError:
+                pass
 
-            # Check if we need to navigate through a nested catalog
-            test_uid = catalog.items_indexer[0][0]
-            typical_uid4_len = 36
-            if len(test_uid) < typical_uid4_len:
-                # Probably not really a UID, and we have a nested catalog
-                picker = CatalogPicker(catalog, self)
-                if picker.exec_():
-                    selected_keys = picker.selected_entry
-                    self.model.set_selected_keys(selected_keys)
-
-                    # Update the label and catalog with selected keys
-                    for key in selected_keys:
-                        catalog = catalog[key]
-                        label += ":" + key
-                else:
-                    return None, None, None  # User cancelled the dialog
-
-            # Now that we have the final catalog, show the model selection dialog
             model_dialog = CatalogModelPicker(self.model.catalog_models, self)
             if model_dialog.exec_():
                 self.model.set_selected_model(model_dialog.selected_model_name)
+                catalog = self.model.select_catalog_model(client)
 
-                # Now get the source with the fully configured model
-                return super().get_source(**kwargs)
+                if isinstance(catalog, KafkaCatalog):
+                    catalog_view = KafkaView(catalog, self.display_id)
+                else:
+                    catalog_view = CatalogTableView(catalog, self.display_id)
+
+                return catalog_view, catalog, label
             else:
-                return None, None, None  # User cancelled the model selection
+                return None, None, None
 
         except Exception as e:
             print(f"Error getting profile source: {e}")
