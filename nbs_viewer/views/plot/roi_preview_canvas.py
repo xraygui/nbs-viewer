@@ -1,5 +1,5 @@
 """
-Small matplotlib canvas for derivative dialog preview.
+Small matplotlib canvas for ROI workbench preview.
 """
 
 from __future__ import annotations
@@ -19,13 +19,12 @@ from ...models.plot.plot_geometry import PlotBundle
 from ...models.plot.view_crop import ViewCrop
 from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 
-from nbs_viewer.models.plot.derived_fetch import fetch_derivative_preview
 from nbs_viewer.utils import print_debug
 
 
-class DerivativePreviewWorker(QThread):
+class RoiPreviewWorker(QThread):
     """
-    Compute a derivative :class:`PlotBundle` off the GUI thread.
+    Compute an ROI profile :class:`PlotBundle` off the GUI thread.
 
     Signals
     -------
@@ -40,7 +39,7 @@ class DerivativePreviewWorker(QThread):
 
     def __init__(
         self,
-        plot_model,
+        plot_data,
         request: MaterializeRequest,
         generation: int,
         parent=None,
@@ -50,7 +49,7 @@ class DerivativePreviewWorker(QThread):
         view_crop: ViewCrop | None = None,
     ):
         super().__init__(parent)
-        self.plot_model = plot_model
+        self.plot_data = plot_data
         self.request = request
         self.parent_spec = parent_spec
         self.parent_bundle = parent_bundle
@@ -59,7 +58,7 @@ class DerivativePreviewWorker(QThread):
 
     def run(self):
         """
-        Fetch the derivative preview bundle.
+        Fetch the ROI preview bundle.
         """
         try:
             if self.isInterruptionRequested():
@@ -67,8 +66,7 @@ class DerivativePreviewWorker(QThread):
             t0 = time.perf_counter()
             parent_bundle = self.parent_bundle
             cached = parent_bundle is not None
-            bundle = fetch_derivative_preview(
-                self.plot_model,
+            bundle = self.plot_data.preview_roi_profile(
                 self.request,
                 parent_spec=self.parent_spec,
                 parent_bundle=parent_bundle,
@@ -76,7 +74,7 @@ class DerivativePreviewWorker(QThread):
             )
             elapsed = time.perf_counter() - t0
             print_debug(
-                "DerivativePreviewWorker",
+                "RoiPreviewWorker",
                 f"preview ready in {elapsed:.3f}s "
                 f"(cached_parent={cached}, "
                 f"plot_ndim={self.request.spec.plot_ndim}, "
@@ -90,14 +88,14 @@ class DerivativePreviewWorker(QThread):
             if self.isInterruptionRequested():
                 return
             print_debug(
-                "DerivativePreviewWorker",
+                "RoiPreviewWorker",
                 str(exc),
                 category="plots",
             )
             self.error_occurred.emit(str(exc), self.generation)
 
 
-class DerivativePreviewCanvas(FigureCanvasQTAgg):
+class RoiPreviewCanvas(FigureCanvasQTAgg):
     """
     Single-axes canvas that renders a preview :class:`PlotBundle`.
     """

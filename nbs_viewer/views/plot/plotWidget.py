@@ -45,7 +45,8 @@ class PlotWidget(QWidget):
         self.dimension_control = tab.dimension_control
         self.roi_panel = tab.roi_panel
         self.roi_controller = tab.roi_controller
-        self.derivative_controller = tab.derivative_controller
+        self.roi_preview_controller = tab.roi_preview_controller
+        self.derivative_controller = tab.roi_preview_controller
 
         self.cache_status_label = QLabel("")
         self.cache_status_label.setObjectName("cacheStatusLabel")

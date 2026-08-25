@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
 from qtpy.QtWidgets import QWidget
@@ -7,7 +8,18 @@ import numpy as np
 from nbs_viewer.utils import print_debug
 from matplotlib.image import AxesImage
 
-from .cube_view import CubeViewSpec
+from .cube_view import (
+    CubeViewSpec,
+    MaterializeRequest,
+    classify_profile_kind,
+    profile_storage_axis,
+)
+from .derived_fetch import fetch_roi_preview
+from .frozen_spectrum import (
+    SYNTHETIC_KEY_PREFIX,
+    FrozenSpectrum,
+    copy_plot_bundle,
+)
 from .plot_geometry import PlotBundle, RenderMode
 from .view_crop import ViewCrop
 
@@ -141,6 +153,108 @@ class PlotDataModel(QObject):
         self._update_render_mode(bundle)
         self.last_bundle = bundle
         return bundle
+
+    def preview_roi_profile(
+        self,
+        request: MaterializeRequest,
+        *,
+        parent_spec: Optional[CubeViewSpec] = None,
+        parent_bundle: Optional[PlotBundle] = None,
+        view_crop: Optional[ViewCrop] = None,
+    ) -> PlotBundle:
+        """
+        Fetch an ROI profile preview bundle for this parent plot-data model.
+
+        Parameters
+        ----------
+        request : MaterializeRequest
+            Profile materialize request including ROI geometry.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view. Defaults to this model's cube view.
+        parent_bundle : PlotBundle, optional
+            Cached parent 2D bundle. Defaults to ``last_bundle``.
+        view_crop : ViewCrop, optional
+            Active main-display crop for ND loads.
+
+        Returns
+        -------
+        PlotBundle
+            1D ROI profile preview payload.
+        """
+        return fetch_roi_preview(
+            self,
+            request,
+            parent_spec=(
+                parent_spec if parent_spec is not None else self._cube_view_spec
+            ),
+            parent_bundle=parent_bundle,
+            view_crop=view_crop,
+        )
+
+    def build_roi_frozen_spectrum(
+        self,
+        bundle: PlotBundle,
+        request: MaterializeRequest,
+        *,
+        label: str,
+        parent_spec: Optional[CubeViewSpec] = None,
+        cube_fingerprint=None,
+        committed_xkey: Optional[str] = None,
+    ) -> FrozenSpectrum:
+        """
+        Build a :class:`FrozenSpectrum` from a committed ROI profile bundle.
+
+        Does not register the spectrum on the run; callers (typically
+        :class:`PlotModel`) perform registration.
+
+        Parameters
+        ----------
+        bundle : PlotBundle
+            1D line profile bundle to freeze.
+        request : MaterializeRequest
+            Provenance request used for the profile.
+        label : str
+            Display label for Run Display.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view used to classify profile kind.
+        cube_fingerprint : tuple, optional
+            Slice / cube-view snapshot at commit time.
+        committed_xkey : str, optional
+            X key selected at save time. Defaults to this model's x key.
+
+        Returns
+        -------
+        FrozenSpectrum
+            Unregistered frozen spectrum entry.
+
+        Raises
+        ------
+        ValueError
+            If the bundle is not a 1D line profile.
+        """
+        if bundle.render_mode != "line" or bundle.ndim != 1:
+            raise ValueError("Saved ROI profiles must be 1D line profiles")
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        kind = "stack_spectrum"
+        try:
+            profile_axis = profile_storage_axis(request.spec)
+        except Exception:
+            profile_axis = None
+        if spec is not None and profile_axis is not None:
+            kind = classify_profile_kind(spec, profile_axis)
+        if committed_xkey is None:
+            committed_xkey = self._xkey
+        return FrozenSpectrum(
+            key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
+            label=label,
+            bundle=copy_plot_bundle(bundle),
+            kind=kind,
+            source_ykey=self._ykey,
+            committed_xkey=committed_xkey or "",
+            request=request,
+            source_key=self._key,
+            cube_fingerprint=cube_fingerprint,
+        )
 
     def get_plot_data(self, indices=None, dimension=None):
         """

@@ -133,7 +133,7 @@ def fetch_context_with_view_crop(
     Parameters
     ----------
     request : MaterializeRequest
-        Derivative or masked fetch request including a region.
+        ROI profile or masked fetch request including a region.
     crop : ViewCrop
         Active persistent view crop.
     parent_spec : CubeViewSpec, optional

@@ -7,6 +7,17 @@ from ...models.plot.plotModel import PlotModel
 from ...models.plot.runModel import RunModel
 from ...utils import print_debug
 
+class Display:
+    def __init__(self, name:str, is_main_display=False, single_selection_mode=False):
+        self.run_list = RunListModel(
+            is_main_display=is_main_display, single_selection_mode=single_selection_mode
+        )
+        self.plot = PlotModel(self.run_list, parent=self)
+        self.name = name
+
+    def add_run(self, run):
+        self.run_list.add_run(run)
+
 
 class DisplayManager(QObject):
     """

@@ -16,7 +16,7 @@ folder moves.
 | 1 | Introduce `PlotModel`; own `RoiSetModel` | Done |
 | 2 | Combine / freeze factories on `RunListModel` | Done |
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
-| 4 | ROI preview + commit as model APIs | Not started |
+| 4 | ROI preview + commit as model APIs | Done |
 | 5 | Catalog table + source models | Not started |
 | 6 | Display registry / no `QtWidgets` in models | Not started |
 | 7 | Organize under `models/` (mechanical) | Not started |
@@ -24,7 +24,7 @@ folder moves.
 
 **Milestones**
 
-- [ ] **A** (after steps 1–4): ROI headless path
+- [x] **A** (after steps 1–4): ROI headless path
 - [ ] **B** (after steps 5–6): Catalog → display → plot headless path
 - [ ] **C** (steps 7–8): Navigable tree + thin views
 
@@ -113,13 +113,12 @@ Known violations at plan start (inventory baseline for step 0):
 | Location | Creates |
 |----------|---------|
 | `views/plot/imageGridWidget.py` | `PlotDataModel` (temporary exception) |
-| `views/plot/derivative_controller.py` | `FrozenSpectrum` |
 | `views/catalog/base.py` | `CatalogTableModel` |
 | `views/dataSource/dataSource.py` | `*SourceModel` |
 
 Cleared in earlier steps: `RoiSetModel` (Step 1), `CombinedRunModel` /
 `FrozenRunModel` (Step 2), `PlotDataModel` in canvas (Step 3; ImageGrid
-deferred).
+deferred), `FrozenSpectrum` in views (Step 4).
 
 `widgets/kafkaViewerTab.py` also constructs `RunListModel` / `KafkaCatalog`, but
 that package is an intentional external embed surface — **leave alone** (see
@@ -454,45 +453,57 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 
 ## Step 4 — ROI preview + commit as model APIs
 
-**Status:** Not started
+**Status:** Done
 
 **Depends on:** Steps 1 and 3 (commit needs run + plot identity)
 
 ### Do
 
-- [ ] Move build-request / preview-fetch / `FrozenSpectrum` construction out of
-      `DerivativeController` / `RoiWindow` into model APIs, for example:
-  - preview via `PlotModel` / ROI helpers:
-    `(roi_set, run, entry_id, parent_spec, …) → PlotBundle`
-  - commit: `RunModel.commit_roi_profile(...)` constructs `FrozenSpectrum` and
-    registers it
-- [ ] Controllers pass UI state only; they do not call `FrozenSpectrum(...)`
-- [ ] Optionally rename “derivative” identifiers toward ROI preview/commit
-      (same PR or immediate follow-up)
-- [ ] File move to `models/roi/` may wait for step 7 if this PR is already large
+- [x] Move build-request / preview-fetch / `FrozenSpectrum` construction out of
+      controllers / ROI window into model APIs:
+  - preview creation on `PlotDataModel.preview_roi_profile` /
+    `build_roi_frozen_spectrum`
+  - routing + register on `PlotModel.preview_roi_profile` /
+    `commit_roi_profile` / `finalize_roi_commit`
+  - shared helper `build_roi_profile_request_from_operation`
+- [x] Controllers pass UI state only; they do not call `FrozenSpectrum(...)`
+- [x] Rename “derivative” identifiers toward ROI preview/commit
+      (`RoiPreviewController`, `RoiPreviewWorker`, `fetch_roi_preview`, …)
+- [x] File move to `models/roi/` deferred to Step 7
+
+**Decision log**
+
+- Creation of preview bundles and `FrozenSpectrum` objects: **`PlotDataModel`**
+- Public preview / commit / register: **`PlotModel`** (routes to parent
+  `PlotDataModel`, then `RunModel.register_frozen_spectrum`)
+- `RunModel` remains register-only for frozen spectra
+- Shared request helper: `build_roi_profile_request_from_operation` in
+  `derived_fetch.py`
+- Async: sync model APIs; `QThread` worker stays in views and calls
+  `PlotDataModel.preview_roi_profile`
+- Rename derivative → ROI naming in this PR; folder move waits for Step 7
 
 ### Testing goals
 
-- [ ] Unit (H0/H1): synthetic 2D data → ROI entry → preview returns 1D
-      `PlotBundle` (extend `test_derived_fetch` / `test_materialize_view` /
-      `test_frozen_spectrum`)
-- [ ] Unit: commit registers synthetic key on `RunModel`; second commit adds
+- [x] Unit (H0/H1): synthetic 2D data → ROI entry → preview returns 1D
+      `PlotBundle`
+- [x] Unit: commit registers synthetic key on `RunModel`; second commit adds
       another key
-- [ ] Unit: stale / missing region errors come from the model API
-- [ ] Inventory: no `FrozenSpectrum(` in views
-- [ ] Review: controllers are wiring + status text only
+- [x] Unit: stale / missing region errors come from the model API
+- [x] Inventory: no `FrozenSpectrum(` in views
+- [x] Review: controllers are wiring + status text only
 
 ### Exit criteria
 
-- [ ] Headless ROI save path:
+- [x] Headless ROI save path:
 
   ```text
   RunListModel + PlotModel → add run → configure cube/ROI → preview → commit
   → list frozen keys
   ```
 
-- [ ] Step status → Done
-- [ ] **Milestone A** checkbox above
+- [x] Step status → Done
+- [x] **Milestone A** checkbox above
 
 ---
 ## Step 5 — Catalog table + source models
@@ -685,3 +696,4 @@ key/data API parity with `BlueskyRun` / `KafkaRun`.
 | 2026-08-07 | Step 3 decisions: one PR; drop on remove; cube/crop/slice on PlotModel; auto-add stays on RunListModel; defaults on PlotModel; ImageGrid deferred |
 | 2026-08-07 | Step 3: uncheck keeps plot-data (stop plotting); transform+retain on PlotModel; ImageGrid temporary exception; available_keys filter on PlotModel |
 | 2026-08-07 | Step 3 done: PlotModel owns keys, transform, retain, cube/crop/slice, plot-data map; canvas uses ensure_plot_data |
+| 2026-08-07 | Step 4 done: PlotDataModel creates ROI preview/FrozenSpectrum; PlotModel routes+registers; derivative→ROI rename; Milestone A |

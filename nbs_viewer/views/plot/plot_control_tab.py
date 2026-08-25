@@ -17,7 +17,7 @@ from .plotDimensionWidget import PlotDimensionControl
 
 from .roi_panel import RoiPanel
 from .roi_controller import RoiController
-from .derivative_controller import DerivativeController
+from .roi_preview_controller import RoiPreviewController
 
 
 class PlotControlTab(QWidget):
@@ -47,6 +47,7 @@ class PlotControlTab(QWidget):
         self.roi_panel = None
         self.roi_set = None
         self.roi_controller = None
+        self.roi_preview_controller = None
         self.derivative_controller = None
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
@@ -166,13 +167,14 @@ class PlotControlTab(QWidget):
             self.roi_set,
             self,
         )
-        self.derivative_controller = DerivativeController(
+        self.roi_preview_controller = RoiPreviewController(
             self.plot_canvas,
             self.dimension_control,
             self.roi_panel,
-            self.roi_set,
+            self.plot_model,
             self,
         )
+        self.derivative_controller = self.roi_preview_controller
 
     def _update_panel_layout(self):
         """

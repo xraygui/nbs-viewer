@@ -23,8 +23,9 @@ from .cube_view import (
 )
 from .plot_geometry import PlotBundle, prepare_1d_bundle
 from .plot_view_frame import frame_from_bundle
-from .view_crop import ViewCrop
 from .region import RegionDefinition, expand_region_for_profile
+from .roi_set import RoiOperation
+from .view_crop import ViewCrop
 
 
 def plot_plane_storage_axes(
@@ -179,6 +180,64 @@ def materialize_request_for_profile(
     return MaterializeRequest(output_spec, region, mask_mode)
 
 
+def build_roi_profile_request_from_operation(
+    parent_spec: CubeViewSpec,
+    region: RegionDefinition,
+    operation: RoiOperation,
+    *,
+    parent_frame=None,
+    span_full_override: Optional[bool] = None,
+    default_profile_axis=None,
+) -> MaterializeRequest:
+    """
+    Build a profile :class:`MaterializeRequest` from an ROI operation.
+
+    Parameters
+    ----------
+    parent_spec : CubeViewSpec
+        Parent cube view.
+    region : RegionDefinition
+        ROI geometry on the parent plot plane.
+    operation : RoiOperation
+        Per-ROI reduction parameters.
+    parent_frame : PlotViewFrame, optional
+        Parent view frame for span-full expansion.
+    span_full_override : bool, optional
+        Override ``operation.span_full_profile_axis`` when set.
+    default_profile_axis : str or int, optional
+        Profile axis used when ``operation.profile_storage_axis`` is None.
+
+    Returns
+    -------
+    MaterializeRequest
+        Frozen view request for ROI preview or commit.
+
+    Raises
+    ------
+    ValueError
+        If no profile axis can be resolved.
+    """
+    profile_axis = operation.profile_storage_axis
+    if profile_axis is None:
+        profile_axis = default_profile_axis
+    if profile_axis is None:
+        raise ValueError("Profile axis is unavailable")
+    span_full = (
+        operation.span_full_profile_axis
+        if span_full_override is None
+        else span_full_override
+    )
+    return materialize_request_for_profile(
+        parent_spec,
+        region,
+        profile_axis,
+        operation.spatial_reduce,
+        operation.mask_mode,
+        parent_frame=parent_frame,
+        span_full_profile_axis=span_full,
+    )
+
+
 def _spatial_reduce_from_profile_spec(spec: CubeViewSpec) -> SpatialReduce:
     """
     Return the spatial reduce op encoded in a profile output spec.
@@ -226,19 +285,19 @@ def _profile_uses_nd_load(
     return not is_plot_plane_storage_axis(parent_spec, profile_axis)
 
 
-def region_frame_for_derivative(
+def region_frame_for_roi_preview(
     request: MaterializeRequest,
     parent_spec: Optional[CubeViewSpec],
     parent_bundle: PlotBundle,
     view_crop: Optional[ViewCrop] = None,
 ):
     """
-    Select the view frame for ROI compilation in derivative fetch.
+    Select the view frame for ROI compilation in ROI preview fetch.
 
     Parameters
     ----------
     request : MaterializeRequest
-        Derivative materialize request.
+        ROI profile materialize request.
     parent_spec : CubeViewSpec or None
         Parent cube view.
     parent_bundle : PlotBundle
@@ -254,6 +313,9 @@ def region_frame_for_derivative(
     if view_crop is not None and _profile_uses_nd_load(request, parent_spec):
         return view_crop.full_frame
     return frame_from_bundle(parent_bundle)
+
+
+region_frame_for_derivative = region_frame_for_roi_preview
 
 
 def fetch_materialized_bundle(
@@ -350,8 +412,8 @@ def fetch_materialized_bundle(
     )
 
 
-def fetch_derivative_preview(
-    plot_model,
+def fetch_roi_preview(
+    plot_data,
     request: MaterializeRequest,
     *,
     parent_spec: Optional[CubeViewSpec] = None,
@@ -359,12 +421,12 @@ def fetch_derivative_preview(
     view_crop: Optional[ViewCrop] = None,
 ) -> PlotBundle:
     """
-    Fetch a derivative bundle for dialog preview from a plot data model.
+    Fetch an ROI profile bundle from a parent plot-data model.
 
     Parameters
     ----------
-    plot_model : PlotDataModel
-        Active 2D plot model.
+    plot_data : PlotDataModel
+        Active 2D plot-data model.
     request : MaterializeRequest
         Frozen profile view request including the ROI.
     parent_spec : CubeViewSpec, optional
@@ -380,13 +442,13 @@ def fetch_derivative_preview(
         1D profile preview payload.
     """
     if request.region is None:
-        raise ValueError("request.region is required for derivative preview")
-    if parent_bundle is None and plot_model.last_bundle is not None:
-        parent_bundle = plot_model.last_bundle
+        raise ValueError("request.region is required for ROI preview")
+    if parent_bundle is None and plot_data.last_bundle is not None:
+        parent_bundle = plot_data.last_bundle
     if parent_bundle is None:
-        raise ValueError("No parent 2D bundle available for derivative fetch")
+        raise ValueError("No parent 2D bundle available for ROI preview")
 
-    frame = region_frame_for_derivative(
+    frame = region_frame_for_roi_preview(
         request,
         parent_spec,
         parent_bundle,
@@ -402,11 +464,14 @@ def fetch_derivative_preview(
         )
     return fetch_materialized_bundle(
         request,
-        run_model=plot_model._run,
-        xkeys=[plot_model._xkey],
-        ykey=plot_model._ykey,
-        norm_keys=plot_model._norm_keys,
+        run_model=plot_data._run,
+        xkeys=[plot_data._xkey],
+        ykey=plot_data._ykey,
+        norm_keys=plot_data._norm_keys,
         parent_spec=parent_spec,
         region_frame=frame,
         view_crop=view_crop,
     )
+
+
+fetch_derivative_preview = fetch_roi_preview

@@ -28,12 +28,22 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
+from .cube_view import (
+    classify_profile_kind,
+    default_profile_label,
+    is_plot_plane_storage_axis,
+    scan_profile_storage_axis,
+)
+from .derived_fetch import build_roi_profile_request_from_operation
 from .plotDataModel import PlotDataModel
-from .roi_set import RoiSetModel
+from .region import RectRegion
+from .roi_set import RoiEntry, RoiSetModel
 from .view_crop import ViewCrop
 
 if TYPE_CHECKING:
-    from .cube_view import CubeViewSpec
+    from .cube_view import CubeViewSpec, MaterializeRequest
+    from .frozen_spectrum import FrozenSpectrum
+    from .plot_geometry import PlotBundle
     from .runListModel import RunListModel
     from .runModel import RunModel
 
@@ -395,6 +405,414 @@ class PlotModel(QObject):
         for key, plot_data in self._plot_data.items():
             if key[2] in visible:
                 yield plot_data
+
+    def resolve_single_visible_2d_plot_data(self) -> Optional[PlotDataModel]:
+        """
+        Return the sole visible 2D plot-data model, if exactly one exists.
+
+        Uses cached render mode or ``last_bundle`` dimensionality. When neither
+        is available, falls back to ``dimension == 2``.
+
+        Returns
+        -------
+        PlotDataModel or None
+        """
+        models = []
+        for plot_data in self.iter_visible_plot_data():
+            if not getattr(plot_data, "_visible", True):
+                continue
+            render_mode = plot_data.render_mode
+            if render_mode in ("image", "mesh"):
+                models.append(plot_data)
+                continue
+            bundle = plot_data.last_bundle
+            if bundle is not None and bundle.ndim == 2:
+                models.append(plot_data)
+                continue
+            if plot_data._dimension == 2 and render_mode is None and bundle is None:
+                models.append(plot_data)
+        if len(models) == 1:
+            return models[0]
+        return None
+
+    def resolve_roi_entry(self, entry_id: Optional[str] = None) -> RoiEntry:
+        """
+        Return a drawable, non-stale ROI entry.
+
+        Parameters
+        ----------
+        entry_id : str, optional
+            Entry id. Defaults to the current selection.
+
+        Returns
+        -------
+        RoiEntry
+            Validated ROI entry.
+
+        Raises
+        ------
+        ValueError
+            If the entry is missing, stale, or has no drawable area.
+        """
+        if entry_id is None:
+            entry = self._roi_set.selected_entry()
+        else:
+            entry = self._roi_set.get(entry_id)
+        if entry is None:
+            raise ValueError("Select an ROI")
+        if entry.stale:
+            raise ValueError("Selected ROI is stale; redraw it before previewing")
+        if not entry.region.has_area():
+            raise ValueError("Draw the selected ROI on the parent plot")
+        if isinstance(entry.region, RectRegion):
+            region = entry.region.normalized()
+            if region.x1 - region.x0 == 0.0 or region.y1 - region.y0 == 0.0:
+                raise ValueError("ROI has zero width or height")
+        return entry
+
+    def build_roi_profile_request(
+        self,
+        entry: RoiEntry,
+        *,
+        parent_spec: Optional["CubeViewSpec"] = None,
+        parent_frame=None,
+        span_full_override: Optional[bool] = None,
+        default_profile_axis=None,
+    ) -> "MaterializeRequest":
+        """
+        Build a profile materialize request for an ROI entry.
+
+        Parameters
+        ----------
+        entry : RoiEntry
+            ROI geometry and operation.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view. Defaults to this plot's cube view.
+        parent_frame : PlotViewFrame, optional
+            Parent view frame for span-full expansion.
+        span_full_override : bool, optional
+            Override the entry span-full flag.
+        default_profile_axis : str or int, optional
+            Profile axis when the entry does not set one.
+
+        Returns
+        -------
+        MaterializeRequest
+            Request for preview or commit.
+        """
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        if spec is None:
+            raise ValueError("Parent cube view is unavailable")
+        return build_roi_profile_request_from_operation(
+            spec,
+            entry.region,
+            entry.operation,
+            parent_frame=parent_frame,
+            span_full_override=span_full_override,
+            default_profile_axis=default_profile_axis,
+        )
+
+    def _commit_span_full(
+        self,
+        parent_spec: "CubeViewSpec",
+        profile_storage_axis: int,
+        span_full: bool,
+    ) -> bool:
+        if classify_profile_kind(parent_spec, profile_storage_axis) != "stack_spectrum":
+            return span_full
+        if is_plot_plane_storage_axis(parent_spec, profile_storage_axis):
+            return True
+        return span_full
+
+    def prepare_roi_commit(
+        self,
+        entry: RoiEntry,
+        *,
+        parent_spec: Optional["CubeViewSpec"] = None,
+        parent_frame=None,
+        axis_names=None,
+        default_profile_axis=None,
+    ) -> Tuple[bool, "MaterializeRequest"]:
+        """
+        Validate an ROI commit and build its materialize request.
+
+        Parameters
+        ----------
+        entry : RoiEntry
+            ROI entry to commit.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view. Defaults to this plot's cube view.
+        parent_frame : PlotViewFrame, optional
+            Parent frame for request construction.
+        axis_names : sequence of str, optional
+            Axis names used in local-profile error hints.
+        default_profile_axis : str or int, optional
+            Fallback profile axis.
+
+        Returns
+        -------
+        tuple
+            ``(span_full, request)`` for the commit fetch.
+
+        Raises
+        ------
+        ValueError
+            If the ROI cannot be committed (missing view, local profile, etc.).
+        """
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        if spec is None:
+            raise ValueError("Parent cube view is unavailable")
+
+        profile_axis = entry.operation.profile_storage_axis
+        if profile_axis is None:
+            profile_axis = default_profile_axis
+        if profile_axis is None:
+            raise ValueError("Profile axis is unavailable")
+        profile_kind = classify_profile_kind(spec, profile_axis)
+        if profile_kind == "local_profile":
+            scan_axis = scan_profile_storage_axis(spec)
+            names = tuple(axis_names or ())
+            if scan_axis is not None and scan_axis < len(names):
+                hint = names[scan_axis]
+            else:
+                hint = "the leading scan axis"
+            raise ValueError(
+                f"Select a profile along {hint} to save to Run Display"
+            )
+
+        span_full = self._commit_span_full(
+            spec,
+            profile_axis,
+            entry.operation.span_full_profile_axis,
+        )
+        request = self.build_roi_profile_request(
+            entry,
+            parent_spec=spec,
+            parent_frame=parent_frame,
+            span_full_override=span_full,
+            default_profile_axis=default_profile_axis,
+        )
+        return span_full, request
+
+    def preview_roi_profile(
+        self,
+        entry_id: Optional[str] = None,
+        *,
+        entry: Optional[RoiEntry] = None,
+        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_spec: Optional["CubeViewSpec"] = None,
+        parent_frame=None,
+        parent_bundle: Optional["PlotBundle"] = None,
+        view_crop: Optional[ViewCrop] = None,
+        span_full_override: Optional[bool] = None,
+        default_profile_axis=None,
+        request: Optional["MaterializeRequest"] = None,
+    ) -> "PlotBundle":
+        """
+        Preview an ROI profile for an entry on the parent plot-data model.
+
+        Parameters
+        ----------
+        entry_id : str, optional
+            ROI entry id. Ignored when ``entry`` is provided.
+        entry : RoiEntry, optional
+            ROI entry. Defaults to resolving ``entry_id`` / selection.
+        parent_plot_data : PlotDataModel, optional
+            Parent 2D plot-data model. Defaults to the sole visible 2D model.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view. Defaults to this plot's cube view.
+        parent_frame : PlotViewFrame, optional
+            Parent frame used when building the request.
+        parent_bundle : PlotBundle, optional
+            Cached parent 2D bundle.
+        view_crop : ViewCrop, optional
+            Active crop. Defaults to this plot's view crop.
+        span_full_override : bool, optional
+            Override span-full when building the request.
+        default_profile_axis : str or int, optional
+            Fallback profile axis.
+        request : MaterializeRequest, optional
+            Prebuilt request. When omitted, one is built from the entry.
+
+        Returns
+        -------
+        PlotBundle
+            1D ROI profile preview.
+        """
+        if entry is None:
+            entry = self.resolve_roi_entry(entry_id)
+        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        if request is None:
+            request = self.build_roi_profile_request(
+                entry,
+                parent_spec=spec,
+                parent_frame=parent_frame,
+                span_full_override=span_full_override,
+                default_profile_axis=default_profile_axis,
+            )
+        crop = self._view_crop if view_crop is None else view_crop
+        return plot_data.preview_roi_profile(
+            request,
+            parent_spec=spec,
+            parent_bundle=parent_bundle,
+            view_crop=crop,
+        )
+
+    def finalize_roi_commit(
+        self,
+        entry: RoiEntry,
+        bundle: "PlotBundle",
+        request: "MaterializeRequest",
+        *,
+        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_spec: Optional["CubeViewSpec"] = None,
+        axis_names=None,
+        cube_fingerprint=None,
+        committed_xkey: Optional[str] = None,
+    ) -> "FrozenSpectrum":
+        """
+        Build and register a frozen spectrum from a fetched ROI profile bundle.
+
+        Parameters
+        ----------
+        entry : RoiEntry
+            ROI entry used for labeling.
+        bundle : PlotBundle
+            Fetched 1D profile bundle.
+        request : MaterializeRequest
+            Request used for the fetch.
+        parent_plot_data : PlotDataModel, optional
+            Parent plot-data model. Defaults to the sole visible 2D model.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view for labeling and kind classification.
+        axis_names : sequence of str, optional
+            Storage axis names for default labels.
+        cube_fingerprint : tuple, optional
+            Slice / cube-view snapshot. Defaults to this plot's state.
+        committed_xkey : str, optional
+            X key at commit time. Defaults to the plot session x selection.
+
+        Returns
+        -------
+        FrozenSpectrum
+            Registered frozen spectrum.
+        """
+        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        names = tuple(axis_names or ())
+        label = (
+            entry.operation.label
+            or entry.display_label
+            or default_profile_label(request, names, parent_spec=spec)
+        )
+        if committed_xkey is None:
+            committed_xkey = self._current_x_keys[0] if self._current_x_keys else ""
+        if cube_fingerprint is None:
+            cube_fingerprint = (
+                tuple(self._slice) if self._slice else None,
+                str(self._cube_view_spec),
+            )
+        frozen = plot_data.build_roi_frozen_spectrum(
+            bundle,
+            request,
+            label=label,
+            parent_spec=spec,
+            cube_fingerprint=cube_fingerprint,
+            committed_xkey=committed_xkey,
+        )
+        plot_data._run.register_frozen_spectrum(frozen)
+        return frozen
+
+    def commit_roi_profile(
+        self,
+        entry_id: Optional[str] = None,
+        *,
+        entry: Optional[RoiEntry] = None,
+        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_spec: Optional["CubeViewSpec"] = None,
+        parent_frame=None,
+        parent_bundle: Optional["PlotBundle"] = None,
+        view_crop: Optional[ViewCrop] = None,
+        axis_names=None,
+        default_profile_axis=None,
+        cube_fingerprint=None,
+        committed_xkey: Optional[str] = None,
+    ) -> "FrozenSpectrum":
+        """
+        Preview, build, and register an ROI profile on the parent run.
+
+        Parameters
+        ----------
+        entry_id : str, optional
+            ROI entry id. Ignored when ``entry`` is provided.
+        entry : RoiEntry, optional
+            ROI entry. Defaults to resolving ``entry_id`` / selection.
+        parent_plot_data : PlotDataModel, optional
+            Parent 2D plot-data model.
+        parent_spec : CubeViewSpec, optional
+            Parent cube view.
+        parent_frame : PlotViewFrame, optional
+            Parent frame for request construction.
+        parent_bundle : PlotBundle, optional
+            Cached parent 2D bundle.
+        view_crop : ViewCrop, optional
+            Active crop.
+        axis_names : sequence of str, optional
+            Axis names for default labels.
+        default_profile_axis : str or int, optional
+            Fallback profile axis.
+        cube_fingerprint : tuple, optional
+            Slice / cube-view snapshot.
+        committed_xkey : str, optional
+            X key at commit time.
+
+        Returns
+        -------
+        FrozenSpectrum
+            Registered frozen spectrum.
+
+        Raises
+        ------
+        ValueError
+            If the ROI cannot be committed (stale, local profile, etc.).
+        """
+        if entry is None:
+            entry = self.resolve_roi_entry(entry_id)
+        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        span_full, request = self.prepare_roi_commit(
+            entry,
+            parent_spec=spec,
+            parent_frame=parent_frame,
+            axis_names=axis_names,
+            default_profile_axis=default_profile_axis,
+        )
+        del span_full
+        bundle = self.preview_roi_profile(
+            entry=entry,
+            parent_plot_data=plot_data,
+            parent_spec=spec,
+            parent_bundle=parent_bundle,
+            view_crop=view_crop,
+            request=request,
+        )
+        return self.finalize_roi_commit(
+            entry,
+            bundle,
+            request,
+            parent_plot_data=plot_data,
+            parent_spec=spec,
+            axis_names=axis_names,
+            cube_fingerprint=cube_fingerprint,
+            committed_xkey=committed_xkey,
+        )
 
     def _ensure_plot_data_for_visible(self) -> None:
         if not (self._current_x_keys and self._current_y_keys):

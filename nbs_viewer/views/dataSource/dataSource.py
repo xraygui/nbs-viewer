@@ -18,7 +18,7 @@ from ..catalog.catalogTree import CatalogPicker
 from ..catalog.base import CatalogTableView
 from ..catalog.kafka import KafkaView
 
-from ...models.catalog.source_models import (
+from ...models.sources import (
     SourceModel,
     URISourceModel,
     ProfileSourceModel,

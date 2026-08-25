@@ -35,12 +35,12 @@ from nbs_viewer.models.plot.cube_view import (
     scan_profile_storage_axis,
     storage_axis_to_plot_axis,
 )
-from nbs_viewer.models.plot.derived_fetch import materialize_request_for_profile
+from nbs_viewer.models.plot.derived_fetch import build_roi_profile_request_from_operation
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
 from nbs_viewer.models.plot.region import RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation, RoiSetModel
 
-from .derivative_preview_canvas import DerivativePreviewCanvas
+from .roi_preview_canvas import RoiPreviewCanvas
 from .roi_types import (
     DescribeOptionsWidget,
     EllipseOptionsWidget,
@@ -229,7 +229,7 @@ class RoiWindow(QDialog):
         preview_header.addStretch(1)
         root.addLayout(preview_header)
 
-        self.preview_canvas = DerivativePreviewCanvas(self)
+        self.preview_canvas = RoiPreviewCanvas(self)
         root.addWidget(self.preview_canvas, stretch=1)
 
         self.context_label = QLabel()
@@ -740,30 +740,24 @@ class RoiWindow(QDialog):
         if operation is None:
             entry = self._roi_set.selected_entry()
             operation = entry.operation if entry is not None else None
-        if operation is not None:
-            profile_axis = operation.profile_storage_axis
-            if profile_axis is None:
-                profile_axis = self.get_profile_storage_axis()
-            spatial_reduce = operation.spatial_reduce
-            mask_mode = operation.mask_mode
-            span_default = operation.span_full_profile_axis
-        else:
-            profile_axis = self.get_profile_storage_axis()
-            spatial_reduce = self.get_spatial_reduce()
-            mask_mode = self.get_mask_mode()
-            span_default = self.span_full_profile_axis()
-        span_full = (
-            span_default if span_full_profile_axis is None else span_full_profile_axis
-        )
-        return materialize_request_for_profile(
-            spec,
-            region,
-            profile_axis,
-            spatial_reduce,
-            mask_mode,
-            parent_frame=self._parent_frame,
-            span_full_profile_axis=span_full,
-        )
+        if operation is None:
+            operation = RoiOperation(
+                mask_mode=self.get_mask_mode(),
+                profile_storage_axis=self.get_profile_storage_axis(),
+                spatial_reduce=self.get_spatial_reduce(),
+                span_full_profile_axis=self.span_full_profile_axis(),
+            )
+        try:
+            return build_roi_profile_request_from_operation(
+                spec,
+                region,
+                operation,
+                parent_frame=self._parent_frame,
+                span_full_override=span_full_profile_axis,
+                default_profile_axis=self.get_profile_storage_axis(),
+            )
+        except ValueError:
+            return None
 
     def is_preview_enabled(self) -> bool:
         """

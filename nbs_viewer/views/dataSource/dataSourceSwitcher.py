@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
 )
 import logging
 from .dataSource import DataSourcePicker, URISourceView
-from nbs_viewer.models.catalog.source_models import CatalogLoadError
+from nbs_viewer.models.sources import CatalogLoadError
 from nbs_viewer.views.display.displayControl import DisplayControlWidget
 from nbs_viewer.utils import print_debug
 
@@ -242,7 +242,13 @@ class DataSourceSwitcher(QWidget):
                 return
 
     def add_new_source(self):
-        """Add a new data source via picker dialog."""
+        """
+        Add a new data source via picker dialog.
+        
+        DataSourcePicker is creating models, which is not good. Registration in the
+        DataSourceSwitcher is also not good, this should be done by a catalog creation
+        model -- really, probably in app_model.catalogs
+        """
         picker = DataSourcePicker(
             self.display_id, config_file=self.config_file, parent=self
         )
