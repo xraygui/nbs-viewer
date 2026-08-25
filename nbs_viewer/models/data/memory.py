@@ -3,21 +3,28 @@ import numpy as np
 from .base import CatalogRun
 from typing import List, Tuple, Dict
 
+
 class MemoryRun(CatalogRun):
     """
-    Implementation of CatalogRun for a totally static in-memory run
+    Implementation of CatalogRun for a totally static in-memory run.
 
     Parameters
     ----------
-    metadata: dict
-        Document containing metadata about the run. Should contain, minimally, the following keys:
+    metadata : dict
+        Document containing metadata about the run. Should contain, minimally,
+        the following keys:
+
         - scan_id
         - uid
-        - time
+        - date or time
         - plan_name
-        - exit_status 
-    data: dict
-        Dictionary containing data keys. For sanity's sake, all should be of the same length   
+        - exit_status
+    data : dict
+        Dictionary containing data keys. All arrays should be the same length.
+    key : str, optional
+        Unique identifier for this run. Defaults to ``metadata["uid"]``.
+    catalog : object, optional
+        Parent catalog, by default None.
     """
 
     DISPLAY_KEYS = {
@@ -38,11 +45,14 @@ class MemoryRun(CatalogRun):
         "uid",
     ]
 
-    def __init__(self, metadata, data):
+    def __init__(self, metadata, data, key=None, catalog=None):
+        uid = key if key is not None else metadata.get("uid")
+        super().__init__(None, uid, catalog, parent=None)
         self.metadata = metadata
         self._data = data
         self._dim_cache = {}
         self.setup()
+        self._initialize_keys()
 
     def __str__(self):
         """
@@ -69,8 +79,8 @@ class MemoryRun(CatalogRun):
         str
             String representation including class name and run info
         """
-        return f"{self.__class__.__name__}"
-        
+        return f"{self.__class__.__name__}({self.uid!r})"
+
     def to_row(self):
         """
         Returns a tuple of values corresponding to the METADATA_KEYS.
@@ -96,27 +106,31 @@ class MemoryRun(CatalogRun):
         header_names = [cls.DISPLAY_KEYS.get(attr, attr) for attr in attrs]
         return header_names
 
-
     def setup(self):
-        """Set up the run object by extracting metadata from start document."""
-        
+        """Set up the run object by extracting metadata from the start document."""
+        self.start = self.metadata
+
         for key in self.METADATA_KEYS:
             if not hasattr(self.__class__, key):
                 value = self.metadata.get(key, None)
                 setattr(self, key, value)
 
+        if not hasattr(self.__class__, "motors"):
+            self.motors = self.metadata.get("motors", None)
+
         self._plot_hints = self.metadata.get("plot_hints", {})
-        self._hints = self.metadata.get("hints", {})
+        self.hints = self.metadata.get("hints", {})
+
+        if self._key is None:
+            self._key = self.uid
 
     @property
     def num_points(self):
-        if 'time' in self._data:
-            return len(self._data['time'])
+        if "time" in self._data:
+            return len(self._data["time"])
         else:
             data = list(self._data.values())[0]
             return len(data)
-        
-
 
     def get_md_value(self, keys, default=None):
         if not isinstance(keys, (list, tuple)):
@@ -138,12 +152,10 @@ class MemoryRun(CatalogRun):
             value = default
         return value
 
-
     def getRunKeys(self):
         xkeys = defaultdict(list)
         ykeys = defaultdict(list)
 
-        # Get dimension hints from start doc
         dimensions = self.hints.get("dimensions", [])
         if not dimensions and self.motors:
             dimensions = [motor for motor in self.motors]
@@ -152,11 +164,13 @@ class MemoryRun(CatalogRun):
 
         xkeys[0].append("time")
         for field in dimensions:
-            if field != "time":
+            if isinstance(field, (list, tuple)) and field:
+                field = field[0]
+                if isinstance(field, (list, tuple)) and field:
+                    field = field[0]
+            if field != "time" and field not in xkeys[0] and field not in xkeys[1]:
                 xkeys[1].append(field)
 
-        # Add remaining keys as y values
-        
         for key in self._data.keys():
             if not any(key in xlist for xlist in xkeys.values()):
                 ykeys[1].append(key)
@@ -170,18 +184,35 @@ class MemoryRun(CatalogRun):
         ----------
         key : str
             The data key to retrieve
+        slice_info : optional
+            Optional slice to apply to the data
 
         Returns
         -------
         np.ndarray
             Array of values for the key
         """
-        # print(f"Getting data for key: {key}")
         data = np.array(self._data.get(key, []))
         if slice_info is not None:
             return data[slice_info]
         else:
             return data
+
+    def getShape(self, key):
+        """
+        Get the shape of data for a specific key.
+
+        Parameters
+        ----------
+        key : str
+            The data key to get shape for
+
+        Returns
+        -------
+        tuple
+            Shape of the data array
+        """
+        return self.getData(key).shape
 
     def getAxis(self, keys):
         if not keys:
@@ -196,28 +227,31 @@ class MemoryRun(CatalogRun):
     def getPlotHints(self):
         return self._plot_hints
 
-    def refresh(self):
-        pass
-
-    def _infer_dims_from_shape(self, key: str, shape: Tuple[int, ...]) -> Tuple[str, ...]:
+    def get_default_selection(self) -> Tuple[List[str], List[str], List[str]]:
         """
-        Infer dimension names when Tiled structure metadata has no dims.
-
-        Stacked Bluesky primary arrays typically use a leading event axis named
-        ``time`` when a ``time`` data key exists in the stream.
-
-        Parameters
-        ----------
-        key : str
-            Data key name.
-        shape : tuple of int
-            Array shape for the key.
+        Get default key selection for a memory run.
 
         Returns
         -------
-        tuple of str
-            Inferred dimension names.
+        Tuple[List[str], List[str], List[str]]
+            Default (x_keys, y_keys, norm_keys) for this run
         """
+        x_keys, y_keys = self.getRunKeys()
+        selected_x = []
+        selected_y = []
+
+        if 1 in x_keys and x_keys[1]:
+            selected_x.append(x_keys[1][0])
+        elif 0 in x_keys and x_keys[0]:
+            selected_x.append(x_keys[0][0])
+
+        if 1 in y_keys and y_keys[1]:
+            selected_y.append(y_keys[1][0])
+
+        return selected_x, selected_y, []
+
+    def refresh(self):
+        pass
 
     def _resolve_dims(self, key: str) -> Tuple[str, ...]:
         """
@@ -241,20 +275,14 @@ class MemoryRun(CatalogRun):
         if key == "time":
             return ("time",)
 
-        has_time_key = False
-        try:
-            has_time_key = "time" in self._data.keys()
-        except Exception:
-            has_time_key = False
+        has_time_key = "time" in self._data
 
         if has_time_key:
             if ndim == 1:
                 return ("time",)
-            return ("time",) + tuple(f"dim_{i}" for i in range(0, ndim))
+            return ("time",) + tuple(f"dim_{i}" for i in range(1, ndim))
 
-        inferred = tuple(f"dim_{i}" for i in range(ndim))
-
-        return inferred
+        return tuple(f"dim_{i}" for i in range(ndim))
 
     def get_dims(
         self, ykey: str, xkeys: List[str]
@@ -273,6 +301,7 @@ class MemoryRun(CatalogRun):
         -------
         Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]
             A tuple containing:
+
             - y_dims: Tuple of dimension names for y-data
             - x_dims: Dict mapping xkeys to their dimension names
         """
@@ -287,4 +316,4 @@ class MemoryRun(CatalogRun):
                 self._dim_cache[key] = self._resolve_dims(key)
             x_dims[key] = self._dim_cache[key]
 
-        return y_dims, x_dims        
+        return y_dims, x_dims

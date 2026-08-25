@@ -4,3 +4,4 @@ from .profileSource import ProfileSourceModel
 from .kafkaSource import KafkaSourceModel
 from .zmqSource import ZMQSourceModel
 from .configSource import ConfigSourceModel
+from .testSource import TestSourceModel

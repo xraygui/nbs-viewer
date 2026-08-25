@@ -10,7 +10,8 @@ def create_metadata(date='2026-08-01', runs=10):
     return [{"scan_id": i, "plan_name": "test", "date": base_datetime + timedelta(minutes=10 * i), "exit_status": "Success", "uid": str(uuid4())} for i in range(runs)]
 
 def create_data(runs=10):
-    return [{"time": np.linspace(0, 1, 50), 'y': np.sin(np.linspace(0, 1, 50)*np.pi)} for i in range(runs)]
+    t = np.linspace(0, 1, 100)
+    return [{"time": t, 'x': np.pi*t,'y': np.sin(i*t*np.pi)} for i in range(runs)]
 
 def create_runs(runs=10):
     metadata = create_metadata(runs=runs)

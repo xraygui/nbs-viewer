@@ -25,6 +25,7 @@ from ...models.sources import (
     KafkaSourceModel,
     ConfigSourceModel,
     ZMQSourceModel,
+    TestSourceModel,
 )
 from ...models.catalog.kafka import KafkaCatalog
 
@@ -519,6 +520,28 @@ class ZMQSourceView(SourceView):
         # No UI updates needed for ZMQ source as it's pre-configured
         pass
 
+class TestSourceView(SourceView):
+    """View for test catalog sources."""
+
+    def __init__(self, display_id, parent=None):
+        """
+        Initialize the test source view.
+        """
+        model = TestSourceModel()
+        super().__init__(model, display_id, parent)
+
+    def _setup_ui(self):
+        """Set up the user interface components."""
+        layout = QVBoxLayout()
+        label = QLabel("Test Catalog")
+        layout.addWidget(label)
+        self.setLayout(layout)
+
+    def update_model(self):
+        """Update the model with values from the UI."""
+        # No UI updates needed for test source as it's pre-configured
+        pass
+
 
 class DataSourcePicker(QDialog):
     """Dialog for selecting a data source."""
@@ -557,6 +580,7 @@ class DataSourcePicker(QDialog):
             self.source_views["Tiled Profile"] = ProfileSourceView(profiles, display_id)
         self.source_views["Kafka"] = KafkaSourceView(display_id)
         self.source_views["ZMQ"] = ZMQSourceView(display_id)
+        self.source_views["Test"] = TestSourceView(display_id)
 
         # Add all views to the UI
         for name, view in self.source_views.items():
