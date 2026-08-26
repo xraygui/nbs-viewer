@@ -1024,7 +1024,12 @@ class CatalogTableView(QWidget):
     def copy_selected_runs_to_new_display(self, display_type: str):
         top_level_model = get_top_level_model()
         runs = self.get_selected_runs()
-        top_level_model.display_manager.create_display_with_runs(runs, display_type)
+        single_selection_mode = (
+            top_level_model.display_manager.single_selection_mode_for_type(display_type)
+        )
+        top_level_model.display_manager.create_display_with_runs(
+            runs, display_type, single_selection_mode=single_selection_mode
+        )
 
     def move_selected_runs_to_display(self, display_id: str):
         self.copy_selected_runs_to_display(display_id)

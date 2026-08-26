@@ -13,8 +13,9 @@ class MainDisplay(PlotDisplay):
         # Create main tab widgets
 
     def setup_models(self):
-        run_list_model = self.display_manager.get_run_list_model("main")
-        plot_model = self.display_manager.get_plot_model("main")
+        self.presenter = self.display_manager.get_presenter(self.display_id)
+        run_list_model = self.presenter.run_list
+        plot_model = self.presenter.plot
         self.run_list_model = run_list_model
         self.plot_model = plot_model
         self.catalog_switcher = CatalogSwitcher(

@@ -55,9 +55,10 @@ class PlotDisplay(QWidget):
         self.data_source.display_id = new_name
 
     def setup_models(self):
-        # Create widgets
-        self.run_list_model = self.display_manager.get_run_list_model(self.display_id)
-        self.plot_model = self.display_manager.get_plot_model(self.display_id)
+        """Resolve presenter-owned models for this display."""
+        self.presenter = self.display_manager.get_presenter(self.display_id)
+        self.run_list_model = self.presenter.run_list
+        self.plot_model = self.presenter.plot
         self.data_source = RunListView(
             self.run_list_model, self.display_manager, self.display_id
         )
@@ -147,12 +148,7 @@ class ImageGridDisplay(PlotDisplay):
     __widget_capabilities__ = ["2d", "3d", "4d"]
     __widget_version__ = "1.0.0"
     __widget_author__ = "NBS Viewer Team"
-
-    def setup_models(self):
-        super().setup_models()
-
-        # Enable single-selection mode for image grid displays
-        self.run_list_model._single_selection_mode = True
+    __single_selection_mode__ = True
 
     def _create_plot_widget(self):
         return ImageGridWidget(self.run_list_model, self.plot_model)

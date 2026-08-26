@@ -18,7 +18,7 @@ folder moves.
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Done |
 | 5 | Catalog table + source models | Done |
-| 6 | Presenter + drop widget registry / no `QtWidgets` in models | Not started |
+| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a done; 6b/6c open) |
 | 7 | Organize under `models/` (mechanical) | Partially done |
 | 8 | Slim views / canvas (optional polish) | Not started |
 
@@ -813,7 +813,7 @@ These are the preferred Milestone B fixtures (see **Catalog fixtures** below).
 
 ## Step 6 — Presenter + remove widget registry / QtWidgets from models
 
-**Status:** Not started
+**Status:** In progress (6a done; 6b/6c open)
 
 **Depends on:** Steps 1–5 ideally; N=1 presenter can start once PlotModel
 exists; full H1 after Step 5 inventory is clean
@@ -832,17 +832,16 @@ exists; full H1 after Step 5 inventory is clean
 
 **6a — Presenter (N=1 first)**
 
-- [ ] Introduce `PlotPresenter` (name flexible) that creates one `PlotModel`
-      and a private `RunListModel` (or has the plot create the list)
-- [ ] Reshape today’s `DisplayManager` into a manager of presenters
-      (rename when convenient); AppModel catalog routing targets the active
-      presenter’s run list
-- [ ] Drop the unused domain `Display` stub / parallel dicts in favor of
-      presenter-owned models
-- [ ] Replace display-type magic strings (`"image_grid"` →
-      `single_selection_mode`) with explicit policy on presenter or run list
-- [ ] Views take presenter or `AppModel` (rule 8); they do not dig parallel
-      run-list + plot out alongside `app_model` without need
+- [x] Introduce `PlotPresenter` (renamed from unused `Display` stub) that
+      creates one `PlotModel` and a private `RunListModel`
+- [x] Reshape `DisplayManager` to own `id → PlotPresenter` (keep name /
+      `display_*` APIs for now; rename in 6b if wanted)
+- [x] Drop unused domain `Display` stub / parallel run-list + plot dicts
+- [x] `single_selection_mode` is explicit on register/create; frontend
+      declares it via `__single_selection_mode__` metadata (no hardcoded
+      `image_grid` / `spiral` list in the manager)
+- [x] `PlotDisplay` / `MainDisplay` resolve `presenter` then take run list /
+      plot from it (minimal rule-8 cleanup)
 
 **6b — Remove model-side widget registry**
 
@@ -868,11 +867,11 @@ exists; full H1 after Step 5 inventory is clean
 
 ### Testing goals
 
-- [ ] Grep/lint: no `qtpy.QtWidgets` under `models/`
-- [ ] Unit: `AppModel` + register presenter / plot session without loading
-      display widgets or entrypoint view classes
-- [ ] Unit: N=1 presenter exposes run list + plot model; catalog selection
-      can add a run without a canvas
+- [ ] Grep/lint: no `qtpy.QtWidgets` under `models/` (6b)
+- [x] Unit (6a): register presenter / plot session without loading
+      display widgets (stub registry)
+- [x] Unit (6a): N=1 presenter exposes run list + plot model; catalog
+      selection can add a run without a canvas
 - [ ] When 6c lands: unit N plot models share one run list; independent
       slices; optional ROI sync tests
 - [ ] Inventory clean for allowlisted constructors under `views/` (incl.
@@ -1037,3 +1036,4 @@ blocker.
 | 2026-08-26 | Rename DataSourceSwitcher→CatalogSwitcher, DataSourcePicker→SourceDialog; file catalogSwitcher.py; clarify source=factory, catalog=loaded registry |
 | 2026-08-26 | Step 5d planned: SourceModel→QObject with catalog_loaded; manager owns long-lived source palette; connect catalog_loaded→register_catalog; CatalogSwitcher reactive via catalog_added/removed; reject SourceView holding manager |
 | 2026-08-26 | Step 5c+5d done: CatalogSwitcher(app_model, display_id); SourceModel.load/catalog_loaded; palette on manager; SourceDialog iterates palette; switcher reacts to catalog_added/removed; label uniquify; load_and_register headless-only |
+| 2026-08-26 | Step 6a done: PlotPresenter owns private RunListModel+PlotModel; DisplayManager stores presenters; explicit single_selection_mode (frontend `__single_selection_mode__`); PlotDisplay/MainDisplay resolve via get_presenter |

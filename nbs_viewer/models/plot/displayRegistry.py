@@ -18,6 +18,7 @@ class DisplayInfo:
     icon: Optional[str] = None
     version: str = "1.0.0"
     author: Optional[str] = None
+    single_selection_mode: bool = False
 
 
 class DisplayRegistry:
@@ -40,6 +41,7 @@ class DisplayRegistry:
             icon=metadata.get("icon"),
             version=metadata.get("version", "1.0.0"),
             author=metadata.get("author"),
+            single_selection_mode=bool(metadata.get("single_selection_mode", False)),
         )
         self._displays[display_id] = display_info
 
@@ -66,6 +68,7 @@ class DisplayRegistry:
             "icon": display_info.icon,
             "version": display_info.version,
             "author": display_info.author,
+            "single_selection_mode": display_info.single_selection_mode,
         }
 
     def get_default_display(self) -> str:
@@ -103,16 +106,40 @@ class DisplayRegistry:
 
     def _extract_metadata(self, display_class, display_id: str) -> dict:
         """Extract metadata from display class."""
-        # Try to get metadata from class attributes
         metadata = {
-            "name": getattr(display_class, "__display_name__", display_id.title()),
-            "description": getattr(display_class, "__display_description__", ""),
-            "capabilities": getattr(
-                display_class, "__display_capabilities__", ["1d", "2d"]
+            "name": getattr(
+                display_class,
+                "__widget_name__",
+                getattr(display_class, "__display_name__", display_id.title()),
             ),
-            "icon": getattr(display_class, "__display_icon__", None),
-            "version": getattr(display_class, "__display_version__", "1.0.0"),
-            "author": getattr(display_class, "__display_author__", None),
+            "description": getattr(
+                display_class,
+                "__widget_description__",
+                getattr(display_class, "__display_description__", ""),
+            ),
+            "capabilities": getattr(
+                display_class,
+                "__widget_capabilities__",
+                getattr(display_class, "__display_capabilities__", ["1d", "2d"]),
+            ),
+            "icon": getattr(
+                display_class,
+                "__widget_icon__",
+                getattr(display_class, "__display_icon__", None),
+            ),
+            "version": getattr(
+                display_class,
+                "__widget_version__",
+                getattr(display_class, "__display_version__", "1.0.0"),
+            ),
+            "author": getattr(
+                display_class,
+                "__widget_author__",
+                getattr(display_class, "__display_author__", None),
+            ),
+            "single_selection_mode": bool(
+                getattr(display_class, "__single_selection_mode__", False)
+            ),
         }
 
         return metadata

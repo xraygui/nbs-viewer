@@ -109,9 +109,13 @@ class DisplayControlWidget(QWidget):
         """Create new display with current selection and selected display type."""
         visible_models = self.run_list_model.visible_models
         selected_runs = [model._run for model in visible_models]
-        # Create new display with specified display type
-        display_id = self.display_manager.create_display_with_runs(
-            selected_runs, display_type=display_type
+        single_selection_mode = self.display_manager.single_selection_mode_for_type(
+            display_type
+        )
+        self.display_manager.create_display_with_runs(
+            selected_runs,
+            display_type=display_type,
+            single_selection_mode=single_selection_mode,
         )
 
     def _on_display_selected(self, display_id):
@@ -134,9 +138,7 @@ class DisplayControlWidget(QWidget):
 
     def _plot_model_for_list(self):
         for display_id in self.display_manager.get_display_ids():
-            if (
-                self.display_manager.get_run_list_model(display_id)
-                is self.run_list_model
-            ):
-                return self.display_manager.get_plot_model(display_id)
+            presenter = self.display_manager.get_presenter(display_id)
+            if presenter.run_list is self.run_list_model:
+                return presenter.plot
         return None

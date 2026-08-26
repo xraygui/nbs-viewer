@@ -165,21 +165,24 @@ class MainWidget(QWidget):
         self.tab_widget.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
     # Controller methods for menu actions
-    def create_display(self, widget_type=None):
+    def create_display(self, widget_type=None, single_selection_mode=False):
         """Create a new display with optional widget type."""
         current_display = self.get_current_display()
         # Auto-add selected runs from current catalog view
         runs = current_display.get_selected_runs()
-        self.display_manager.create_display_with_runs(runs, widget_type)
+        self.display_manager.create_display_with_runs(
+            runs,
+            widget_type,
+            single_selection_mode=single_selection_mode,
+        )
 
     def create_matplotlib_display(self):
         """Create a new matplotlib display."""
-        return self.create_display("matplotlib")
+        return self.create_display("matplotlib", single_selection_mode=False)
 
     def create_image_grid_display(self):
         """Create a new image grid display."""
-        return self.create_display("image_grid")
-
+        return self.create_display("image_grid", single_selection_mode=True)
     def close_current_display(self):
         """Close the currently active display."""
         current_index = self.tab_widget.currentIndex()
