@@ -173,7 +173,8 @@ class MemoryRun(CatalogRun):
 
         for key in self._data.keys():
             if not any(key in xlist for xlist in xkeys.values()):
-                ykeys[1].append(key)
+                ndim = len(np.asarray(self._data[key]).shape)
+                ykeys[max(ndim, 1)].append(key)
         return dict(xkeys), dict(ykeys)
 
     def getData(self, key, slice_info=None):
@@ -184,19 +185,20 @@ class MemoryRun(CatalogRun):
         ----------
         key : str
             The data key to retrieve
-        slice_info : optional
-            Optional slice to apply to the data
+        slice_info : tuple, optional
+            Per-axis slice tuple. Truncated to the key's dimensionality so
+            1-D axes/norms can be loaded alongside N-D plot slices.
 
         Returns
         -------
         np.ndarray
             Array of values for the key
         """
-        data = np.array(self._data.get(key, []))
+        data = np.asarray(self._data.get(key, []))
         if slice_info is not None:
+            slice_info = tuple(slice_info[: data.ndim])
             return data[slice_info]
-        else:
-            return data
+        return data
 
     def getShape(self, key):
         """
@@ -212,18 +214,32 @@ class MemoryRun(CatalogRun):
         tuple
             Shape of the data array
         """
-        return self.getData(key).shape
+        return np.asarray(self._data.get(key, [])).shape
 
-    def getAxis(self, keys):
+    def getAxis(self, keys, slice_info=None):
+        """
+        Get axis data for the given keys.
+
+        Parameters
+        ----------
+        keys : list
+            Key path; the last entry is the data key.
+        slice_info : tuple, optional
+            Per-axis slice tuple, truncated to the axis dimensionality.
+
+        Returns
+        -------
+        np.ndarray
+            Axis values for the key.
+        """
         if not keys:
             return np.array([])
 
         key = keys[-1]
-        if key == "time":
-            return np.array(self._data.get("time", []))
-
-        return np.array(self._data.get(key, []))
-
+        data = np.asarray(self._data.get(key, []))
+        if slice_info is not None and data.ndim > 0:
+            data = data[tuple(slice_info[-data.ndim :])]
+        return data
     def getPlotHints(self):
         return self._plot_hints
 
@@ -245,8 +261,10 @@ class MemoryRun(CatalogRun):
         elif 0 in x_keys and x_keys[0]:
             selected_x.append(x_keys[0][0])
 
-        if 1 in y_keys and y_keys[1]:
-            selected_y.append(y_keys[1][0])
+        for dim in sorted(y_keys.keys()):
+            if y_keys[dim]:
+                selected_y.append(y_keys[dim][0])
+                break
 
         return selected_x, selected_y, []
 
