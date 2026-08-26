@@ -194,6 +194,7 @@ class BlueskyCatalog(CatalogBase):
             New catalog containing matching runs.
         """
         self._catalog = self._base_catalog.search(query)
+        self.data_updated.emit()
         return self
 
     def filter_by_time(

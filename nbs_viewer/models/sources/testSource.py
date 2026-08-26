@@ -45,11 +45,11 @@ def create_test_catalog(runs=10):
 
 class TestSourceModel(SourceModel):
     def __init__(self, runs=10):
+        super().__init__()
         self.runs = runs
-        self.catalog = create_test_catalog(runs)
 
-    def get_source(self):
-        return self.catalog, "Test Catalog"
+    def get_source(self, **kwargs):
+        return create_test_catalog(self.runs), "Test Catalog"
 
     def is_configured(self):
         return True

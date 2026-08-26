@@ -79,6 +79,46 @@ class CatalogBase(QObject):
         self._selection = []  # Set of selected UIDs
         self._filters = []
         self._runs = []
+        self._table_model = None
+
+    def ensure_table_model(self, chunk_size: int = 50):
+        """
+        Return the catalog-owned table model, creating it if needed.
+
+        Parameters
+        ----------
+        chunk_size : int, optional
+            Rows per lazy-load chunk when creating the model. Ignored if the
+            table model already exists.
+
+        Returns
+        -------
+        CatalogTableModel
+            Table model bound to this catalog.
+        """
+        if self._table_model is None:
+            from .table import CatalogTableModel
+
+            self._table_model = CatalogTableModel(
+                self, chunk_size=chunk_size, parent=self
+            )
+        return self._table_model
+
+    def refresh_table_model(self):
+        """
+        Reset the owned table model after catalog contents change.
+
+        Call after in-place search/filter that replaces the visible run set.
+        Creates the table model if it does not exist yet.
+
+        Returns
+        -------
+        CatalogTableModel
+            The owned table model after reset.
+        """
+        table = self.ensure_table_model()
+        table.reset_from_catalog()
+        return table
 
     @property
     def columns(self) -> List[str]:

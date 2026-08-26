@@ -21,7 +21,6 @@ from qtpy.QtCore import (
     Signal,
 )
 
-from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
 from ..plot.metadataView import FullMetadataBrowser
 from nbs_viewer.utils import print_debug, get_top_level_model
@@ -635,7 +634,7 @@ class CatalogTableView(QWidget):
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
-        table_model = CatalogTableModel(catalog)
+        table_model = catalog.refresh_table_model()
         reverse_model = ReverseModel(parent=self.data_view)
         filter_model = FilterModel(parent=self.data_view)
         filter_model2 = FilterModel(parent=self.data_view)
@@ -714,16 +713,11 @@ class CatalogTableView(QWidget):
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
 
-        # self.setupModelAndView(catalog)
-        table_model = CatalogTableModel(catalog)
-        self.lowest_model.setSourceModel(table_model)
+        table_model = catalog.refresh_table_model()
+        if self.lowest_model.sourceModel() is not table_model:
+            self.lowest_model.setSourceModel(table_model)
 
         self.data_view._update_visible_rows()
-
-        # Reconnect the selection model's signal after setting up the new model
-        # self.data_view.selectionModel().selectionChanged.connect(
-        #    self.on_selection_changed
-        # )
 
     def get_selected_runs(self):
         """

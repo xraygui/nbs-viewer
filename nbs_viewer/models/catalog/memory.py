@@ -151,6 +151,7 @@ class MemoryCatalog(CatalogBase):
                 for uid, run in self._base_catalog.items()
                 if self._in_time_range(run, query.since, query.until)
             }
+            self.data_updated.emit()
             return self
         raise TypeError(f"Unsupported query type for MemoryCatalog: {type(query)}")
 

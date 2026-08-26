@@ -17,15 +17,15 @@ folder moves.
 | 2 | Combine / freeze factories on `RunListModel` | Done |
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Done |
-| 5 | Catalog table + source models | Not started |
-| 6 | Display registry / no `QtWidgets` in models | Not started |
-| 7 | Organize under `models/` (mechanical) | Not started |
+| 5 | Catalog table + source models | Done |
+| 6 | Presenter + drop widget registry / no `QtWidgets` in models | Not started |
+| 7 | Organize under `models/` (mechanical) | Partially done |
 | 8 | Slim views / canvas (optional polish) | Not started |
 
 **Milestones**
 
 - [x] **A** (after steps 1–4): ROI headless path
-- [ ] **B** (after steps 5–6): Catalog → display → plot headless path
+- [ ] **B** (after steps 5–6): Catalog → presenter → plot headless path
 - [ ] **C** (steps 7–8): Navigable tree + thin views
 
 ## Rules of the road
@@ -34,9 +34,11 @@ folder moves.
    models used purely as view adapters (`ReverseModel`, `FilterModel`,
    metadata `QStandardItemModel`, etc.).
 2. **A view that needs a new model asks the model it already holds**
-   (e.g. `run_list.roi_set`, `run_list.ensure_plot_data(...)`).
+   (e.g. `plot_model.roi_set`, `plot_model.ensure_plot_data(...)`, or
+   `presenter.plot_models[i]`).
 3. **Stay under `models/`** for domain code. Folder splits (`models/roi/`, …)
-   come in step 7 after ownership is fixed.
+   come in step 7 after ownership is fixed (catalog/data/sources layout already
+   landed ahead of Step 5 ownership).
 4. **Each step ships with tests** in the same PR when practical. GUI smoke is
    optional until later steps.
 5. Do **not** invert the package tree to `feature/{models,views}` unless we
@@ -48,40 +50,103 @@ folder moves.
    do not refactor it into `views/`, do not treat it as an internal grab-bag
    to empty, and do not block steps on cleaning model construction there.
    Ownership rules still apply to the main app under `views/` + `models/`.
+7. **`AppModel` is the long-lived root.** It owns `ConfigModel`,
+   `CatalogManagerModel`, and a manager of **presenters** (today’s
+   `DisplayManager`, to be renamed or reshaped in Step 6). Views must not
+   keep a parallel catalog registry alongside `CatalogManagerModel` (today:
+   residual dual ownership was cleared in 5b; views renamed to
+   `CatalogSwitcher` / `SourceDialog`).
+8. **Constructor injection is exclusive.** If a view constructor takes
+   `app_model`, do **not** also pass child models (`run_list_model`,
+   `plot_model`, `catalogs`, …) in parallel. Either pass `AppModel` and
+   resolve children inside, **or** pass only the specific children needed.
+   Mixing both is forbidden (current smell: `MainDisplay` /
+   `CatalogSwitcher(app_model, run_list_model, …)`).
+9. **Frontends are views, including non-Qt ones.** A terminal driver or
+   “save plot to disk” path is still a view: it observes models and
+   performs I/O. Headless H1 means **no `QtWidgets` in models**, not “no
+   view layer.”
 
 ### Target ownership tree
 
 ```text
 AppModel
-└── DisplayManager
-    └── per display (default 1:1 today; N plots per run list later):
-          RunListModel              # run membership + visibility + key universe
-          PlotModel                 # one plot session bound to a RunListModel
-              ├── selected keys, transform, auto_add / retain (plot policy)
-              ├── PlotDataModel map                 # step 3
-              ├── RoiSetModel                       # step 1 (on PlotModel, not RunList)
-              └── view state (cube_view_spec, slice, view_crop)
-└── CatalogManagerModel
-    └── Source / Catalog
-        └── CatalogTableModel                       # step 5
+├── ConfigModel
+├── CatalogManagerModel          # source palette + catalog registry (Step 5)
+│   ├── sources (palette)        # long-lived SourceModels (one per type / config recipe)
+│   │     URI / Profile / Kafka / ZMQ / Test / config entries …
+│   │     catalog_loaded ──► register_catalog
+│   └── catalogs (label) → CatalogBase
+│         └── CatalogTableModel  # owned by the catalog (Step 5a)
+└── PresenterManager             # today’s DisplayManager (rename in Step 6)
+    └── PlotPresenter (id)       # coordinates 1..N plot sessions; name flexible
+          ├── RunListModel       # private if N=1; shared if N>1
+          └── PlotModel × N      # each is a full plot session
+                ├── selected keys, transform, retain (plot policy)
+                ├── PlotDataModel map
+                ├── RoiSetModel
+                └── view state (cube_view_spec, slice, view_crop)
 ```
+
+There is **no** domain `Display` type and **no** model-side registry of Qt
+widget / “display type” classes. Tabs, image-grid widgets, and export
+drivers are frontends that bind to a `PlotPresenter`.
+
+**Naming (views):** `CatalogSwitcher` switches among registered **catalogs**.
+`SourceDialog` configures **SourceModels** (factories) to load catalogs.
+A `SourceModel` is not a catalog session — one URI source can load many
+catalogs over time.
+
+**`CatalogManagerModel` is for:** owning the **source palette** (long-lived
+`SourceModel`s), creating sources via typed `create_*` / `create_from_config`,
+connecting each source’s `catalog_loaded` to `register_catalog`, holding the
+**catalog registry**, and forwarding run selection signals. Expand in place —
+do **not** split out a separate `SourceFactory` unless types become a large
+plugin surface (entrypoints can hang off the manager later).
+
+**`SourceModel` is for:** how to load a catalog (connect/auth/navigate/wrap).
+It is a **QObject** with `catalog_loaded(catalog, label)`. Prefer a `load()`
+(or equivalent) that calls `get_source` then emits. Views configure and call
+`load`; they do **not** hold `CatalogManagerModel` or call `register_catalog`.
+Sources are **long-lived palette members**, not 1:1 with catalogs.
+
+**`CatalogBase` (and peers) own `CatalogTableModel`:** create via something
+like `ensure_table_model()` / lazy property so Kafka / Tiled / Memory stay
+consistent. Views only attach Qt proxies (`ReverseModel`, filters) to that
+table model; they never construct `CatalogTableModel(...)`.
+
+**`CatalogSwitcher` is for:** reacting to manager catalog add/remove signals
+and creating/destroying catalog table views. It must **not** register
+catalogs after `SourceDialog` returns.
+
+**`PlotPresenter` is for:** creating and coordinating one or more
+`PlotModel`s (and their `RunListModel`). It **sets** shared policy across
+plot models (e.g. slice indices for a grid); it does **not** extract or
+reshape plot arrays. Layout on screen or on disk is the frontend’s job.
+
+- **N = 1 (default today):** presenter creates one `PlotModel` with a
+  **private** `RunListModel` (plot may construct the list, or presenter
+  passes one it created).
+- **N > 1 (multi-view, e.g. slice grid):** presenter creates **one shared**
+  `RunListModel` and **N** `PlotModel`s; each plot holds its own slice /
+  cube / crop; presenter assigns those parameters consistently.
 
 **`RunListModel` is for:** collecting runs, which runs are checked/visible,
 and the **intersection of catalog keys** among visible runs (the key universe
 a plot may choose from). It is **not** the home for artists, ROI geometry,
-cube/crop view state, or (eventually) which x/y keys a particular plot uses.
+cube/crop view state, or which x/y keys a particular plot uses.
 
 **`PlotModel` is for:** one plot session’s selection and products — selected
-keys, `PlotDataModel` instances, ROI set, cube/crop, transform/auto-add
+keys, `PlotDataModel` instances, ROI set, cube/crop, transform/retain
 policy. It holds a reference to a `RunListModel` and reacts to that list’s
-membership/visibility signals.
+membership/visibility signals. Auto-add stays on `RunListModel`. Slice /
+cube / crop remain on **each** `PlotModel` (presenter only writes them for
+coordination).
 
-Default wiring stays 1:1 (`DisplayManager` creates both together) so today’s
-UI does not need multi-plot sharing yet. The split still matters so Step 3
-does not cement the wrong parent.
-
-See **“Run list vs plot session”** below for add/remove behavior and
-alternatives considered.
+See **“Run list vs plot session”** below for add/remove behavior.
+See **“Catalog ownership (Step 5 decisions)”** for source/table wiring.
+See **“Source palette + catalog_loaded (Step 5d)”** for signal wiring.
+See **“Presenter vs multi-view (Step 6 decisions)”** for path-2 / ROI deferral.
 
 ### Headless tiers
 
@@ -104,9 +169,12 @@ Update this list if new domain types appear.
 - `FrozenRunModel`
 - `FrozenSpectrum`
 - `CatalogTableModel`
-- `ConfigSourceModel`, `URISourceModel`, `ProfileSourceModel`, `KafkaSourceModel`, `ZMQSourceModel`
-- `BlueskyCatalog`, `NBSCatalog`, `KafkaCatalog` (and peers)
-- `AppModel`, `DisplayManager`, `ChunkCache` (unless explicitly delegated)
+- `ConfigSourceModel`, `URISourceModel`, `ProfileSourceModel`,
+  `KafkaSourceModel`, `ZMQSourceModel`, `TestSourceModel`
+- `BlueskyCatalog`, `NBSCatalog`, `KafkaCatalog`, `MemoryCatalog` (and peers)
+- `MemoryRun` (and other `CatalogRun` implementations constructed as domain)
+- `AppModel`, `CatalogManagerModel`, `PlotPresenter`, `PresenterManager`
+  (today’s `DisplayManager`), `ChunkCache` (unless explicitly delegated)
 
 Known violations at plan start (inventory baseline for step 0):
 
@@ -114,15 +182,128 @@ Known violations at plan start (inventory baseline for step 0):
 |----------|---------|
 | `views/plot/imageGridWidget.py` | `PlotDataModel` (temporary exception) |
 | `views/catalog/base.py` | `CatalogTableModel` |
-| `views/dataSource/dataSource.py` | `*SourceModel` |
+| `views/dataSource/dataSource.py` | `*SourceModel` (incl. `TestSourceModel`) |
 
 Cleared in earlier steps: `RoiSetModel` (Step 1), `CombinedRunModel` /
 `FrozenRunModel` (Step 2), `PlotDataModel` in canvas (Step 3; ImageGrid
 deferred), `FrozenSpectrum` in views (Step 4).
 
+Cleared in Step 5: `CatalogTableModel(` / `*SourceModel(` under `views/`;
+constructor injection rule 8 for `CatalogSwitcher` (5c); source palette +
+`catalog_loaded` + reactive switcher (5d).
+
 `widgets/kafkaViewerTab.py` also constructs `RunListModel` / `KafkaCatalog`, but
 that package is an intentional external embed surface — **leave alone** (see
 rule 6). Do not list it as a violation to clear in steps 0–8.
+
+### Catalog ownership (Step 5 decisions)
+
+Decided (2026-08-26); 5a/5b implemented; 5c/5d follow.
+
+| Concern | Owner |
+|---------|--------|
+| Create `*SourceModel` from connection / config params | `CatalogManagerModel` (expand in place) |
+| Own long-lived source **palette** (one per type / config recipe) | `CatalogManagerModel` (5d) |
+| Register / unregister labeled catalogs; forward select signals | `CatalogManagerModel` |
+| Emit after successful load | `SourceModel.catalog_loaded` → manager `register_catalog` (5d) |
+| Own / create `CatalogTableModel` | `CatalogBase` (and peers), e.g. `ensure_table_model()` |
+| Qt proxies / filters for the catalog table | Views only |
+| Catalog table / kafka **widgets** | `CatalogSwitcher` reacting to `catalog_added` / `catalog_removed` |
+| Parallel `_catalogs` dict in switcher | **Remove** — manager is sole registry (done 5b) |
+| `CatalogSwitcher` calling `register_catalog` after dialog | **Forbidden** (5d) |
+| `SourceView` holding `CatalogManagerModel` | **Avoid** — prefer signals (5d) |
+| `SourceDialog` holding `CatalogManagerModel` | **OK** — iterates palette to build views |
+| View ctor: `app_model` + child models together | **Forbidden** (rule 8; 5c) |
+
+**Rejected alternative:** split a separate `SourceFactory` / session type out of
+`CatalogManagerModel`. Prefer expanding the existing manager unless source
+construction later grows enough to justify a split.
+
+**Rejected alternative:** views hold `CatalogManagerModel` and call
+`load_and_register` as the primary GUI path. Prefer
+`SourceModel.catalog_loaded` → manager slot. Keep `load_and_register` as an
+optional headless/script helper only.
+
+**Auth:** keep auth callbacks injectable on source construction (GUI dialog
+from views, or no-op / tokens for headless). Views do not construct the
+source model; they may still supply the callback when asking the manager to
+create.
+
+### Source palette + catalog_loaded (Step 5d)
+
+Decided (2026-08-26); implement as Step 5d.
+
+**Roles**
+
+- **SourceModel** = long-lived factory/strategy on the manager palette (how to
+  load). One URI source can produce many catalogs over time. Not 1:1 with
+  catalogs; not what `CatalogSwitcher` lists.
+- **Catalog** = durable registry entry; what the switcher lists.
+- **SourceDialog** = configures palette sources and triggers `load`.
+- **CatalogSwitcher** = reacts to catalog add/remove; builds/tears down views.
+
+**Signal wiring (preferred)**
+
+```text
+SourceModel (QObject)
+  catalog_loaded(catalog, label)  ──►  CatalogManagerModel.register_catalog
+
+CatalogManagerModel
+  catalog_added(label, catalog)   ──►  CatalogSwitcher creates CatalogTableView / KafkaView
+  catalog_removed(label)          ──►  CatalogSwitcher removes view
+```
+
+When the manager adds a source to the palette, it connects
+`source.catalog_loaded` to `register_catalog` (or a thin adapting slot).
+`SourceView` configures the source and calls `load()` / equivalent; it does
+not register catalogs or hold the manager. `SourceDialog` may hold the
+manager to iterate the palette and build views.
+
+**Prerequisite:** `SourceModel` becomes a `QObject` (H1). Subclasses keep
+`get_source`; base (or shared) `load(**kwargs)` calls `get_source` then emits
+`catalog_loaded`.
+
+**Autoload:** manager configures/loads palette or config sources via `load`
+(non-interactive) → same signals → switcher populates with no special
+register path.
+
+**Not in scope for 5d:** full entrypoint discovery of source types (can hang
+off the palette later); 5c injection cleanup can land with or after 5d.
+
+### Presenter vs multi-view (Step 6 decisions)
+
+Decided (2026-08-26); implement in Step 6 (N=1 now; N>1 when multi-view
+lands).
+
+**Path chosen:** for N panels (e.g. a grid of slices), use **N `PlotModel`s
+sharing one `RunListModel`**. The presenter assigns per-plot parameters
+(slices, etc.); each plot session still owns its own data path via
+`ensure_plot_data`. Frontends only lay out panels (or write files).
+
+**Rejected path:** one global `PlotModel` plus a presenter that **extracts**
+slices from the cube. That makes the presenter a second data pipeline and
+bypasses `PlotDataModel` / ROI APIs per panel.
+
+| Concern | Owner |
+|---------|--------|
+| Create 1..N `PlotModel`s + run list (private or shared) | `PlotPresenter` |
+| Slice / cube / crop source of truth | Each `PlotModel` |
+| Assign slices (or other params) across plots | `PlotPresenter` (writes into plot models) |
+| Fetch / reshape arrays for panels | **Not** the presenter — each `PlotModel` |
+| Screen / disk layout | Frontend (Qt or headless view) |
+| Qt widget / entrypoint “display type” registry in models | **None** — remove |
+| Domain `Display` bag (run list + plot + type) | **Do not adopt** — drop stub |
+| Multi-view ROI | **Deferred**; preferred direction = presenter **syncs** ROIs across plot models’ `RoiSetModel`s |
+| Multi-view key/transform policy | Defer with multi-view; likely presenter sync (same pattern as ROI) |
+
+**ROI note:** keep Milestone A as-is (`RoiSetModel` on each `PlotModel`).
+Do not implement cross-plot ROI sync until a multi-view presenter needs it.
+When that lands, prefer presenter-synced copies over a shared `RoiSetModel`
+or primary/mirror special cases unless sync proves too painful.
+
+**`single_selection_mode` and similar:** set as explicit presenter / run-list
+policy, not via magic strings like `"image_grid"` from a display-type
+registry.
 
 ### Run list vs plot session
 
@@ -184,12 +365,17 @@ changes are fan-out via signals.
    half-split; key selection is still plot-global while artists are
    per-plot; confusing when two plots disagree on keys. Rejected as end
    state; acceptable only as a brief intermediate if a PR must stay small.
-3. **Fully shareable N plots × 1 list in the first PR** — not required.
-   Ship `PlotModel` + 1:1 `DisplayManager` wiring; multi-plot sharing can
-   come later without another ownership redesign.
+3. **Fully shareable N plots × 1 list in the first PlotModel PR** — not
+   required then. **Revised (2026-08-26):** N plots × 1 list is the
+   multi-view presenter shape; ship N=1 presenter first in Step 6; N>1
+   when image-grid / multi-panel needs it.
 4. **Put `RoiSetModel` on `RunListModel` (old Step 1)** — same wrong-parent
    problem as plot data. **Revised:** Step 1 introduces a thin `PlotModel`
    that owns `RoiSetModel`; Step 3 expands that `PlotModel`.
+5. **Domain `Display` aggregate + model-side widget registry** — rejected;
+   “display” is a frontend concept. See Presenter decisions above.
+6. **Single `PlotModel` + presenter extracts grid slices** — rejected; see
+   Presenter decisions above.
 
 ---
 
@@ -508,73 +694,229 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 ---
 ## Step 5 — Catalog table + source models
 
-**Status:** Not started
+**Status:** Done
 
-**Depends on:** Step 0; can parallelize with steps 1–4
+**Depends on:** Step 0; can proceed now that Steps 1–4 are done
+
+**Already landed (ahead of ownership move):**
+
+- `MemoryRun` / `MemoryCatalog` under `models/data/` and `models/catalog/`
+- `TestSourceModel` + helpers under `models/sources/`
+- Package splits: `models/catalog/`, `models/data/`, `models/sources/`
+
+These are the preferred Milestone B fixtures (see **Catalog fixtures** below).
 
 ### Do
 
-- [ ] `CatalogBase` (or catalog manager) factories / owns `CatalogTableModel`
-- [ ] `CatalogManagerModel` (or peer) factories `*SourceModel` from connection
-      params; dataSource views submit forms and call `create_…`
-- [ ] Qt proxies stay in views
+**5a — Table ownership**
+
+- [x] `CatalogBase` (and peers) factories / owns `CatalogTableModel`
+      (e.g. `ensure_table_model()` or equivalent lazy API)
+- [x] `CatalogTableView` / peers obtain the table model from the catalog;
+      Qt proxies stay in views
+- [x] Inventory: no `CatalogTableModel(` under `views/`
+
+**5b — Source factories on `CatalogManagerModel` (expand in place)**
+
+- [x] Move `*SourceModel` construction out of `SourceDialog` /
+      source views into `CatalogManagerModel` APIs (`create_…` / `load_…`
+      from connection params or config entries)
+- [x] Auth callback remains injectable; views may pass a GUI callback or
+      headless/no-op
+- [x] Register created catalogs on the manager; drop
+      parallel view-side catalog dict as a second source of truth
+- [x] Autoload from config goes through `ConfigModel` /
+      `CatalogManagerModel`, not ad-hoc TOML parse + view construction
+- [x] Inventory: no `*SourceModel(` under `views/`
+
+**5c — Constructor injection (rule 8)**
+
+- [x] `CatalogSwitcher` takes `app_model` + `display_id` only; resolves
+      run list via `display_manager` (no parallel child injection)
+- [x] `MainDisplay` already took `app_model` only; passes display_id to
+      switcher. Other mixed ctors deferred (PlotWidget / RunListView stay
+      children-only)
+
+**5d — Source palette + `catalog_loaded` + reactive switcher**
+
+- [x] Make `SourceModel` a `QObject` with `catalog_loaded(object, str)`
+- [x] Add `load(**kwargs)` that runs `get_source` then emits
+- [x] `CatalogManagerModel` owns a long-lived source **palette**; on add,
+      connect `catalog_loaded` → `register_catalog`
+- [x] Emit `catalog_added` / `catalog_removed` (keep `catalogs_changed`)
+- [x] `SourceDialog` holds manager, iterates palette, builds `SourceView`s;
+      views call `load` / `emit_catalog_loaded` — no `register_catalog`
+- [x] `CatalogSwitcher` only reacts to catalog add/remove to create/destroy
+      catalog views (including autoload)
+- [x] Keep `load_and_register` only as optional headless/script helper
+
+### Non-goals
+
+- No Presenter / widget-registry cleanup (Step 6)
+- No ROI folder move (Step 7)
+- No separate `SourceFactory` type unless construction later forces a split
+- Do not treat file-backed offline catalogs as a Step 5 prerequisite
+  (`MemoryCatalog` is enough)
+- Do not implement multi-view (N>1) or ROI sync in Step 5
+- Do not register one SourceModel per catalog (palette is by type / recipe)
+- Source type entrypoints can wait until after 5d palette exists
 
 ### Testing goals
 
-- [ ] Unit: catalog fixture → table model → row count / roles
-- [ ] Unit: source factory returns expected type without widgets (auth callback
-      injectable)
-- [ ] Inventory: no `CatalogTableModel(` / `*SourceModel(` in views
+- [x] Unit: `MemoryCatalog` fixture → `ensure_table_model` → row count /
+      roles without widgets constructing the table model
+- [x] Unit: manager source factory returns expected type without widgets
+      (auth callback injectable)
+- [x] Unit: register catalog on manager; no need for a parallel view-side
+      catalog dict
+- [x] Inventory: no `CatalogTableModel(` / `*SourceModel(` in views
+- [x] Unit (5d): source `load` emits `catalog_loaded`; manager registers
+      without the view calling `register_catalog`
+- [x] Unit (5d): two loads from one test source → two catalog labels
+- [ ] Optional: headless script path below
 
 ### Exit criteria
 
-- [ ] Headless: config → source/catalog → table model → run UIDs → hand runs to
-      `DisplayManager` / `RunListModel`
-- [ ] Step status → Done
+- [ ] Headless:
+
+  ```text
+  TestSourceModel / MemoryCatalog
+    → CatalogTableModel (via catalog)
+    → select / list run UIDs
+    → AppModel routes to active presenter / RunListModel + PlotModel
+  ```
+
+  (Presenter routing remains Step 6; catalog/table/source path is done.)
+
+- [x] Views submit forms / auth results; they do not construct source or
+      catalog table domain models
+- [x] `CatalogSwitcher` does not call `register_catalog` (5d)
+- [x] Step status → Done (after 5c + 5d)
+
+**Decision log**
+
+- Source construction: **expand `CatalogManagerModel` in place** (not a
+  separate factory type)
+- API shape: **hybrid C** — typed `create_*` for interactive sources +
+  `create_from_config` for TOML `source_type` dispatch
+- Sources: **long-lived palette** on the manager (not ephemeral; not 1:1
+  with catalogs)
+- Registration path: **`SourceModel.catalog_loaded` → manager** (not
+  SourceView holding the manager; not CatalogSwitcher after dialog)
+- `load_and_register`: **headless helper only** after 5d
+- `CatalogTableModel` owner: **`CatalogBase` / catalog peers**
+- View injection: **`app_model` XOR specific children** (rule 8; 5c)
+- Fixture path for Milestone B: **`MemoryCatalog` / `TestSourceModel`**
+- View names: **`CatalogSwitcher`**, **`SourceDialog`**
 
 ---
 
-## Step 6 — Display registry QtWidgets leak + app wiring leftovers
+## Step 6 — Presenter + remove widget registry / QtWidgets from models
 
 **Status:** Not started
 
-**Depends on:** Steps 1–5 ideally; can start registry cleanup earlier
+**Depends on:** Steps 1–5 ideally; N=1 presenter can start once PlotModel
+exists; full H1 after Step 5 inventory is clean
+
+### Decisions (locked)
+
+- **Path 2:** presenter coordinates 1..N `PlotModel`s; does not extract data
+- **N=1:** private `RunListModel`; **N>1:** shared `RunListModel`
+- **No** domain `Display`; **no** model-side Qt / entrypoint display-type
+  registry
+- **Frontends** (Qt tabs, image grid, save-to-disk) bind to presenters
+- **Multi-view ROI / key sync:** deferred; preferred = presenter syncs
+  across plot models when N>1 is implemented
 
 ### Do
 
-- [ ] Remove `QWidget` from `DisplayRegistry` model layer (import path / name
-      registry, or move registry to views and register from app shell)
-- [ ] Remove any remaining `QtWidgets` imports under `models/` (including
-      `PlotDataModel` parent typing if present)
-- [ ] Do **not** change `widgets/` as part of this step
+**6a — Presenter (N=1 first)**
+
+- [ ] Introduce `PlotPresenter` (name flexible) that creates one `PlotModel`
+      and a private `RunListModel` (or has the plot create the list)
+- [ ] Reshape today’s `DisplayManager` into a manager of presenters
+      (rename when convenient); AppModel catalog routing targets the active
+      presenter’s run list
+- [ ] Drop the unused domain `Display` stub / parallel dicts in favor of
+      presenter-owned models
+- [ ] Replace display-type magic strings (`"image_grid"` →
+      `single_selection_mode`) with explicit policy on presenter or run list
+- [ ] Views take presenter or `AppModel` (rule 8); they do not dig parallel
+      run-list + plot out alongside `app_model` without need
+
+**6b — Remove model-side widget registry**
+
+- [ ] Remove `DisplayRegistry` from `models/` (or gut it so it no longer
+      imports `QWidget` / `PlotDisplay` / loads view classes)
+- [ ] Entry-point loading of plot **frontends** lives in views / app shell
+      only
+- [ ] Remove any remaining `QtWidgets` imports under `models/`
+
+**6c — Multi-view presenter (can be a later PR within or after Step 6)**
+
+- [ ] N>1 `PlotModel`s + shared `RunListModel`; presenter assigns slices
+- [ ] ROI sync across plot models (preferred direction); record protocol in
+      decision log when implemented
+- [ ] Image grid stops constructing `PlotDataModel` (clears temporary
+      exception) by using per-cell plot models instead
+
+### Non-goals
+
+- Do not block Step 6a/6b on image-grid multi-view
+- Do not put a Presenter that extracts cube slices (rejected path)
+- Do not change `widgets/` as part of this step
 
 ### Testing goals
 
 - [ ] Grep/lint: no `qtpy.QtWidgets` under `models/`
-- [ ] Unit: `AppModel` + `DisplayManager.register_display` without display
-      widgets
-- [ ] Inventory clean for allowlisted constructors under `views/`
+- [ ] Unit: `AppModel` + register presenter / plot session without loading
+      display widgets or entrypoint view classes
+- [ ] Unit: N=1 presenter exposes run list + plot model; catalog selection
+      can add a run without a canvas
+- [ ] When 6c lands: unit N plot models share one run list; independent
+      slices; optional ROI sync tests
+- [ ] Inventory clean for allowlisted constructors under `views/` (incl.
+      clearing ImageGrid `PlotDataModel(` when 6c done)
 
 ### Exit criteria
 
-- [ ] **H1 headless** declared: model tree usable without constructing widgets
-      (`QT_QPA_PLATFORM=offscreen` OK if a `QApplication` is required by Qt)
-- [ ] Step status → Done
+- [ ] **H1 headless** declared: model tree usable without constructing
+      widgets (`QT_QPA_PLATFORM=offscreen` OK if a `QApplication` is
+      required by Qt)
+- [ ] No model-side registry of Qt display classes
+- [ ] Step status → Done (6c may remain a checked follow-up if split out;
+      note in modification log)
 - [ ] **Milestone B** checkbox above
+
+**Decision log**
+
+- Presenter path: **N PlotModels, shared run list for multi-view** (not
+  extract-from-one-plot)
+- Widget / display-type registry in models: **removed**
+- Domain `Display`: **not adopted**
+- Multi-view ROI: **deferred**; preferred **presenter sync**
 
 ---
 
 ## Step 7 — Organize under `models/` (mechanical)
 
-**Status:** Not started
+**Status:** Partially done
 
 **Depends on:** Steps 1–4 at minimum (ROI ownership stable); prefer after 6
+for remaining moves. Catalog/data/sources layout may keep landing with Step 5.
 
-### Do
+### Already done
+
+- [x] `models/catalog/` (incl. `memory.py`, `table.py`, bluesky/kafka peers)
+- [x] `models/data/` (incl. `MemoryRun`)
+- [x] `models/sources/` (incl. `TestSourceModel`)
+
+### Still to do
 
 - [ ] Move ROI cluster → `models/roi/` (`region*`, `roi_set`, preview/commit
       helpers)
-- [ ] Optionally `models/display/` for `DisplayManager` / registry metadata
+- [ ] Optionally `models/plot/` or `models/presenter/` for `PlotPresenter` /
+      presenter manager after Step 6
 - [ ] Optionally nest cube/materialize under `models/plot/` subpackage
 - [ ] Temporary shims at old import paths if needed
 - [ ] Optionally collapse tiny `views/plot/controls/` checkbox modules (no
@@ -602,8 +944,10 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 
 - [ ] Extract ROI/crop draw helpers from `MplCanvas`
 - [ ] Canvas renders `PlotBundle` and shows overlays from `RoiSetModel`
-- [ ] Crop apply becomes a model API (`set_view_crop` on run list / session /
-      run); canvas does not own long-lived domain crop state
+- [ ] Crop apply remains a **`PlotModel`** API (`set_view_crop` already on
+      the plot session from Step 3); canvas does not own long-lived domain
+      crop state
+- [ ] Frontends (including headless export) consume plot/presenter APIs only
 
 ### Testing goals
 
@@ -627,9 +971,10 @@ is out of scope for Step 0 (rare; catch in review if it appears).
     → 2 combine/freeze          (can start after 0 in parallel with 1)
     → 3 PlotModel plot-data + keys/policy
       → 4 ROI preview/commit      ← Milestone A
-  → 5 catalog/sources           (parallel after 0)
-  → 6 no QtWidgets in models    ← Milestone B
-  → 7 folder moves
+  → 5 catalog/sources           (5a table · 5b factories · 5c injection · 5d palette+signals)
+  → 6 presenter N=1 + drop widget registry  ← Milestone B
+      → 6c multi-view presenter + ROI sync (optional follow-up)
+  → 7 folder moves (ROI / presenter; catalog/data/sources mostly done)
   → 8 canvas slim               ← Milestone C
 ```
 
@@ -640,45 +985,33 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 - [ ] Implementing band projection (should consume new ROI/plot APIs when added)
 - [ ] Refactoring or relocating `widgets/` (embeddable entrypoints for external
       programs; leave alone; may grow later)
-- [ ] Building a full mock / file-backed catalog as a prerequisite for Step 2
-      (see **Future: catalog fixtures for tests** below)
+- [ ] Splitting `CatalogManagerModel` into a separate `SourceFactory` type
+      (expand in place unless construction later forces a split)
+- [ ] File-backed offline catalog as a prerequisite for Step 5 / Milestone B
+      (`MemoryCatalog` covers fixtures)
+- [ ] Model-side registry of Qt display / plot widget classes
+- [ ] Domain `Display` type as RunList+Plot bag
+- [ ] Presenter that extracts slice grids from a single PlotModel
+- [ ] Multi-view ROI sync before a multi-view presenter exists
 
-## Future: catalog fixtures for tests
+## Catalog fixtures
 
-Not required for Step 2 (combine/freeze factories can use stub `RunModel`s).
-Worth doing soon for headless Milestone B and any test that needs real
-`CatalogRun` / key / `get_plot_data` behavior across multiple runs.
+**Primary (landed):** `MemoryRun` + `MemoryCatalog` + `TestSourceModel`.
+Use these for Milestone B headless tests and any multi-run catalog → plot
+path that does not need Tiled/Kafka specifics.
 
-### Option A — Replay Bluesky documents into `KafkaCatalog`
+### Optional — Replay Bluesky documents into `KafkaCatalog`
 
 `KafkaCatalog` already ingests `(name, doc)` via `_handle_document` and builds
-`KafkaRun`s. A test dispatcher that reads a saved document stream (JSON/msgpack
-of start / descriptor / event|event_page / stop) and calls the same handler
-would exercise the live Kafka run path without a broker.
+`KafkaRun`s. A test dispatcher that reads a saved document stream and calls
+the same handler would exercise the live Kafka run path without a broker.
+Useful for streaming/partial-run tests; not required for Step 5.
 
-**Pros:** Reuses production code; good for streaming/partial-run behavior;
-small surface (dispatcher + fixture files).  
-**Cons:** Fixture capture and refresh; large/image-heavy runs are bulky;
-Kafka-shaped runs may not match Tiled/`BlueskyRun` quirks.
+### Optional later — File-backed catalog (product + tests)
 
-### Option B — File-backed catalog (product + tests)
-
-A `CatalogBase` implementation over on-disk runs (e.g. databroker/tiled
-export, msgpack bundles, or a dedicated package layout). Dual use: offline
-beamline playback and CI fixtures.
-
-**Pros:** Stable, versionable fixtures; can mirror Tiled-like access if
-designed that way; useful outside tests.  
-**Cons:** Larger design/implementation; need a clear run file format and
-key/data API parity with `BlueskyRun` / `KafkaRun`.
-
-### Suggested sequencing
-
-1. Finish Step 2 with stubs (no catalog fixture dependency).
-2. If document replay is easy, add Option A as `tests/fixtures/runs/…` + a
-   tiny replay dispatcher for multi-run combine / selection tests.
-3. Treat Option B as a real feature when offline catalogs are wanted in the
-   app, not only as test scaffolding — tests then consume the same catalog.
+A `CatalogBase` over on-disk runs for offline beamline playback. Treat as a
+real product feature when wanted; tests can then share it. Not a Step 5
+blocker.
 
 ## Modification log
 
@@ -697,3 +1030,10 @@ key/data API parity with `BlueskyRun` / `KafkaRun`.
 | 2026-08-07 | Step 3: uncheck keeps plot-data (stop plotting); transform+retain on PlotModel; ImageGrid temporary exception; available_keys filter on PlotModel |
 | 2026-08-07 | Step 3 done: PlotModel owns keys, transform, retain, cube/crop/slice, plot-data map; canvas uses ensure_plot_data |
 | 2026-08-07 | Step 4 done: PlotDataModel creates ROI preview/FrozenSpectrum; PlotModel routes+registers; derivative→ROI rename; Milestone A |
+| 2026-08-26 | Step 5 decisions: expand CatalogManagerModel in place; catalogs own CatalogTableModel; app_model XOR child injection (rules 7–8); MemoryCatalog/TestSource as primary fixtures; Step 5 split 5a/5b/5c; Step 7 partial (catalog/data/sources); Step 6 registry placement left open |
+| 2026-08-26 | Step 6 decisions: PlotPresenter path (N PlotModels; shared run list for multi-view); no domain Display; no model-side widget registry; frontends are views incl. non-Qt; multi-view ROI deferred (prefer presenter sync); rule 9 |
+| 2026-08-26 | Step 5a done: CatalogBase.ensure_table_model / refresh_table_model; views use catalog-owned CatalogTableModel; Memory/Bluesky search emit data_updated |
+| 2026-08-26 | Step 5b done: CatalogManagerModel hybrid C factories (create_* + create_from_config + load_*); ConfigSourceModel thin wrap; views take injected source models; drop DataSourceSwitcher._catalogs |
+| 2026-08-26 | Rename DataSourceSwitcher→CatalogSwitcher, DataSourcePicker→SourceDialog; file catalogSwitcher.py; clarify source=factory, catalog=loaded registry |
+| 2026-08-26 | Step 5d planned: SourceModel→QObject with catalog_loaded; manager owns long-lived source palette; connect catalog_loaded→register_catalog; CatalogSwitcher reactive via catalog_added/removed; reject SourceView holding manager |
+| 2026-08-26 | Step 5c+5d done: CatalogSwitcher(app_model, display_id); SourceModel.load/catalog_loaded; palette on manager; SourceDialog iterates palette; switcher reacts to catalog_added/removed; label uniquify; load_and_register headless-only |

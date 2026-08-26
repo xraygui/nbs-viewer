@@ -75,13 +75,11 @@ class CatalogTableModel(QAbstractTableModel):
         parent : QObject, optional
             Parent object.
         """
-        super().__init__()
-        # print("CatalogTableModel init")
+        super().__init__(parent)
         self._catalog = catalog
         self._catalog.data_updated.connect(self.updateCatalog)
         self._catalog.new_run_available.connect(self.new_run_available)
         self._catalog_length = len(self._catalog)
-        # print("Catalog length: ", self._catalog_length)
         self._current_num_rows = 0
         self._fetched_rows = 0
         self._chunk_size = chunk_size
@@ -89,13 +87,11 @@ class CatalogTableModel(QAbstractTableModel):
         self._keys = {}
         self._invert = False
 
-        # Track which chunks are being loaded or have been requested
-        self._loading_chunks = set()  # Set of (start, end) tuples
+        self._loading_chunks = set()
 
         self._work_queue = collections.deque()
         self._active_workers = set()
 
-        # Track visible rows for prioritization
         self._visible_rows = set()
 
         self._data_loading_timer = QTimer(self)
@@ -397,56 +393,73 @@ class CatalogTableModel(QAbstractTableModel):
         """Get columns."""
         return self._catalog.columns
 
+    def reset_from_catalog(self):
+        """
+        Rebuild row state from the catalog after search or bulk replacement.
+
+        Clears cached cells and resets the model length to ``len(catalog)``.
+        Prefer this after in-place filter/search when the visible run set may
+        change without a simple append/remove pattern.
+        """
+        self.beginResetModel()
+        self._data.clear()
+        self._keys.clear()
+        self._loading_chunks.clear()
+        self._work_queue.clear()
+        self._visible_rows.clear()
+        self._catalog_length = len(self._catalog)
+        self._current_num_rows = 0
+        self._fetched_rows = 0
+        self.endResetModel()
+
     def updateCatalog(self):
         """Update catalog data when new data arrives or rows are removed."""
         new_length = len(self._catalog)
 
         if new_length != self._catalog_length:
-            # Clear cached data since indices will change
             self._data.clear()
             self._keys.clear()
             self._loading_chunks.clear()
             self._work_queue.clear()
 
             if new_length < self._catalog_length:
-                # Rows were removed
                 self.beginRemoveRows(
                     QModelIndex(), new_length, self._catalog_length - 1
                 )
                 self._catalog_length = new_length
                 self.endRemoveRows()
             else:
-                # Rows were added
                 self.beginInsertRows(
                     QModelIndex(), self._catalog_length, new_length - 1
                 )
                 self._catalog_length = new_length
                 self.endInsertRows()
 
-            # Update visible rows if they were set
             if self._visible_rows:
-                # Recalculate visible rows based on current view
-                # This will trigger loading of visible data
                 visible_rows = list(self._visible_rows)
                 if visible_rows:
                     start_row = min(visible_rows)
                     end_row = min(max(visible_rows), new_length - 1)
                     self.set_visible_rows(start_row, end_row)
         else:
-            # If length hasn't changed, just emit dataChanged for visible rows
+            self._data.clear()
+            self._keys.clear()
+            self._loading_chunks.clear()
+            self._work_queue.clear()
+
             if self._visible_rows:
                 visible_rows = list(self._visible_rows)
                 if visible_rows:
                     start_row = min(visible_rows)
                     end_row = min(max(visible_rows), new_length - 1)
 
-                    # Only emit dataChanged for visible rows
                     start_idx = self.createIndex(start_row, 0)
                     end_idx = self.createIndex(end_row, len(self.columns) - 1)
                     self.dataChanged.emit(start_idx, end_idx, [])
                     return
 
-            # If no visible rows, emit dataChanged for all rows
+            if self._catalog_length <= 0:
+                return
             start_idx = self.createIndex(0, 0)
             end_idx = self.createIndex(self._catalog_length - 1, len(self.columns) - 1)
             self.dataChanged.emit(start_idx, end_idx, [])

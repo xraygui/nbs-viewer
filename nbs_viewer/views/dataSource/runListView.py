@@ -20,7 +20,7 @@ from nbs_viewer.utils import get_top_level_model
 from .expressionBuilder import ExpressionBuilderDialog
 
 
-# TODO: Should move closer to DataSourceSwitcher (which also needs cleanup)
+# TODO: Should move closer to CatalogSwitcher (which also needs cleanup)
 class RunListView(QWidget):
     """
     Widget for managing run selection for a display.

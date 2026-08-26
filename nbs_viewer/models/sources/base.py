@@ -1,6 +1,8 @@
 """Models for different catalog data sources."""
 
-from typing import Tuple
+from typing import Optional, Tuple
+
+from qtpy.QtCore import QObject, Signal
 
 from ..catalog.base import CatalogBase
 from ..catalog.base import load_catalog_models
@@ -18,16 +20,26 @@ class AuthenticationRejected(CatalogLoadError):
     pass
 
 
-class SourceModel:
+class SourceModel(QObject):
     """
     Base class for catalog source models.
 
-    This class defines the interface for all source models that provide
-    catalogs to the application.
+    Long-lived factory/strategy on the catalog manager palette. Subclasses
+    implement ``get_source``; ``load`` calls it and emits ``catalog_loaded``.
     """
 
-    def __init__(self):
-        """Initialize the source model."""
+    catalog_loaded = Signal(object, str)
+
+    def __init__(self, parent: Optional[QObject] = None):
+        """
+        Initialize the source model.
+
+        Parameters
+        ----------
+        parent : QObject, optional
+            Qt parent object.
+        """
+        super().__init__(parent)
         self.catalog_models = load_catalog_models()
 
     def get_source(self, **kwargs) -> Tuple[CatalogBase, str]:
@@ -42,6 +54,40 @@ class SourceModel:
             - A label describing the source
         """
         raise NotImplementedError("Subclasses must implement get_source")
+
+    def load(self, **kwargs) -> Tuple[CatalogBase, str]:
+        """
+        Load a catalog via ``get_source`` and emit ``catalog_loaded``.
+
+        Parameters
+        ----------
+        **kwargs
+            Forwarded to ``get_source``.
+
+        Returns
+        -------
+        Tuple[CatalogBase, str]
+            The catalog instance and label.
+        """
+        catalog, label = self.get_source(**kwargs)
+        self.catalog_loaded.emit(catalog, label)
+        return catalog, label
+
+    def emit_catalog_loaded(self, catalog: CatalogBase, label: str) -> None:
+        """
+        Emit ``catalog_loaded`` for a catalog built outside ``get_source``.
+
+        Used by interactive views that assemble a catalog via staged
+        connect / navigate / model-select APIs.
+
+        Parameters
+        ----------
+        catalog : CatalogBase
+            Loaded catalog.
+        label : str
+            Registry label for the catalog.
+        """
+        self.catalog_loaded.emit(catalog, label)
 
     def is_configured(self) -> bool:
         """
