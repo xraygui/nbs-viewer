@@ -18,8 +18,8 @@ folder moves.
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Done |
 | 5 | Catalog table + source models | Done |
-| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a/6b done; 6c open) |
-| 7 | Organize under `models/` (mechanical) | Partially done |
+| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a/6b done; 6c deferred) |
+| 7 | Organize under `models/` (mechanical) | Replaced by [`plot_package_reorganization.md`](plot_package_reorganization.md) |
 | 8 | Slim views / canvas (optional polish) | Not started |
 
 **Milestones**
@@ -36,9 +36,10 @@ folder moves.
 2. **A view that needs a new model asks the model it already holds**
    (e.g. `plot_model.roi_set`, `plot_model.ensure_plot_data(...)`, or
    `presenter.plot_models[i]`).
-3. **Stay under `models/`** for domain code. Folder splits (`models/roi/`, …)
-   come in step 7 after ownership is fixed (catalog/data/sources layout already
-   landed ahead of Step 5 ownership).
+3. **Stay under `models/`** for domain code. Folder splits inside
+   `models/plot/` (`plot/roi/`, `plot/run/`, `plot/cube/`, …) are Step 7
+   ([`plot_package_reorganization.md`](plot_package_reorganization.md));
+   catalog/data/sources layout already landed ahead of Step 5 ownership.
 4. **Each step ships with tests** in the same PR when practical. GUI smoke is
    optional until later steps.
 5. Do **not** invert the package tree to `feature/{models,views}` unless we
@@ -655,7 +656,9 @@ is out of scope for Step 0 (rare; catch in review if it appears).
 - [x] Controllers pass UI state only; they do not call `FrozenSpectrum(...)`
 - [x] Rename “derivative” identifiers toward ROI preview/commit
       (`RoiPreviewController`, `RoiPreviewWorker`, `fetch_roi_preview`, …)
-- [x] File move to `models/roi/` deferred to Step 7
+- [x] File move of ROI modules deferred to Step 7
+      ([`plot_package_reorganization.md`](plot_package_reorganization.md)
+      slice 7a: `models/plot/roi/`, not top-level `models/roi/`)
 
 **Decision log**
 
@@ -853,7 +856,7 @@ exists; full H1 after Step 5 inventory is clean
       classes; `display_type` is an opaque shell hint only
 - [x] No `qtpy.QtWidgets` under `models/`
 
-**6c — Multi-view presenter (can be a later PR within or after Step 6)**
+**6c — Multi-view presenter (deferred; not required for Step 7)**
 
 - [ ] N>1 `PlotModel`s + shared `RunListModel`; presenter assigns slices
 - [ ] ROI sync across plot models (preferred direction); record protocol in
@@ -902,36 +905,41 @@ exists; full H1 after Step 5 inventory is clean
 
 ## Step 7 — Organize under `models/` (mechanical)
 
-**Status:** Partially done
+**Status:** Replaced — execute
+[`plot_package_reorganization.md`](plot_package_reorganization.md)
+instead of the checklist below.
 
-**Depends on:** Steps 1–4 at minimum (ROI ownership stable); prefer after 6
-for remaining moves. Catalog/data/sources layout may keep landing with Step 5.
+**Depends on:** Steps 1–4 (ROI ownership stable); 6a/6b preferred so
+presenter types exist to place. **6c is not required.**
 
-### Already done
+Catalog/data/sources/cache layout already landed. The remaining work is
+grouping `models/plot/` and `views/plot/` (ROI / run / cube / canvas
+subpackages, snake_case on move, no import shims). Model–view leaks that
+folders cannot fix are inventoried in that document, not cleared here.
+
+### Already done (this plan)
 
 - [x] `models/catalog/` (incl. `memory.py`, `table.py`, bluesky/kafka peers)
 - [x] `models/data/` (incl. `MemoryRun`)
 - [x] `models/sources/` (incl. `TestSourceModel`)
+- [x] `models/cache/`
 
 ### Still to do
 
-- [ ] Move ROI cluster → `models/roi/` (`region*`, `roi_set`, preview/commit
-      helpers)
-- [ ] Optionally `models/plot/` or `models/presenter/` for `PlotPresenter` /
-      presenter manager after Step 6
-- [ ] Optionally nest cube/materialize under `models/plot/` subpackage
-- [ ] Temporary shims at old import paths if needed
-- [ ] Optionally collapse tiny `views/plot/controls/` checkbox modules (no
-      behavior change)
+See slices 7a–7d in the reorganization document (7e optional / Step 8).
+
+Do **not** use the old sketch (`models/roi/` as a top-level sibling,
+import shims, presenter as `models/presenter/`). Those were considered
+and rejected there.
 
 ### Testing goals
 
-- [ ] Full unit suite green after import updates
-- [ ] Diff is mostly moves + imports
+- [ ] Full unit suite green after each reorganization slice
+- [ ] Diff is mostly moves + imports (+ cube/presenter file splits)
 
 ### Exit criteria
 
-- [ ] Folder layout matches ownership tree mental model
+- [ ] Folder layout matches the target trees in the reorganization document
 - [ ] Step status → Done
 
 ---
@@ -975,9 +983,9 @@ for remaining moves. Catalog/data/sources layout may keep landing with Step 5.
       → 4 ROI preview/commit      ← Milestone A
   → 5 catalog/sources           (5a table · 5b factories · 5c injection · 5d palette+signals)
   → 6 presenter N=1 + drop widget registry  ← Milestone B
-      → 6c multi-view presenter + ROI sync (optional follow-up)
-  → 7 folder moves (ROI / presenter; catalog/data/sources mostly done)
-  → 8 canvas slim               ← Milestone C
+      → 6c multi-view presenter + ROI sync (deferred; not required for 7)
+  → 7 plot package reorg (see plot_package_reorganization.md; 7a–7d)
+  → 8 canvas slim (+ optional 7e ROI/crop extract)  ← Milestone C
 ```
 
 ## Explicit non-goals (until this plan is revised)
@@ -991,6 +999,8 @@ for remaining moves. Catalog/data/sources layout may keep landing with Step 5.
       (expand in place unless construction later forces a split)
 - [ ] File-backed offline catalog as a prerequisite for Step 5 / Milestone B
       (`MemoryCatalog` covers fixtures)
+- [ ] Top-level `models/roi/` or `models/presenter/` packages (Step 7 nests
+      those concerns under `models/plot/` instead)
 - [ ] Model-side registry of Qt display / plot widget classes
 - [ ] Domain `Display` type as RunList+Plot bag
 - [ ] Presenter that extracts slice grids from a single PlotModel
@@ -1041,3 +1051,4 @@ blocker.
 | 2026-08-26 | Step 5c+5d done: CatalogSwitcher(app_model, display_id); SourceModel.load/catalog_loaded; palette on manager; SourceDialog iterates palette; switcher reacts to catalog_added/removed; label uniquify; load_and_register headless-only |
 | 2026-08-26 | Step 6a done: PlotPresenter owns private RunListModel+PlotModel; DisplayManager stores presenters; explicit single_selection_mode (frontend `__single_selection_mode__`); PlotDisplay/MainDisplay resolve via get_presenter |
 | 2026-08-27 | Step 6b done (option A): DisplayRegistry → views/display/frontendRegistry.FrontendRegistry; MainWidget owns it; AppModel/DisplayManager detached; no QtWidgets under models |
+| 2026-08-27 | Step 6c deferred; Step 7 replaced by plot_package_reorganization.md (`models/plot/{roi,run,cube}/`, mirrored `views/plot/roi/`; no top-level `models/roi/`, no shims) |

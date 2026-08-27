@@ -7,9 +7,9 @@ from nbs_viewer.models.plot.view_crop import (
     view_crop_from_region,
 )
 
-from .roi_panel import RoiPanel
-from .plotDimensionWidget import PlotDimensionControl
-from .mpl_canvas import MplCanvas
+from .panel import RoiPanel
+from ..plotDimensionWidget import PlotDimensionControl
+from ..mpl_canvas import MplCanvas
 
 
 class RoiController(QObject):

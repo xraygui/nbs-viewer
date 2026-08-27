@@ -15,9 +15,9 @@ from .controls.transform import TransformControl
 from .controls.retain_selection import RetainSelectionControl
 from .plotDimensionWidget import PlotDimensionControl
 
-from .roi_panel import RoiPanel
-from .roi_controller import RoiController
-from .roi_preview_controller import RoiPreviewController
+from .roi.panel import RoiPanel
+from .roi.controller import RoiController
+from .roi.preview_controller import RoiPreviewController
 
 
 class PlotControlTab(QWidget):

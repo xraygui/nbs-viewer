@@ -11,11 +11,11 @@ from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.region import expand_region_for_profile
 
-from .mpl_canvas import MplCanvas
-from .plotDimensionWidget import PlotDimensionControl
-from .roi_panel import RoiPanel
-from .roi_preview_canvas import RoiPreviewWorker
-from .roi_window import RoiWindow
+from ..mpl_canvas import MplCanvas
+from ..plotDimensionWidget import PlotDimensionControl
+from .panel import RoiPanel
+from .preview_canvas import RoiPreviewWorker
+from .window import RoiWindow
 
 
 class RoiPreviewController(QObject):

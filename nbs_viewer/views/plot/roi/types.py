@@ -36,7 +36,7 @@ from nbs_viewer.models.plot.region import (
     RegionDefinition,
 )
 
-from .roi_overlays import (
+from .overlays import (
     _ROI_EDGE_WIDTH,
     _ROI_FILL_ALPHA,
     overlay_artists_for_region,

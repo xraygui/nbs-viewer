@@ -40,8 +40,8 @@ from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
 from nbs_viewer.models.plot.region import RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation, RoiSetModel
 
-from .roi_preview_canvas import RoiPreviewCanvas
-from .roi_types import (
+from .preview_canvas import RoiPreviewCanvas
+from .types import (
     DescribeOptionsWidget,
     EllipseOptionsWidget,
     ShapeOptionsWidget,
