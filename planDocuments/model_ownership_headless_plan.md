@@ -18,7 +18,7 @@ folder moves.
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Done |
 | 5 | Catalog table + source models | Done |
-| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a done; 6b/6c open) |
+| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a/6b done; 6c open) |
 | 7 | Organize under `models/` (mechanical) | Partially done |
 | 8 | Slim views / canvas (optional polish) | Not started |
 
@@ -813,7 +813,7 @@ These are the preferred Milestone B fixtures (see **Catalog fixtures** below).
 
 ## Step 6 — Presenter + remove widget registry / QtWidgets from models
 
-**Status:** In progress (6a done; 6b/6c open)
+**Status:** In progress (6a/6b done; 6c open)
 
 **Depends on:** Steps 1–5 ideally; N=1 presenter can start once PlotModel
 exists; full H1 after Step 5 inventory is clean
@@ -845,11 +845,13 @@ exists; full H1 after Step 5 inventory is clean
 
 **6b — Remove model-side widget registry**
 
-- [ ] Remove `DisplayRegistry` from `models/` (or gut it so it no longer
-      imports `QWidget` / `PlotDisplay` / loads view classes)
-- [ ] Entry-point loading of plot **frontends** lives in views / app shell
-      only
-- [ ] Remove any remaining `QtWidgets` imports under `models/`
+- [x] Move entry-point / widget discovery to
+      `views/display/frontendRegistry.py` (`FrontendRegistry`)
+- [x] GUI shell (`MainWidget`) owns the registry; menus / tab creation use
+      `get_frontend_registry()`
+- [x] `AppModel` / `DisplayManager` no longer own or validate against widget
+      classes; `display_type` is an opaque shell hint only
+- [x] No `qtpy.QtWidgets` under `models/`
 
 **6c — Multi-view presenter (can be a later PR within or after Step 6)**
 
@@ -867,9 +869,9 @@ exists; full H1 after Step 5 inventory is clean
 
 ### Testing goals
 
-- [ ] Grep/lint: no `qtpy.QtWidgets` under `models/` (6b)
-- [x] Unit (6a): register presenter / plot session without loading
-      display widgets (stub registry)
+- [x] Grep/lint: no `qtpy.QtWidgets` under `models/` (6b)
+- [x] Unit (6a/6b): register presenter / plot session without loading
+      display widgets (no registry on AppModel)
 - [x] Unit (6a): N=1 presenter exposes run list + plot model; catalog
       selection can add a run without a canvas
 - [ ] When 6c lands: unit N plot models share one run list; independent
@@ -879,21 +881,22 @@ exists; full H1 after Step 5 inventory is clean
 
 ### Exit criteria
 
-- [ ] **H1 headless** declared: model tree usable without constructing
-      widgets (`QT_QPA_PLATFORM=offscreen` OK if a `QApplication` is
-      required by Qt)
-- [ ] No model-side registry of Qt display classes
-- [ ] Step status → Done (6c may remain a checked follow-up if split out;
-      note in modification log)
-- [ ] **Milestone B** checkbox above
+- [x] **H1 headless** for model tree: no widget registry / `QtWidgets` in
+      models; presenters usable without entrypoint display classes
+- [x] No model-side registry of Qt display classes
+- [ ] Step status → Done (6c remain follow-up)
+- [ ] **Milestone B** checkbox above (catalog path done; multi-view 6c open)
 
 **Decision log**
 
 - Presenter path: **N PlotModels, shared run list for multi-view** (not
   extract-from-one-plot)
-- Widget / display-type registry in models: **removed**
-- Domain `Display`: **not adopted**
+- Widget / display-type registry in models: **removed** (6b: moved to
+  `FrontendRegistry` in views; option A)
+- Domain `Display`: **not adopted** (became `PlotPresenter`)
 - Multi-view ROI: **deferred**; preferred **presenter sync**
+- `DisplayRegistry` role: **GUI frontend catalog only** — not required for
+  domain/headless; entry points load in the view shell
 
 ---
 
@@ -1037,3 +1040,4 @@ blocker.
 | 2026-08-26 | Step 5d planned: SourceModel→QObject with catalog_loaded; manager owns long-lived source palette; connect catalog_loaded→register_catalog; CatalogSwitcher reactive via catalog_added/removed; reject SourceView holding manager |
 | 2026-08-26 | Step 5c+5d done: CatalogSwitcher(app_model, display_id); SourceModel.load/catalog_loaded; palette on manager; SourceDialog iterates palette; switcher reacts to catalog_added/removed; label uniquify; load_and_register headless-only |
 | 2026-08-26 | Step 6a done: PlotPresenter owns private RunListModel+PlotModel; DisplayManager stores presenters; explicit single_selection_mode (frontend `__single_selection_mode__`); PlotDisplay/MainDisplay resolve via get_presenter |
+| 2026-08-27 | Step 6b done (option A): DisplayRegistry → views/display/frontendRegistry.FrontendRegistry; MainWidget owns it; AppModel/DisplayManager detached; no QtWidgets under models |

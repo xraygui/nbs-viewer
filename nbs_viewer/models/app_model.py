@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
 from .plot.displayManager import DisplayManager
-from .plot.displayRegistry import DisplayRegistry
 
 
 class ConfigModel(QObject):
@@ -658,8 +657,7 @@ class AppModel(QObject):
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
         self.config = ConfigModel(config_path)
-        self.display_registry = DisplayRegistry()
-        self.display_manager = DisplayManager(self.display_registry)
+        self.display_manager = DisplayManager()
         self.catalogs = CatalogManagerModel(self.config)
 
         self._active_display_id = "main"

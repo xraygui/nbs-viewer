@@ -2,7 +2,6 @@ from typing import Dict, List, Optional, Union
 from qtpy.QtCore import QObject, Signal
 from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
-from .displayRegistry import DisplayRegistry
 from ...models.plot.plotModel import PlotModel
 from ...models.plot.runModel import RunModel
 from ...utils import print_debug
@@ -81,10 +80,10 @@ class DisplayManager(QObject):
     """
     Manager of :class:`PlotPresenter` sessions.
 
-    Keeps display-type strings as a frontend hint for which widget to load
-    (until Step 6b moves the registry out of models). Run-list policy such as
-    ``single_selection_mode`` is set explicitly on the presenter, not inferred
-    from a hardcoded display-type list.
+    Does not own or load plot frontend widgets. An optional opaque
+    ``display_type`` string may be stored as a hint for the GUI shell
+    (which frontend tab to open). Widget discovery lives in
+    ``views.display.frontendRegistry``.
 
     Signals
     -------
@@ -93,7 +92,7 @@ class DisplayManager(QObject):
     display_removed : Signal
         Emitted when a presenter is removed (display_id)
     display_type_changed : Signal
-        Emitted when display type changes (display_id, display_type)
+        Emitted when display type hint changes (display_id, display_type)
     display_renamed : Signal
         Emitted when a presenter is renamed (old_id, new_id)
     """
@@ -103,17 +102,12 @@ class DisplayManager(QObject):
     display_type_changed = Signal(str, str)  # display_id, display_type
     display_renamed = Signal(str, str)  # display_id, new_name
 
-    def __init__(self, display_registry: DisplayRegistry):
-        super().__init__()
+    def __init__(self, parent: Optional[QObject] = None):
+        super().__init__(parent)
         self._presenters: Dict[str, PlotPresenter] = {}
         self._display_types: Dict[str, str] = {}
-        self._display_registry = display_registry
 
         self.register_display(is_main_display=True)
-
-    ###########################################################################
-    # Accessors and setters
-    ###########################################################################
 
     def get_presenter(self, display_id: str) -> PlotPresenter:
         """
@@ -175,48 +169,15 @@ class DisplayManager(QObject):
         return list(self._presenters.keys())
 
     def get_display_type(self, display_id: str) -> str:
-        """Get the display type for a display."""
+        """Get the frontend type hint for a display."""
         return self._display_types.get(display_id, "matplotlib")
 
     def set_display_type(self, display_id: str, display_type: str):
-        """Set the display type for a display."""
+        """Set the frontend type hint for a display."""
         if display_id in self._presenters:
             self._display_types[display_id] = display_type
             self.display_type_changed.emit(display_id, display_type)
 
-    def get_available_display_types(self) -> List[str]:
-        """Get list of available display types."""
-        if self._display_registry:
-            return self._display_registry.get_available_displays()
-        return ["matplotlib"]
-
-    def get_display_metadata(self, display_type: str) -> dict:
-        """Get metadata for a display type."""
-        if self._display_registry:
-            return self._display_registry.get_display_metadata(display_type)
-        return {"name": display_type, "description": ""}
-
-    def single_selection_mode_for_type(self, display_type: str) -> bool:
-        """
-        Read ``single_selection_mode`` from frontend display metadata.
-
-        Parameters
-        ----------
-        display_type : str
-            Registered display / widget type id.
-
-        Returns
-        -------
-        bool
-            Policy declared on the frontend class, default False.
-        """
-        return bool(
-            self.get_display_metadata(display_type).get("single_selection_mode", False)
-        )
-
-    ###########################################################################
-    # Display management
-    ###########################################################################
     def rename_display(self, display_id: str, new_name: str) -> None:
         """
         Rename a display / presenter.
@@ -258,7 +219,8 @@ class DisplayManager(QObject):
         Parameters
         ----------
         display_type : str, optional
-            Frontend widget type hint. If None, uses default.
+            Opaque frontend hint for the GUI shell. Defaults to
+            ``"matplotlib"``. Not validated against widget entry points.
         display_id : str, optional
             Presenter id. If None, uses a generated id (or ``"main"``).
         is_main_display : bool, optional
@@ -271,15 +233,8 @@ class DisplayManager(QObject):
         str
             The display identifier
         """
-        if display_type is None and self._display_registry:
-            display_type = self._display_registry.get_default_display()
-        elif display_type is None:
+        if display_type is None:
             display_type = "matplotlib"
-
-        if self._display_registry:
-            available_displays = self._display_registry.get_available_displays()
-            if display_type not in available_displays:
-                raise ValueError(f"Unknown display type: {display_type}")
 
         if is_main_display:
             display_id = "main"
@@ -315,7 +270,7 @@ class DisplayManager(QObject):
         run_list : List[CatalogRun]
             Runs to add to the new display
         display_type : str
-            Frontend widget type hint
+            Opaque frontend hint for the GUI shell
         single_selection_mode : bool, optional
             Explicit run-list policy (do not infer from display_type here)
 
@@ -330,9 +285,6 @@ class DisplayManager(QObject):
         self.add_runs_to_display(run_list, display_id)
         return display_id
 
-    ###########################################################################
-    # Run management
-    ###########################################################################
     def add_runs_to_display(self, run_list: List[CatalogRun], display_id: str) -> None:
         """
         Add multiple runs to a specific display.

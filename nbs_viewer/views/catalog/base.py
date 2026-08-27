@@ -24,6 +24,7 @@ from qtpy.QtCore import (
 from ...search import DateSearchWidget
 from ..plot.metadataView import FullMetadataBrowser
 from nbs_viewer.utils import print_debug, get_top_level_model
+from nbs_viewer.views.display.frontendRegistry import get_frontend_registry
 
 
 class CustomHeaderView(QHeaderView):
@@ -893,12 +894,13 @@ class CatalogTableView(QWidget):
 
         menu = QMenu(self)
         app_model = get_top_level_model()
+        registry = get_frontend_registry()
         # Add to new display
         if self.display_id != "main":
             new_canvas_menu = QMenu("Move to New Display", self)
-            display_types = app_model.display_manager.get_available_display_types()
+            display_types = registry.get_available_displays()
             for display_type in display_types:
-                metadata = app_model.display_manager.get_display_metadata(display_type)
+                metadata = registry.get_display_metadata(display_type)
                 display_name = metadata.get("name", display_type)
                 action = QAction(display_name, self)
                 action.setToolTip(
@@ -913,10 +915,9 @@ class CatalogTableView(QWidget):
             menu.addMenu(new_canvas_menu)
 
         new_canvas_copy_menu = QMenu("Copy to New Display", self)
-        display_types = app_model.display_manager.get_available_display_types()
-        # Remove the current display from the list
+        display_types = registry.get_available_displays()
         for display_type in display_types:
-            metadata = app_model.display_manager.get_display_metadata(display_type)
+            metadata = registry.get_display_metadata(display_type)
             display_name = metadata.get("name", display_type)
             action = QAction(display_name, self)
             action.setToolTip(
@@ -1024,8 +1025,8 @@ class CatalogTableView(QWidget):
     def copy_selected_runs_to_new_display(self, display_type: str):
         top_level_model = get_top_level_model()
         runs = self.get_selected_runs()
-        single_selection_mode = (
-            top_level_model.display_manager.single_selection_mode_for_type(display_type)
+        single_selection_mode = get_frontend_registry().single_selection_mode_for_type(
+            display_type
         )
         top_level_model.display_manager.create_display_with_runs(
             runs, display_type, single_selection_mode=single_selection_mode

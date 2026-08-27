@@ -2,7 +2,6 @@ from typing import Optional
 from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
-from qtpy.QtWidgets import QWidget
 import numpy as np
 
 from nbs_viewer.utils import print_debug
