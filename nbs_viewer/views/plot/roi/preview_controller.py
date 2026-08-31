@@ -8,7 +8,6 @@ from qtpy.QtCore import QObject, QTimer
 
 from nbs_viewer.models.plot.derived_fetch import _profile_uses_nd_load
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.region import expand_region_for_profile
 
 from ..mpl_canvas import MplCanvas
@@ -32,15 +31,16 @@ class RoiPreviewController(QObject):
         canvas: MplCanvas,
         dimension_control: PlotDimensionControl,
         panel: RoiPanel,
-        plot_model: PlotModel,
+        presenter,
         parent=None,
     ):
         super().__init__(parent)
         self.canvas = canvas
         self.dimension_control = dimension_control
         self.panel = panel
-        self.plot_model = plot_model
-        self.roi_set = plot_model.roi_set
+        self.presenter = presenter
+        self.plot_model = presenter.plot
+        self.roi_set = presenter.plot.roi_set
         self._window = None
         self._active_worker = None
         self._commit_worker = None

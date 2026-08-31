@@ -21,7 +21,7 @@ class MainDisplay(PlotDisplay):
         self.catalog_switcher = CatalogSwitcher(
             self.app_model, self.display_id
         )
-        self.plot_widget = PlotWidget(run_list_model, plot_model)
+        self.plot_widget = PlotWidget(self.presenter)
 
         # Create main tab layout with three panels
 

@@ -1,23 +1,11 @@
-from qtpy.QtWidgets import (
-    QVBoxLayout,
-    QWidget,
-    QFormLayout,
-    QSizePolicy,
-)
-from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QVBoxLayout, QWidget, QSizePolicy
 
 from ..common.panel import CollapsiblePanel
+from .controls.plot_settings import PlotSettingsWidget
 from .controls.run_display import RunDisplayWidget
-from .controls.auto_add import AutoAddControl
-from .controls.dynamic_update import DynamicUpdateControl
-from .controls.lock_aspect import LockAspectControl
 from .controls.transform import TransformControl
-from .controls.retain_selection import RetainSelectionControl
 from .plotDimensionWidget import PlotDimensionControl
-
-from .roi.panel import RoiPanel
-from .roi.controller import RoiController
-from .roi.preview_controller import RoiPreviewController
+from .roi.crop_control import CropControlWidget
 
 
 class PlotControlTab(QWidget):
@@ -26,29 +14,20 @@ class PlotControlTab(QWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        Model for the active run list and plot settings
+    presenter : PlotPresenter
+        Plot session presenter.
     plot_canvas : MplCanvas, optional
-        Canvas for dimension and ROI controls; omitted when not applicable
-    plot_model : PlotModel, optional
-        Plot session that owns the ROI set; required when ``plot_canvas`` is set
+        Canvas for dimension and ROI controls; omitted when not applicable.
     parent : QWidget, optional
-        Parent widget, by default None
+        Parent widget, by default None.
     """
 
-    def __init__(
-        self, run_list_model, plot_canvas=None, plot_model=None, parent=None
-    ):
+    def __init__(self, presenter, plot_canvas=None, parent=None):
         super().__init__(parent)
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
         self.plot_canvas = plot_canvas
         self.dimension_control = None
-        self.roi_panel = None
-        self.roi_set = None
-        self.roi_controller = None
-        self.roi_preview_controller = None
-        self.derivative_controller = None
+        self.crop_control = None
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
@@ -57,70 +36,43 @@ class PlotControlTab(QWidget):
         self._tab_layout.setContentsMargins(0, 0, 0, 0)
         self._tab_layout.setSpacing(0)
 
-        self._setup_panels()
-        self._update_panel_layout()
-
-    def _setup_panels(self):
-        if self.plot_model is None:
-            raise ValueError("plot_model is required for PlotControlTab")
-
-        plot_settings_widget = QWidget()
-        form = QFormLayout(plot_settings_widget)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(8)
-        form.setVerticalSpacing(2)
-        form.setLabelAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        form.setFormAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        )
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
-
-        self.auto_add = AutoAddControl(self.run_list_model, plot_settings_widget)
-        self.auto_add.add_to_form(form)
-
-        self.dynamic_update = DynamicUpdateControl(
-            self.run_list_model, plot_settings_widget
-        )
-        self.dynamic_update.add_to_form(form)
-
-        self.lock_aspect = None
-        if self.plot_canvas is not None:
-            self.lock_aspect = LockAspectControl(
-                self.run_list_model, self.plot_canvas, plot_settings_widget
-            )
-            self.lock_aspect.add_to_form(form)
-
-        self.retain_selection = RetainSelectionControl(
-            self.plot_model, plot_settings_widget
-        )
-        self.retain_selection.add_to_form(form)
-
-        plot_settings_widget.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
-        )
-        settings_min_height = form.minimumSize().height()
-        if settings_min_height > 0:
-            plot_settings_widget.setMinimumHeight(settings_min_height)
-
+        self.plot_settings = PlotSettingsWidget(presenter, plot_canvas)
         self.plot_settings_panel = CollapsiblePanel(
-            "Plot Settings", plot_settings_widget, can_expand=False, resizable=False
+            "Plot Settings",
+            self.plot_settings,
+            can_expand=False,
+            resizable=False,
         )
         self._tab_layout.addWidget(self.plot_settings_panel, 0)
 
-        if self.plot_canvas is not None:
-            self._setup_canvas_panels()
+        if plot_canvas is not None:
+            self.dimension_control = PlotDimensionControl(presenter, plot_canvas)
+            self.dimension_control_panel = CollapsiblePanel(
+                "Dimension Control",
+                self.dimension_control,
+                can_expand=False,
+                resizable=False,
+            )
+            self._tab_layout.addWidget(self.dimension_control_panel, 0)
 
-        self.transform = TransformControl(self.plot_model)
+            self.crop_control = CropControlWidget(
+                presenter, plot_canvas, self.dimension_control
+            )
+            self.crop_control_panel = CollapsiblePanel(
+                "Crop",
+                self.crop_control,
+                can_expand=False,
+                resizable=False,
+            )
+            self._tab_layout.addWidget(self.crop_control_panel, 0)
+
+        self.transform = TransformControl(presenter)
         self.transform_panel = CollapsiblePanel(
             "Transform", self.transform, can_expand=False, resizable=False
         )
         self._tab_layout.addWidget(self.transform_panel, 0)
 
-        self.run_display = RunDisplayWidget(
-            self.run_list_model, plot_model=self.plot_model
-        )
+        self.run_display = RunDisplayWidget(presenter)
         self.run_display_panel = CollapsiblePanel(
             "Run Display",
             self.run_display,
@@ -132,49 +84,26 @@ class PlotControlTab(QWidget):
 
         self.spacer = self._tab_layout.addStretch(0)
 
-    def _setup_canvas_panels(self):
-        if self.plot_model is None:
-            raise ValueError(
-                "plot_model is required when plot_canvas is provided"
-            )
+        for panel in self._stretch_panels():
+            panel.collapsed_changed.connect(self._update_spacer_stretch)
 
-        self.dimension_control = PlotDimensionControl(
-            self.run_list_model, self.plot_canvas, self.plot_model, self
-        )
-        self.dimension_control_panel = CollapsiblePanel(
-            "Dimension Control",
-            self.dimension_control,
-            can_expand=False,
-            resizable=False,
-        )
-        self._tab_layout.addWidget(self.dimension_control_panel, 0)
+        self._update_panel_layout()
 
-        self.roi_panel = RoiPanel(self)
-        self.roi_panel_panel = CollapsiblePanel(
-            "Crop",
-            self.roi_panel,
-            can_expand=False,
-            resizable=False,
-        )
-        self._tab_layout.addWidget(self.roi_panel_panel, 0)
-
-        self.roi_set = self.plot_model.roi_set
-        self.roi_controller = RoiController(
-            self.plot_canvas,
-            self.dimension_control,
-            self.roi_panel,
-            self.run_list_model,
-            self.roi_set,
-            self,
-        )
-        self.roi_preview_controller = RoiPreviewController(
-            self.plot_canvas,
-            self.dimension_control,
-            self.roi_panel,
-            self.plot_model,
-            self,
-        )
-        self.derivative_controller = self.roi_preview_controller
+    def _stretch_panels(self):
+        """
+        Return collapsible panels participating in vertical stretch logic.
+        """
+        panels = [
+            self.plot_settings_panel,
+            self.transform_panel,
+            self.run_display_panel,
+        ]
+        if self.plot_canvas is not None:
+            panels[1:1] = [
+                self.dimension_control_panel,
+                self.crop_control_panel,
+            ]
+        return panels
 
     def _update_panel_layout(self):
         """

@@ -10,17 +10,17 @@ class LockAspectControl(CheckboxFormControl):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The plot model associated with this control panel.
+    presenter : PlotPresenter
+        Plot session presenter.
     plot_canvas : MplCanvas
         Canvas whose image aspect is controlled.
     parent : QWidget, optional
         Parent widget, by default None.
     """
 
-    def __init__(self, run_list_model, plot_canvas, parent=None):
+    def __init__(self, presenter, plot_canvas, parent=None):
         self.plot_canvas = plot_canvas
-        super().__init__(run_list_model, parent)
+        super().__init__(presenter, parent)
         self._checkbox.setChecked(self.plot_canvas.lock_aspect)
 
     def _setup_ui(self) -> None:

@@ -513,9 +513,10 @@ class FullMetadataBrowser(QDialog):
 class MetadataViewer(QWidget):
     """Widget for displaying run metadata in a tree view."""
 
-    def __init__(self, plot_model, parent=None):
+    def __init__(self, presenter, parent=None):
         super().__init__(parent)
-        self.plot_model = plot_model
+        self.presenter = presenter
+        self.run_list = presenter.run_list
 
         # Create tree view
         self.tree_view = QTreeView(self)
@@ -535,14 +536,14 @@ class MetadataViewer(QWidget):
         self.setLayout(layout)
 
         # Connect signals
-        self.plot_model.visible_runs_changed.connect(self._update_metadata)
+        self.run_list.visible_runs_changed.connect(self._update_metadata)
         self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
         self._browser_dialog = None
 
     def _update_metadata(self, selected_runs):
         """Update displayed metadata when selection changes."""
 
-        self.metadata_model.update_metadata(self.plot_model.visible_models)
+        self.metadata_model.update_metadata(self.run_list.visible_models)
 
         # Expand top-level items if multiple runs
         if len(selected_runs) > 1:
@@ -570,7 +571,7 @@ class MetadataViewer(QWidget):
 
     def _get_run_for_index(self, index):
         if not index.isValid():
-            runs = self.plot_model.visible_models
+            runs = self.run_list.visible_models
             return runs[0] if runs else None
         current = index
         parent = current.parent()
@@ -582,12 +583,12 @@ class MetadataViewer(QWidget):
             run = item.data(MetadataModel.RUN_MODEL_ROLE)
             if run is not None:
                 return run
-        runs = self.plot_model.visible_models
+        runs = self.run_list.visible_models
         return runs[0] if runs else None
 
     def _open_full_metadata_browser(self, selected_run=None):
         """Open popup browser for full metadata navigation."""
-        runs = self.plot_model.visible_models
+        runs = self.run_list.visible_models
         if not runs:
             return
         self._browser_dialog = FullMetadataBrowser(

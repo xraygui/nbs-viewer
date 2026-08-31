@@ -33,7 +33,9 @@ from .roi.types import (
     get_roi_type,
     roi_type_for_region,
     set_ellipse_selector_circle_lock,
+    _region_from_ellipse_selector
 )
+
 _CROP_SELECTOR_PROPS = dict(
     facecolor=to_rgba("#ff7f0e", 0.12),
     edgecolor="#ff7f0e",
@@ -96,6 +98,12 @@ class NavigationToolbar(NavigationToolbar2QT):
             self.canvas.draw()
 
 
+"""
+MplCanvas needs to be a view of a presenter (which is really a single-plot presenter
+at the moment). Everything should hook up to the presenter. Why do we have so many properties?
+
+
+"""
 class MplCanvas(FigureCanvasQTAgg):
     """
     Matplotlib canvas for run list plots.
@@ -120,14 +128,14 @@ class MplCanvas(FigureCanvasQTAgg):
     view_crop_changed = Signal(object)
     plot_view_updated = Signal()
 
-    def __init__(self, run_list_model, plot_model, parent=None, width=5, height=4, dpi=100):
+    def __init__(self, presenter, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
-
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
+        self.run_list_model = presenter.run_list
+        self.plot_model = presenter.plot
         self._connected_plot_data = set()
         self._worker_generations = {}
         self._active_workers = {}
@@ -171,10 +179,6 @@ class MplCanvas(FigureCanvasQTAgg):
         return self.plot_model.plot_data_map
 
     @property
-    def _dimension(self):
-        return self.plot_model.dimension
-
-    @property
     def _slice(self):
         return self.plot_model.slice
 
@@ -186,8 +190,188 @@ class MplCanvas(FigureCanvasQTAgg):
     def _view_crop(self):
         return self.plot_model.view_crop
 
+    def _canvas_is_2d(self):
+        """
+        Return whether the canvas is currently showing 2D image or mesh data.
+
+        Returns
+        -------
+        bool
+            True if active render mode or dimension indicates 2D plotting.
+        """
+        return (
+            self._active_render_mode in ("image", "mesh") or self.currentDim == 2
+        )
+
+    def _mode_is_2d(self, mode):
+        """
+        Return whether a render mode string describes 2D plotting.
+
+        Parameters
+        ----------
+        mode : str
+            Render mode name from :class:`PlotBundle`.
+
+        Returns
+        -------
+        bool
+            True for image or mesh modes.
+        """
+        return mode in ("image", "mesh")
+
+    @property
+    def lock_aspect(self) -> bool:
+        """
+        Whether image plots should use equal data aspect.
+
+        Returns
+        -------
+        bool
+            True when image aspect should be locked.
+        """
+        return self._lock_aspect
+
+
+    def get_roi_set_model(self) -> Optional[RoiSetModel]:
+        """
+        Return the attached ROI set model, if any.
+        """
+        return self.plot_model.roi_set
+
+    def get_single_visible_2d_model(self):
+        """
+        Return the sole visible 2D plot model, if exactly one exists.
+
+        Returns
+        -------
+        PlotDataModel or None
+        """
+        models = []
+        for model in self.plotArtists.values():
+            if not getattr(model, "_visible", False):
+                continue
+            artist = model.artist
+            if artist is None or not artist.get_visible():
+                continue
+            if model.render_mode in ("image", "mesh"):
+                models.append(model)
+        if len(models) == 1:
+            return models[0]
+        return None
+
+    def get_active_plot_bundle(self):
+        """
+        Return the plot bundle for the single visible 2D trace.
+
+        Returns
+        -------
+        PlotBundle or None
+        """
+        model = self.get_single_visible_2d_model()
+        if model is None:
+            return None
+        if model.last_bundle is not None:
+            return model.last_bundle
+        return model.get_plot_bundle(
+            self._slice, self.plot_model.dimension, self._cube_view_spec
+        )
+
+    def get_view_frame(self) -> PlotViewFrame:
+        """
+        Return the view frame for the current 2D plot.
+
+        Returns
+        -------
+        PlotViewFrame
+
+        Raises
+        ------
+        ValueError
+            If no 2D bundle is available.
+        """
+        bundle = self.get_active_plot_bundle()
+        if bundle is None:
+            raise ValueError("No active 2D plot bundle for ROI")
+        return frame_from_bundle(bundle)
+
+    def region_controls_enabled(self):
+        """
+        Return whether ROI controls should be enabled.
+
+        Returns
+        -------
+        bool
+        """
+        return self._canvas_is_2d() and self.get_single_visible_2d_model() is not None
+
+    def is_roi_draw_enabled(self):
+        """
+        Return whether interactive ROI drawing is active.
+        """
+        return self._roi_draw_enabled
+
+    def is_crop_draw_enabled(self):
+        """
+        Return whether interactive crop drawing is active.
+        """
+        return self._crop_draw_enabled
+
+    def get_roi_region(self):
+        """
+        Return the selected ROI geometry, if any.
+
+        Returns
+        -------
+        RegionDefinition or None
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_region()
+
+    def get_selected_roi_entry(self):
+        """
+        Return the selected :class:`RoiEntry`, if any.
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_entry()
+
+    def is_selected_roi_stale(self) -> bool:
+        """
+        Return whether the selected ROI is marked stale.
+        """
+        entry = self.get_selected_roi_entry()
+        return entry is not None and entry.stale
+
+    def get_crop_region(self):
+        """
+        Return the draft crop rectangle, if any.
+
+        Returns
+        -------
+        RectRegion or None
+        """
+        return self._crop_draft_region
+
+    def get_view_crop(self) -> Optional[ViewCrop]:
+        """
+        Return the active persistent view crop, if any.
+
+        Returns
+        -------
+        ViewCrop or None
+        """
+        return self.plot_model.view_crop
+
     def _on_plot_view_crop_changed(self, crop):
         self.view_crop_changed.emit(crop)
+        model = self.get_single_visible_2d_model()
+        if model is not None and (
+            crop is None or crop.source_key == model._key
+        ):
+            self.plot_data(model)
+        else:
+            self.updatePlot()
 
     def sizeHint(self):
         width = self.width()
@@ -222,7 +406,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 msg.exec_()
                 return False
 
-        if self._dimension != dimension:
+        if self.plot_model.dimension != dimension:
             self.clear()
 
         view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
@@ -268,52 +452,13 @@ class MplCanvas(FigureCanvasQTAgg):
                 norm_keys=norm_keys,
                 indices=self._slice,
                 cube_view_spec=self._cube_view_spec,
-                dimension=self._dimension,
+                dimension=self.plot_model.dimension,
                 emit=False,
             )
             if changed:
                 self.plot_data(plotData)
 
-    def _canvas_is_2d(self):
-        """
-        Return whether the canvas is currently showing 2D image or mesh data.
 
-        Returns
-        -------
-        bool
-            True if active render mode or dimension indicates 2D plotting.
-        """
-        return (
-            self._active_render_mode in ("image", "mesh") or self.currentDim == 2
-        )
-
-    def _mode_is_2d(self, mode):
-        """
-        Return whether a render mode string describes 2D plotting.
-
-        Parameters
-        ----------
-        mode : str
-            Render mode name from :class:`PlotBundle`.
-
-        Returns
-        -------
-        bool
-            True for image or mesh modes.
-        """
-        return mode in ("image", "mesh")
-
-    @property
-    def lock_aspect(self) -> bool:
-        """
-        Whether image plots should use equal data aspect.
-
-        Returns
-        -------
-        bool
-            True when image aspect should be locked.
-        """
-        return self._lock_aspect
 
     def set_lock_aspect(self, locked: bool) -> None:
         """
@@ -468,7 +613,7 @@ class MplCanvas(FigureCanvasQTAgg):
         worker = PlotWorker(
             plotData,
             self._slice,
-            self._dimension,
+            self.plot_model.dimension,
             generation,
             plotData.artist,
             cube_view_spec=self._cube_view_spec,
@@ -727,31 +872,17 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_render_mode = None
         self.axes.set_aspect("auto")
 
-    def set_roi_set_model(self, roi_set: RoiSetModel) -> None:
+    def set_roi_set_model(self) -> None:
         """
         Attach the ROI set model that owns geometry and selection.
         """
-        if self._roi_set is not None:
-            try:
-                self._roi_set.entries_changed.disconnect(self._on_roi_set_changed)
-                self._roi_set.entry_changed.disconnect(self._on_roi_entry_changed)
-                self._roi_set.selection_changed.disconnect(
-                    self._on_roi_selection_changed
-                )
-            except (TypeError, RuntimeError):
-                pass
-        self._roi_set = roi_set
+        roi_set = self.plot_model.roi_set
         roi_set.entries_changed.connect(self._on_roi_set_changed)
         roi_set.entry_changed.connect(self._on_roi_entry_changed)
         roi_set.selection_changed.connect(self._on_roi_selection_changed)
         self._sync_roi_display()
         self.roi_region_changed.emit(self.get_roi_region())
 
-    def get_roi_set_model(self) -> Optional[RoiSetModel]:
-        """
-        Return the attached ROI set model, if any.
-        """
-        return self._roi_set
 
     def apply_roi_from_region(self, region) -> None:
         """
@@ -772,177 +903,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
-
-    def get_single_visible_2d_model(self):
-        """
-        Return the sole visible 2D plot model, if exactly one exists.
-
-        Returns
-        -------
-        PlotDataModel or None
-        """
-        models = []
-        for model in self.plotArtists.values():
-            if not getattr(model, "_visible", False):
-                continue
-            artist = model.artist
-            if artist is None or not artist.get_visible():
-                continue
-            if model.render_mode in ("image", "mesh"):
-                models.append(model)
-        if len(models) == 1:
-            return models[0]
-        return None
-
-    def get_active_plot_bundle(self):
-        """
-        Return the plot bundle for the single visible 2D trace.
-
-        Returns
-        -------
-        PlotBundle or None
-        """
-        model = self.get_single_visible_2d_model()
-        if model is None:
-            return None
-        if model.last_bundle is not None:
-            return model.last_bundle
-        return model.get_plot_bundle(
-            self._slice, self._dimension, self._cube_view_spec
-        )
-
-    def get_view_frame(self) -> PlotViewFrame:
-        """
-        Return the view frame for the current 2D plot.
-
-        Returns
-        -------
-        PlotViewFrame
-
-        Raises
-        ------
-        ValueError
-            If no 2D bundle is available.
-        """
-        bundle = self.get_active_plot_bundle()
-        if bundle is None:
-            raise ValueError("No active 2D plot bundle for ROI")
-        return frame_from_bundle(bundle)
-
-    def region_controls_enabled(self):
-        """
-        Return whether ROI controls should be enabled.
-
-        Returns
-        -------
-        bool
-        """
-        return self._canvas_is_2d() and self.get_single_visible_2d_model() is not None
-
-    def is_roi_draw_enabled(self):
-        """
-        Return whether interactive ROI drawing is active.
-        """
-        return self._roi_draw_enabled
-
-    def is_crop_draw_enabled(self):
-        """
-        Return whether interactive crop drawing is active.
-        """
-        return self._crop_draw_enabled
-
-    def get_roi_region(self):
-        """
-        Return the selected ROI geometry, if any.
-
-        Returns
-        -------
-        RegionDefinition or None
-        """
-        if self._roi_set is None:
-            return None
-        return self._roi_set.selected_region()
-
-    def get_selected_roi_entry(self):
-        """
-        Return the selected :class:`RoiEntry`, if any.
-        """
-        if self._roi_set is None:
-            return None
-        return self._roi_set.selected_entry()
-
-    def is_selected_roi_stale(self) -> bool:
-        """
-        Return whether the selected ROI is marked stale.
-        """
-        entry = self.get_selected_roi_entry()
-        return entry is not None and entry.stale
-
-    def get_crop_region(self):
-        """
-        Return the draft crop rectangle, if any.
-
-        Returns
-        -------
-        RectRegion or None
-        """
-        return self._crop_draft_region
-
-    def get_view_crop(self) -> Optional[ViewCrop]:
-        """
-        Return the active persistent view crop, if any.
-
-        Returns
-        -------
-        ViewCrop or None
-        """
-        return self.plot_model.view_crop
-
-    def set_view_crop(self, crop: Optional[ViewCrop]):
-        """
-        Set or clear the persistent view crop and refresh the plot.
-
-        Parameters
-        ----------
-        crop : ViewCrop or None
-            Crop state to apply to the main display fetch path.
-        """
-        self.plot_model.set_view_crop(crop)
-        model = self.get_single_visible_2d_model()
-        if model is not None and (
-            crop is None or crop.source_key == model._key
-        ):
-            self.plot_data(model)
-            return
-        self.updatePlot()
-
-    def clear_view_crop(self):
-        """
-        Remove the persistent view crop and refresh the plot.
-        """
-        if self.plot_model.view_crop is None:
-            return
-        self.set_view_crop(None)
-
-    def get_full_view_frame_for_crop(self) -> PlotViewFrame:
-        """
-        Return the full plot-plane frame used to commit a view crop.
-
-        When a crop is already active, returns the stored pre-crop frame.
-        Otherwise returns the frame for the current displayed bundle.
-
-        Returns
-        -------
-        PlotViewFrame
-
-        Raises
-        ------
-        ValueError
-            If no 2D bundle is available.
-        """
-        if self._view_crop is not None:
-            return self._view_crop.full_frame
-        return self.get_view_frame()
 
     def _view_crop_for_model(self, plot_data: PlotDataModel) -> Optional[ViewCrop]:
         crop = self._view_crop
@@ -1084,8 +1044,6 @@ class MplCanvas(FigureCanvasQTAgg):
         if spec is None:
             return None
         if self._roi_selector_type == "ellipse":
-            from .roi_types import _region_from_ellipse_selector
-
             return _region_from_ellipse_selector(
                 self._roi_selector,
                 lock_circle=self._ellipse_circle_locked,
@@ -1360,6 +1318,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 )
         else:
             self._update_crop_overlay()
+
     def clear(self):
         """
         Reset axes and artists for a dimension change without painting.
@@ -1634,7 +1593,7 @@ class MplCanvas(FigureCanvasQTAgg):
         if not DEBUG_VARIABLES.get("PRINT_DEBUG"):
             return
         print("\n=== MplCanvas Debug Info ===")
-        print(f"Current Dimension: {self._dimension}")
+        print(f"Current Dimension: {self.plot_model.dimension}")
         print(f"Active Render Mode: {self._active_render_mode}")
         print(f"Current Slice: {self._slice}")
         print(f"plotArtists count: {len(self.plotArtists)}")

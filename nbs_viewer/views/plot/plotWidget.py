@@ -27,26 +27,18 @@ class PlotWidget(QWidget):
         Parent widget.
     """
 
-    def __init__(self, run_list_model, plot_model, parent=None):
+    def __init__(self, presenter, parent=None):
         super().__init__(parent)
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
+        self.run_list_model = self.presenter.run_list
+        self.plot_model = self.presenter.plot
         self._cache_progress_source = None
 
         self.plot_canvas = MplCanvas(
-            self.run_list_model, self.plot_model, self, 5, 4, 100
+            self.presenter, self, 5, 4, 100
         )
         self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
-        self.plot_controls = PlotControls(
-            self.run_list_model, self.plot_canvas, plot_model=self.plot_model
-        )
-
-        tab = self.plot_controls.plot_control_tab
-        self.dimension_control = tab.dimension_control
-        self.roi_panel = tab.roi_panel
-        self.roi_controller = tab.roi_controller
-        self.roi_preview_controller = tab.roi_preview_controller
-        self.derivative_controller = tab.roi_preview_controller
+        self.plot_controls = PlotControls(self.presenter, self.plot_canvas)
 
         self.cache_status_label = QLabel("")
         self.cache_status_label.setObjectName("cacheStatusLabel")

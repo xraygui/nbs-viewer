@@ -33,8 +33,8 @@ class RunDisplayWidget(QWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The run list model to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : Optional[QWidget], optional
         Parent widget, by default None
 
@@ -46,12 +46,12 @@ class RunDisplayWidget(QWidget):
 
     selection_changed = Signal(list, list, list)
 
-    def __init__(self, run_list_model, plot_model, parent: Optional[QWidget] = None):
+    def __init__(self, presenter, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        # Allow full expansion within the panel
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
+        self.run_list_model = presenter.run_list
+        self.plot_model = presenter.plot
         self._show_all = False
         self._linked_mode = True
         self._current_run = None

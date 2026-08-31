@@ -18,22 +18,17 @@ class PlotControls(QWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        Model for the active run list and plot settings
+    presenter : PlotPresenter
+        Plot session presenter.
     plot_canvas : MplCanvas, optional
-        Canvas passed to the plot control tab for dimension and ROI widgets
-    plot_model : PlotModel, optional
-        Plot session model; required when ``plot_canvas`` is set
+        Canvas passed to the plot control tab for dimension and ROI widgets.
     parent : QWidget, optional
         The parent widget, by default None
     """
 
-    def __init__(
-        self, run_list_model, plot_canvas=None, plot_model=None, parent=None
-    ):
+    def __init__(self, presenter, plot_canvas=None, parent=None):
         super().__init__(parent)
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
@@ -43,13 +38,11 @@ class PlotControls(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
 
-        self.plot_control_tab = PlotControlTab(
-            run_list_model, plot_canvas, plot_model=plot_model
-        )
+        self.plot_control_tab = PlotControlTab(presenter, plot_canvas)
 
         self.metadata_tab = QWidget()
         self.metadata_layout = QVBoxLayout(self.metadata_tab)
-        self.metadata_viewer = MetadataViewer(run_list_model)
+        self.metadata_viewer = MetadataViewer(presenter)
         self.metadata_layout.addWidget(self.metadata_viewer)
 
         self.tab_widget.addTab(self.plot_control_tab, "Plot Controls")

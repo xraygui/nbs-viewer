@@ -8,6 +8,8 @@ from qtpy.QtWidgets import (
     QSizePolicy,
 )
 from qtpy.QtCore import Signal
+from nbs_viewer.views.common.panel import CollapsiblePanel
+from nbs_viewer.models.plot.view_crop import crop_status_text
 
 
 class RoiPanel(QWidget):
@@ -20,8 +22,6 @@ class RoiPanel(QWidget):
         Emitted when the draw-crop toggle changes state.
     clear_crop_draft_requested : Signal
         Emitted when the user requests clearing the draft crop rectangle.
-    apply_crop_requested : Signal
-        Emitted when the user requests applying the draft crop.
     clear_crop_requested : Signal
         Emitted when the user requests clearing the applied view crop.
     roi_window_requested : Signal
@@ -30,12 +30,18 @@ class RoiPanel(QWidget):
 
     crop_draw_toggled = Signal(bool)
     clear_crop_draft_requested = Signal()
-    apply_crop_requested = Signal()
     clear_crop_requested = Signal()
     roi_window_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, presenter, canvas, parent=None):
         super().__init__(parent)
+        self.presenter = presenter
+        self.plot_model = presenter.plot
+        self.canvas = canvas
+        self.setup_ui()
+        self.connect_signals()
+
+    def setup_ui(self):
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
@@ -55,7 +61,6 @@ class RoiPanel(QWidget):
         button_row1.setContentsMargins(0, 0, 0, 0)
         button_row1.setSpacing(4)
         self.apply_crop_button = QPushButton("Apply crop")
-        self.apply_crop_button.clicked.connect(self.apply_crop_requested.emit)
         button_row1.addWidget(self.apply_crop_button)
 
         self.clear_crop_button = QPushButton("Clear crop")
@@ -84,6 +89,15 @@ class RoiPanel(QWidget):
         self._panel_enabled = True
         self.set_region_active(False)
 
+    def connect_signals(self):
+        self.crop_draw_toggled.connect(self._on_crop_draw_toggled)
+        self.clear_crop_draft_requested.connect(self._on_clear_crop_draft_requested)
+        self.clear_crop_requested.connect(self._on_clear_crop_requested)
+        self.apply_crop_button.clicked.connect(self._on_apply_crop_requested)
+        self.canvas.crop_region_changed.connect(self._on_crop_region_changed)
+        self.plot_model.view_crop_changed.connect(self._on_view_crop_changed)
+        self.canvas.plot_view_updated.connect(self._on_plot_view_updated)
+
     def set_region_active(self, active: bool):
         """
         Enable or disable crop controls for the current view mode.
@@ -105,6 +119,7 @@ class RoiPanel(QWidget):
                 self.crop_draw_checkbox.setChecked(False)
                 self.crop_draw_checkbox.blockSignals(False)
             self.crop_corners_label.setText("Crop: —")
+            self.canvas.set_crop_draw_enabled(False)
 
     def set_apply_crop_enabled(self, enabled: bool):
         """
@@ -165,10 +180,85 @@ class RoiPanel(QWidget):
         """
         Update the enclosing :class:`CollapsiblePanel` height.
         """
-        from ..common.panel import CollapsiblePanel
 
         panel = self.parentWidget()
         while panel is not None and not isinstance(panel, CollapsiblePanel):
             panel = panel.parentWidget()
         if panel is not None:
             panel.refresh_expanded_size()
+
+    def _on_crop_draw_toggled(self, enabled: bool):
+        if enabled and self.canvas.is_roi_draw_enabled():
+            self.canvas.set_roi_draw_enabled(False)
+        self.canvas.set_crop_draw_enabled(enabled)
+
+    def _on_clear_crop_draft_requested(self):
+        self.canvas.clear_crop_draft()
+        self.clear_crop_corners()
+        self.set_crop_draw_checked(False)
+        self.canvas.set_crop_draw_enabled(False)
+        if self.plot_model.view_crop is None:
+            self.set_status("")
+        self._update_panel_buttons()
+
+    def _on_clear_crop_requested(self):
+        self.plot_model.clear_view_crop()
+        self.set_status("Crop cleared")
+        self._update_panel_buttons()
+
+    def _on_apply_crop_requested(self):
+        region = self.canvas.get_crop_region()
+        if region is None:
+            self.set_status("Draw a crop region before applying crop")
+            return
+        try:
+            crop = self.plot_model.apply_view_crop_from_region(region)
+        except ValueError as exc:
+            self.set_status(str(exc))
+            return
+        self.canvas.set_crop_draw_enabled(False)
+        self.set_crop_draw_checked(False)
+        self.canvas.clear_crop_draft(paint=False)
+        self.clear_crop_corners()
+        self.set_status(crop_status_text(crop))
+        self._update_panel_buttons()
+
+    def _on_crop_region_changed(self, region):
+        self._update_panel_buttons()
+        if region is None:
+            self.clear_crop_corners()
+            return
+        region = region.normalized()
+        self.set_crop_corners(region.x0, region.y0, region.x1, region.y1)
+        width = region.x1 - region.x0
+        height = region.y1 - region.y0
+        if width == 0.0 or height == 0.0:
+            self.set_status("Crop region has zero width or height")
+        elif self.plot_model.view_crop is None:
+            self.set_status("")
+
+    def _on_view_crop_changed(self, _crop):
+        self._update_panel_buttons()
+
+    def _on_plot_view_updated(self):
+        if self.canvas.region_controls_enabled():
+            crop_draw_checked = self.crop_draw_checkbox.isChecked()
+            if crop_draw_checked != self.canvas.is_crop_draw_enabled():
+                self.canvas.set_crop_draw_enabled(crop_draw_checked)
+        self._update_panel_buttons()
+
+    def _update_panel_buttons(self):
+        region_active = self.canvas.region_controls_enabled()
+        has_crop_draft = self.canvas.get_crop_region() is not None
+        self.set_apply_crop_enabled(region_active and has_crop_draft)
+        self.set_clear_crop_enabled(
+            region_active and self.plot_model.view_crop is not None
+        )
+        self.set_roi_window_enabled(region_active)
+        crop = self.plot_model.view_crop
+        if (
+            crop is not None
+            and not self.crop_draw_checkbox.isChecked()
+            and not has_crop_draft
+        ):
+            self.set_status(crop_status_text(crop))

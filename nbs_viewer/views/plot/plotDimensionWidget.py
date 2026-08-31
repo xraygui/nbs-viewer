@@ -216,18 +216,16 @@ class PlotDimensionControl(QWidget):
     cubeViewChanged = Signal(object)
     dimensionChanged = Signal(int)
 
-    def __init__(self, run_list_model, canvas, plot_model, parent=None):
+    def __init__(self, presenter, canvas, parent=None):
         """
         Initialize the dimension control widget.
 
         Parameters
         ----------
-        run_list_model : RunListModel
-            Run membership and available keys.
+        presenter : PlotPresenter
+            Plot session presenter.
         canvas : MplCanvas
             Canvas receiving view state updates.
-        plot_model : PlotModel
-            Plot session owning key selection and cube view state.
         parent : QWidget, optional
             Parent widget, by default None.
         """
@@ -235,8 +233,9 @@ class PlotDimensionControl(QWidget):
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
-        self.run_list_model = run_list_model
-        self.plot_model = plot_model
+        self.presenter = presenter
+        self.run_list_model = presenter.run_list
+        self.plot_model = presenter.plot
         self.canvas = canvas
         self._slice_rows = []
         self._plot_rows = []
@@ -708,7 +707,7 @@ class PlotDimensionControl(QWidget):
         """
         Handle changes to the plot dimension spinbox.
         """
-        old_dim = self.canvas._dimension
+        old_dim = self.plot_model.dimension
         new_dim = self.dimension_spinbox.value()
 
         if self._cube_view_spec is not None and self._shape is not None:

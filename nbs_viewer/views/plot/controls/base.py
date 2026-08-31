@@ -27,6 +27,8 @@ class PlotControlWidget(QWidget):
 
     Parameters
     ----------
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
 
@@ -38,9 +40,11 @@ class PlotControlWidget(QWidget):
 
     state_changed = Signal()
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, presenter, parent=None):
         super().__init__(parent)
-        self.run_list_model = run_list_model
+        self.presenter = presenter
+        self.run_list_model = presenter.run_list
+        self.plot_model = presenter.plot
         # Prefer to expand when the panel allows it; let layout manage height
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._setup_ui()

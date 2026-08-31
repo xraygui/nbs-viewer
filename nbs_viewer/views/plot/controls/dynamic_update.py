@@ -9,14 +9,14 @@ class DynamicUpdateControl(CheckboxFormControl):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The plot model to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
     """
 
-    def __init__(self, run_list_model, parent=None):
-        super().__init__(run_list_model, parent)
+    def __init__(self, presenter, parent=None):
+        super().__init__(presenter, parent)
         self._checkbox.setChecked(self.run_list_model.dynamic_update)
 
     def _setup_ui(self) -> None:

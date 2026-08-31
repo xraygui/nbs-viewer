@@ -139,7 +139,7 @@ class PlotDisplay(QWidget):
         QWidget
             The created plot widget
         """
-        return PlotWidget(self.run_list_model, self.plot_model)
+        return PlotWidget(self.presenter)
 
 
 class ImageGridDisplay(PlotDisplay):
@@ -151,4 +151,4 @@ class ImageGridDisplay(PlotDisplay):
     __single_selection_mode__ = True
 
     def _create_plot_widget(self):
-        return ImageGridWidget(self.run_list_model, self.plot_model)
+        return ImageGridWidget(self.presenter)

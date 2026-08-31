@@ -29,6 +29,7 @@ from qtpy.QtCore import QObject, Signal
 from nbs_viewer.utils import print_debug
 
 from .cube_view import (
+    _fetch_plot_plane_storage_axes,
     classify_profile_kind,
     default_profile_label,
     is_plot_plane_storage_axis,
@@ -36,9 +37,10 @@ from .cube_view import (
 )
 from .derived_fetch import build_roi_profile_request_from_operation
 from .plotDataModel import PlotDataModel
-from .region import RectRegion
+from .plot_view_frame import PlotViewFrame, frame_from_bundle
+from .region import RectRegion, RegionDefinition
 from .roi_set import RoiEntry, RoiSetModel
-from .view_crop import ViewCrop
+from .view_crop import ViewCrop, view_crop_from_region
 
 if TYPE_CHECKING:
     from .cube_view import CubeViewSpec, MaterializeRequest
@@ -331,6 +333,139 @@ class PlotModel(QObject):
         if self._view_crop is None:
             return
         self.set_view_crop(None)
+
+    def apply_view_crop_from_region(
+        self,
+        region: RegionDefinition,
+        *,
+        plot_data: Optional[PlotDataModel] = None,
+    ) -> ViewCrop:
+        """
+        Commit a drawn rectangle to the persistent view crop.
+
+        Parameters
+        ----------
+        region : RegionDefinition
+            Crop rectangle in matplotlib data coordinates on the oriented plot
+            plane. Only :class:`RectRegion` is supported.
+        plot_data : PlotDataModel, optional
+            Parent 2D plot-data model. Defaults to the sole visible 2D model.
+
+        Returns
+        -------
+        ViewCrop
+            Applied crop state.
+
+        Raises
+        ------
+        ValueError
+            If the region is invalid or crop context cannot be resolved.
+        """
+        if self._view_crop is not None:
+            raise ValueError("Clear the current crop before applying a new one")
+        if not isinstance(region, RectRegion):
+            raise ValueError("Crop region must be a rectangle")
+        region = region.normalized()
+        width = region.x1 - region.x0
+        height = region.y1 - region.y0
+        if width == 0.0 or height == 0.0:
+            raise ValueError("Crop region has zero width or height")
+
+        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+        parent_spec = self._cube_view_spec
+        if parent_spec is None:
+            raise ValueError("Select a single 2D dataset")
+
+        full_frame = self._resolve_full_view_frame_for_crop(plot_data)
+        slice_info = parent_spec.to_load_slice_info()
+        xlist, _names, _extra = plot_data._run.get_dimension_axes(
+            plot_data._ykey,
+            [plot_data._xkey],
+            slice_info,
+        )
+        plot_y_axis, plot_x_axis = _fetch_plot_plane_storage_axes(
+            parent_spec,
+            full_frame,
+            parent_spec,
+        )
+        crop = view_crop_from_region(
+            region,
+            full_frame,
+            parent_spec,
+            plot_data._key,
+            xlist[plot_y_axis],
+            xlist[plot_x_axis],
+        )
+        self.set_view_crop(crop)
+        return crop
+
+    def invalidate_view_crop_if_invalid(self) -> Optional[str]:
+        """
+        Clear the view crop when the current plot context no longer matches it.
+
+        Returns
+        -------
+        str or None
+            Reason the crop was cleared, or ``None`` if the crop remains valid.
+        """
+        crop = self._view_crop
+        if crop is None:
+            return None
+        plot_data = self.resolve_single_visible_2d_plot_data()
+        if plot_data is None or plot_data._key != crop.source_key:
+            self.clear_view_crop()
+            return "dataset changed"
+        parent_spec = self._cube_view_spec
+        if parent_spec is None:
+            self.clear_view_crop()
+            return "view no longer available"
+        try:
+            plot_y_axis, plot_x_axis = _fetch_plot_plane_storage_axes(
+                parent_spec,
+                crop.full_frame,
+                parent_spec,
+            )
+        except ValueError:
+            self.clear_view_crop()
+            return "plot axes changed"
+        if (
+            plot_y_axis != crop.plot_y_axis
+            or plot_x_axis != crop.plot_x_axis
+        ):
+            self.clear_view_crop()
+            return "plot axes changed"
+        return None
+
+    def _resolve_full_view_frame_for_crop(
+        self,
+        plot_data: PlotDataModel,
+    ) -> PlotViewFrame:
+        """
+        Return the full oriented plot-plane frame used to commit a view crop.
+
+        Parameters
+        ----------
+        plot_data : PlotDataModel
+            Parent 2D plot-data model for the crop.
+
+        Returns
+        -------
+        PlotViewFrame
+            Full plane before crop is applied.
+
+        Raises
+        ------
+        ValueError
+            If no suitable 2D bundle is available.
+        """
+        if self._view_crop is not None:
+            return self._view_crop.full_frame
+        bundle = plot_data.last_bundle
+        if bundle is None or bundle.ndim != 2:
+            raise ValueError("Select a single 2D dataset")
+        return frame_from_bundle(bundle)
 
     def ensure_plot_data(
         self,

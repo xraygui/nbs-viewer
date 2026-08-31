@@ -9,15 +9,14 @@ class RetainSelectionControl(CheckboxFormControl):
 
     Parameters
     ----------
-    plot_model : PlotModel
-        The plot session to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
     """
 
-    def __init__(self, plot_model, parent=None):
-        self.plot_model = plot_model
-        super().__init__(plot_model, parent)
+    def __init__(self, presenter, parent=None):
+        super().__init__(presenter, parent)
         self._checkbox.setChecked(self.plot_model.retain_selection)
 
     def _setup_ui(self) -> None:

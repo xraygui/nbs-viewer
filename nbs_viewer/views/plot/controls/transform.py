@@ -23,8 +23,8 @@ class TransformControl(PlotControlWidget):
 
     Parameters
     ----------
-    plot_model : PlotModel
-        The plot session to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
     """
@@ -43,20 +43,19 @@ class TransformControl(PlotControlWidget):
         "Log(1/y)": "log(1/y)",
     }
 
-    def __init__(self, plot_model, parent=None):
+    def __init__(self, presenter, parent=None):
         """
         Initialize the widget.
 
         Parameters
         ----------
-        plot_model : PlotModel
-            The plot session to control
+        presenter : PlotPresenter
+            Plot session presenter.
         parent : QWidget, optional
             Parent widget, by default None
         """
-        self.plot_model = plot_model
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
-        super().__init__(plot_model, parent)
+        super().__init__(presenter, parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         # Set initial state from model
         transform_state = self.plot_model.transform
