@@ -1,12 +1,11 @@
 from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 from .panel import RoiPanel
-from .preview_controller import RoiPreviewController
 
 
 class CropControlWidget(QWidget):
     """
-    Crop panel and preview controller coordinating canvas, dimensions, and ROI state.
+    Crop panel for inline region controls and ROI workbench launcher.
 
     Parameters
     ----------
@@ -30,13 +29,10 @@ class CropControlWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.panel = RoiPanel(presenter, plot_canvas, self)
-        layout.addWidget(self.panel)
-
-        self.roi_preview_controller = RoiPreviewController(
-            plot_canvas,
-            dimension_control,
-            self.panel,
+        self.panel = RoiPanel(
             presenter,
-            self,
+            plot_canvas,
+            dimension_control=dimension_control,
+            parent=self,
         )
+        layout.addWidget(self.panel)

@@ -154,7 +154,6 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_render_mode = None
         self._colorbar_state = {}
         self.currentDim = 1
-        self._roi_set: Optional[RoiSetModel] = None
         self._roi_selector = None
         self._roi_selector_type: Optional[str] = None
         self._roi_overlays = {}
@@ -176,6 +175,19 @@ class MplCanvas(FigureCanvasQTAgg):
         self.plot_model.region_invalidation_requested.connect(
             self._on_region_invalidation_requested
         )
+        self.plot_model.roi_draw_enabled_changed.connect(
+            self._apply_roi_draw_enabled
+        )
+        self.plot_model.ellipse_circle_locked_changed.connect(
+            self.set_ellipse_circle_locked
+        )
+        self.plot_model.roi_live_region_sync_requested.connect(
+            self._sync_live_roi_region
+        )
+        roi_set = self.plot_model.roi_set
+        roi_set.entries_changed.connect(self._on_roi_set_changed)
+        roi_set.entry_changed.connect(self._on_roi_entry_changed)
+        roi_set.selection_changed.connect(self._on_roi_selection_changed)
 
     @property
     def plotArtists(self):
@@ -311,7 +323,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Return whether interactive ROI drawing is active.
         """
-        return self._roi_draw_enabled
+        return self.plot_model.is_roi_draw_enabled()
 
     def is_crop_draw_enabled(self):
         """
@@ -375,6 +387,21 @@ class MplCanvas(FigureCanvasQTAgg):
             self.plot_data(model)
         else:
             self.updatePlot()
+
+    @property
+    def _roi_set(self) -> RoiSetModel:
+        """
+        ROI set owned by the plot session model.
+        """
+        return self.plot_model.roi_set
+
+    def _sync_live_roi_region(self):
+        if not self._roi_draw_enabled:
+            return
+        region = self._roi_region_from_active_selector()
+        if region is None or not region.has_area():
+            return
+        self._commit_roi_region(region)
 
     def sizeHint(self):
         width = self.width()
@@ -698,7 +725,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.draw()
 
     def _on_region_invalidation_requested(self, _reason: str):
-        self.set_roi_draw_enabled(False)
+        self.plot_model.set_roi_draw_enabled(False)
         self.clear_crop_draft(paint=False)
         self.set_crop_draw_enabled(False)
 
@@ -883,12 +910,8 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def set_roi_set_model(self) -> None:
         """
-        Attach the ROI set model that owns geometry and selection.
+        Refresh ROI overlays from the plot session ROI set.
         """
-        roi_set = self.plot_model.roi_set
-        roi_set.entries_changed.connect(self._on_roi_set_changed)
-        roi_set.entry_changed.connect(self._on_roi_entry_changed)
-        roi_set.selection_changed.connect(self._on_roi_selection_changed)
         self._sync_roi_display()
         self.roi_region_changed.emit(self.get_roi_region())
 
@@ -959,6 +982,12 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Enable or disable interactive ROI rectangle drawing.
         """
+        self.plot_model.set_roi_draw_enabled(enabled)
+
+    def _apply_roi_draw_enabled(self, enabled: bool):
+        """
+        Apply ROI draw mode from :class:`PlotModel`.
+        """
         enabled = bool(enabled)
         if enabled and self._crop_draw_enabled:
             self.set_crop_draw_enabled(False)
@@ -985,7 +1014,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         enabled = bool(enabled)
         if enabled and self._roi_draw_enabled:
-            self.set_roi_draw_enabled(False)
+            self.plot_model.set_roi_draw_enabled(False)
         if enabled == self._crop_draw_enabled:
             return
         self._crop_draw_enabled = enabled
@@ -1074,6 +1103,9 @@ class MplCanvas(FigureCanvasQTAgg):
             )
         elif hasattr(region, "normalized"):
             region = region.normalized()
+        selected = self._roi_set.selected_entry()
+        if selected is not None and selected.region == region:
+            return
         self._roi_set.set_or_replace_single(
             region,
             view_fingerprint=self.current_view_fingerprint(),

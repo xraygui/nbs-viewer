@@ -35,14 +35,14 @@ from .cube_view import (
     is_plot_plane_storage_axis,
     scan_profile_storage_axis,
 )
-from .derived_fetch import build_roi_profile_request_from_operation
+from .derived_fetch import _profile_uses_nd_load, build_roi_profile_request_from_operation
 from .plotDataModel import PlotDataModel
 from .plot_view_frame import (
     PlotViewFrame,
     frame_from_bundle,
     view_fingerprint_from_bundle,
 )
-from .region import RectRegion, RegionDefinition
+from .region import RectRegion, RegionDefinition, expand_region_for_profile
 from .roi_set import RoiEntry, RoiSetModel
 from .view_crop import ViewCrop, view_crop_from_region
 
@@ -73,6 +73,9 @@ class PlotModel(QObject):
     view_crop_changed = Signal(object)
     region_status_changed = Signal(str)
     region_invalidation_requested = Signal(str)
+    roi_draw_enabled_changed = Signal(bool)
+    ellipse_circle_locked_changed = Signal(bool)
+    roi_live_region_sync_requested = Signal()
     plot_data_added = Signal(object)
     plot_data_removed = Signal(object)
 
@@ -91,6 +94,8 @@ class PlotModel(QObject):
         self._slice = None
         self._cube_view_spec = None
         self._view_crop: Optional[ViewCrop] = None
+        self._roi_draw_enabled = False
+        self._ellipse_circle_locked = False
 
         self._plot_data: Dict[Tuple[str, str, str], PlotDataModel] = {}
         self._connected_run_uids = set()
@@ -646,6 +651,159 @@ class PlotModel(QObject):
         if len(models) == 1:
             return models[0]
         return None
+
+    def is_roi_draw_enabled(self) -> bool:
+        """
+        Return whether interactive ROI drawing is requested on the parent plot.
+        """
+        return self._roi_draw_enabled
+
+    def set_roi_draw_enabled(self, enabled: bool) -> None:
+        """
+        Request interactive ROI drawing on the parent plot view.
+
+        Parameters
+        ----------
+        enabled : bool
+            True to enable ROI drawing.
+        """
+        enabled = bool(enabled)
+        if enabled == self._roi_draw_enabled:
+            return
+        self._roi_draw_enabled = enabled
+        self.roi_draw_enabled_changed.emit(enabled)
+
+    def is_ellipse_circle_locked(self) -> bool:
+        """
+        Return whether ellipse ROI drawing is locked to a circle.
+        """
+        return self._ellipse_circle_locked
+
+    def set_ellipse_circle_locked(self, locked: bool) -> None:
+        """
+        Request circle-locked ellipse ROI drawing on the parent plot.
+
+        Parameters
+        ----------
+        locked : bool
+            True to lock ellipse drawing to a circle.
+        """
+        locked = bool(locked)
+        if locked == self._ellipse_circle_locked:
+            return
+        self._ellipse_circle_locked = locked
+        self.ellipse_circle_locked_changed.emit(locked)
+
+    def request_roi_live_region_sync(self) -> None:
+        """
+        Ask the parent plot view to commit any in-progress ROI draw geometry.
+        """
+        self.roi_live_region_sync_requested.emit()
+
+    def resolve_parent_frame(
+        self,
+        plot_data: Optional[PlotDataModel] = None,
+    ) -> Optional[PlotViewFrame]:
+        """
+        Return the view frame for the visible 2D plot-data model.
+
+        Parameters
+        ----------
+        plot_data : PlotDataModel, optional
+            Plot-data model. Defaults to the sole visible 2D model.
+
+        Returns
+        -------
+        PlotViewFrame or None
+        """
+        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None or plot_data.last_bundle is None:
+            return None
+        try:
+            return frame_from_bundle(plot_data.last_bundle)
+        except ValueError:
+            return None
+
+    def cached_parent_bundle_for_preview(
+        self,
+        plot_data: PlotDataModel,
+        request: Optional["MaterializeRequest"] = None,
+    ) -> Optional["PlotBundle"]:
+        """
+        Return a cached parent bundle when it still matches the plot session.
+
+        Parameters
+        ----------
+        plot_data : PlotDataModel
+            Parent plot-data model.
+        request : MaterializeRequest, optional
+            Preview request. ND loads skip the parent-bundle cache.
+
+        Returns
+        -------
+        PlotBundle or None
+        """
+        if plot_data.last_bundle is None:
+            return None
+        if plot_data._cube_view_spec != self._cube_view_spec:
+            return None
+        if plot_data._indices != self._slice:
+            return None
+        if request is not None and _profile_uses_nd_load(request, self._cube_view_spec):
+            return None
+        return plot_data.last_bundle
+
+    def apply_roi_region_to_selected(self, region: RegionDefinition) -> None:
+        """
+        Update the selected ROI geometry from a region in data coordinates.
+
+        Parameters
+        ----------
+        region : RegionDefinition
+            ROI geometry on the oriented plot plane.
+
+        Raises
+        ------
+        ValueError
+            If no ROI is selected.
+        """
+        entry = self._roi_set.selected_entry()
+        if entry is None:
+            raise ValueError("Select an ROI")
+        if hasattr(region, "normalized"):
+            region = region.normalized()
+        self._roi_set.update_region(
+            entry.id,
+            region,
+            view_fingerprint=self.resolve_current_view_fingerprint(),
+            clear_stale=True,
+        )
+
+    def apply_expanded_roi_profile_span(self, profile_axis: str) -> None:
+        """
+        Expand the selected ROI along a plot axis for span-full profile actions.
+
+        Parameters
+        ----------
+        profile_axis : str
+            ``plot_x`` or ``plot_y``.
+
+        Raises
+        ------
+        ValueError
+            If the ROI or parent view frame is unavailable.
+        """
+        entry = self._roi_set.selected_entry()
+        if entry is None:
+            raise ValueError("Select an ROI")
+        region = entry.region
+        if not region.has_area():
+            raise ValueError("Draw an ROI on the parent plot first")
+        frame = self.resolve_parent_frame()
+        if frame is None:
+            raise ValueError("Select a single 2D dataset")
+        expanded = expand_region_for_profile(frame, region, profile_axis)
+        self.apply_roi_region_to_selected(expanded)
 
     def resolve_roi_entry(self, entry_id: Optional[str] = None) -> RoiEntry:
         """

@@ -288,6 +288,8 @@ class RoiSetModel(QObject):
         if entry is None:
             return None
         updated = replace(entry, **changes)
+        if updated == entry:
+            return entry
         self._entries[entry_id] = updated
         self.entry_changed.emit(entry_id)
         return updated

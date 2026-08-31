@@ -33,11 +33,12 @@ class RoiPanel(QWidget):
     clear_crop_requested = Signal()
     roi_window_requested = Signal()
 
-    def __init__(self, presenter, canvas, parent=None):
+    def __init__(self, presenter, canvas, dimension_control=None, parent=None):
         super().__init__(parent)
         self.presenter = presenter
         self.plot_model = presenter.plot
         self.canvas = canvas
+        self.dimension_control = dimension_control
         self.setup_ui()
         self.connect_signals()
 
@@ -100,6 +101,19 @@ class RoiPanel(QWidget):
         self.plot_model.region_status_changed.connect(self.set_status)
         self.plot_model.region_invalidation_requested.connect(
             self._on_region_invalidation_requested
+        )
+        self.plot_model.roi_draw_enabled_changed.connect(
+            self._on_roi_draw_enabled_changed
+        )
+        self.roi_window_requested.connect(self._on_roi_window_requested)
+
+    def _on_roi_window_requested(self):
+        from .window import RoiWindow
+
+        RoiWindow.open_or_raise(
+            self.presenter,
+            parent=self.window(),
+            dimension_control=self.dimension_control,
         )
 
     def set_region_active(self, active: bool):
@@ -191,9 +205,14 @@ class RoiPanel(QWidget):
         if panel is not None:
             panel.refresh_expanded_size()
 
+    def _on_roi_draw_enabled_changed(self, enabled: bool):
+        if enabled:
+            self.set_crop_draw_checked(False)
+            self.canvas.set_crop_draw_enabled(False)
+
     def _on_crop_draw_toggled(self, enabled: bool):
-        if enabled and self.canvas.is_roi_draw_enabled():
-            self.canvas.set_roi_draw_enabled(False)
+        if enabled and self.plot_model.is_roi_draw_enabled():
+            self.plot_model.set_roi_draw_enabled(False)
         self.canvas.set_crop_draw_enabled(enabled)
 
     def _on_clear_crop_draft_requested(self):

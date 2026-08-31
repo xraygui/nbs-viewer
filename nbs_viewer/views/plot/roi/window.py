@@ -1,12 +1,13 @@
 """
-Non-modal ROI workbench window bound to :class:`RoiSetModel`.
+Non-modal ROI workbench window bound to a plot session presenter.
 """
 
 from __future__ import annotations
 
+import weakref
 from typing import Optional, Sequence
 
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QColor, QBrush
 from qtpy.QtWidgets import (
     QButtonGroup,
@@ -35,12 +36,11 @@ from nbs_viewer.models.plot.cube_view import (
     scan_profile_storage_axis,
     storage_axis_to_plot_axis,
 )
-from nbs_viewer.models.plot.derived_fetch import build_roi_profile_request_from_operation
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
 from nbs_viewer.models.plot.region import RegionDefinition
-from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation, RoiSetModel
+from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation
 
-from .preview_canvas import RoiPreviewCanvas
+from .preview_canvas import RoiPreviewCanvas, RoiPreviewWorker
 from .types import (
     DescribeOptionsWidget,
     EllipseOptionsWidget,
@@ -52,58 +52,48 @@ from .types import (
 
 class RoiWindow(QDialog):
     """
-    Dedicated ROI workbench: list, reduction options, and selected-ROI preview.
+    Dedicated ROI workbench: list, reduction options, preview, and commit.
 
-    Signals
-    -------
-    draw_toggled : bool
-        Emitted when the Draw toggle changes.
-    clear_requested : Signal
-        Emitted when Clear (all ROIs) is requested.
-    delete_requested : Signal
-        Emitted when Delete (selected) is requested.
-    remove_stale_requested : Signal
-        Emitted when Remove stale is requested.
-    add_roi_requested : str
-        Emitted with the region type id to add.
-    operation_changed : Signal
-        Emitted when the selected ROI's reduction options change.
-    preview_enabled_changed : bool
-        Emitted when the preview checkbox toggles.
-    save_selected_requested : Signal
-        Emitted when Save selected is clicked.
-    save_all_requested : Signal
-        Emitted when Save all is clicked.
-    full_height_requested : Signal
-        Emitted when Set ROI: full height is clicked.
-    full_width_requested : Signal
-        Emitted when Set ROI: full width is clicked.
+    Parameters
+    ----------
+    presenter : PlotPresenter
+        Plot session presenter.
+    parent : QWidget, optional
+        Parent window.
+    dimension_control : PlotDimensionControl, optional
+        Dimension editor supplying storage axis names for profile controls.
     """
 
-    draw_toggled = Signal(bool)
-    clear_requested = Signal()
-    delete_requested = Signal()
-    remove_stale_requested = Signal()
-    add_roi_requested = Signal(str)
-    operation_changed = Signal()
-    preview_enabled_changed = Signal(bool)
-    save_selected_requested = Signal()
-    save_all_requested = Signal()
-    full_height_requested = Signal()
-    full_width_requested = Signal()
-    ellipse_circle_lock_changed = Signal(bool)
+    _instances: "weakref.WeakValueDictionary[str, RoiWindow]" = weakref.WeakValueDictionary()
 
-    def __init__(self, roi_set: RoiSetModel, parent=None):
+    def __init__(self, presenter, parent=None, dimension_control=None):
         super().__init__(parent)
         self.setWindowTitle("Regions of Interest")
         self.setModal(False)
         self.setMinimumSize(760, 640)
-        self._roi_set = roi_set
+        self.presenter = presenter
+        self.plot_model = presenter.plot
+        self.dimension_control = dimension_control
         self._parent_spec: Optional[CubeViewSpec] = None
         self._axis_names: Sequence[str] = ()
         self._parent_frame: Optional[PlotViewFrame] = None
         self._loading_form = False
         self._shape_options: Optional[ShapeOptionsWidget] = None
+        self._active_worker = None
+        self._commit_worker = None
+        self._pending_workers = set()
+        self._generation = 0
+        self._commit_generation = 0
+        self._pending_commit_request = None
+        self._pending_commit_entry_id = None
+        self._pending_commit_plot_data = None
+        self._save_all_queue = []
+        self._connected_plot_data = None
+
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(150)
+        self._debounce_timer.timeout.connect(self._run_preview)
 
         root = QVBoxLayout(self)
 
@@ -249,17 +239,17 @@ class RoiWindow(QDialog):
         root.addLayout(footer)
 
         self.add_button.clicked.connect(self._on_add_clicked)
-        self.draw_button.toggled.connect(self.draw_toggled.emit)
-        self.clear_button.clicked.connect(self.clear_requested.emit)
-        self.delete_button.clicked.connect(self.delete_requested.emit)
-        self.remove_stale_button.clicked.connect(self.remove_stale_requested.emit)
+        self.draw_button.toggled.connect(self._on_draw_toggled)
+        self.clear_button.clicked.connect(self._on_clear_clicked)
+        self.delete_button.clicked.connect(self._on_delete_clicked)
+        self.remove_stale_button.clicked.connect(self._on_remove_stale_clicked)
         self.entry_list.currentItemChanged.connect(self._on_list_selection_changed)
         self.close_button.clicked.connect(self.close)
-        self.save_selected_button.clicked.connect(self.save_selected_requested.emit)
-        self.save_all_button.clicked.connect(self.save_all_requested.emit)
-        self.full_height_button.clicked.connect(self.full_height_requested.emit)
-        self.full_width_button.clicked.connect(self.full_width_requested.emit)
-        self.preview_checkbox.toggled.connect(self._on_preview_toggled)
+        self.save_selected_button.clicked.connect(self._on_save_selected)
+        self.save_all_button.clicked.connect(self._on_save_all)
+        self.full_height_button.clicked.connect(self._apply_roi_full_height)
+        self.full_width_button.clicked.connect(self._apply_roi_full_width)
+        self.preview_checkbox.toggled.connect(self._on_preview_checkbox_toggled)
         self._shape_options.region_edited.connect(self._on_shape_region_edited)
 
         for widget in (self.mask_inside, self.mask_outside):
@@ -269,14 +259,422 @@ class RoiWindow(QDialog):
         self.span_full_checkbox.toggled.connect(self._on_form_changed)
         self.label_edit.textChanged.connect(self._on_form_changed)
 
-        roi_set.entries_changed.connect(self.refresh_entry_list)
-        roi_set.entry_changed.connect(self._on_entry_changed)
-        roi_set.selection_changed.connect(self._on_model_selection_changed)
+        self.roi_set.entries_changed.connect(self.refresh_entry_list)
+        self.roi_set.entry_changed.connect(self._on_entry_changed)
+        self.roi_set.selection_changed.connect(self._on_model_selection_changed)
+        self.plot_model.cube_view_changed.connect(self._on_view_context_changed)
+        self.plot_model.view_crop_changed.connect(self._on_view_context_changed)
+        self.plot_model.roi_draw_enabled_changed.connect(self._on_model_roi_draw_changed)
+        self.finished.connect(self._on_finished)
 
         self.refresh_entry_list()
         self._load_selected_into_form()
         self._update_form_enabled()
         self._update_controls_minimum_sizes()
+
+    @property
+    def roi_set(self):
+        """
+        ROI set owned by the plot session.
+        """
+        return self.plot_model.roi_set
+
+    @classmethod
+    def open_or_raise(cls, presenter, parent=None, dimension_control=None):
+        """
+        Show the ROI workbench for a presenter, creating it when needed.
+
+        Parameters
+        ----------
+        presenter : PlotPresenter
+            Plot session presenter.
+        parent : QWidget, optional
+            Parent window.
+        dimension_control : PlotDimensionControl, optional
+            Dimension editor for axis-name context.
+
+        Returns
+        -------
+        RoiWindow
+            Active workbench window.
+        """
+        window = cls._instances.get(presenter.id)
+        if window is None:
+            window = cls(
+                presenter,
+                parent=parent,
+                dimension_control=dimension_control,
+            )
+            cls._instances[presenter.id] = window
+        window._connect_plot_data_signals()
+        window.refresh_context()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        window._trigger_initial_preview()
+        return window
+
+    def _dimension_axis_names(self):
+        if self.dimension_control is not None:
+            names = self.dimension_control._dim_names
+            if names is not None:
+                return names
+        return ()
+
+    def _connect_plot_data_signals(self):
+        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
+        if plot_data is self._connected_plot_data:
+            return
+        self._disconnect_plot_data_signals()
+        self._connected_plot_data = plot_data
+        if plot_data is not None:
+            plot_data.data_changed.connect(self._schedule_preview)
+
+    def _disconnect_plot_data_signals(self):
+        plot_data = self._connected_plot_data
+        self._connected_plot_data = None
+        if plot_data is None:
+            return
+        try:
+            plot_data.data_changed.disconnect(self._schedule_preview)
+        except (TypeError, RuntimeError):
+            pass
+
+    def refresh_context(self):
+        """
+        Refresh source summary and profile-axis controls from the plot model.
+        """
+        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            source = "No single 2D dataset selected"
+        else:
+            source = f"{plot_data.label} · {plot_data._ykey}"
+        self.set_context(source)
+
+        parent_spec = self.plot_model.cube_view_spec
+        parent_frame = self.plot_model.resolve_parent_frame(plot_data)
+        self.set_profile_context(
+            parent_spec,
+            self._dimension_axis_names(),
+            parent_frame,
+        )
+        if self.plot_model.is_roi_draw_enabled() != self.draw_button.isChecked():
+            self.set_draw_checked(self.plot_model.is_roi_draw_enabled())
+
+    def _on_finished(self):
+        self._cancel_preview_worker()
+        self._cancel_commit_worker()
+        self._save_all_queue.clear()
+        self._disconnect_plot_data_signals()
+        self.plot_model.set_roi_draw_enabled(False)
+        self.plot_model.set_ellipse_circle_locked(False)
+        self.set_draw_checked(False)
+
+    def _on_view_context_changed(self, *_args):
+        if not self.isVisible():
+            return
+        self._connect_plot_data_signals()
+        self.refresh_context()
+        self._schedule_preview()
+
+    def _on_draw_toggled(self, enabled: bool):
+        self.plot_model.set_roi_draw_enabled(enabled)
+
+    def _on_model_roi_draw_changed(self, enabled: bool):
+        self.set_draw_checked(enabled)
+        if not enabled:
+            self._schedule_preview()
+
+    def _on_clear_clicked(self):
+        self.plot_model.set_roi_draw_enabled(False)
+        self.set_draw_checked(False)
+        self.roi_set.clear()
+        self.set_status("Cleared all ROIs")
+        self.show_preview_message("No ROI selected")
+
+    def _on_delete_clicked(self):
+        entry = self.roi_set.selected_entry()
+        if entry is None:
+            return
+        self.roi_set.remove(entry.id)
+        self.set_status(f"Deleted {entry.display_label}")
+
+    def _on_remove_stale_clicked(self):
+        removed = self.roi_set.remove_stale()
+        if removed:
+            self.set_status(f"Removed {removed} stale ROI(s)")
+        else:
+            self.set_status("No stale ROIs")
+
+    def _on_save_selected(self):
+        self._save_all_queue.clear()
+        self._start_commit(self.roi_set.selected_id)
+
+    def _on_save_all(self):
+        self._save_all_queue = [
+            entry.id
+            for entry in self.roi_set.entries()
+            if not entry.stale and entry.region.has_area()
+        ]
+        if not self._save_all_queue:
+            self.set_status("No drawable ROIs to save")
+            return
+        self._start_commit(self._save_all_queue.pop(0))
+
+    def _schedule_preview(self, *_args):
+        if not self.isVisible() or not self.is_preview_enabled():
+            return
+        self._debounce_timer.stop()
+        self._debounce_timer.start()
+
+    def _trigger_initial_preview(self):
+        self._debounce_timer.stop()
+        if not self.is_preview_enabled():
+            return
+        self.show_preview_message("Updating preview…")
+        QTimer.singleShot(0, self._run_preview)
+
+    def _start_preview_worker(self, generation: int, entry, span_full_override=None):
+        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+
+        parent_spec = self.plot_model.cube_view_spec
+        request = self.plot_model.build_roi_profile_request(
+            entry,
+            parent_spec=parent_spec,
+            parent_frame=self.plot_model.resolve_parent_frame(plot_data),
+            span_full_override=span_full_override,
+            default_profile_axis=self.get_profile_storage_axis(),
+        )
+
+        return RoiPreviewWorker(
+            plot_data,
+            request,
+            generation,
+            self,
+            parent_spec=parent_spec,
+            parent_bundle=self.plot_model.cached_parent_bundle_for_preview(
+                plot_data,
+                request,
+            ),
+            view_crop=self.plot_model.view_crop,
+        )
+
+    def _run_preview(self):
+        if not self.is_preview_enabled():
+            self._cancel_preview_worker()
+            self.show_preview_message("Preview disabled")
+            return
+
+        if self.plot_model.is_roi_draw_enabled():
+            self.plot_model.request_roi_live_region_sync()
+
+        try:
+            entry = self.plot_model.resolve_roi_entry()
+        except ValueError as exc:
+            self.show_preview_message(str(exc))
+            self.set_status("")
+            return
+
+        if self.plot_model.resolve_single_visible_2d_plot_data() is None:
+            self.show_preview_message("Select a single 2D dataset")
+            self.set_status("")
+            return
+
+        self._cancel_preview_worker()
+        self._generation += 1
+        generation = self._generation
+
+        try:
+            worker = self._start_preview_worker(generation, entry)
+        except ValueError as exc:
+            self.show_preview_message("Preview unavailable")
+            self.set_status(str(exc))
+            return
+
+        worker.preview_ready.connect(self._on_preview_ready)
+        worker.error_occurred.connect(self._on_preview_error)
+        worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
+        self._active_worker = worker
+        self._pending_workers.add(worker)
+        self.set_status("Updating preview…")
+        worker.start()
+
+    def _cancel_preview_worker(self):
+        worker = self._active_worker
+        self._active_worker = None
+        if worker is None:
+            return
+        try:
+            worker.preview_ready.disconnect(self._on_preview_ready)
+            worker.error_occurred.disconnect(self._on_preview_error)
+        except (TypeError, RuntimeError):
+            pass
+        worker.requestInterruption()
+        if worker.isRunning():
+
+            def _cleanup():
+                self._pending_workers.discard(worker)
+                worker.deleteLater()
+
+            worker.finished.connect(_cleanup)
+        else:
+            self._pending_workers.discard(worker)
+            worker.deleteLater()
+
+    def _cancel_commit_worker(self):
+        worker = self._commit_worker
+        self._commit_worker = None
+        if worker is None:
+            return
+        try:
+            worker.preview_ready.disconnect(self._on_commit_ready)
+            worker.error_occurred.disconnect(self._on_commit_error)
+        except (TypeError, RuntimeError):
+            pass
+        worker.requestInterruption()
+        if worker.isRunning():
+
+            def _cleanup():
+                self._pending_workers.discard(worker)
+                worker.deleteLater()
+
+            worker.finished.connect(_cleanup)
+        else:
+            self._pending_workers.discard(worker)
+            worker.deleteLater()
+
+    def _on_worker_finished(self, worker):
+        self._pending_workers.discard(worker)
+        if self._active_worker is worker:
+            self._active_worker = None
+        if self._commit_worker is worker:
+            self._commit_worker = None
+
+    def _on_preview_ready(self, bundle, generation):
+        if generation != self._generation:
+            return
+        if not self.is_preview_enabled():
+            return
+        self.show_preview_bundle(bundle)
+        self.set_status("")
+
+    def _on_preview_error(self, message, generation):
+        if generation != self._generation:
+            return
+        self.show_preview_message("Preview unavailable")
+        self.set_status(message)
+
+    def _start_commit(self, entry_id):
+        if entry_id is None:
+            return
+
+        try:
+            entry = self.plot_model.resolve_roi_entry(entry_id)
+        except ValueError as exc:
+            self.set_status(str(exc))
+            self._save_all_queue.clear()
+            return
+
+        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            self.set_status("Select a single 2D dataset")
+            return
+
+        parent_spec = self.plot_model.cube_view_spec
+        default_axis = self.get_profile_storage_axis()
+        try:
+            span_full, request = self.plot_model.prepare_roi_commit(
+                entry,
+                parent_spec=parent_spec,
+                parent_frame=self.plot_model.resolve_parent_frame(plot_data),
+                axis_names=self._dimension_axis_names(),
+                default_profile_axis=default_axis,
+            )
+        except ValueError as exc:
+            self.set_status(str(exc))
+            self._save_all_queue.clear()
+            return
+
+        self._cancel_commit_worker()
+        self._commit_generation += 1
+        generation = self._commit_generation
+        self._pending_commit_request = request
+        self._pending_commit_entry_id = entry_id
+        self._pending_commit_plot_data = plot_data
+        self.set_status(f"Saving {entry.display_label}…")
+
+        try:
+            worker = self._start_preview_worker(
+                generation,
+                entry,
+                span_full_override=span_full,
+            )
+        except ValueError as exc:
+            self.set_status(str(exc))
+            self._save_all_queue.clear()
+            return
+
+        worker.preview_ready.connect(self._on_commit_ready)
+        worker.error_occurred.connect(self._on_commit_error)
+        worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
+        self._commit_worker = worker
+        self._pending_workers.add(worker)
+        worker.start()
+
+    def _on_commit_ready(self, bundle, generation):
+        if generation != self._commit_generation:
+            return
+
+        entry = self.roi_set.get(self._pending_commit_entry_id)
+        plot_data = self._pending_commit_plot_data
+        request = self._pending_commit_request
+        if entry is None or plot_data is None or request is None:
+            return
+
+        try:
+            frozen = self.plot_model.finalize_roi_commit(
+                entry,
+                bundle,
+                request,
+                parent_plot_data=plot_data,
+                parent_spec=self.plot_model.cube_view_spec,
+                axis_names=self._dimension_axis_names(),
+            )
+        except ValueError as exc:
+            self.set_status(str(exc))
+            self._save_all_queue.clear()
+            return
+
+        self.set_status(f"Saved: {frozen.label}")
+
+        if self._save_all_queue:
+            next_id = self._save_all_queue.pop(0)
+            QTimer.singleShot(0, lambda: self._start_commit(next_id))
+
+    def _on_commit_error(self, message, generation):
+        if generation != self._commit_generation:
+            return
+        self.set_status(message)
+        self._save_all_queue.clear()
+
+    def _apply_roi_full_height(self):
+        self._apply_roi_full_span("plot_y")
+
+    def _apply_roi_full_width(self):
+        self._apply_roi_full_span("plot_x")
+
+    def _apply_roi_full_span(self, profile_axis: str):
+        selected = self.profile_axis_for_roi_span()
+        if selected is not None:
+            profile_axis = selected
+        try:
+            self.plot_model.apply_expanded_roi_profile_span(profile_axis)
+        except ValueError as exc:
+            self.set_status(str(exc))
+            return
+        self._schedule_preview()
 
     @staticmethod
     def _labeled_row(label: str, widget: QWidget) -> QHBoxLayout:
@@ -317,21 +715,37 @@ class RoiWindow(QDialog):
 
     def _on_add_clicked(self):
         region_type = self.add_type_combo.currentData()
-        self.add_roi_requested.emit(region_type or "rect")
+        try:
+            entry_id = self.roi_set.add_placeholder(region_type or "rect")
+        except ValueError:
+            self.set_status(f"ROI type {region_type!r} is not available")
+            return
+        self.set_draw_checked(True)
+        self.plot_model.set_roi_draw_enabled(True)
+        entry = self.roi_set.get(entry_id)
+        label = entry.display_label if entry is not None else "ROI"
+        kind = region_type or "rect"
+        if region_type == "polygon":
+            self.set_status(
+                f"Draw {label}: click vertices on the parent plot, "
+                "click the first vertex to close"
+            )
+        else:
+            self.set_status(f"Draw {label} ({kind}) on the parent plot")
 
     def _on_shape_region_edited(self, region: RegionDefinition):
         if self._loading_form:
             return
-        entry = self._roi_set.selected_entry()
+        entry = self.roi_set.selected_entry()
         if entry is None:
             return
-        self._roi_set.update_region(
+        self.roi_set.update_region(
             entry.id,
             region,
             view_fingerprint=entry.view_fingerprint,
             clear_stale=False,
         )
-        self.operation_changed.emit()
+        self._schedule_preview()
 
     def _replace_shape_options(
         self, region: Optional[RegionDefinition], *, sync_circle_lock: bool = False
@@ -372,7 +786,7 @@ class RoiWindow(QDialog):
             self._shape_options = DescribeOptionsWidget(self)
             self._shape_options._bound_type_id = None
             self._shape_options.clear_summary()
-            self.ellipse_circle_lock_changed.emit(False)
+            self.plot_model.set_ellipse_circle_locked(False)
         else:
             self._shape_options = spec.create_options_widget(self)
             self._shape_options._bound_type_id = spec.type_id
@@ -387,28 +801,29 @@ class RoiWindow(QDialog):
                 self._shape_options.circle_lock_changed.connect(
                     self._on_ellipse_circle_lock_changed
                 )
-                self.ellipse_circle_lock_changed.emit(
+                self.plot_model.set_ellipse_circle_locked(
                     self._shape_options.is_circle_locked()
                 )
             else:
-                self.ellipse_circle_lock_changed.emit(False)
+                self.plot_model.set_ellipse_circle_locked(False)
         self._shape_options.region_edited.connect(self._on_shape_region_edited)
         self._shape_layout.addWidget(self._shape_options)
         self._update_controls_minimum_sizes()
 
     def _on_ellipse_circle_lock_changed(self, locked: bool):
-        self.ellipse_circle_lock_changed.emit(locked)
-    def _on_preview_toggled(self, enabled: bool):
-        self.preview_enabled_changed.emit(enabled)
+        self.plot_model.set_ellipse_circle_locked(locked)
+
+    def _on_preview_checkbox_toggled(self, enabled: bool):
         if enabled:
             self.preview_canvas.show_message("Updating preview…")
         else:
             self.preview_canvas.show_message("Preview disabled")
+        self._schedule_preview()
 
     def _on_form_changed(self, *_args):
         if self._loading_form:
             return
-        entry = self._roi_set.selected_entry()
+        entry = self.roi_set.selected_entry()
         if entry is None:
             return
         operation = RoiOperation(
@@ -420,39 +835,41 @@ class RoiWindow(QDialog):
         )
         self._loading_form = True
         try:
-            self._roi_set.update_operation(entry.id, operation)
+            self.roi_set.update_operation(entry.id, operation)
             if operation.label and operation.label != entry.display_label:
-                self._roi_set.update_entry(entry.id, display_label=operation.label)
+                self.roi_set.update_entry(entry.id, display_label=operation.label)
             self._refresh_list_item(entry.id)
         finally:
             self._loading_form = False
         self._update_profile_controls_enabled()
-        self.operation_changed.emit()
+        self._schedule_preview()
 
     def _on_list_selection_changed(self, current: Optional[QListWidgetItem], _previous):
         if current is None:
-            self._roi_set.set_selected(None)
+            self.roi_set.set_selected(None)
             return
         entry_id = current.data(Qt.ItemDataRole.UserRole)
-        if entry_id != self._roi_set.selected_id:
-            self._roi_set.set_selected(entry_id)
+        if entry_id != self.roi_set.selected_id:
+            self.roi_set.set_selected(entry_id)
 
     def _on_model_selection_changed(self, entry_id):
         self._sync_list_selection(entry_id)
         self._load_selected_into_form()
         self._update_form_enabled()
+        self._schedule_preview()
 
     def _on_entry_changed(self, entry_id: str):
         if self._loading_form:
             self._refresh_list_item(entry_id)
             return
         self._refresh_list_item(entry_id)
-        if entry_id == self._roi_set.selected_id:
-            entry = self._roi_set.get(entry_id)
+        if entry_id == self.roi_set.selected_id:
+            entry = self.roi_set.get(entry_id)
             if entry is not None:
                 self._replace_shape_options(entry.region)
+            self._schedule_preview()
     def _refresh_list_item(self, entry_id: str):
-        entry = self._roi_set.get(entry_id)
+        entry = self.roi_set.get(entry_id)
         if entry is None:
             return
         for row in range(self.entry_list.count()):
@@ -480,10 +897,10 @@ class RoiWindow(QDialog):
         """
         Rebuild the ROI list from the model.
         """
-        selected = self._roi_set.selected_id
+        selected = self.roi_set.selected_id
         self.entry_list.blockSignals(True)
         self.entry_list.clear()
-        for entry in self._roi_set.entries():
+        for entry in self.roi_set.entries():
             item = QListWidgetItem(self._entry_list_text(entry))
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
             item.setForeground(QBrush(QColor("#9e9e9e" if entry.stale else entry.color)))
@@ -501,7 +918,7 @@ class RoiWindow(QDialog):
         return f"{entry.display_label}  {kind_label}  {mark}"
 
     def _load_selected_into_form(self):
-        entry = self._roi_set.selected_entry()
+        entry = self.roi_set.selected_entry()
         self._loading_form = True
         try:
             if entry is None:
@@ -526,7 +943,7 @@ class RoiWindow(QDialog):
             self._loading_form = False
 
     def _update_form_enabled(self):
-        has_selection = self._roi_set.selected_entry() is not None
+        has_selection = self.roi_set.selected_entry() is not None
         for widget in (
             self.reduction_box,
             self.shape_box,
@@ -537,13 +954,13 @@ class RoiWindow(QDialog):
             self.full_width_button,
         ):
             widget.setEnabled(has_selection)
-        self.save_all_button.setEnabled(len(self._roi_set) > 0)
-        self.clear_button.setEnabled(len(self._roi_set) > 0)
+        self.save_all_button.setEnabled(len(self.roi_set) > 0)
+        self.clear_button.setEnabled(len(self.roi_set) > 0)
         if has_selection:
             self._update_profile_controls_enabled()
 
     def _update_profile_controls_enabled(self):
-        entry = self._roi_set.selected_entry()
+        entry = self.roi_set.selected_entry()
         separable = (
             entry is not None and entry.region.separable_for_profile
         )
@@ -663,7 +1080,7 @@ class RoiWindow(QDialog):
                 self.profile_axis_combo.clear()
                 return
 
-            entry = self._roi_set.selected_entry()
+            entry = self.roi_set.selected_entry()
             current = (
                 entry.operation.profile_storage_axis
                 if entry is not None
@@ -694,7 +1111,7 @@ class RoiWindow(QDialog):
 
             if entry is not None and entry.operation.profile_storage_axis is None:
                 axis = self.get_profile_storage_axis()
-                self._roi_set.update_operation(
+                self.roi_set.update_operation(
                     entry.id,
                     RoiOperation(
                         mask_mode=entry.operation.mask_mode,
@@ -707,57 +1124,6 @@ class RoiWindow(QDialog):
         finally:
             self._loading_form = False
         self._update_profile_controls_enabled()
-
-    def build_profile_request(
-        self,
-        region: RegionDefinition,
-        parent_spec: Optional[CubeViewSpec] = None,
-        *,
-        span_full_profile_axis: Optional[bool] = None,
-        operation: Optional[RoiOperation] = None,
-    ):
-        """
-        Build a profile :class:`MaterializeRequest` for a region.
-
-        Parameters
-        ----------
-        region : RegionDefinition
-            ROI geometry on the parent plot plane.
-        parent_spec : CubeViewSpec, optional
-            Live parent cube view.
-        span_full_profile_axis : bool, optional
-            Override for span-full.
-        operation : RoiOperation, optional
-            Reduction parameters. Defaults to the selected entry or form values.
-
-        Returns
-        -------
-        MaterializeRequest or None
-        """
-        spec = parent_spec if parent_spec is not None else self._parent_spec
-        if spec is None:
-            return None
-        if operation is None:
-            entry = self._roi_set.selected_entry()
-            operation = entry.operation if entry is not None else None
-        if operation is None:
-            operation = RoiOperation(
-                mask_mode=self.get_mask_mode(),
-                profile_storage_axis=self.get_profile_storage_axis(),
-                spatial_reduce=self.get_spatial_reduce(),
-                span_full_profile_axis=self.span_full_profile_axis(),
-            )
-        try:
-            return build_roi_profile_request_from_operation(
-                spec,
-                region,
-                operation,
-                parent_frame=self._parent_frame,
-                span_full_override=span_full_profile_axis,
-                default_profile_axis=self.get_profile_storage_axis(),
-            )
-        except ValueError:
-            return None
 
     def is_preview_enabled(self) -> bool:
         """
