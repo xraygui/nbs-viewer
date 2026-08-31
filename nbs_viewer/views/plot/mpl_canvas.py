@@ -173,6 +173,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self.run_list_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
+        self.plot_model.region_invalidation_requested.connect(
+            self._on_region_invalidation_requested
+        )
 
     @property
     def plotArtists(self):
@@ -690,8 +693,14 @@ class MplCanvas(FigureCanvasQTAgg):
         if bundle.render_mode == "line":
             self._ensure_sibling_lines_on_axes(except_key=plotData._key)
         self._sync_roi_display()
+        self.plot_model.sync_region_state_with_view()
         self.plot_view_updated.emit()
         self.draw()
+
+    def _on_region_invalidation_requested(self, _reason: str):
+        self.set_roi_draw_enabled(False)
+        self.clear_crop_draft(paint=False)
+        self.set_crop_draw_enabled(False)
 
     def _ensure_sibling_lines_on_axes(self, except_key=None):
         """

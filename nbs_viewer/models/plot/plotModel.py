@@ -37,7 +37,11 @@ from .cube_view import (
 )
 from .derived_fetch import build_roi_profile_request_from_operation
 from .plotDataModel import PlotDataModel
-from .plot_view_frame import PlotViewFrame, frame_from_bundle
+from .plot_view_frame import (
+    PlotViewFrame,
+    frame_from_bundle,
+    view_fingerprint_from_bundle,
+)
 from .region import RectRegion, RegionDefinition
 from .roi_set import RoiEntry, RoiSetModel
 from .view_crop import ViewCrop, view_crop_from_region
@@ -67,6 +71,8 @@ class PlotModel(QObject):
     request_plot_update = Signal()
     cube_view_changed = Signal(object)
     view_crop_changed = Signal(object)
+    region_status_changed = Signal(str)
+    region_invalidation_requested = Signal(str)
     plot_data_added = Signal(object)
     plot_data_removed = Signal(object)
 
@@ -97,6 +103,8 @@ class PlotModel(QObject):
         self._run_list_model.available_keys_changed.connect(
             self._on_available_keys_changed
         )
+        self.cube_view_changed.connect(self._on_cube_view_changed_for_region)
+        self.selected_keys_changed.connect(self._on_selected_keys_changed_for_region)
 
         for run_model in self._run_list_model.available_models:
             self._attach_run_model(run_model)
@@ -292,6 +300,8 @@ class PlotModel(QObject):
         if dimension is not None and dimension != self._dimension:
             self._dimension = dimension
             changed = True
+            if dimension != 2:
+                self.invalidate_all_region_state("switched out of 2D mode")
         if indices is not None and indices != self._slice:
             self._slice = indices
             changed = True
@@ -437,6 +447,73 @@ class PlotModel(QObject):
             self.clear_view_crop()
             return "plot axes changed"
         return None
+
+    def resolve_current_view_fingerprint(self) -> Optional[tuple]:
+        """
+        Return a fingerprint for the sole visible 2D plot coordinate frame.
+
+        Returns
+        -------
+        tuple or None
+            View fingerprint from the active plot bundle, if available.
+        """
+        plot_data = self.resolve_single_visible_2d_plot_data()
+        if plot_data is None or plot_data.last_bundle is None:
+            return None
+        try:
+            return view_fingerprint_from_bundle(plot_data.last_bundle)
+        except ValueError:
+            return None
+
+    def sync_region_state_with_view(self) -> None:
+        """
+        Mark stale ROIs and clear invalid crops for the current plot view.
+        """
+        if len(self._roi_set) > 0:
+            fingerprint = self.resolve_current_view_fingerprint()
+            newly_stale = self._roi_set.mark_stale_for_fingerprint(fingerprint)
+            if newly_stale:
+                self.region_status_changed.emit(
+                    "ROI marked stale: view coordinates changed"
+                )
+        crop_reason = self.invalidate_view_crop_if_invalid()
+        if crop_reason is not None:
+            self.region_status_changed.emit(f"Crop cleared: {crop_reason}")
+
+    def invalidate_all_region_state(self, reason: str) -> None:
+        """
+        Force-clear crop and mark all ROIs stale after a view-context change.
+
+        Parameters
+        ----------
+        reason : str
+            Short description emitted to views for status readouts.
+        """
+        had_crop = self._view_crop is not None
+        if had_crop:
+            self.clear_view_crop()
+
+        had_rois = len(self._roi_set) > 0
+        if had_rois:
+            self._roi_set.mark_stale_for_fingerprint(None)
+
+        self.region_invalidation_requested.emit(reason)
+
+        if had_crop:
+            self.region_status_changed.emit(f"Crop cleared: {reason}")
+        if had_rois and self._view_crop is None:
+            self.region_status_changed.emit(f"ROI marked stale: {reason}")
+
+    def _on_cube_view_changed_for_region(self, _spec) -> None:
+        self.sync_region_state_with_view()
+
+    def _on_selected_keys_changed_for_region(
+        self,
+        _xkeys,
+        _ykeys,
+        _normkeys,
+    ) -> None:
+        self.invalidate_all_region_state("field selection changed")
 
     def _resolve_full_view_frame_for_crop(
         self,

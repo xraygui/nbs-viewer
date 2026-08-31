@@ -97,6 +97,10 @@ class RoiPanel(QWidget):
         self.canvas.crop_region_changed.connect(self._on_crop_region_changed)
         self.plot_model.view_crop_changed.connect(self._on_view_crop_changed)
         self.canvas.plot_view_updated.connect(self._on_plot_view_updated)
+        self.plot_model.region_status_changed.connect(self.set_status)
+        self.plot_model.region_invalidation_requested.connect(
+            self._on_region_invalidation_requested
+        )
 
     def set_region_active(self, active: bool):
         """
@@ -241,11 +245,16 @@ class RoiPanel(QWidget):
         self._update_panel_buttons()
 
     def _on_plot_view_updated(self):
+        self.set_region_active(self.canvas.region_controls_enabled())
         if self.canvas.region_controls_enabled():
             crop_draw_checked = self.crop_draw_checkbox.isChecked()
             if crop_draw_checked != self.canvas.is_crop_draw_enabled():
                 self.canvas.set_crop_draw_enabled(crop_draw_checked)
         self._update_panel_buttons()
+
+    def _on_region_invalidation_requested(self, _reason: str):
+        self.clear_crop_corners()
+        self.set_crop_draw_checked(False)
 
     def _update_panel_buttons(self):
         region_active = self.canvas.region_controls_enabled()
