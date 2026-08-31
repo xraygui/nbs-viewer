@@ -5,7 +5,7 @@ from .controls.plot_settings import PlotSettingsWidget
 from .controls.run_display import RunDisplayWidget
 from .controls.transform import TransformControl
 from .plotDimensionWidget import PlotDimensionControl
-from .roi.crop_control import CropControlWidget
+from .roi.region_control import RegionControlWidget
 
 
 class PlotControlTab(QWidget):
@@ -27,7 +27,7 @@ class PlotControlTab(QWidget):
         self.presenter = presenter
         self.plot_canvas = plot_canvas
         self.dimension_control = None
-        self.crop_control = None
+        self.region_control = None
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
@@ -55,16 +55,16 @@ class PlotControlTab(QWidget):
             )
             self._tab_layout.addWidget(self.dimension_control_panel, 0)
 
-            self.crop_control = CropControlWidget(
+            self.region_control = RegionControlWidget(
                 presenter, plot_canvas, self.dimension_control
             )
-            self.crop_control_panel = CollapsiblePanel(
-                "Crop",
-                self.crop_control,
+            self.region_control_panel = CollapsiblePanel(
+                "Region",
+                self.region_control,
                 can_expand=False,
                 resizable=False,
             )
-            self._tab_layout.addWidget(self.crop_control_panel, 0)
+            self._tab_layout.addWidget(self.region_control_panel, 0)
 
         self.transform = TransformControl(presenter)
         self.transform_panel = CollapsiblePanel(
@@ -101,7 +101,7 @@ class PlotControlTab(QWidget):
         if self.plot_canvas is not None:
             panels[1:1] = [
                 self.dimension_control_panel,
-                self.crop_control_panel,
+                self.region_control_panel,
             ]
         return panels
 

@@ -7,37 +7,31 @@ from qtpy.QtWidgets import (
     QLabel,
     QSizePolicy,
 )
-from qtpy.QtCore import Signal
 from nbs_viewer.views.common.panel import CollapsiblePanel
 from nbs_viewer.models.plot.view_crop import crop_status_text
 
 
-class RoiPanel(QWidget):
+class RegionControlWidget(QWidget):
     """
     Inline crop controls and launcher for the ROI workbench window.
 
-    Signals
-    -------
-    crop_draw_toggled : bool
-        Emitted when the draw-crop toggle changes state.
-    clear_crop_draft_requested : Signal
-        Emitted when the user requests clearing the draft crop rectangle.
-    clear_crop_requested : Signal
-        Emitted when the user requests clearing the applied view crop.
-    roi_window_requested : Signal
-        Emitted when the user opens the ROI workbench window.
+    Parameters
+    ----------
+    presenter : PlotPresenter
+        Plot session presenter.
+    plot_canvas : MplCanvas
+        Canvas receiving crop interactions.
+    dimension_control : PlotDimensionControl
+        Dimension editor used to resolve plot-plane geometry.
+    parent : QWidget, optional
+        Parent widget, by default None.
     """
 
-    crop_draw_toggled = Signal(bool)
-    clear_crop_draft_requested = Signal()
-    clear_crop_requested = Signal()
-    roi_window_requested = Signal()
-
-    def __init__(self, presenter, canvas, dimension_control=None, parent=None):
+    def __init__(self, presenter, plot_canvas, dimension_control, parent=None):
         super().__init__(parent)
         self.presenter = presenter
         self.plot_model = presenter.plot
-        self.canvas = canvas
+        self.canvas = plot_canvas
         self.dimension_control = dimension_control
         self.setup_ui()
         self.connect_signals()
@@ -51,7 +45,6 @@ class RoiPanel(QWidget):
         layout.setSpacing(2)
 
         self.crop_draw_checkbox = QCheckBox("Draw crop region")
-        self.crop_draw_checkbox.toggled.connect(self.crop_draw_toggled.emit)
         layout.addWidget(self.crop_draw_checkbox)
 
         self.crop_corners_label = QLabel("Crop: —")
@@ -65,7 +58,6 @@ class RoiPanel(QWidget):
         button_row1.addWidget(self.apply_crop_button)
 
         self.clear_crop_button = QPushButton("Clear crop")
-        self.clear_crop_button.clicked.connect(self.clear_crop_requested.emit)
         button_row1.addWidget(self.clear_crop_button)
         layout.addLayout(button_row1)
 
@@ -73,13 +65,9 @@ class RoiPanel(QWidget):
         button_row2.setContentsMargins(0, 0, 0, 0)
         button_row2.setSpacing(4)
         self.clear_crop_draft_button = QPushButton("Clear crop draft")
-        self.clear_crop_draft_button.clicked.connect(
-            self.clear_crop_draft_requested.emit
-        )
         button_row2.addWidget(self.clear_crop_draft_button)
 
         self.roi_window_button = QPushButton("ROI Window…")
-        self.roi_window_button.clicked.connect(self.roi_window_requested.emit)
         button_row2.addWidget(self.roi_window_button)
         layout.addLayout(button_row2)
 
@@ -91,10 +79,13 @@ class RoiPanel(QWidget):
         self.set_region_active(False)
 
     def connect_signals(self):
-        self.crop_draw_toggled.connect(self._on_crop_draw_toggled)
-        self.clear_crop_draft_requested.connect(self._on_clear_crop_draft_requested)
-        self.clear_crop_requested.connect(self._on_clear_crop_requested)
+        self.crop_draw_checkbox.toggled.connect(self._on_crop_draw_toggled)
+        self.clear_crop_draft_button.clicked.connect(
+            self._on_clear_crop_draft_requested
+        )
+        self.clear_crop_button.clicked.connect(self._on_clear_crop_requested)
         self.apply_crop_button.clicked.connect(self._on_apply_crop_requested)
+        self.roi_window_button.clicked.connect(self._on_roi_window_requested)
         self.canvas.crop_region_changed.connect(self._on_crop_region_changed)
         self.plot_model.view_crop_changed.connect(self._on_view_crop_changed)
         self.canvas.plot_view_updated.connect(self._on_plot_view_updated)
@@ -105,7 +96,6 @@ class RoiPanel(QWidget):
         self.plot_model.roi_draw_enabled_changed.connect(
             self._on_roi_draw_enabled_changed
         )
-        self.roi_window_requested.connect(self._on_roi_window_requested)
 
     def _on_roi_window_requested(self):
         from .window import RoiWindow
@@ -166,7 +156,7 @@ class RoiPanel(QWidget):
 
     def set_crop_draw_checked(self, checked: bool):
         """
-        Set the crop draw toggle without emitting ``crop_draw_toggled``.
+        Set the crop draw toggle without emitting a toggled signal.
         """
         if self.crop_draw_checkbox.isChecked() == checked:
             return
@@ -198,7 +188,6 @@ class RoiPanel(QWidget):
         """
         Update the enclosing :class:`CollapsiblePanel` height.
         """
-
         panel = self.parentWidget()
         while panel is not None and not isinstance(panel, CollapsiblePanel):
             panel = panel.parentWidget()
