@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
 )
 from nbs_viewer.views.common.panel import CollapsiblePanel
 from nbs_viewer.models.plot.view_crop import crop_status_text
+from ..roi.window import RoiWindow
 
 
 class RegionControlWidget(QWidget):
@@ -98,7 +99,6 @@ class RegionControlWidget(QWidget):
         )
 
     def _on_roi_window_requested(self):
-        from .window import RoiWindow
 
         RoiWindow.open_or_raise(
             self.presenter,

@@ -1,14 +1,14 @@
 from qtpy.QtWidgets import QVBoxLayout, QWidget, QSizePolicy
 
-from ..common.panel import CollapsiblePanel
-from .controls.plot_settings import PlotSettingsWidget
-from .controls.run_display import RunDisplayWidget
-from .controls.transform import TransformControl
-from .controls.dimension import DimensionControl
-from .roi.region_control import RegionControlWidget
+from nbs_viewer.views.common.panel import CollapsiblePanel
+from .plot_settings import PlotSettingsWidget
+from .run_display import RunDisplayWidget
+from .transform import TransformControl
+from .dimension import DimensionControl
+from .region_control import RegionControlWidget
 
 
-class PlotControlTab(QWidget):
+class ControlPanel(QWidget):
     """
     Plot Controls tab: settings, view axes, region, transform, and run display.
 
@@ -17,15 +17,30 @@ class PlotControlTab(QWidget):
     presenter : PlotPresenter
         Plot session presenter.
     plot_canvas : MplCanvas, optional
-        Canvas for dimension and ROI controls; omitted when not applicable.
+        Canvas for plot settings and spatial controls.
+    enable_spatial_controls : bool, optional
+        When True, include dimension and region panels. Requires
+        ``plot_canvas``. This flag is interim; a capability-based or
+        plug-in control layout would be cleaner long term.
     parent : QWidget, optional
         Parent widget, by default None.
     """
 
-    def __init__(self, presenter, plot_canvas=None, parent=None):
+    def __init__(
+        self,
+        presenter,
+        plot_canvas=None,
+        enable_spatial_controls=False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.presenter = presenter
         self.plot_canvas = plot_canvas
+        self._enable_spatial_controls = enable_spatial_controls
+        if enable_spatial_controls and plot_canvas is None:
+            raise ValueError(
+                "plot_canvas is required when enable_spatial_controls is True"
+            )
         self.dimension_control = None
         self.region_control = None
         self.setSizePolicy(
@@ -45,7 +60,7 @@ class PlotControlTab(QWidget):
         )
         self._tab_layout.addWidget(self.plot_settings_panel, 0)
 
-        if plot_canvas is not None:
+        if enable_spatial_controls:
             self.dimension_control = DimensionControl(presenter, plot_canvas)
             self.dimension_control_panel = CollapsiblePanel(
                 "Dimension Control",
@@ -98,7 +113,7 @@ class PlotControlTab(QWidget):
             self.transform_panel,
             self.run_display_panel,
         ]
-        if self.plot_canvas is not None:
+        if self._enable_spatial_controls:
             panels[1:1] = [
                 self.dimension_control_panel,
                 self.region_control_panel,

@@ -12,7 +12,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QIcon
 from ..dataSource.runListView import RunListView
 from ..plot.plotWidget import PlotWidget
-from ..plot.imageGridWidget import ImageGridWidget
+from ..plot.image_grid_plot_widget import ImageGridPlotWidget
 from ..common.panel import CollapsiblePanel
 
 
@@ -151,4 +151,4 @@ class ImageGridDisplay(PlotDisplay):
     __single_selection_mode__ = True
 
     def _create_plot_widget(self):
-        return ImageGridWidget(self.presenter)
+        return ImageGridPlotWidget(self.presenter)
