@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, default_spec
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
 from nbs_viewer.models.plot.region import RectRegion
@@ -17,41 +18,29 @@ from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.runListModel import RunListModel
 from nbs_viewer.models.plot.runModel import RunModel
 from nbs_viewer.models.plot.view_crop import ViewCrop
+from tests.fixtures.catalog_recipes import line_scan_run
 
 
-def _mock_catalog_run(uid, scan_id, keys=("time", "det"), shape=(100,)):
-    run = MagicMock()
-    run.uid = uid
-    run.scan_id = scan_id
-    run.available_keys = list(keys)
-    run.get_default_selection.return_value = (
-        [keys[0]] if keys else [],
-        [keys[1]] if len(keys) > 1 else [],
-        [],
-    )
-    run.getShape.return_value = shape
-    run.data_changed = MagicMock()
-    run.data_changed.connect = MagicMock()
-    run.data_changed.disconnect = MagicMock()
-    run.keys_ready = MagicMock()
-    run.keys_ready.connect = MagicMock()
-    run.keys_error = MagicMock()
-    run.keys_error.connect = MagicMock()
-    run.start = {}
-    run.metadata = {}
-    run.display_name = f"scan {scan_id}"
-    run.plan_name = "test"
-    return run
+def _make_run_model(memory_run: MemoryRun) -> RunModel:
+    return RunModel(memory_run)
 
 
-def _make_run_model(uid, scan_id, keys=("time", "det")):
-    return RunModel(_mock_catalog_run(uid, scan_id, keys))
+def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> MemoryRun:
+    base = line_scan_run(scan_id)
+    t = np.linspace(0, 1, length)
+    data = {}
+    for key in keys:
+        if key == "time":
+            data[key] = t
+        else:
+            data[key] = np.ones(length, dtype=float) * (scan_id + 1)
+    return MemoryRun(base.metadata, data)
 
 
-def test_ensure_plot_data_same_keys_same_instance():
+def test_ensure_plot_data_same_keys_same_instance(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1)
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
 
     first = plot_model.ensure_plot_data(run_model, "time", "det")
@@ -60,10 +49,10 @@ def test_ensure_plot_data_same_keys_same_instance():
     assert isinstance(first, PlotDataModel)
 
 
-def test_ensure_plot_data_different_keys_different_instances():
+def test_ensure_plot_data_different_keys_different_instances(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1, keys=("time", "det", "i0"))
+    run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
     run_list.add_run(run_model)
 
     first = plot_model.ensure_plot_data(run_model, "time", "det")
@@ -71,51 +60,51 @@ def test_ensure_plot_data_different_keys_different_instances():
     assert first is not second
 
 
-def test_remove_run_drops_plot_data():
+def test_remove_run_drops_plot_data(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1)
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    assert any(key[2] == "uid-1" for key in plot_model.plot_data_map)
+    assert any(key[2] == run_model.uid for key in plot_model.plot_data_map)
 
     run_list.remove_run(run_model)
-    assert all(key[2] != "uid-1" for key in plot_model.plot_data_map)
+    assert all(key[2] != run_model.uid for key in plot_model.plot_data_map)
 
 
-def test_uncheck_keeps_plot_data_in_map():
+def test_uncheck_keeps_plot_data_in_map(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1)
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
     assert len(plot_model.plot_data_map) >= 1
 
-    run_list.set_uids_visible(["uid-1"], False)
-    assert any(key[2] == "uid-1" for key in plot_model.plot_data_map)
+    run_list.set_uids_visible([run_model.uid], False)
+    assert any(key[2] == run_model.uid for key in plot_model.plot_data_map)
     assert list(plot_model.iter_visible_plot_data()) == []
 
 
-def test_visibility_ensures_plot_data_when_keys_selected():
+def test_visibility_ensures_plot_data_when_keys_selected(qapp):
     run_list = RunListModel(is_main_display=False)
     run_list.set_auto_add(False)
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1)
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    run_list.set_uids_visible(["uid-1"], False)
-    plot_model.drop_plot_data_for_uid("uid-1")
-    assert "uid-1" not in {key[2] for key in plot_model.plot_data_map}
+    run_list.set_uids_visible([run_model.uid], False)
+    plot_model.drop_plot_data_for_uid(run_model.uid)
+    assert run_model.uid not in {key[2] for key in plot_model.plot_data_map}
 
-    run_list.set_uids_visible(["uid-1"], True)
-    assert ("time", "det", "uid-1") in plot_model.plot_data_map
+    run_list.set_uids_visible([run_model.uid], True)
+    assert ("time", "det", run_model.uid) in plot_model.plot_data_map
 
 
-def test_two_plot_models_independent_keys_and_maps():
+def test_two_plot_models_independent_keys_and_maps(qapp):
     run_list = RunListModel()
     first = PlotModel(run_list)
     second = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1, keys=("time", "det", "i0"))
+    run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
     run_list.add_run(run_model)
 
     first.set_selected_keys(["time"], ["det"])
@@ -123,12 +112,12 @@ def test_two_plot_models_independent_keys_and_maps():
 
     assert first.get_selected_keys()[1] == ["det"]
     assert second.get_selected_keys()[1] == ["i0"]
-    assert ("time", "det", "uid-1") in first.plot_data_map
-    assert ("time", "i0", "uid-1") in second.plot_data_map
-    assert ("time", "i0", "uid-1") not in first.plot_data_map
+    assert ("time", "det", run_model.uid) in first.plot_data_map
+    assert ("time", "i0", run_model.uid) in second.plot_data_map
+    assert ("time", "i0", run_model.uid) not in first.plot_data_map
 
 
-def test_cube_view_and_crop_without_canvas():
+def test_cube_view_and_crop_without_canvas(qapp):
     plot_model = PlotModel(RunListModel())
     spec = default_spec(3, 2)
     plot_model.set_view_state(
@@ -146,10 +135,10 @@ def test_cube_view_and_crop_without_canvas():
     assert plot_model.view_crop is None
 
 
-def test_apply_view_crop_from_region():
+def test_apply_view_crop_from_region(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1, keys=("x", "y"))
+    run_model = _make_run_model(_custom_run(1, ("x", "y")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["x"], ["y"])
 
@@ -185,13 +174,13 @@ def test_apply_view_crop_from_region():
 
     assert plot_model.view_crop is crop
     assert crop.display_bbox == (2, 4, 2, 4)
-    assert crop.source_key == ("x", "y", "uid-1")
+    assert crop.source_key == ("x", "y", run_model.uid)
 
 
-def test_apply_view_crop_from_region_rejects_second_crop():
+def test_apply_view_crop_from_region_rejects_second_crop(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1, keys=("x", "y"))
+    run_model = _make_run_model(_custom_run(1, ("x", "y")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["x"], ["y"])
 
@@ -229,10 +218,10 @@ def test_apply_view_crop_from_region_rejects_second_crop():
         plot_model.apply_view_crop_from_region(region)
 
 
-def test_default_selection_on_first_run():
+def test_default_selection_on_first_run(qapp):
     run_list = RunListModel()
     plot_model = PlotModel(run_list)
-    run_model = _make_run_model("uid-1", 1, keys=("time", "det"))
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
     x_keys, y_keys, _ = plot_model.get_selected_keys()
     assert x_keys == ["time"]

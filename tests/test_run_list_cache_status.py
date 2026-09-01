@@ -14,7 +14,7 @@ def _fake_run_model(chunk_cache):
     )
 
 
-def test_run_list_model_aggregates_multiple_cache_progress_sources():
+def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
     model = RunListModel()
     progress_a = ChunkCacheProgress()
     progress_b = ChunkCacheProgress()
@@ -34,7 +34,7 @@ def test_run_list_model_aggregates_multiple_cache_progress_sources():
     assert statuses[-1] == "Fetching 4/7"
 
 
-def test_run_list_model_clears_cache_status_when_runs_removed():
+def test_run_list_model_clears_cache_status_when_runs_removed(qapp):
     model = RunListModel()
     progress = ChunkCacheProgress()
     cache = SimpleNamespace(progress=progress)
@@ -52,7 +52,7 @@ def test_run_list_model_clears_cache_status_when_runs_removed():
     assert statuses[-1] == ""
 
 
-def test_plot_presenter_forwards_cache_status():
+def test_plot_presenter_forwards_cache_status(qapp):
     presenter = PlotPresenter("sess")
     statuses = []
     presenter.status_changed.connect(statuses.append)

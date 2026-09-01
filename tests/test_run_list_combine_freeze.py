@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
+from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.combinedRunModel import (
     CombinationMethod,
     CombineError,
@@ -16,41 +17,35 @@ from nbs_viewer.models.plot.combinedRunModel import (
 from nbs_viewer.models.plot.frozenRunModel import FrozenRunModel
 from nbs_viewer.models.plot.runListModel import RunListModel
 from nbs_viewer.models.plot.runModel import RunModel
+from tests.fixtures.catalog_recipes import line_scan_run
 
 
-def _mock_catalog_run(uid, scan_id, keys, shape=(100,), plan_name="test"):
-    run = MagicMock()
-    run.uid = uid
-    run.scan_id = scan_id
-    run.available_keys = list(keys)
-    run.get_default_selection.return_value = (
-        [keys[0]] if keys else [],
-        [keys[1]] if len(keys) > 1 else [],
-        [],
-    )
-    run.getShape.return_value = shape
-    run.data_changed = MagicMock()
-    run.data_changed.connect = MagicMock()
-    run.data_changed.disconnect = MagicMock()
-    run.keys_ready = MagicMock()
-    run.keys_ready.connect = MagicMock()
-    run.keys_error = MagicMock()
-    run.keys_error.connect = MagicMock()
-    run.start = {}
-    run.metadata = {}
-    run.display_name = f"scan {scan_id}"
-    run.plan_name = plan_name
-    return run
+def _make_run_model(memory_run: MemoryRun) -> RunModel:
+    return RunModel(memory_run)
 
 
-def _make_run_model(uid, scan_id, keys=("time", "det"), shape=(100,)):
-    return RunModel(_mock_catalog_run(uid, scan_id, keys, shape=shape))
+def _run_model_with_keys(memory_run: MemoryRun, keys: tuple[str, ...]) -> RunModel:
+    model = RunModel(memory_run)
+    model._catalog_keys = list(keys)
+    return model
 
 
-def test_combine_runs_adds_one_combined_entry():
+def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> MemoryRun:
+    base = line_scan_run(scan_id)
+    t = np.linspace(0, 1, length)
+    data = {}
+    for key in keys:
+        if key == "time":
+            data[key] = t
+        else:
+            data[key] = np.ones(length, dtype=float) * (scan_id + 1)
+    return MemoryRun(base.metadata, data)
+
+
+def test_combine_runs_adds_one_combined_entry(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1)
-    second = _make_run_model("uid-2", 2)
+    first = _make_run_model(line_scan_run(1))
+    second = _make_run_model(line_scan_run(2))
     run_list.add_runs([first, second])
     before = len(run_list.available_models)
 
@@ -65,43 +60,43 @@ def test_combine_runs_adds_one_combined_entry():
     assert set(combined.source_runs) == {first, second}
 
 
-def test_validate_combine_rejects_single_run():
+def test_validate_combine_rejects_single_run(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1)
+    first = _make_run_model(line_scan_run(1))
     with pytest.raises(CombineError, match="at least 2"):
         run_list.validate_combine([first])
 
 
-def test_validate_combine_rejects_no_common_keys():
+def test_validate_combine_rejects_no_common_keys(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1, keys=("time", "det_a"))
-    second = _make_run_model("uid-2", 2, keys=("energy", "det_b"))
+    first = _run_model_with_keys(line_scan_run(1), ("time", "det_a"))
+    second = _run_model_with_keys(line_scan_run(2), ("energy", "det_b"))
     with pytest.raises(CombineError, match="no common data keys"):
         run_list.validate_combine([first, second])
 
 
-def test_validate_combine_rejects_shape_mismatch():
+def test_validate_combine_rejects_shape_mismatch(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1, shape=(100,))
-    second = _make_run_model("uid-2", 2, shape=(50,))
+    first = _make_run_model(_custom_run(1, ("time", "det"), length=100))
+    second = _make_run_model(_custom_run(2, ("time", "det"), length=50))
     with pytest.raises(CombineError, match="different data shapes"):
         run_list.validate_combine([first, second])
 
 
-def test_combine_runs_rejects_incompatible():
+def test_combine_runs_rejects_incompatible(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1, keys=("time", "det_a"))
-    second = _make_run_model("uid-2", 2, keys=("energy", "det_b"))
+    first = _run_model_with_keys(line_scan_run(1), ("time", "det_a"))
+    second = _run_model_with_keys(line_scan_run(2), ("energy", "det_b"))
     before = len(run_list.available_models)
     with pytest.raises(CombineError):
         run_list.combine_runs([first, second])
     assert len(run_list.available_models) == before
 
 
-def test_freeze_runs_adds_frozen_entries_for_selected_y():
+def test_freeze_runs_adds_frozen_entries_for_selected_y(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1, keys=("time", "det", "i0"))
-    second = _make_run_model("uid-2", 2, keys=("time", "det", "i0"))
+    first = _make_run_model(_custom_run(1, ("time", "det", "i0")))
+    second = _make_run_model(_custom_run(2, ("time", "det", "i0")))
     run_list.add_runs([first, second])
     first.set_selected_keys(["time"], ["det", "i0"])
     second.set_selected_keys(["time"], ["det"])
@@ -119,9 +114,9 @@ def test_freeze_runs_adds_frozen_entries_for_selected_y():
     }
 
 
-def test_freeze_runs_noop_without_selected_y():
+def test_freeze_runs_noop_without_selected_y(qapp):
     run_list = RunListModel()
-    first = _make_run_model("uid-1", 1)
+    first = _make_run_model(line_scan_run(1))
     run_list.add_run(first)
     first.set_selected_keys(["time"], [])
     before = len(run_list.available_models)
