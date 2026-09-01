@@ -1,7 +1,12 @@
 """Run list model managing run membership, visibility, and available keys."""
 
-from typing import List, Optional, Union, Set
+from typing import Dict, List, Optional, Union, Set
 from nbs_viewer.models.catalog.base import CatalogRun
+from nbs_viewer.models.cache.chunk_cache_progress import (
+    ChunkCacheProgress,
+    TiledFetchStatus,
+    aggregate_tiled_fetch_label,
+)
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtGui import QStandardItemModel, QStandardItem
 from .runModel import RunModel
@@ -26,6 +31,7 @@ class RunListModel(QStandardItemModel):
     available_runs_changed = Signal(list)
     visible_runs_changed = Signal(set)
     add_runs_to_display = Signal(list, str)
+    cache_status_changed = Signal(str)
 
     def __init__(self, is_main_display=False, single_selection_mode=False):
         """
@@ -46,13 +52,18 @@ class RunListModel(QStandardItemModel):
         self.available_keys = list()
         self._auto_add = True
         self._visible_runs = set()
+        self._progress_sources: Dict[int, ChunkCacheProgress] = {}
+        self._cache_statuses: Dict[int, TiledFetchStatus] = {}
 
         self.run_added.connect(self._on_run_added)
         self.run_removed.connect(self._on_run_removed)
+        self.run_added.connect(self._refresh_cache_progress_connections)
+        self.run_removed.connect(self._refresh_cache_progress_connections)
         self.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.itemChanged.connect(self._on_item_changed)
 
         self._initialize_runs()
+        self._refresh_cache_progress_connections()
 
     def _initialize_runs(self):
         """Initialize the model with current runs from run_list_model."""
@@ -608,3 +619,66 @@ class RunListModel(QStandardItemModel):
         # Remove any visible or selected runs that aren't in run_models
         valid_uids = set(self._run_models.keys())
         self._visible_runs.intersection_update(valid_uids)
+
+    def _discover_cache_progress_sources(self) -> Dict[int, ChunkCacheProgress]:
+        """
+        Return unique chunk-cache progress notifiers for available runs.
+        """
+        sources: Dict[int, ChunkCacheProgress] = {}
+        for model in self.available_models:
+            run = getattr(model, "_run", None)
+            if run is None:
+                continue
+            chunk_cache = getattr(run, "_chunk_cache", None)
+            if chunk_cache is None:
+                continue
+            progress = getattr(chunk_cache, "progress", None)
+            if progress is None:
+                continue
+            sources[id(progress)] = progress
+        return sources
+
+    def _refresh_cache_progress_connections(self, *_args) -> None:
+        """
+        Connect to chunk-cache progress notifiers for the current run set.
+        """
+        desired = self._discover_cache_progress_sources()
+        desired_ids = set(desired)
+        current_ids = set(self._progress_sources)
+
+        for progress_id in current_ids - desired_ids:
+            progress = self._progress_sources.pop(progress_id)
+            try:
+                progress.status_changed.disconnect(
+                    self._on_cache_progress_status_changed
+                )
+            except (TypeError, RuntimeError):
+                pass
+            self._cache_statuses.pop(progress_id, None)
+
+        for progress_id in desired_ids - current_ids:
+            progress = desired[progress_id]
+            progress.status_changed.connect(self._on_cache_progress_status_changed)
+            self._progress_sources[progress_id] = progress
+
+        self._emit_aggregated_cache_status()
+
+    def _on_cache_progress_status_changed(self, status: TiledFetchStatus) -> None:
+        """
+        Track a progress update and publish aggregated cache status text.
+        """
+        progress = self.sender()
+        if progress is None:
+            return
+        progress_id = id(progress)
+        if progress_id not in self._progress_sources:
+            return
+        self._cache_statuses[progress_id] = status
+        self._emit_aggregated_cache_status()
+
+    def _emit_aggregated_cache_status(self) -> None:
+        """
+        Emit summed in-flight fetch status across connected chunk caches.
+        """
+        text = aggregate_tiled_fetch_label(self._cache_statuses.values())
+        self.cache_status_changed.emit(text)

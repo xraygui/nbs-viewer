@@ -26,10 +26,10 @@ from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefin
 from nbs_viewer.models.plot.roi_set import RoiSetModel
 from nbs_viewer.models.plot.view_crop import ViewCrop
 from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
-from .mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
+from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
-from .roi.overlays import _ROI_EDGE_WIDTH
-from .roi.types import (
+from ..roi.overlays import _ROI_EDGE_WIDTH
+from ..roi.types import (
     get_roi_type,
     roi_type_for_region,
     set_ellipse_selector_circle_lock,

@@ -17,7 +17,7 @@ from qtpy.QtCore import QThread, Signal
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, MaterializeRequest
 from nbs_viewer.models.plot.plot_geometry import PlotBundle
 from nbs_viewer.models.plot.view_crop import ViewCrop
-from ..mpl_renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
+from ..mplCanvas.renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 
 from nbs_viewer.utils import print_debug
 

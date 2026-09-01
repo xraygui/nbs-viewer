@@ -21,7 +21,7 @@ class RegionControlWidget(QWidget):
         Plot session presenter.
     plot_canvas : MplCanvas
         Canvas receiving crop interactions.
-    dimension_control : PlotDimensionControl
+    dimension_control : DimensionControl
         Dimension editor used to resolve plot-plane geometry.
     parent : QWidget, optional
         Parent widget, by default None.

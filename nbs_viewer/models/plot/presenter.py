@@ -16,7 +16,8 @@ class PlotPresenter(QObject):
     """
     roi_region_changed = Signal(object)
     crop_region_changed = Signal(object)
-    
+    status_changed = Signal(str)
+
     def __init__(
         self,
         presenter_id: str,
@@ -44,6 +45,7 @@ class PlotPresenter(QObject):
             single_selection_mode=single_selection_mode,
         )
         self._plot = PlotModel(self._run_list, parent=self)
+        self._run_list.cache_status_changed.connect(self.status_changed.emit)
 
     @property
     def id(self) -> str:

@@ -60,7 +60,7 @@ class RoiWindow(QDialog):
         Plot session presenter.
     parent : QWidget, optional
         Parent window.
-    dimension_control : PlotDimensionControl, optional
+    dimension_control : DimensionControl, optional
         Dimension editor supplying storage axis names for profile controls.
     """
 
@@ -290,7 +290,7 @@ class RoiWindow(QDialog):
             Plot session presenter.
         parent : QWidget, optional
             Parent window.
-        dimension_control : PlotDimensionControl, optional
+        dimension_control : DimensionControl, optional
             Dimension editor for axis-name context.
 
         Returns

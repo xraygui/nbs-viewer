@@ -4,7 +4,7 @@ from ..common.panel import CollapsiblePanel
 from .controls.plot_settings import PlotSettingsWidget
 from .controls.run_display import RunDisplayWidget
 from .controls.transform import TransformControl
-from .plotDimensionWidget import PlotDimensionControl
+from .controls.dimension import DimensionControl
 from .roi.region_control import RegionControlWidget
 
 
@@ -46,7 +46,7 @@ class PlotControlTab(QWidget):
         self._tab_layout.addWidget(self.plot_settings_panel, 0)
 
         if plot_canvas is not None:
-            self.dimension_control = PlotDimensionControl(presenter, plot_canvas)
+            self.dimension_control = DimensionControl(presenter, plot_canvas)
             self.dimension_control_panel = CollapsiblePanel(
                 "Dimension Control",
                 self.dimension_control,

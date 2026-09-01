@@ -5,7 +5,7 @@ Qt signal bridge for in-flight Tiled chunk fetch status.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
 
 from qtpy.QtCore import QObject, Signal
 
@@ -101,6 +101,35 @@ def format_tiled_fetch_status(
 
 
 format_l2_cache_status = format_tiled_fetch_status
+
+
+def aggregate_tiled_fetch_label(statuses: Iterable[TiledFetchStatus]) -> str:
+    """
+    Build a single status label from multiple in-flight fetch snapshots.
+
+    Parameters
+    ----------
+    statuses : iterable of TiledFetchStatus
+        Status snapshots from one or more chunk caches.
+
+    Returns
+    -------
+    str
+        Empty when no batches are active, otherwise ``Fetching loaded/total``
+        with chunk counts summed across active batches.
+    """
+    loaded = 0
+    total = 0
+    for status in statuses:
+        if not status.active or status.batch_total <= 0:
+            continue
+        if status.pending_chunks <= 0:
+            continue
+        loaded += status.loaded_chunks
+        total += status.batch_total
+    if total <= 0:
+        return ""
+    return f"Fetching {loaded}/{total}"
 
 
 class ChunkCacheProgress(QObject):

@@ -23,7 +23,7 @@ from nbs_viewer.models.plot.cube_view import (
     spec_for_plot_ndim,
 )
 from nbs_viewer.utils import print_debug
-from ..common.panel import CollapsiblePanel
+from nbs_viewer.views.common.panel import CollapsiblePanel
 
 
 
@@ -204,7 +204,7 @@ class _PlotAxisRow(QWidget):
         layout.addWidget(self.plot_label)
 
 
-class PlotDimensionControl(QWidget):
+class DimensionControl(QWidget):
     """
     Widget for controlling N-dimensional cube views in plots.
 
@@ -301,7 +301,7 @@ class PlotDimensionControl(QWidget):
         Build dimension rows from the current Y-field shape.
         """
         print_debug(
-            "PlotDimensionControl.create_sliders",
+            "DimensionControl.create_sliders",
             f"plot_ndim={self.dimension_spinbox.value()}",
             category="dimension",
         )
@@ -516,7 +516,7 @@ class PlotDimensionControl(QWidget):
         plot_ndim = self.dimension_spinbox.value()
 
         print_debug(
-            "PlotDimensionControl",
+            "DimensionControl",
             f"view spec roles={self._cube_view_spec.roles} slice={slice_info}",
             category="dimension",
         )

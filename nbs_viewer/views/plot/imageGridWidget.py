@@ -16,7 +16,7 @@ import time as ttime
 from ...utils import print_debug
 from ...models.plot.plotDataModel import PlotDataModel
 from .plotControl import PlotControls
-from .plot_worker import PlotWorker, retire_plot_worker
+from .mplCanvas.plot_worker import PlotWorker, retire_plot_worker
 
 
 import numpy as np
