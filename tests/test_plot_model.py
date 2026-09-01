@@ -30,7 +30,7 @@ def test_roi_set_add_via_plot_model():
     assert plot_model.roi_set.selected_region() == region
 
 
-def test_sync_region_state_with_view_marks_mismatched_roi_stale():
+def test_sync_region_state_with_view_marks_mismatched_roi_stale(qapp):
     plot_model = PlotModel(RunListModel())
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))
@@ -43,7 +43,7 @@ def test_sync_region_state_with_view_marks_mismatched_roi_stale():
     assert statuses == ["ROI marked stale: view coordinates changed"]
 
 
-def test_invalidate_all_region_state_clears_crop_and_marks_rois_stale():
+def test_invalidate_all_region_state_clears_crop_and_marks_rois_stale(qapp):
     plot_model = PlotModel(RunListModel())
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))

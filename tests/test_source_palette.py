@@ -9,7 +9,7 @@ def _manager():
     return CatalogManagerModel(ConfigModel())
 
 
-def test_source_load_emits_catalog_loaded_and_manager_registers():
+def test_source_load_emits_catalog_loaded_and_manager_registers(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=3)
     manager.add_source("test", source)
@@ -25,7 +25,7 @@ def test_source_load_emits_catalog_loaded_and_manager_registers():
     assert manager.get_catalog("Test Catalog") is catalog
 
 
-def test_two_loads_from_one_source_unique_labels():
+def test_two_loads_from_one_source_unique_labels(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=2)
     manager.add_source("test", source)
@@ -38,7 +38,7 @@ def test_two_loads_from_one_source_unique_labels():
     assert manager.get_catalog(labels[0]) is not manager.get_catalog(labels[1])
 
 
-def test_ensure_interactive_palette_contains_defaults():
+def test_ensure_interactive_palette_contains_defaults(qapp):
     manager = _manager()
     manager.ensure_interactive_palette()
     keys = [k for k, _ in manager.iter_palette()]
@@ -46,7 +46,7 @@ def test_ensure_interactive_palette_contains_defaults():
     assert isinstance(manager.get_palette_source("test"), TestSourceModel)
 
 
-def test_load_and_register_headless_helper_no_double_register():
+def test_load_and_register_headless_helper_no_double_register(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=2)
     manager.add_source("test", source)
@@ -56,7 +56,7 @@ def test_load_and_register_headless_helper_no_double_register():
     assert manager.get_catalog_labels() == ["Solo"]
 
 
-def test_catalog_added_and_removed_signals():
+def test_catalog_added_and_removed_signals(qapp):
     manager = _manager()
     added = []
     removed = []

@@ -14,27 +14,27 @@ def _manager():
     return CatalogManagerModel(ConfigModel())
 
 
-def test_create_uri_source_type():
+def test_create_uri_source_type(qapp):
     model = _manager().create_uri_source()
     assert isinstance(model, URISourceModel)
 
 
-def test_create_profile_source_type():
+def test_create_profile_source_type(qapp):
     model = _manager().create_profile_source()
     assert isinstance(model, ProfileSourceModel)
 
 
-def test_create_kafka_source_type():
+def test_create_kafka_source_type(qapp):
     model = _manager().create_kafka_source()
     assert isinstance(model, KafkaSourceModel)
 
 
-def test_create_zmq_source_type():
+def test_create_zmq_source_type(qapp):
     model = _manager().create_zmq_source()
     assert isinstance(model, ZMQSourceModel)
 
 
-def test_create_test_source_and_load():
+def test_create_test_source_and_load(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=4)
     assert isinstance(source, test_source_mod.TestSourceModel)
@@ -44,7 +44,7 @@ def test_create_test_source_and_load():
     assert label == "Test Catalog"
 
 
-def test_load_and_register_test_source():
+def test_load_and_register_test_source(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=3)
     label = manager.load_and_register(source)
@@ -53,7 +53,7 @@ def test_load_and_register_test_source():
     assert len(manager.get_current_catalog()) == 3
 
 
-def test_create_from_config_uri_dispatch():
+def test_create_from_config_uri_dispatch(qapp):
     manager = _manager()
     config = {
         "source_type": "uri",
@@ -70,7 +70,7 @@ def test_create_from_config_uri_dispatch():
     assert wrapped.source_model.selected_keys == ["a", "b"]
 
 
-def test_create_from_config_unknown_type():
+def test_create_from_config_unknown_type(qapp):
     manager = _manager()
     try:
         manager.create_from_config({"source_type": "nope"})
@@ -79,7 +79,7 @@ def test_create_from_config_unknown_type():
         assert "Unknown source type" in str(exc)
 
 
-def test_register_is_sole_registry():
+def test_register_is_sole_registry(qapp):
     manager = _manager()
     source = manager.create_test_source(runs=2)
     manager.load_and_register(source, label="Solo")
