@@ -1,0 +1,236 @@
+"""Tests for mesh and image region mask compilation."""
+
+import numpy as np
+import pytest
+
+from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
+from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.region import (
+    AxisSliceRegion,
+    EllipseRegion,
+    PolygonRegion,
+    RectRegion,
+)
+from nbs_viewer.models.plot.region_mesh import mask_from_data_rect
+from nbs_viewer.models.plot.cube_view import (
+    CubeViewSpec,
+    DimRole,
+    MaterializeRequest,
+    materialize_view,
+    profile_view_spec,
+)
+
+
+def _tes_like_mesh_bundle():
+    y = np.ones((30, 400), dtype=float)
+    row_axis = np.linspace(200.0, 1000.0, 30)
+    col_axis = np.cumsum(np.linspace(0.1, 0.3, 400))
+    return prepare_2d_bundle(y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"])
+
+
+def test_frame_from_mesh_bundle_axes():
+    bundle = _tes_like_mesh_bundle()
+    assert bundle.render_mode == "mesh"
+    frame = frame_from_bundle(bundle)
+    assert frame.shape == bundle.y.shape
+    assert frame.plot_x_dim == 0
+    assert frame.plot_y_dim == 1
+    assert frame.plot_x_name == "en_energy"
+    assert frame.plot_y_name == "tes_mca_energies"
+    assert frame.mesh_x is not None
+    assert frame.shape[0] == 400
+    assert frame.shape[1] == 30
+
+
+def test_rect_on_non_uniform_col_selects_cells():
+    from nbs_viewer.models.plot.region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh
+
+    bundle = _tes_like_mesh_bundle()
+    frame = frame_from_bundle(bundle)
+    x0, _ = _cell_x_bounds_mesh(frame, 5, 0)
+    _, x1 = _cell_x_bounds_mesh(frame, 15, 0)
+    y0, _ = _cell_y_bounds_mesh(frame, 50, 0)
+    _, y1 = _cell_y_bounds_mesh(frame, 60, 0)
+    mask = mask_from_data_rect(frame, x0, x1, y0, y1)
+    assert mask.shape == bundle.y.shape
+    assert mask.sum() > 0
+    assert mask.sum() < mask.size
+
+
+def test_axis_slice_plot_y_band():
+    bundle = _tes_like_mesh_bundle()
+    frame = frame_from_bundle(bundle)
+    y_lo = float(np.min(frame.mesh_y))
+    y_hi = float(np.max(frame.mesh_y))
+    mid = (y_lo + y_hi) / 2.0
+    region = AxisSliceRegion(axis="plot_y", v0=y_lo, v1=mid)
+    compiled = region.compile(frame)
+    assert compiled.pixel_count > 0
+    assert compiled.pixel_count < compiled.mask.size
+
+
+def test_profile_along_en_energy_sums_over_tes_band():
+    bundle = _tes_like_mesh_bundle()
+    y = np.arange(bundle.y.size, dtype=float).reshape(bundle.y.shape)
+    frame = frame_from_bundle(bundle)
+    from nbs_viewer.models.plot.region_mesh import _cell_y_bounds_mesh, _data_limits
+
+    x_lo, x_hi, _, _ = _data_limits(frame)
+    y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
+    _, y1 = _cell_y_bounds_mesh(frame, 5, 0)
+    region = RectRegion(x0=x_lo, x1=x_hi, y0=y0, y1=y1)
+    compiled = region.compile(frame)
+    parent = CubeViewSpec(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0),
+    )
+    request = MaterializeRequest(
+        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+        region=region,
+    )
+    row_axis = np.nanmean(bundle.mesh_y, axis=1)
+    col_axis = np.nanmean(bundle.mesh_x, axis=0)
+    profile, coords, names = materialize_view(
+        y,
+        [row_axis, col_axis],
+        ["en_energy", "tes_mca_energies"],
+        request,
+        region_frame=frame,
+        plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
+    )
+    assert names == ["en_energy"]
+    assert profile.shape == (bundle.y.shape[1],)
+    assert np.isfinite(profile).any()
+    expected = np.array(
+        [
+            np.nansum(y[compiled.mask[:, j], j])
+            if compiled.mask[:, j].any()
+            else np.nan
+            for j in range(y.shape[1])
+        ]
+    )
+    np.testing.assert_allclose(profile, expected, rtol=1e-5, equal_nan=True)
+
+
+def test_image_rect_mask_shape():
+    y = np.zeros((50, 100))
+    bundle = prepare_2d_bundle(
+        y,
+        [np.linspace(0, 10, 50), np.linspace(0, 99, 100)],
+        ["y", "x"],
+    )
+    assert bundle.render_mode == "image"
+    frame = frame_from_bundle(bundle)
+    assert frame.shape == (50, 100)
+    assert frame.plot_x_dim == 1
+    region = RectRegion(x0=10.0, x1=20.0, y0=2.0, y1=4.0)
+    compiled = region.compile(frame)
+    assert compiled.mask.shape == (50, 100)
+
+
+def test_cell_centers_image_shape_and_order():
+    from nbs_viewer.models.plot.region_mesh import cell_centers, _data_limits
+
+    ny, nx = 4, 5
+    bundle = prepare_2d_bundle(
+        np.zeros((ny, nx)),
+        [np.arange(ny, dtype=float), np.arange(nx, dtype=float)],
+        ["y", "x"],
+        render_mode_hint="image",
+    )
+    frame = frame_from_bundle(bundle)
+    centers_x, centers_y = cell_centers(frame)
+    assert centers_x.shape == (ny, nx)
+    assert centers_y.shape == (ny, nx)
+    left, right, bottom, top = _data_limits(frame)
+    assert centers_x[0, 0] == pytest.approx(left + 0.5 * (right - left) / nx)
+    assert centers_y[0, 0] == pytest.approx(top - 0.5 * (top - bottom) / ny)
+    assert centers_y[-1, 0] < centers_y[0, 0]
+
+
+def test_image_mask_at_plot_top_selects_storage_row_zero():
+    """
+    Regression: row 0 must map to the top of the axes under origin='upper'.
+    """
+    from nbs_viewer.models.plot.region_mesh import _data_limits, mask_from_data_rect
+
+    ny, nx = 10, 12
+    bundle = prepare_2d_bundle(
+        np.zeros((ny, nx)),
+        [np.linspace(0.0, 9.0, ny), np.linspace(0.0, 11.0, nx)],
+        ["dim_1", "dim_2"],
+    )
+    frame = frame_from_bundle(bundle)
+    left, right, bottom, top = _data_limits(frame)
+    mask = mask_from_data_rect(frame, left, right, top - 0.6, top)
+    assert mask[0, :].any()
+    assert not mask[ny - 1, :].any()
+
+
+def test_image_rect_mask_matches_imshow_origin_upper():
+    """
+    ROI rows must follow imshow origin='upper' (row 0 at top of axes).
+    """
+    from nbs_viewer.models.plot.region_mesh import _image_cell_bounds
+
+    ny, nx = 20, 30
+    y = np.arange(ny * nx, dtype=float).reshape(ny, nx)
+    row_axis = np.linspace(100.0, 200.0, ny)
+    col_axis = np.linspace(0.0, 29.0, nx)
+    bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["dim_1", "dim_2"])
+    frame = frame_from_bundle(bundle)
+    row, col0, col_last = 3, 5, 7
+    x0, _, y0, y1 = _image_cell_bounds(frame, row, col0)
+    _, x1, _, _ = _image_cell_bounds(frame, row, col_last)
+    region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
+    compiled = region.compile(frame)
+    assert compiled.mask[row, col0 : col_last + 1].all()
+    assert not compiled.mask[row, :col0].any()
+    assert not compiled.mask[row, col_last + 1 :].any()
+    assert not compiled.mask[0, :].any()
+    assert not compiled.mask[ny - 1, :].any()
+
+
+def test_ellipse_on_non_uniform_mesh_selects_cells():
+    bundle = _tes_like_mesh_bundle()
+    frame = frame_from_bundle(bundle)
+    x_lo = float(np.nanmin(frame.mesh_x))
+    x_hi = float(np.nanmax(frame.mesh_x))
+    y_lo = float(np.nanmin(frame.mesh_y))
+    y_hi = float(np.nanmax(frame.mesh_y))
+    region = EllipseRegion(
+        cx=0.5 * (x_lo + x_hi),
+        cy=0.5 * (y_lo + y_hi),
+        rx=0.2 * (x_hi - x_lo),
+        ry=0.15 * (y_hi - y_lo),
+        angle=25.0,
+    )
+    compiled = region.compile(frame)
+    assert compiled.mask.shape == bundle.y.shape
+    assert compiled.pixel_count > 0
+    assert compiled.pixel_count < compiled.mask.size
+
+
+def test_polygon_on_non_uniform_mesh_selects_cells():
+    bundle = _tes_like_mesh_bundle()
+    frame = frame_from_bundle(bundle)
+    x_lo = float(np.nanmin(frame.mesh_x))
+    x_hi = float(np.nanmax(frame.mesh_x))
+    y_lo = float(np.nanmin(frame.mesh_y))
+    y_hi = float(np.nanmax(frame.mesh_y))
+    x_mid = 0.5 * (x_lo + x_hi)
+    y_mid = 0.5 * (y_lo + y_hi)
+    region = PolygonRegion(
+        vertices=(
+            (x_lo + 0.1 * (x_hi - x_lo), y_mid),
+            (x_mid, y_lo + 0.1 * (y_hi - y_lo)),
+            (x_hi - 0.1 * (x_hi - x_lo), y_mid),
+            (x_mid, y_hi - 0.1 * (y_hi - y_lo)),
+        )
+    )
+    compiled = region.compile(frame)
+    assert compiled.mask.shape == bundle.y.shape
+    assert compiled.pixel_count > 0
+    assert compiled.pixel_count < compiled.mask.size

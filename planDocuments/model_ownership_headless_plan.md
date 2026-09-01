@@ -1,5 +1,11 @@
 # Model ownership and headless readiness plan
 
+**Status: CLOSED (2026-09-01).** H1 model ownership goals are met for the
+N=1 path. Follow-up work is tracked in
+[`headless_testing_plan.md`](headless_testing_plan.md) (E2E fixtures and test
+infrastructure), [`plot_package_reorganization.md`](plot_package_reorganization.md)
+(Step 7 layout), and ad-hoc issues for Step 6c / Step 8.
+
 Path B refactor: keep domain code under `models/`, enforce **only models create
 domain models**, and make the viewer runnable as a model tree without views
 (headless H1).
@@ -8,25 +14,44 @@ Related context: ROI workbench and materialize plans under `planDocuments/`;
 cache extraction (`models/cache/`) is the organizational precedent for later
 folder moves.
 
-## Status
+## Status (final)
 
 | Step | Title | Status |
 |------|-------|--------|
-| 0 | Baseline and guardrails | Skipped (optional later) |
+| 0 | Baseline and guardrails | Skipped → moved to [`headless_testing_plan.md`](headless_testing_plan.md) Phase 3 |
 | 1 | Introduce `PlotModel`; own `RoiSetModel` | Done |
 | 2 | Combine / freeze factories on `RunListModel` | Done |
 | 3 | Expand `PlotModel`: plot data + key/policy move | Done |
 | 4 | ROI preview + commit as model APIs | Done |
 | 5 | Catalog table + source models | Done |
-| 6 | Presenter + drop widget registry / no `QtWidgets` in models | In progress (6a/6b done; 6c deferred) |
+| 6 | Presenter + drop widget registry / no `QtWidgets` in models | Done (6a/6b); **6c deferred** (multi-view / image grid) |
 | 7 | Organize under `models/` (mechanical) | Replaced by [`plot_package_reorganization.md`](plot_package_reorganization.md) |
-| 8 | Slim views / canvas (optional polish) | Not started |
+| 8 | Slim views / canvas (optional polish) | Deferred (not blocking H1) |
 
 **Milestones**
 
 - [x] **A** (after steps 1–4): ROI headless path
-- [ ] **B** (after steps 5–6): Catalog → presenter → plot headless path
-- [ ] **C** (steps 7–8): Navigable tree + thin views
+- [x] **B** (after steps 5–6): Catalog → presenter → plot headless path (model
+  tree complete; E2E test harness is follow-up in testing plan)
+- [ ] **C** (steps 7–8): Navigable tree + thin views (deferred)
+
+### Closure notes
+
+What shipped: the target ownership tree (`AppModel` → `CatalogManagerModel` /
+`DisplayManager` → `PlotPresenter` → `RunListModel` + `PlotModel`), no
+`QtWidgets` under `models/`, views consume presenters, catalog and table
+ownership on models, ROI/plot-data APIs callable without a canvas.
+
+What remains outside this plan:
+
+- **6c** — N>1 presenter, image grid per-cell `PlotModel`, clear
+  `PlotDataModel(` in `image_grid_canvas.py`
+- **7** — plot package reorg (`plot_package_reorganization.md`)
+- **8** — canvas slim / export frontend
+- **Testing** — shared `AppModel` + `MemoryCatalog` fixtures, E2E integration
+  tests, ownership AST guard (`headless_testing_plan.md`)
+- **`widgets/kafkaViewerTab.py`** — intentional embed surface; stale API, not
+  in scope
 
 ## Rules of the road
 
@@ -816,7 +841,7 @@ These are the preferred Milestone B fixtures (see **Catalog fixtures** below).
 
 ## Step 6 — Presenter + remove widget registry / QtWidgets from models
 
-**Status:** In progress (6a/6b done; 6c open)
+**Status:** Done (6a/6b); 6c deferred follow-up
 
 **Depends on:** Steps 1–5 ideally; N=1 presenter can start once PlotModel
 exists; full H1 after Step 5 inventory is clean
@@ -887,8 +912,8 @@ exists; full H1 after Step 5 inventory is clean
 - [x] **H1 headless** for model tree: no widget registry / `QtWidgets` in
       models; presenters usable without entrypoint display classes
 - [x] No model-side registry of Qt display classes
-- [ ] Step status → Done (6c remain follow-up)
-- [ ] **Milestone B** checkbox above (catalog path done; multi-view 6c open)
+- [x] Step status → Done (6c remain follow-up)
+- [x] **Milestone B** checkbox above (model path; E2E harness in testing plan)
 
 **Decision log**
 
@@ -1052,3 +1077,4 @@ blocker.
 | 2026-08-26 | Step 6a done: PlotPresenter owns private RunListModel+PlotModel; DisplayManager stores presenters; explicit single_selection_mode (frontend `__single_selection_mode__`); PlotDisplay/MainDisplay resolve via get_presenter |
 | 2026-08-27 | Step 6b done (option A): DisplayRegistry → views/display/frontendRegistry.FrontendRegistry; MainWidget owns it; AppModel/DisplayManager detached; no QtWidgets under models |
 | 2026-08-27 | Step 6c deferred; Step 7 replaced by plot_package_reorganization.md (`models/plot/{roi,run,cube}/`, mirrored `views/plot/roi/`; no top-level `models/roi/`, no shims) |
+| 2026-09-01 | Plan closed. Milestone B marked done at model layer; Step 0 AST guard and E2E fixtures moved to headless_testing_plan.md; 6c/7/8 remain as follow-ups |
