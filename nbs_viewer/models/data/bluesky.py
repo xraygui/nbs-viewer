@@ -84,20 +84,6 @@ class BlueskyRun(CatalogRun):
         # Defer keys initialization; emit loading/ready/error via background pool
         # Caller (catalog UI) should schedule async key init using AppModel's pool
 
-    @time_function(category="run")
-    def _check_data_access(self):
-        """Check if run has accessible data."""
-        try:
-            # Check if primary stream exists and has data
-            if "/".join(["primary", "data"]) in self._run:
-                self._has_data = True
-            else:
-                print(f"Warning: Run {self._key} has no primary data stream")
-                self._has_data = False
-        except Exception as e:
-            print(f"Error checking data access for run {self._key}: {e}")
-            self._has_data = False
-
     def refresh(self):
         """
         Refresh the run data and clear caches.

@@ -73,7 +73,6 @@ def test_l2_miss_seeds_from_slab_and_materializes_l2_in_background():
 
     cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
 
-    assert len(cache.tiles) == 0
     assert cache.l2.completion_fraction(run.start["uid"], "det") > 0.0
     assert len(tiled_reads) > 1
 
@@ -151,7 +150,6 @@ def test_roi_does_not_mark_partial_zarr_tiles_complete():
     slice_info = (slice(None), 0, slice(10, 26), slice(10, 26))
     cache.get_data(run, "det", slice_info)
 
-    assert len(cache.tiles) == 0
     assert l2.completion_fraction("uid-partial", "det") == 0.0
 
 
@@ -183,7 +181,6 @@ def test_roi_does_not_spill_partial_coverage_into_zarr():
     roi_slice = (slice(None), 0, slice(10, 26), slice(10, 26))
     cache.get_data(run, "det", roi_slice)
 
-    assert len(cache.tiles) == 0
     assert l2.completion_fraction("uid-spill", "det") == 0.0
 
 

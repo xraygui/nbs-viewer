@@ -261,7 +261,7 @@ class CombinedRunModel(RunModel):
         enabled : bool
             Whether to enable dynamic updates
         """
-        pass  # TODO: Implement, no concept of dynamic updates for combined runs
+        pass
 
     def set_combination_method(self, method: CombinationMethod):
         """

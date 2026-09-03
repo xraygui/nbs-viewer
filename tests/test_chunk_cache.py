@@ -137,26 +137,6 @@ def test_evict_lru_removes_slice_cache_when_chunks_empty():
     assert cache.current_size == 0
 
 
-def test_flush_l1_to_l2_moves_tiles():
-    from nbs_viewer.models.cache.zarr_l2_cache import ZarrL2Cache
-
-    l2 = ZarrL2Cache(l2_chunks=(1, 1, 4, 4))
-    cache = ChunkCache(l2=l2, l1_max_bytes=10_000)
-    shape = (1, 1, 8, 8)
-    cache.chunk_info[("uid", "det")] = (shape, ((1,), (1,), (8, 8), (8, 8)))
-    tile = np.arange(16, dtype=np.float32).reshape(1, 1, 4, 4)
-    cache.tiles[("uid", "det", (0, 0, 0, 0))] = tile
-    cache.l1_tile_size = tile.nbytes
-    cache.l1_tile_access_times[("uid", "det", (0, 0, 0, 0))] = 0.0
-    l2.register_array("uid", "det", shape, tile.dtype)
-
-    result = cache.flush_l1_to_l2("uid", "det")
-
-    assert result["flushed"] == 1
-    assert result["remaining_l1_tiles"] == 0
-    assert l2.has_chunk("uid", "det", (0, 0, 0, 0))
-
-
 def test_assemble_result_integer_index_with_variable_width_tiles():
     from nbs_viewer.models.cache.tile_indices import tiles_intersecting
 

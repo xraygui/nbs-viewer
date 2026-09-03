@@ -13,6 +13,7 @@ from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, default_spec
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
 from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.runListModel import RunListModel
@@ -66,10 +67,10 @@ def test_remove_run_drops_plot_data(qapp):
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
     run_list.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    assert any(key[2] == run_model.uid for key in plot_model.plot_data_map)
+    assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
 
     run_list.remove_run(run_model)
-    assert all(key[2] != run_model.uid for key in plot_model.plot_data_map)
+    assert all(key.uid != run_model.uid for key in plot_model.plot_data_map)
 
 
 def test_uncheck_keeps_plot_data_in_map(qapp):
@@ -81,7 +82,7 @@ def test_uncheck_keeps_plot_data_in_map(qapp):
     assert len(plot_model.plot_data_map) >= 1
 
     run_list.set_uids_visible([run_model.uid], False)
-    assert any(key[2] == run_model.uid for key in plot_model.plot_data_map)
+    assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
     assert list(plot_model.iter_visible_plot_data()) == []
 
 
@@ -94,10 +95,10 @@ def test_visibility_ensures_plot_data_when_keys_selected(qapp):
     plot_model.set_selected_keys(["time"], ["det"])
     run_list.set_uids_visible([run_model.uid], False)
     plot_model.drop_plot_data_for_uid(run_model.uid)
-    assert run_model.uid not in {key[2] for key in plot_model.plot_data_map}
+    assert run_model.uid not in {key.uid for key in plot_model.plot_data_map}
 
     run_list.set_uids_visible([run_model.uid], True)
-    assert ("time", "det", run_model.uid) in plot_model.plot_data_map
+    assert TraceKey(run_model.uid, "time", "det") in plot_model.plot_data_map
 
 
 def test_two_plot_models_independent_keys_and_maps(qapp):
@@ -112,9 +113,9 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
 
     assert first.get_selected_keys()[1] == ["det"]
     assert second.get_selected_keys()[1] == ["i0"]
-    assert ("time", "det", run_model.uid) in first.plot_data_map
-    assert ("time", "i0", run_model.uid) in second.plot_data_map
-    assert ("time", "i0", run_model.uid) not in first.plot_data_map
+    assert TraceKey(run_model.uid, "time", "det") in first.plot_data_map
+    assert TraceKey(run_model.uid, "time", "i0") in second.plot_data_map
+    assert TraceKey(run_model.uid, "time", "i0") not in first.plot_data_map
 
 
 def test_cube_view_and_crop_without_canvas(qapp):

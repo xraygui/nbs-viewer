@@ -21,11 +21,12 @@ from qtpy.QtWidgets import QMessageBox, QSizePolicy
 from nbs_viewer.models.plot.cube_view import CubeViewSpec
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
+from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle, view_fingerprint_from_bundle
 from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiSetModel
 from nbs_viewer.models.plot.view_crop import ViewCrop
-from nbs_viewer.utils import print_debug, time_function, DEBUG_VARIABLES
+from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
 from ..roi.overlays import _ROI_EDGE_WIDTH
@@ -287,9 +288,7 @@ class MplCanvas(FigureCanvasQTAgg):
             return None
         if model.last_bundle is not None:
             return model.last_bundle
-        return model.get_plot_bundle(
-            self._slice, self.plot_model.dimension, self._cube_view_spec
-        )
+        return model.get_plot_bundle()
 
     def get_view_frame(self) -> PlotViewFrame:
         """
@@ -478,17 +477,8 @@ class MplCanvas(FigureCanvasQTAgg):
             self._connected_plot_data.add(key)
             self.plot_data(plotData)
         else:
-            changed = plotData.update_data_info(
-                norm_keys=norm_keys,
-                indices=self._slice,
-                cube_view_spec=self._cube_view_spec,
-                dimension=self.plot_model.dimension,
-                emit=False,
-            )
-            if changed:
+            if plotData.needs_fetch():
                 self.plot_data(plotData)
-
-
 
     def set_lock_aspect(self, locked: bool) -> None:
         """
@@ -595,7 +585,8 @@ class MplCanvas(FigureCanvasQTAgg):
                         self.updatePlotData(runModel, xkey, ykey, normkeys)
 
             for key, plotDataModel in self.plotArtists.items():
-                if key not in visible_keys:
+                tuple_key = key.as_tuple()
+                if tuple_key not in visible_keys:
                     plotDataModel.set_visible(False)
                     plotDataModel.clear()
                 else:
@@ -605,7 +596,7 @@ class MplCanvas(FigureCanvasQTAgg):
                         isinstance(artist, Line2D)
                         and not self._line_artist_on_axes(artist)
                     )
-                    if needs_artist and key not in self._active_workers:
+                    if needs_artist and tuple_key not in self._active_workers:
                         self.plot_data(plotDataModel)
 
             workers_pending = len(self._active_workers) > 0
@@ -642,12 +633,9 @@ class MplCanvas(FigureCanvasQTAgg):
 
         worker = PlotWorker(
             plotData,
-            self._slice,
-            self.plot_model.dimension,
+            plotData.request,
             generation,
             plotData.artist,
-            cube_view_spec=self._cube_view_spec,
-            view_crop=self._view_crop_for_model(plotData),
         )
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
@@ -736,7 +724,7 @@ class MplCanvas(FigureCanvasQTAgg):
         Covers races where another handler cleared lines but left plot models.
         """
         for key, model in self.plotArtists.items():
-            if key == except_key or not getattr(model, "_visible", False):
+            if key.as_tuple() == except_key or not getattr(model, "_visible", False):
                 continue
             if model.render_mode != "line":
                 continue
@@ -1602,7 +1590,8 @@ class MplCanvas(FigureCanvasQTAgg):
             retire_plot_worker(worker, self._pending_workers)
 
         for key in keys_to_remove:
-            plot_data = self.plotArtists.get(key)
+            trace_key = TraceKey(key[2], key[0], key[1])
+            plot_data = self.plotArtists.get(trace_key)
             if plot_data is not None:
                 try:
                     plot_data.data_changed.disconnect(self.plot_data)
@@ -1629,115 +1618,3 @@ class MplCanvas(FigureCanvasQTAgg):
             self._reset_plot_axes()
             self.updateLegend()
             self.draw()
-
-    def _debug_plot_state(self):
-        if not DEBUG_VARIABLES.get("PRINT_DEBUG"):
-            return
-        print("\n=== MplCanvas Debug Info ===")
-        print(f"Current Dimension: {self.plot_model.dimension}")
-        print(f"Active Render Mode: {self._active_render_mode}")
-        print(f"Current Slice: {self._slice}")
-        print(f"plotArtists count: {len(self.plotArtists)}")
-        print(f"active workers: {list(self._active_workers.keys())}")
-
-        visible_keys = set()
-        for runModel in self.run_list_model.visible_models:
-            xkeys, ykeys, normkeys = runModel.get_selected_keys()
-            print(
-                f"  run {runModel.scan_id}: x={xkeys} y={ykeys} norm={normkeys}"
-            )
-            for xkey in xkeys:
-                for ykey in ykeys:
-                    visible_keys.add((xkey, ykey, runModel.uid))
-        print(f"expected visible_keys ({len(visible_keys)}):")
-        for key in sorted(visible_keys):
-            print(f"    {key}")
-
-        axes_line_ids = {id(line) for line in self.axes.get_lines()}
-
-        def _on_axes(artist):
-            return self._line_artist_on_axes(artist)
-        print("plotArtists:")
-        for key, model in self.plotArtists.items():
-            artist = model.artist
-            artist_visible = None
-            mpl_label = None
-            on_axes = _on_axes(artist)
-            if artist is not None:
-                artist_visible = artist.get_visible()
-                mpl_label = artist.get_label() if hasattr(artist, "get_label") else None
-                if on_axes and id(artist) not in axes_line_ids:
-                    on_axes = False
-            print(
-                f"  {key}:"
-                f" label={model.label!r}"
-                f" mode={model.render_mode}"
-                f" in_visible_keys={key in visible_keys}"
-                f" model._visible={getattr(model, '_visible', '?')}"
-                f" artist={artist is not None}"
-                f" artist.get_visible()={artist_visible}"
-                f" on_axes={on_axes}"
-                f" mpl_label={mpl_label!r}"
-            )
-
-        lines = self.axes.get_lines()
-        print(f"axes.get_lines() ({len(lines)}):")
-        for i, line in enumerate(lines):
-            print(
-                f"  [{i}] label={line.get_label()!r}"
-                f" visible={line.get_visible()}"
-                f" id={id(line)}"
-            )
-
-        artist_ids = {
-            id(m.artist) for m in self.plotArtists.values() if m.artist is not None
-        }
-        orphan_lines = [
-            line
-            for line in lines
-            if id(line) not in artist_ids
-            and line.get_label()
-            and not line.get_label().startswith("_")
-        ]
-        if orphan_lines:
-            print(f"lines on axes not tracked in plotArtists ({len(orphan_lines)}):")
-            for line in orphan_lines:
-                print(
-                    f"  label={line.get_label()!r}"
-                    f" visible={line.get_visible()}"
-                    f" id={id(line)}"
-                )
-
-        missing_artists = [
-            key for key in visible_keys if key not in self.plotArtists
-        ]
-        if missing_artists:
-            print(f"visible_keys without plotArtists entry ({len(missing_artists)}):")
-            for key in sorted(missing_artists):
-                print(f"    {key}")
-
-        stale_artists = [
-            key
-            for key, model in self.plotArtists.items()
-            if key in visible_keys
-            and not self._line_artist_on_axes(model.artist)
-        ]
-        if stale_artists:
-            print(
-                f"visible_keys without line on axes ({len(stale_artists)}):"
-            )
-            for key in sorted(stale_artists):
-                model = self.plotArtists[key]
-                axes_ref = (
-                    None
-                    if model.artist is None
-                    else getattr(model.artist, "axes", None)
-                )
-                print(f"    {key} artist.axes={axes_ref}")
-
-        legend = self.axes.get_legend()
-        if legend is not None:
-            print(f"legend visible={legend.get_visible()}")
-        else:
-            print("legend: None")
-        print("=== End MplCanvas Debug Info ===\n")

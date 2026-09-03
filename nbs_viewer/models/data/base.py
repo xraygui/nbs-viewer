@@ -39,9 +39,6 @@ class CatalogRun(QObject):
         self._key = key
         self._catalog = catalog
         self.metadata = {}
-        # Caching
-        self._plot_data_cache = {}
-        self._dimensions_cache = {}
 
         # Dynamic updates
         self._dynamic = False
@@ -350,13 +347,10 @@ class CatalogRun(QObject):
 
     def _on_data_changed(self):
         """Clear caches when data changes without re-emitting signal."""
-        self._plot_data_cache.clear()
-        self._dimensions_cache.clear()
+        pass
 
     def clear_caches(self):
         """Clear all data caches and notify of change."""
-        self._plot_data_cache.clear()
-        self._dimensions_cache.clear()
         self.data_changed.emit()
 
     def _compute_available_keys(self) -> list:

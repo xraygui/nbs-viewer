@@ -6,6 +6,7 @@ import pytest
 from nbs_viewer.models.plot.cube_view import (
     CubeViewSpec,
     DimRole,
+    MaterializeRequest,
     materialize_view,
     plot_axis_to_storage_axis,
     profile_view_spec,
@@ -24,22 +25,30 @@ from nbs_viewer.models.plot.region import RectRegion
 
 class _StubRunModel:
     def __init__(self, bundle, *, ndim_arrays=None, ndim_y=None):
+        self.uid = "stub"
         self._bundle = bundle
         self._ndim_arrays = ndim_arrays
         self._ndim_y = ndim_y
 
-    def get_plot_bundle(self, xkeys, ykey, norm_keys=None, **kwargs):
-        materialize_request = kwargs.get("materialize_request")
-        if materialize_request is None or materialize_request.region is None:
+    def get_plot_bundle(
+        self,
+        request,
+        *,
+        region_frame=None,
+        parent_spec=None,
+        label="",
+        view_crop=None,
+    ):
+        if request.region is None:
             return self._bundle
 
-        region_frame = kwargs.get("region_frame")
-        parent_spec = kwargs.get("parent_spec")
-        label = kwargs.get("label", "")
-        load_slice = materialize_request.spec.to_load_slice_info()
-        xlist, names, y = self._fetch_plot_arrays(
-            xkeys, ykey, norm_keys, load_slice
+        materialize_request = MaterializeRequest(
+            spec=request.view.to_cube_view_spec(),
+            region=request.region,
+            mask_mode=request.mask_mode,
         )
+        load_slice = materialize_request.spec.to_load_slice_info()
+        xlist, names, y = self._fetch_plot_arrays(load_slice)
         y, xlist, names = materialize_view(
             y,
             xlist,
@@ -56,7 +65,7 @@ class _StubRunModel:
         display_label = label or names[0]
         return prepare_1d_bundle(y, xlist, [display_label])
 
-    def _fetch_plot_arrays(self, xkeys, ykey, norm_keys, slice_info, **kwargs):
+    def _fetch_plot_arrays(self, slice_info):
         if self._ndim_y is None or self._ndim_arrays is None:
             raise ValueError("ndim data not configured on stub")
         y = self._ndim_y[tuple(slice_info)]

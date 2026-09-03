@@ -3,6 +3,7 @@ from typing import Optional, Set
 
 from qtpy.QtCore import QThread, Signal
 
+from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.utils import print_debug
 
 
@@ -64,19 +65,25 @@ class PlotWorker(QThread):
     def __init__(
         self,
         plot_data,
-        slice_info,
-        dimension,
+        plot_request: PlotRequest,
         generation,
         artist=None,
-        cube_view_spec=None,
-        view_crop=None,
     ):
+        """
+        Parameters
+        ----------
+        plot_data : PlotDataModel
+            Trace model that owns the fetch.
+        plot_request : PlotRequest
+            Frozen description of what to fetch.
+        generation : int
+            Worker generation used to discard stale results.
+        artist : object, optional
+            Existing matplotlib artist to update.
+        """
         super().__init__()
         self.plot_data = plot_data
-        self.slice_info = slice_info
-        self.cube_view_spec = cube_view_spec
-        self.view_crop = view_crop
-        self.dimension = dimension
+        self.plot_request = plot_request
         self.generation = generation
         self.artist = artist
 
@@ -87,10 +94,7 @@ class PlotWorker(QThread):
                 return
             t1 = ttime.time()
             bundle = self.plot_data.get_plot_bundle(
-                self.slice_info,
-                self.dimension,
-                cube_view_spec=self.cube_view_spec,
-                view_crop=self.view_crop,
+                plot_request=self.plot_request
             )
             if self.isInterruptionRequested():
                 print_debug(

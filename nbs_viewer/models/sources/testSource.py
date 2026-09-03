@@ -1,4 +1,5 @@
 from .base import SourceModel, CatalogLoadError
+from .fixtures import make_fixture_runs
 from ..catalog.memory import MemoryCatalog
 from ..data.memory import MemoryRun
 from uuid import uuid4
@@ -33,23 +34,48 @@ def create_data(runs=10):
         for i in range(runs)
     ]
 
-def create_runs(runs=10):
+def create_runs(runs=10, include_nd=False):
+    """
+    Build demo runs for the test catalog.
+
+    Parameters
+    ----------
+    runs : int, optional
+        Number of generated 1-D/2-D demo runs. ``include_nd`` runs are added
+        on top of this count.
+    include_nd : bool, optional
+        Append the deterministic N-D fixture runs from
+        :mod:`nbs_viewer.models.sources.fixtures`. Off by default so
+        ``runs`` remains the exact catalog size.
+
+    Returns
+    -------
+    list of MemoryRun
+        Demo runs.
+    """
     metadata = create_metadata(runs=runs)
     data = create_data(runs=runs)
-    return [MemoryRun(m, d) for m, d in zip(metadata, data)]
+    generated = [MemoryRun(m, d) for m, d in zip(metadata, data)]
+    if include_nd:
+        generated.extend(make_fixture_runs())
+    return generated
 
-def create_test_catalog(runs=10):
-    runs = create_runs(runs)
+def create_test_catalog(runs=10, include_nd=False):
+    runs = create_runs(runs, include_nd=include_nd)
     c = MemoryCatalog(runs)
     return c
 
 class TestSourceModel(SourceModel):
-    def __init__(self, runs=10):
+    def __init__(self, runs=10, include_nd=False):
         super().__init__()
         self.runs = runs
+        self.include_nd = include_nd
 
     def get_source(self, **kwargs):
-        return create_test_catalog(self.runs), "Test Catalog"
+        return (
+            create_test_catalog(self.runs, include_nd=self.include_nd),
+            "Test Catalog",
+        )
 
     def is_configured(self):
         return True

@@ -19,6 +19,10 @@ class MemoryRun(CatalogRun):
         - date or time
         - plan_name
         - exit_status
+        Optionally, ``metadata["dims"]`` may map a data key to a tuple of
+        dimension names. Declared names take precedence over shape-based
+        inference, mirroring the ``dims`` attribute Tiled exposes on stored
+        arrays. Keys absent from the mapping fall back to inference.
     data : dict
         Dictionary containing data keys. All arrays should be the same length.
     key : str, optional
@@ -120,6 +124,7 @@ class MemoryRun(CatalogRun):
 
         self._plot_hints = self.metadata.get("plot_hints", {})
         self.hints = self.metadata.get("hints", {})
+        self._declared_dims = self.metadata.get("dims", {}) or {}
 
         if self._key is None:
             self._key = self.uid
@@ -273,7 +278,11 @@ class MemoryRun(CatalogRun):
 
     def _resolve_dims(self, key: str) -> Tuple[str, ...]:
         """
-        Resolve dimension names for a data key, with shape-based inference as fallback.
+        Resolve dimension names for a data key.
+
+        Names declared in ``metadata["dims"]`` are used verbatim. Otherwise the
+        names are inferred from the array shape, assuming a leading event axis
+        named ``time`` whenever a ``time`` data key is present.
 
         Parameters
         ----------
@@ -285,6 +294,10 @@ class MemoryRun(CatalogRun):
         tuple of str
             Dimension names for the key.
         """
+        declared = self._declared_dims.get(key)
+        if declared is not None:
+            return tuple(declared)
+
         shape = tuple(self.getShape(key))
         ndim = len(shape)
         if ndim == 0:

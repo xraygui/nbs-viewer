@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Sequence, Tuple, Any
 
 from qtpy.QtCore import QObject, Signal
 from asteval import Interpreter
@@ -6,16 +6,20 @@ import numpy as np
 import time as ttime
 
 from ..data.base import CatalogRun
-from .cube_view import CubeViewSpec, MaterializeRequest, materialize_view
-from .view_crop import ViewCrop, apply_view_crop_to_slice_info, fetch_context_with_view_crop
+from .cube_view import CubeViewSpec, MaterializeRequest
+from .view_crop import ViewCrop, fetch_context_with_view_crop
 from .derived_fetch import plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
-from .plot_geometry import (
-    PlotBundle,
-    get_render_mode_hint,
-    prepare_1d_bundle,
-    prepare_2d_bundle,
+from .plot_bundle import (
+    apply_normalization,
+    apply_transform,
+    build_plot_bundle,
+    reduce_loaded_array,
+    reduce_to_plot_plane,
+    slice_info_for_key,
 )
+from .plot_geometry import PlotBundle, get_render_mode_hint
+from .plot_request import PlotRequest, build_plot_request
 from nbs_viewer.utils import print_debug
 
 
@@ -47,13 +51,13 @@ class RunModel(QObject):
         self._selected_x: List[str] = []
         self._selected_y: List[str] = []
         self._selected_norm: List[str] = []
-        # self._artists = {}
-        self._is_visible = True  # Track overall visibility state
+        self._is_visible = True
         self._catalog_keys: List[str] = []
         self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
 
         self._transform_text = ""
         self._transform = Interpreter()
+        self._dynamic = False
         # Initialize state
         self._update_available_keys()  # Initial key setup
         self._set_default_selection()
@@ -436,186 +440,110 @@ class RunModel(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    def _fetch_plot_arrays(
+    def _load_slice_for_request(
         self,
-        xkeys,
-        ykey,
-        norm_keys=None,
-        slice_info=None,
-        cube_view_spec=None,
-        materialize_request: Optional[MaterializeRequest] = None,
-        view_crop: Optional[ViewCrop] = None,
-        transform=True,
-        preserve_storage_axes: bool = False,
+        request: PlotRequest,
         *,
         region_frame=None,
         parent_spec: Optional[CubeViewSpec] = None,
-    ) -> Tuple[List[np.ndarray], List[str], np.ndarray]:
+        view_crop: Optional[ViewCrop] = None,
+    ) -> Tuple[tuple, object]:
         """
-        Load and normalize raw x/y arrays for plotting.
+        Resolve the storage load slice and ROI materialize frame.
+
+        Crop on a 2-D view is already folded into ``request.view.load_slice``.
+        A 1-D ROI profile cannot carry that crop on the view, so ``view_crop``
+        remains an extra argument for N-D ROI loads.
 
         Parameters
         ----------
-        xkeys : list of str
-            X axis keys.
-        ykey : str
-            Y data key.
-        norm_keys : list of str, optional
-            Normalization keys.
-        slice_info : tuple, optional
-            Legacy slice specification.
-        cube_view_spec : CubeViewSpec, optional
-            N-D cube view (slice, reduce, axis order). Takes precedence over
-            ``slice_info`` when provided.
-        materialize_request : MaterializeRequest, optional
-            Unified view request. When set, takes precedence over
-            ``cube_view_spec``.
-        view_crop : ViewCrop, optional
-            Persistent spatial crop applied to plot-plane load slices.
-        transform : bool
-            Whether to apply the user transform expression.
-        preserve_storage_axes : bool
-            When True, keep one coordinate array per storage axis even if an
-            axis was collapsed to length 1 by ``slice_info``.
+        request : PlotRequest
+            Frozen plot description.
         region_frame : PlotViewFrame, optional
-            Parent 2D view frame required when ``materialize_request.region``
-            is set.
+            Parent 2D view frame required when ``request.region`` is set.
         parent_spec : CubeViewSpec, optional
-            Parent cube view for plot-plane storage axis lookup during ROI
-            materialization.
+            Parent cube view for plot-plane storage axis lookup.
+        view_crop : ViewCrop, optional
+            Parent-plane crop applied only on the ROI load path.
 
         Returns
         -------
         tuple
-            (xlist, axis_names, y)
+            ``(slice_info, materialize_frame)``. ``materialize_frame`` is
+            None when there is no region.
         """
-        view_spec = None
-        request = materialize_request
-        materialize_frame = region_frame
-        if self._frozen_entry(ykey) is not None:
-            request = None
-            materialize_request = None
-            cube_view_spec = None
-        if request is not None:
-            view_spec = request.spec
-            if request.region is not None:
-                if region_frame is None:
-                    raise ValueError(
-                        "region_frame is required when materialize_request.region is set"
-                    )
-                if view_crop is not None:
-                    slice_info, materialize_frame = fetch_context_with_view_crop(
-                        request,
-                        view_crop,
-                        parent_spec,
-                    )
-                else:
-                    slice_info, materialize_frame = request.fetch_context(
-                        region_frame=region_frame,
-                        parent_spec=parent_spec,
-                    )
-            else:
-                slice_info = view_spec.to_load_slice_info()
-                if view_crop is not None:
-                    slice_info = apply_view_crop_to_slice_info(slice_info, view_crop)
-            preserve_storage_axes = True
-        elif cube_view_spec is not None:
-            view_spec = cube_view_spec
-            slice_info = cube_view_spec.to_load_slice_info()
-            if view_crop is not None:
-                slice_info = apply_view_crop_to_slice_info(slice_info, view_crop)
-
-        t0 = ttime.time()
-        xlist, axis_names, _extra = self.get_dimension_axes(
-            ykey, xkeys, slice_info
-        )
-        y = self.get_data(ykey, slice_info)
-        t_load = ttime.time() - t0
-        storage_axes = list(xlist)
-        storage_names = list(axis_names)
-
-        t0 = ttime.time()
-        if request is not None:
-            y, xlist, axis_names = materialize_view(
-                y,
-                storage_axes,
-                storage_names,
-                request,
-                region_frame=materialize_frame,
-                plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
+        if request.region is None:
+            return request.view.load_slice(), None
+        if region_frame is None:
+            raise ValueError(
+                "region_frame is required when request.region is set"
             )
-        elif view_spec is not None:
-            y, xlist, axis_names = materialize_view(
-                y,
-                storage_axes,
-                storage_names,
-                MaterializeRequest(view_spec),
-            )
-        elif y.size > 1 and not preserve_storage_axes:
-            filtered = [(x, n) for x, n in zip(xlist, axis_names) if x.size > 1]
-            if filtered:
-                xlist, axis_names = zip(*filtered)
-                xlist = list(xlist)
-                axis_names = list(axis_names)
-            else:
-                xlist = []
-                axis_names = []
-        t_materialize = ttime.time() - t0
-
-        t0 = ttime.time()
-        if norm_keys is not None:
-            normlist = [
-                self.get_data(norm_key, slice_info) for norm_key in norm_keys
-            ]
-            if request is not None:
-                for i, norm_key in enumerate(norm_keys):
-                    if self._frozen_entry(norm_key) is not None:
-                        continue
-                    normlist[i], _, _ = materialize_view(
-                        normlist[i],
-                        storage_axes,
-                        storage_names,
-                        request,
-                        region_frame=materialize_frame,
-                        plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
-                    )
-            elif view_spec is not None:
-                for i, norm_key in enumerate(norm_keys):
-                    if self._frozen_entry(norm_key) is not None:
-                        continue
-                    normlist[i], _, _ = materialize_view(
-                        normlist[i],
-                        storage_axes,
-                        storage_names,
-                        MaterializeRequest(view_spec),
-                    )
-            norm = np.prod(normlist, axis=0)
-        else:
-            norm = None
-
-        if norm is not None:
-            if np.isscalar(norm):
-                y = y / norm
-            else:
-                temp_norm = norm
-                while temp_norm.ndim < y.ndim:
-                    temp_norm = np.expand_dims(temp_norm, axis=-1)
-                y = y / temp_norm
-        t_norm = ttime.time() - t0
-
-        t0 = ttime.time()
-        if transform:
-            xlist, y = self.transform_data(xlist, y)
-        t_transform = ttime.time() - t0
-
-        print_debug(
-            "RunModel._fetch_plot_arrays",
-            f"{ykey} shape={getattr(y, 'shape', None)} "
-            f"load={t_load:.4f}s materialize={t_materialize:.4f}s "
-            f"norm={t_norm:.4f}s transform={t_transform:.4f}s",
-            category="plots",
+        materialize_request = MaterializeRequest(
+            spec=request.view.to_cube_view_spec(),
+            region=request.region,
+            mask_mode=request.mask_mode,
         )
-        return xlist, axis_names, y
+        if view_crop is not None:
+            return fetch_context_with_view_crop(
+                materialize_request,
+                view_crop,
+                parent_spec,
+            )
+        return materialize_request.fetch_context(
+            region_frame=region_frame,
+            parent_spec=parent_spec,
+        )
+
+    def _normalized_y(
+        self,
+        y: np.ndarray,
+        y_plot_names: Sequence[str],
+        request: PlotRequest,
+        slice_info: tuple,
+        y_storage_names: Sequence[str],
+    ) -> np.ndarray:
+        """
+        Load and reduce each norm key, then divide into ``y``.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Plot-plane y array.
+        y_plot_names : sequence of str
+            Names of the plot-plane axes of ``y``.
+        request : PlotRequest
+            Supplies norm keys, x keys, and the y view roles.
+        slice_info : tuple
+            Load slice used for the y key.
+        y_storage_names : sequence of str
+            Full storage names of the y key.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized y array.
+        """
+        if not request.norm_keys:
+            return y
+        xkeys = list(request.xkeys)
+        roles = request.view.roles
+        reduced = []
+        for norm_key in request.norm_keys:
+            _, norm_names, _, _ = self.get_dimension_ui_info(norm_key, xkeys)
+            if self._frozen_entry(norm_key) is not None:
+                arr = self.get_data(norm_key, slice_info)
+                reduced.append((arr, list(norm_names)))
+                continue
+            key_slice = slice_info_for_key(
+                slice_info, y_storage_names, norm_names
+            )
+            arr = self.get_data(norm_key, key_slice)
+            reduced.append(
+                reduce_loaded_array(
+                    arr, list(norm_names), y_storage_names, roles
+                )
+            )
+        return apply_normalization(y, y_plot_names, reduced)
 
     def get_plot_data(
         self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
@@ -634,159 +562,140 @@ class RunModel(QObject):
         slice_info : tuple, optional
             Slice specification.
         transform : bool
-            Whether to apply transforms.
+            Whether to apply the run model's transform expression.
 
         Returns
         -------
         tuple
             (xlist, y)
         """
-        xlist, _axis_names, y = self._fetch_plot_arrays(
-            xkeys, ykey, norm_keys, slice_info, transform
+        shape = self.get_shape(ykey)
+        plot_ndim = 2 if len(shape) >= 2 else 1
+        request = build_plot_request(
+            uid=self.uid,
+            xkeys=xkeys,
+            ykey=ykey,
+            shape=shape,
+            norm_keys=norm_keys,
+            plot_ndim=plot_ndim,
+            slice_info=slice_info,
+            transform=self._transform_text if transform else "",
         )
-        return xlist, y
+        bundle = self.get_plot_bundle(request)
+        if bundle.ndim == 1:
+            xlist = [] if bundle.x_line is None else [bundle.x_line]
+        else:
+            xlist = []
+        return xlist, bundle.y
 
     def get_plot_bundle(
         self,
-        xkeys,
-        ykey,
-        norm_keys=None,
-        slice_info=None,
-        cube_view_spec=None,
-        materialize_request: Optional[MaterializeRequest] = None,
-        view_crop: Optional[ViewCrop] = None,
-        transform=True,
+        request: PlotRequest,
         *,
         region_frame=None,
         parent_spec: Optional[CubeViewSpec] = None,
         label: str = "",
+        view_crop: Optional[ViewCrop] = None,
     ) -> PlotBundle:
         """
-        Get a prepared PlotBundle with render mode and coordinates.
+        Load, reduce, normalize, transform, and pack one plot request.
 
         Parameters
         ----------
-        xkeys : list of str
-            X axis keys.
-        ykey : str
-            Y data key.
-        norm_keys : list of str, optional
-            Normalization keys.
-        slice_info : tuple, optional
-            Slice specification.
-        cube_view_spec : CubeViewSpec, optional
-            N-D cube view specification.
-        materialize_request : MaterializeRequest, optional
-            Unified view request including optional ROI parameters.
-        view_crop : ViewCrop, optional
-            Persistent spatial crop applied to plot-plane load slices.
-        transform : bool
-            Whether to apply transforms.
+        request : PlotRequest
+            Frozen plot description.
         region_frame : PlotViewFrame, optional
-            Parent 2D view frame required when ``materialize_request.region``
-            is set.
+            Parent 2D view frame required when ``request.region`` is set.
         parent_spec : CubeViewSpec, optional
             Parent cube view for ROI plot-plane axis lookup.
         label : str
             Optional display label for 1D ROI output.
+        view_crop : ViewCrop, optional
+            Parent-plane crop for N-D ROI loads. Ordinary 2-D crops belong on
+            ``request.view``.
 
         Returns
         -------
         PlotBundle
             Prepared plot payload for the view layer.
         """
-        request = materialize_request
-        if request is not None and request.region is not None:
-            if region_frame is None:
-                raise ValueError(
-                    "region_frame is required when materialize_request.region is set"
-                )
-            xlist, axis_names, y = self._fetch_plot_arrays(
-                xkeys,
-                ykey,
-                norm_keys,
-                materialize_request=request,
-                view_crop=view_crop,
-                transform=transform,
-                region_frame=region_frame,
-                parent_spec=parent_spec,
-            )
-            if request.spec.plot_ndim != 1:
-                raise ValueError(
-                    f"ROI requests always reduce to a profile, got plot_ndim "
-                    f"{request.spec.plot_ndim}"
-                )
-            if not np.isfinite(y).any():
-                raise ValueError("ROI profile is empty after reduction")
-            display_label = label or (axis_names[0] if axis_names else "profile")
-            return prepare_1d_bundle(y, xlist, [display_label])
-
-        xlist, axis_names, y = self._fetch_plot_arrays(
-            xkeys,
-            ykey,
-            norm_keys,
-            slice_info=slice_info,
-            cube_view_spec=cube_view_spec,
-            materialize_request=request,
+        xkeys = list(request.xkeys)
+        ykey = request.ykey
+        slice_info, materialize_frame = self._load_slice_for_request(
+            request,
+            region_frame=region_frame,
+            parent_spec=parent_spec,
             view_crop=view_crop,
-            transform=transform,
         )
-        if y is None:
-            raise ValueError(f"Plot data for {ykey!r} is missing")
-        hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+
+        t0 = ttime.time()
+        storage_axes, storage_names, _extra = self.get_dimension_axes(
+            ykey, xkeys, slice_info
+        )
+        y = self.get_data(ykey, slice_info)
+        t_load = ttime.time() - t0
+
+        t0 = ttime.time()
+        y, coords, names = reduce_to_plot_plane(
+            y,
+            storage_axes,
+            storage_names,
+            request,
+            region_frame=materialize_frame,
+            plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
+        )
+        t_materialize = ttime.time() - t0
+
+        t0 = ttime.time()
+        y = self._normalized_y(
+            y, names, request, slice_info, storage_names
+        )
+        t_norm = ttime.time() - t0
+
+        t0 = ttime.time()
+        coords, y = apply_transform(coords, y, request.transform)
+        t_transform = ttime.time() - t0
+
+        print_debug(
+            "RunModel.get_plot_bundle",
+            f"{ykey} shape={getattr(y, 'shape', None)} "
+            f"load={t_load:.4f}s materialize={t_materialize:.4f}s "
+            f"norm={t_norm:.4f}s transform={t_transform:.4f}s",
+            category="plots",
+        )
+
         frozen = self._frozen_entry(ykey)
         if frozen is not None and y.ndim == 1:
-            axis_names = [label or frozen.label]
-
-        if y.ndim == 1:
-            return prepare_1d_bundle(y, xlist, axis_names)
-        if y.ndim == 2:
-            t0 = ttime.time()
-            bundle = prepare_2d_bundle(
-                y, xlist, axis_names, render_mode_hint=hint
-            )
-            print_debug(
-                "RunModel.get_plot_bundle",
-                f"{ykey} prepare_2d mode={bundle.render_mode} "
-                f"shape={y.shape} {ttime.time() - t0:.4f}s",
-                category="plots",
-            )
-            return bundle
-
-        raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")
+            names = [label or frozen.label]
+        hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+        return build_plot_bundle(
+            y,
+            coords,
+            names,
+            request,
+            render_mode_hint=hint,
+            label=label,
+        )
 
     def transform_data(
         self, xlist: List[np.ndarray], y: np.ndarray
     ) -> Tuple[List[np.ndarray], np.ndarray]:
         """
-        Transform data using normalization and custom transformations.
+        Transform data using this run's current expression text.
 
         Parameters
         ----------
-        xlist : List[np.ndarray]
-            List of x-axis data arrays
+        xlist : list of np.ndarray
+            Plot-plane coordinate arrays.
         y : np.ndarray
-            Y-axis data array
-        norm : Optional[np.ndarray]
-            Optional normalization data
+            Plot-plane data.
 
         Returns
         -------
-        Tuple[List[np.ndarray], np.ndarray]
-            Transformed (x_data_list, y_data)
+        tuple
+            Transformed ``(xlist, y)``.
         """
-        # Apply normalization if provided
-        # Apply custom transformation
-        if self._transform_text:
-            self._transform.symtable["y"] = y
-            self._transform.symtable["x"] = xlist
-            result = self._transform(self._transform_text)
-            if result is not None:
-                y = result
-            else:
-                y = self._transform.symtable.get("y", y)
-
-        return xlist, y
+        return apply_transform(xlist, y, self._transform_text)
 
     def set_transform(self, transform_state: Dict[str, Any]) -> None:
         """
@@ -807,6 +716,18 @@ class RunModel(QObject):
         if transform_text != self._transform_text:
             self._transform_text = transform_text
             self.transform_changed.emit(transform_state)
+
+    @property
+    def dynamic_update(self) -> bool:
+        """
+        Whether dynamic updates are enabled for this run.
+
+        Returns
+        -------
+        bool
+            True when live data updates are enabled.
+        """
+        return self._dynamic
 
     def set_dynamic(self, enabled: bool) -> None:
         """
@@ -834,8 +755,6 @@ class RunModel(QObject):
         self._selected_y.clear()
         self._selected_norm.clear()
 
-        # Emit a final signal to ensure any remaining references are cleaned up
-        # self.data_changed.emit()
         self.visibility_changed.emit(False)
 
     def get_selected_keys(self):

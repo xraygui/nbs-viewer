@@ -61,35 +61,6 @@ class Viewer(QMainWindow):
         open_config_action.triggered.connect(self._on_open_catalog_config)
         file_menu.addAction(open_config_action)
 
-        """
-        file_menu.addSeparator()
-
-        # Save Plot
-        save_plot_action = QAction("&Save Plot As...", self)
-        save_plot_action.setShortcut("Ctrl+S")
-        save_plot_action.setStatusTip("Save the current plot as an image")
-        save_plot_action.triggered.connect(self._on_save_plot)
-        file_menu.addAction(save_plot_action)
-
-        # Export Data
-        export_data_action = QAction("&Export Data...", self)
-        export_data_action.setShortcut("Ctrl+E")
-        export_data_action.setStatusTip("Export plot data to a file")
-        export_data_action.triggered.connect(self._on_export_data)
-        file_menu.addAction(export_data_action)
-
-        file_menu.addSeparator()
-
-        # Print
-        print_action = QAction("&Print...", self)
-        print_action.setShortcut("Ctrl+P")
-        print_action.setStatusTip("Print the current plot")
-        print_action.triggered.connect(self._on_print)
-        file_menu.addAction(print_action)
-
-        file_menu.addSeparator() 
-        """
-
         # Exit
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -123,37 +94,11 @@ class Viewer(QMainWindow):
 
         catalog_menu.addSeparator()
 
-        # Refresh All Catalogs
-        """
-        refresh_action = QAction("&Refresh Current Catalog", self)
-        refresh_action.setShortcut("F5")
-        refresh_action.setStatusTip("Refresh current catalog")
-        refresh_action.triggered.connect(self._on_refresh_catalogs)
-        catalog_menu.addAction(refresh_action)
-        """
-
         clear_selected_run_action = QAction("&Deselect Runs", self)
         clear_selected_run_action.setShortcut("Ctrl+Shift+D")
         clear_selected_run_action.setStatusTip("Deselect all runs")
         clear_selected_run_action.triggered.connect(self._on_clear_selected_run)
         catalog_menu.addAction(clear_selected_run_action)
-
-        """
-        # Clear Cache
-        clear_cache_action = QAction("&Clear Cache", self)
-        clear_cache_action.setShortcut("Ctrl+Shift+C")
-        clear_cache_action.setStatusTip("Clear catalog cache")
-        clear_cache_action.triggered.connect(self._on_clear_cache)
-        catalog_menu.addAction(clear_cache_action)
-
-        catalog_menu.addSeparator()
-
-        # Catalog Settings
-        catalog_settings_action = QAction("Catalog &Settings...", self)
-        catalog_settings_action.setShortcut("Ctrl+Shift+S")
-        catalog_settings_action.setStatusTip("Configure catalog settings")
-        catalog_settings_action.triggered.connect(self._on_catalog_settings)
-        catalog_menu.addAction(catalog_settings_action) """
 
         # Switch Catalog (submenu)
         self.switch_catalog_menu = catalog_menu.addMenu("&Switch Catalog")
@@ -203,14 +148,6 @@ class Viewer(QMainWindow):
         close_display_action.triggered.connect(self._on_close_display)
         display_menu.addAction(close_display_action)
 
-        # Keep duplicate for potential quick copy; no-op for now
-
-        display_menu.addSeparator()
-
-        # Remove unused display actions for now
-
-        # Remove unused display actions for now
-
     def _update_switch_catalog_menu(self):
         """Update the switch catalog submenu with available catalogs."""
         # Clear existing items
@@ -238,21 +175,6 @@ class Viewer(QMainWindow):
             self.catalog_switcher.load_catalog_config(path)
             self._update_switch_catalog_menu()
 
-    def _on_save_plot(self):
-        """Handle saving the current plot."""
-        # TODO: Implement plot saving
-        print("Save plot - not implemented yet")
-
-    def _on_export_data(self):
-        """Handle exporting data."""
-        # TODO: Implement data export
-        print("Export data - not implemented yet")
-
-    def _on_print(self):
-        """Handle printing."""
-        # TODO: Implement printing
-        print("Print - not implemented yet")
-
     # Catalog menu action handlers
     def _on_connect_tiled_uri(self):
         """Handle connecting to a Tiled URI."""
@@ -266,25 +188,9 @@ class Viewer(QMainWindow):
         """Handle removing a catalog source."""
         self.catalog_switcher.remove_current_source()
 
-    '''
-    def _on_refresh_catalogs(self):
-        """Handle refreshing all catalogs."""
-        self.catalog_switcher.refresh_catalog()
-    '''
-
     def _on_clear_selected_run(self):
         """Handle clearing selected run."""
         self.catalog_switcher.deselect_all()
-
-    def _on_clear_cache(self):
-        """Handle clearing cache."""
-        # TODO: Implement cache clearing
-        print("Clear cache - not implemented yet")
-
-    def _on_catalog_settings(self):
-        """Handle catalog settings."""
-        # TODO: Implement catalog settings dialog
-        print("Catalog settings - not implemented yet")
 
     def _on_switch_catalog(self, label: str):
         """Switch active catalog by label from submenu."""
@@ -311,21 +217,6 @@ class Viewer(QMainWindow):
         """Handle closing the current display."""
         # TODO: Implement display closing
         self.mainWidget.close_current_display()
-
-    def _on_duplicate_display(self):
-        """Handle duplicating the current display."""
-        # TODO: Implement display duplication
-        self.mainWidget.duplicate_current_display()
-
-    def _on_display_settings(self):
-        """Handle display settings."""
-        # TODO: Implement display settings dialog
-        print("Display settings - not implemented yet")
-
-    def _on_save_display_layout(self):
-        """Handle saving display layout."""
-        # TODO: Implement display layout saving
-        print("Save display layout - not implemented yet")
 
     def _on_rename_display(self):
         """Handle renaming the current display."""

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Optional
 from uuid import uuid4
 
@@ -20,13 +21,16 @@ from .frozen_spectrum import (
     copy_plot_bundle,
 )
 from .plot_geometry import PlotBundle, RenderMode
+from .plot_request import PlotRequest, TraceKey, build_plot_request
 from .view_crop import ViewCrop
 
 
 class PlotDataModel(QObject):
     """
-    A class to plot x, y data on a given MplCanvas instance and hold the
-    resulting lines object.
+    Long-lived plot object for one :class:`TraceKey`.
+
+    Holds a :class:`PlotRequest` describing the current fetch. Changing the
+    request (crop, slice, transform, norm) reuses this model and its artist.
 
     Attributes
     ----------
@@ -46,49 +50,34 @@ class PlotDataModel(QObject):
     def __init__(
         self,
         run,
-        xkey,
-        ykey,
-        norm_keys=None,
+        request: PlotRequest,
+        *,
         label=None,
-        indices=None,
-        cube_view_spec=None,
-        dimension=1,
         parent=None,
+        trace_key: Optional[TraceKey] = None,
     ):
         """
-        Initialize plot data model for one x/y pair on a run.
+        Initialize plot data model for one trace key.
 
         Parameters
         ----------
         run : RunModel
             Run model providing data.
-        xkey : str
-            X axis key.
-        ykey : str
-            Y data key.
-        norm_keys : list of str, optional
-            Normalization keys.
+        request : PlotRequest
+            Current fetch description.
         label : str, optional
             Plot label override.
-        indices : tuple, optional
-            Legacy slice indices for multidimensional data.
-        cube_view_spec : CubeViewSpec, optional
-            N-D cube view for slice, reduce, and axis assignment.
-        dimension : int, optional
-            Plot dimensionality (1 or 2).
         parent : QWidget, optional
             Parent QObject.
+        trace_key : TraceKey, optional
+            Object identity. Defaults to ``request.trace_key()``.
         """
         super().__init__(parent=parent)
-        self._key = (xkey, ykey, run.uid)
-        self._xkey = xkey
-        self._ykey = ykey
         self._run = run
-        self._norm_keys = norm_keys
+        self._request = request
+        self._trace_key = trace_key or request.trace_key()
+        self._fetched_request: Optional[PlotRequest] = None
         self._label = label
-        self._indices = indices
-        self._cube_view_spec = cube_view_spec
-        self._dimension = dimension
         self.artist = None
         self.last_bundle: Optional[PlotBundle] = None
         self._render_mode: Optional[RenderMode] = None
@@ -97,6 +86,103 @@ class PlotDataModel(QObject):
         self._run.selected_keys_changed.connect(self._on_keys_changed)
         self._run.transform_changed.connect(self._on_data_changed)
         self._run.data_changed.connect(self._on_data_changed)
+
+    @property
+    def request(self) -> PlotRequest:
+        """
+        Current fetch description.
+        """
+        return self._request
+
+    @property
+    def trace_key(self) -> TraceKey:
+        """
+        Object identity for this model / artist.
+        """
+        return self._trace_key
+
+    @property
+    def last_fetched_request(self) -> Optional[PlotRequest]:
+        """
+        Request used to produce ``last_bundle``, if any.
+        """
+        return self._fetched_request
+
+    @property
+    def _key(self):
+        return self._trace_key.as_tuple()
+
+    @property
+    def _xkey(self):
+        return self._trace_key.xkey
+
+    @property
+    def _ykey(self):
+        return self._trace_key.ykey
+
+    @property
+    def _norm_keys(self):
+        return list(self._request.norm_keys)
+
+    @property
+    def _indices(self):
+        return self._request.view.load_slice()
+
+    @property
+    def _cube_view_spec(self):
+        return self._request.view.to_cube_view_spec()
+
+    @property
+    def _dimension(self):
+        return self._request.view.plot_ndim
+
+    def set_request(self, request: PlotRequest) -> bool:
+        """
+        Replace the current fetch description without changing object identity.
+
+        Parameters
+        ----------
+        request : PlotRequest
+            New fetch description. ``uid``, primary x key, and ``ykey`` must
+            match :attr:`trace_key`.
+
+        Returns
+        -------
+        bool
+            True if the request changed.
+
+        Raises
+        ------
+        ValueError
+            If the request names a different trace.
+        """
+        incoming = request.trace_key(self._trace_key.fan_out_index)
+        if (
+            incoming.uid != self._trace_key.uid
+            or incoming.xkey != self._trace_key.xkey
+            or incoming.ykey != self._trace_key.ykey
+        ):
+            raise ValueError(
+                f"request trace {incoming} does not match {self._trace_key}"
+            )
+        if request == self._request:
+            return False
+        self._request = request
+        return True
+
+    def needs_fetch(self) -> bool:
+        """
+        Return whether a worker should fetch for the current request.
+
+        Returns
+        -------
+        bool
+            True if there is no artist or the held request has not been
+            fetched yet.
+        """
+        if self.artist is None:
+            return True
+        return self._fetched_request != self._request
 
     @property
     def label(self):
@@ -115,40 +201,24 @@ class PlotDataModel(QObject):
         return self._render_mode
 
     def get_plot_bundle(
-        self,
-        indices=None,
-        dimension=None,
-        cube_view_spec=None,
-        view_crop: Optional[ViewCrop] = None,
+        self, plot_request: Optional[PlotRequest] = None
     ) -> PlotBundle:
         """
         Fetch and prepare plot data as a PlotBundle.
 
         Parameters
         ----------
-        indices : tuple, optional
-            Legacy slice indices for multidimensional data.
-        dimension : int, optional
-            Plot dimension count (unused; kept for API compatibility).
-        cube_view_spec : CubeViewSpec, optional
-            N-D cube view specification.
-        view_crop : ViewCrop, optional
-            Persistent spatial crop for plot-plane load slices.
+        plot_request : PlotRequest, optional
+            Override for this fetch. Defaults to the held request.
 
         Returns
         -------
         PlotBundle
             Prepared plot payload.
         """
-        spec = cube_view_spec if cube_view_spec is not None else self._cube_view_spec
-        bundle = self._run.get_plot_bundle(
-            [self._xkey],
-            self._ykey,
-            self._norm_keys,
-            slice_info=indices,
-            cube_view_spec=spec,
-            view_crop=view_crop,
-        )
+        request = plot_request if plot_request is not None else self._request
+        bundle = self._run.get_plot_bundle(request)
+        self._fetched_request = request
         self._update_render_mode(bundle)
         self.last_bundle = bundle
         return bundle
@@ -271,7 +341,7 @@ class PlotDataModel(QObject):
         tuple
             (xlist, y) for legacy callers.
         """
-        bundle = self.get_plot_bundle(indices, dimension)
+        bundle = self.get_plot_bundle()
         if bundle.ndim == 1:
             return [bundle.x_line], bundle.y
         return [], bundle.y
@@ -315,18 +385,37 @@ class PlotDataModel(QObject):
         changed = False
         if self.artist is None:
             changed = True
-        if norm_keys is not None and set(norm_keys) != set(self._norm_keys or []):
-            self._norm_keys = norm_keys
-            changed = True
-        if indices is not None and indices != self._indices:
-            self._indices = indices
-            changed = True
-        if cube_view_spec is not None and cube_view_spec != self._cube_view_spec:
-            self._cube_view_spec = cube_view_spec
-            changed = True
-        if dimension is not None and dimension != self._dimension:
-            self._dimension = dimension
-            changed = True
+        if (
+            norm_keys is not None
+            or indices is not None
+            or cube_view_spec is not None
+            or dimension is not None
+        ):
+            shape = self._run.get_shape(self._ykey)
+            request = build_plot_request(
+                uid=self._run.uid,
+                xkeys=[self._xkey] if self._xkey else (),
+                ykey=self._ykey,
+                shape=shape,
+                norm_keys=(
+                    norm_keys if norm_keys is not None else self._norm_keys
+                ),
+                plot_ndim=(
+                    dimension if dimension is not None else self._dimension
+                ),
+                cube_view_spec=(
+                    cube_view_spec
+                    if cube_view_spec is not None
+                    else self._cube_view_spec
+                ),
+                slice_info=(
+                    indices if indices is not None else self._indices
+                ),
+                crop=self._request.view.crop,
+                transform=self._request.transform,
+            )
+            if self.set_request(request):
+                changed = True
         if not self._run._is_visible:
             changed = False
         if changed:
@@ -347,8 +436,8 @@ class PlotDataModel(QObject):
             self.set_visible(visible)
 
     def set_norm_keys(self, norm_keys):
-        if set(norm_keys) != set(self._norm_keys):
-            self._norm_keys = norm_keys
+        request = replace(self._request, norm_keys=tuple(norm_keys or ()))
+        if self.set_request(request):
             self.data_changed.emit(self)
 
     def set_visible(self, visible):
@@ -382,6 +471,9 @@ class PlotDataModel(QObject):
             self.set_visible(True)
 
     def _on_data_changed(self, *args):
+        text = getattr(self._run, "_transform_text", "") or ""
+        if text != self._request.transform:
+            self.set_request(replace(self._request, transform=text))
         if self._visible:
             print_debug(
                 "PlotDataModel._on_data_changed",

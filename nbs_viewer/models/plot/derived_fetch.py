@@ -22,10 +22,12 @@ from .cube_view import (
     storage_axis_to_plot_axis,
 )
 from .plot_geometry import PlotBundle, prepare_1d_bundle
+from .plot_request import PlotRequest
 from .plot_view_frame import frame_from_bundle
 from .region import RegionDefinition, expand_region_for_profile
 from .roi_set import RoiOperation
 from .view_crop import ViewCrop
+from .view_spec import ViewSpec
 
 
 def plot_plane_storage_axes(
@@ -340,7 +342,7 @@ def fetch_materialized_bundle(
     request : MaterializeRequest
         View and ROI parameters.
     run_model
-        Object providing ``get_plot_bundle`` with ``materialize_request``.
+        Object providing ``get_plot_bundle`` with a :class:`PlotRequest`.
     xkeys : list, optional
         Plot x keys for loading.
     ykey : str, optional
@@ -399,16 +401,21 @@ def fetch_materialized_bundle(
         raise ValueError("run_model or parent_bundle required")
     if region_frame is None:
         raise ValueError("region_frame required when loading from run_model")
+    plot_request = PlotRequest(
+        uid=str(getattr(run_model, "uid", "") or "unknown"),
+        xkeys=tuple(xkeys or ()),
+        ykey=ykey,
+        norm_keys=tuple(norm_keys or ()),
+        view=ViewSpec.from_cube_view_spec(request.spec),
+        region=request.region,
+        mask_mode=request.mask_mode,
+    )
     return run_model.get_plot_bundle(
-        xkeys,
-        ykey,
-        norm_keys,
-        materialize_request=request,
+        plot_request,
         view_crop=view_crop,
         region_frame=region_frame,
         parent_spec=parent_spec,
         label=label,
-        transform=transform,
     )
 
 

@@ -9,6 +9,7 @@ from qtpy.QtCore import QTimer, Signal
 from qtpy.QtWidgets import QSizePolicy
 
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
+from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker
 
@@ -390,14 +391,24 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 category="plots",
             )
 
+            xkey = x_keys[0] if x_keys else ""
+            request = build_plot_request(
+                uid=run_model.uid,
+                xkeys=[xkey] if xkey else (),
+                ykey=y_key,
+                shape=run_model.get_shape(y_key),
+                norm_keys=norm_keys,
+                plot_ndim=2,
+                slice_info=slice_info,
+                transform=getattr(run_model, "_transform_text", "") or "",
+            )
             plot_data = PlotDataModel(
                 run_model,
-                x_keys[0] if x_keys else "",
-                y_key,
-                norm_keys=norm_keys,
+                request,
                 label=f"Image {image_idx}",
-                indices=slice_info,
-                dimension=2,
+                trace_key=TraceKey(
+                    run_model.uid, xkey, y_key, fan_out_index=image_idx
+                ),
             )
 
             plot_data.data_changed.connect(self._start_image_worker)
@@ -439,9 +450,13 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         old_worker = self._active_workers.pop(worker_key, None)
         retire_plot_worker(old_worker, self._pending_workers)
 
-        worker = PlotWorker(
-            plot_data, slice_info, dimension, generation, artist
-        )
+        request = plot_data.request
+        if slice_info is not None:
+            plot_data.update_data_info(
+                indices=slice_info, dimension=dimension, emit=False
+            )
+            request = plot_data.request
+        worker = PlotWorker(plot_data, request, generation, artist)
         worker.data_ready.connect(self._handle_image_data)
         worker.error_occurred.connect(self._handle_image_error)
         worker.finished.connect(

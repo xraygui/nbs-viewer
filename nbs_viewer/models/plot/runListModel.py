@@ -62,15 +62,7 @@ class RunListModel(QStandardItemModel):
         self.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.itemChanged.connect(self._on_item_changed)
 
-        self._initialize_runs()
         self._refresh_cache_progress_connections()
-
-    def _initialize_runs(self):
-        """Initialize the model with current runs from run_list_model."""
-        self.clear()
-
-        for run in self.available_runs:
-            self._add_run_item(run)
 
     def _add_run_item(self, run: RunModel):
         """Add a run as a QStandardItem to the model."""
@@ -507,7 +499,6 @@ class RunListModel(QStandardItemModel):
             if uid in self._visible_runs:
                 self._visible_runs.remove(uid)
 
-        # self._update_plot_from_selection()
         self.update_available_keys()
         self.visible_runs_changed.emit(self.visible_runs)
         self.available_runs_changed.emit(self.available_runs)

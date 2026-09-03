@@ -211,9 +211,6 @@ class FilterModel(QSortFilterProxyModel):
         # The view needs to display rows start_row to end_row
         # So we need at least (end_row + 1) total filtered matches
         self._filter_target_rows = end_row + 1
-        # print(
-        #    f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
-        # )
 
         current_matches = self.rowCount()
         if current_matches < self._filter_target_rows:
@@ -318,13 +315,8 @@ class FilterModel(QSortFilterProxyModel):
         total_rows = source_model.rowCount()
         # Check if we've loaded all available data
         if self._filter_loaded_end >= total_rows:
-            # print(
-            #    f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
-            # )
             return
 
-        # Load the next chunk
-        # print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
         self._load_next_filter_chunk(source_model)
 
 
@@ -602,8 +594,6 @@ class CatalogTableView(QWidget):
 
     def _handle_invert(self):
         """Handle inversion by clearing selection and toggling order."""
-        # print("_handle_invert in CatalogTableView")
-        # Clear any existing selection
         selection_model = self.data_view.selectionModel()
         if selection_model:
             selection_model.clearSelection()

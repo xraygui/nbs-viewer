@@ -194,7 +194,7 @@ class HeadlessSession:
             y_list[0],
             norm_keys=norm_list,
         )
-        return plot_data.get_plot_bundle(cube_view_spec=self.plot.cube_view_spec)
+        return plot_data.get_plot_bundle()
 
     def _first_run_model(self) -> RunModel:
         models = self.run_list.available_models

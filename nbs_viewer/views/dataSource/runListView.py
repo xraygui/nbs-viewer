@@ -144,9 +144,7 @@ class RunListView(QWidget):
             self._addSinglePlotItem(plotItem)
 
     def _addSinglePlotItem(self, plotItem):
-        # print("Adding bluesky plot item")
         self.run_list_model.add_run(plotItem)
-        # print("Done adding bluesky plot item")
 
     def removePlotItem(self, plotItem):
         """
@@ -157,7 +155,6 @@ class RunListView(QWidget):
         plotItem : PlotItem
             The plot item to be removed from the list widget.
         """
-        # print("Removing Plot Item from BlueskyList")
         plotItem.clear()
         self.run_list_model.remove_run(plotItem)
 

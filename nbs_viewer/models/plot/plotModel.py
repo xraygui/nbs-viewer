@@ -37,6 +37,7 @@ from .cube_view import (
 )
 from .derived_fetch import _profile_uses_nd_load, build_roi_profile_request_from_operation
 from .plotDataModel import PlotDataModel
+from .plot_request import TraceKey, build_plot_request
 from .plot_view_frame import (
     PlotViewFrame,
     frame_from_bundle,
@@ -77,7 +78,6 @@ class PlotModel(QObject):
     ellipse_circle_locked_changed = Signal(bool)
     roi_live_region_sync_requested = Signal()
     plot_data_added = Signal(object)
-    plot_data_removed = Signal(object)
 
     def __init__(self, run_list_model: "RunListModel", parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -97,7 +97,7 @@ class PlotModel(QObject):
         self._roi_draw_enabled = False
         self._ellipse_circle_locked = False
 
-        self._plot_data: Dict[Tuple[str, str, str], PlotDataModel] = {}
+        self._plot_data: Dict[TraceKey, PlotDataModel] = {}
         self._connected_run_uids = set()
 
         self._run_list_model.run_added.connect(self._on_run_added)
@@ -129,9 +129,9 @@ class PlotModel(QObject):
         return self._roi_set
 
     @property
-    def plot_data_map(self) -> Dict[Tuple[str, str, str], PlotDataModel]:
+    def plot_data_map(self) -> Dict[TraceKey, PlotDataModel]:
         """
-        Return the live map of plot-data models keyed by ``(x, y, uid)``.
+        Return the live map of plot-data models keyed by :class:`TraceKey`.
         """
         return self._plot_data
 
@@ -173,6 +173,7 @@ class PlotModel(QObject):
         for model in self._run_list_model.available_models:
             model.set_transform(self._transform)
         self.transform_changed.emit(self.transform)
+        self._sync_plot_data_requests()
         print_debug(
             "PlotModel.set_transform",
             "applied (artist bus via transform_changed)",
@@ -307,18 +308,16 @@ class PlotModel(QObject):
             changed = True
             if dimension != 2:
                 self.invalidate_all_region_state("switched out of 2D mode")
-        if indices is not None and indices != self._slice:
+        if indices != self._slice:
             self._slice = indices
             changed = True
-        if (
-            cube_view_spec is not None
-            and cube_view_spec != self._cube_view_spec
-        ):
+        if cube_view_spec != self._cube_view_spec:
             self._cube_view_spec = cube_view_spec
             changed = True
             self.cube_view_changed.emit(self._cube_view_spec)
 
         if changed:
+            self._sync_plot_data_requests()
             self.request_plot_update.emit()
 
     @property
@@ -339,6 +338,7 @@ class PlotModel(QObject):
         """
         self._view_crop = crop
         self.view_crop_changed.emit(crop)
+        self._sync_plot_data_requests()
         self.request_plot_update.emit()
 
     def clear_view_crop(self) -> None:
@@ -549,6 +549,96 @@ class PlotModel(QObject):
             raise ValueError("Select a single 2D dataset")
         return frame_from_bundle(bundle)
 
+    def _effective_transform_text(self, run_model: "RunModel") -> str:
+        """
+        Return the effective transform expression for a run.
+
+        Parameters
+        ----------
+        run_model : RunModel
+            Run whose transform state is read.
+
+        Returns
+        -------
+        str
+            Transform text when enabled on the run, otherwise empty.
+        """
+        return getattr(run_model, "_transform_text", "") or ""
+
+    def _crop_for_trace(self, trace_key: TraceKey):
+        """
+        Return the session crop if it applies to this trace.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace to match against crop ``source_key``.
+
+        Returns
+        -------
+        ViewCrop or None
+            Active crop when it names this trace, otherwise None.
+        """
+        crop = self._view_crop
+        if crop is None:
+            return None
+        if crop.source_key != trace_key.as_tuple():
+            return None
+        return crop
+
+    def _build_plot_request(
+        self,
+        run_model: "RunModel",
+        xkey: str,
+        ykey: str,
+        norm_keys: Optional[List[str]] = None,
+    ):
+        """
+        Assemble a :class:`PlotRequest` from session view state.
+
+        Parameters
+        ----------
+        run_model : RunModel
+            Source run.
+        xkey : str
+            X key.
+        ykey : str
+            Y key.
+        norm_keys : list of str, optional
+            Normalization keys.
+
+        Returns
+        -------
+        PlotRequest
+            Frozen request for this trace.
+        """
+        trace_key = TraceKey(run_model.uid, xkey, ykey)
+        return build_plot_request(
+            uid=run_model.uid,
+            xkeys=[xkey] if xkey else (),
+            ykey=ykey,
+            shape=run_model.get_shape(ykey),
+            norm_keys=norm_keys,
+            plot_ndim=self._dimension,
+            cube_view_spec=self._cube_view_spec,
+            slice_info=self._slice,
+            crop=self._crop_for_trace(trace_key),
+            transform=self._effective_transform_text(run_model),
+        )
+
+    def _sync_plot_data_requests(self) -> None:
+        """
+        Rewrite held requests from current session view without replacing models.
+        """
+        for key, plot_data in self._plot_data.items():
+            request = self._build_plot_request(
+                plot_data._run,
+                key.xkey,
+                key.ykey,
+                plot_data._norm_keys,
+            )
+            plot_data.set_request(request)
+
     def ensure_plot_data(
         self,
         run_model: "RunModel",
@@ -558,6 +648,9 @@ class PlotModel(QObject):
     ) -> PlotDataModel:
         """
         Return the plot-data model for ``(xkey, ykey, run uid)``, creating it.
+
+        Assembles a :class:`PlotRequest` from session slice / cube / crop and
+        stores it on the model. Existing models keep their artist.
 
         Parameters
         ----------
@@ -575,17 +668,14 @@ class PlotModel(QObject):
         PlotDataModel
             Existing or newly created plot-data model.
         """
-        key = (xkey, ykey, run_model.uid)
+        key = TraceKey(run_model.uid, xkey, ykey)
+        request = self._build_plot_request(run_model, xkey, ykey, norm_keys)
         if key not in self._plot_data:
             plot_data = PlotDataModel(
                 run_model,
-                xkey,
-                ykey,
-                norm_keys=norm_keys,
-                indices=self._slice,
-                cube_view_spec=self._cube_view_spec,
-                dimension=self._dimension,
+                request,
                 parent=self,
+                trace_key=key,
             )
             self._plot_data[key] = plot_data
             self.plot_data_added.emit(plot_data)
@@ -594,6 +684,8 @@ class PlotModel(QObject):
                 f"create {xkey}/{ykey}",
                 category="plots",
             )
+        else:
+            self._plot_data[key].set_request(request)
         return self._plot_data[key]
 
     def drop_plot_data_for_uid(self, uid: str) -> None:
@@ -605,14 +697,13 @@ class PlotModel(QObject):
         uid : str
             Run uid whose plot-data entries should be dropped.
         """
-        keys = [key for key in self._plot_data if key[2] == uid]
+        keys = [key for key in self._plot_data if key.uid == uid]
         for key in keys:
             plot_data = self._plot_data.pop(key)
             try:
                 plot_data.clear()
             except Exception:
                 pass
-            self.plot_data_removed.emit(plot_data)
 
     def iter_visible_plot_data(self):
         """
@@ -620,7 +711,7 @@ class PlotModel(QObject):
         """
         visible = self._run_list_model.visible_runs
         for key, plot_data in self._plot_data.items():
-            if key[2] in visible:
+            if key.uid in visible:
                 yield plot_data
 
     def resolve_single_visible_2d_plot_data(self) -> Optional[PlotDataModel]:
@@ -745,9 +836,13 @@ class PlotModel(QObject):
         """
         if plot_data.last_bundle is None:
             return None
-        if plot_data._cube_view_spec != self._cube_view_spec:
-            return None
-        if plot_data._indices != self._slice:
+        session_request = self._build_plot_request(
+            plot_data._run,
+            plot_data._xkey,
+            plot_data._ykey,
+            plot_data._norm_keys,
+        )
+        if plot_data.request.view != session_request.view:
             return None
         if request is not None and _profile_uses_nd_load(request, self._cube_view_spec):
             return None

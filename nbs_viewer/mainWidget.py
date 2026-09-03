@@ -199,26 +199,9 @@ class MainWidget(QWidget):
         else:
             QMessageBox.warning(self, "Cannot Close", "Cannot close the main display")
 
-    def duplicate_current_display(self):
-        """Duplicate the currently active display."""
-        current_tab = self.tab_widget.currentWidget()
-        if hasattr(current_tab, "plot_model"):
-            # TODO: Implement display duplication logic
-            print("Display duplication not implemented yet")
-
     def get_current_display(self):
         """Get the currently active display widget."""
         return self.tab_widget.currentWidget()
-
-    def save_display_layout(self, filename):
-        """Save the current display layout to a file."""
-        # TODO: Implement layout saving
-        print(f"Save display layout to {filename} - not implemented yet")
-
-    def apply_display_settings(self, settings):
-        """Apply settings to the current display."""
-        # TODO: Implement settings application
-        print("Apply display settings - not implemented yet")
 
     # Signal handlers
     def _on_display_added(self, display_id):

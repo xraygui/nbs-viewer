@@ -57,7 +57,7 @@ def _wired_image_scan_with_roi(
     plot_data = session.plot.ensure_plot_data(
         run_model, "en_energy", "detector_image"
     )
-    bundle = plot_data.get_plot_bundle(cube_view_spec=parent_spec)
+    bundle = plot_data.get_plot_bundle()
     plot_data._visible = True
 
     frame = frame_from_bundle(bundle)

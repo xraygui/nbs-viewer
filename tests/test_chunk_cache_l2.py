@@ -57,7 +57,6 @@ def test_seeds_zarr_tiles_after_tiled_fetch():
     cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
 
     assert result.shape == (8, 8)
-    assert len(cache.tiles) == 0
     for tile_idx in ((0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 1, 0), (0, 0, 1, 1)):
         assert l2.has_chunk(run.start["uid"], "det", tile_idx)
 
@@ -157,7 +156,6 @@ def test_l1_tile_eviction_preserves_l2():
     cache.get_data(run, "det", slice_info)
     cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
     assert l2.completion_fraction("uid-1", "det") > 0.0
-    assert len(cache.tiles) == 0
 
     read_count = 0
     original_read = accessor.read
@@ -218,7 +216,6 @@ def test_bulk_slab_seed_writes_zarr_without_tile_l1():
     cache.get_data(run, "det", (slice(None), 0, slice(None), slice(None)))
     cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
 
-    assert len(cache.tiles) == 0
     assert l2.completion_fraction("uid-bulk", "det") > 0.0
     assert l2.tile_counts("uid-bulk", "det")[0] > 0
 
