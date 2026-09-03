@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Sequence, Tuple, Any
+from types import MappingProxyType
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
 
 from qtpy.QtCore import QObject, Signal
 from asteval import Interpreter
@@ -10,6 +11,7 @@ from .cube_view import CubeViewSpec, MaterializeRequest
 from .view_crop import ViewCrop, fetch_context_with_view_crop
 from .derived_fetch import plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
+from .key_info import AxisLayout, KeyInfo, RunIdentity
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -25,14 +27,17 @@ from nbs_viewer.utils import print_debug
 
 class RunModel(QObject):
     """
-    Model for managing run data selection and filtering state.
+    Uniform key access over a catalog run plus frozen synthetic keys.
 
-    Manages available keys, key selection, and filtering options for a run.
+    The RunSource surface is ``key_table``, ``identity``, ``read``,
+    ``describe_axes``, ``load_axes``, and ``get_plot_bundle``. Selection,
+    visibility, and transform text remain on this object until PlotSession
+    owns them.
 
     Parameters
     ----------
     run : CatalogRun
-        The run to manage state for
+        The run to wrap.
     """
 
     available_keys_changed = Signal()
@@ -58,8 +63,8 @@ class RunModel(QObject):
         self._transform_text = ""
         self._transform = Interpreter()
         self._dynamic = False
-        # Initialize state
-        self._update_available_keys()  # Initial key setup
+        self._key_table: Optional[Dict[str, KeyInfo]] = None
+        self._update_available_keys()
         self._set_default_selection()
         self._connect_run()
 
@@ -139,6 +144,77 @@ class RunModel(QObject):
         """
         return key in self._frozen_spectra
 
+    def _invalidate_key_table(self) -> None:
+        """Drop the cached key table so the next access rebuilds it."""
+        self._key_table = None
+
+    def _build_key_table(self) -> Dict[str, KeyInfo]:
+        """
+        Merge catalog keys with frozen entries into a KeyInfo table.
+
+        Catalog keys are marked hinted until ``get_hinted_keys`` is confirmed
+        as the "Show All Keys" backing. ``render_hint`` comes from
+        ``get_render_mode_hint`` and is None when that returns nothing.
+
+        Returns
+        -------
+        dict of str to KeyInfo
+            Fresh table keyed by data key name.
+        """
+        table: Dict[str, KeyInfo] = {}
+        plot_hints = self._run.getPlotHints()
+        for name in self._catalog_keys:
+            shape = tuple(self._run.getShape(name))
+            table[name] = KeyInfo(
+                name=name,
+                label=name,
+                shape=shape,
+                synthetic=False,
+                hinted=True,
+                render_hint=get_render_mode_hint(plot_hints, name),
+            )
+        for key, entry in self._frozen_spectra.items():
+            table[key] = KeyInfo(
+                name=key,
+                label=entry.label,
+                shape=tuple(entry.get_shape()),
+                synthetic=True,
+                hinted=False,
+                render_hint=None,
+            )
+        return table
+
+    def key_table(self) -> Mapping[str, KeyInfo]:
+        """
+        Return the cached catalog-plus-frozen key table.
+
+        Returns
+        -------
+        mapping of str to KeyInfo
+            Read-only view of the current table. Invalidated on catalog key
+            updates, data changes, and frozen register/remove.
+        """
+        if self._key_table is None:
+            self._key_table = self._build_key_table()
+        return MappingProxyType(self._key_table)
+
+    def identity(self) -> RunIdentity:
+        """
+        Return a snapshot of run identity fields for views.
+
+        Returns
+        -------
+        RunIdentity
+            uid, scan_id, plan_name, display_name, and metadata.
+        """
+        return RunIdentity(
+            uid=str(self.uid),
+            scan_id=str(self.scan_id),
+            plan_name=str(self.plan_name),
+            display_name=str(self.display_name),
+            metadata=MappingProxyType(dict(self.metadata)),
+        )
+
     def _frozen_entry(self, key: str) -> Optional[FrozenSpectrum]:
         """
         Return a frozen spectrum entry when registered.
@@ -155,7 +231,56 @@ class RunModel(QObject):
         """
         return self._frozen_spectra.get(key)
 
-    def get_data(self, key: str, slice_info=None) -> np.ndarray:
+    def _frozen_axis_names(self, entry: FrozenSpectrum) -> List[str]:
+        """
+        Resolve display dimension names for a frozen spectrum.
+
+        Parameters
+        ----------
+        entry : FrozenSpectrum
+            Registered frozen entry.
+
+        Returns
+        -------
+        list of str
+            Names truncated or padded to the storage rank.
+        """
+        shape = entry.get_shape()
+        ndim = len(shape)
+        names = list(entry.bundle.axis_names) if entry.bundle.axis_names else []
+        if entry.label and ndim == 1:
+            names = [entry.label]
+        while len(names) < ndim:
+            names.append(f"dim_{len(names)}")
+        return names[:ndim]
+
+    @staticmethod
+    def _truncate_dim_names(
+        ordered_dims: Sequence[str], ndim: int
+    ) -> List[str]:
+        """
+        Pad or truncate dimension names to match storage rank.
+
+        Parameters
+        ----------
+        ordered_dims : sequence of str
+            Names from ``analyze_dimensions``.
+        ndim : int
+            Storage rank.
+
+        Returns
+        -------
+        list of str
+            Names of length ``ndim``.
+        """
+        names = list(ordered_dims)
+        if len(names) < ndim:
+            names = names + [f"dim_{i}" for i in range(len(names), ndim)]
+        elif len(names) > ndim:
+            names = names[:ndim]
+        return names
+
+    def read(self, key: str, slice_info=None) -> np.ndarray:
         """
         Load array data for a catalog or frozen key.
 
@@ -170,53 +295,95 @@ class RunModel(QObject):
         -------
         np.ndarray
             Storage array for the key.
+
+        Raises
+        ------
+        ValueError
+            If the underlying source returns None.
         """
         entry = self._frozen_entry(key)
         if entry is not None:
             data = entry.get_data(slice_info)
+        elif slice_info is None:
+            data = self._run.getData(key)
         else:
             data = self._run.getData(key, slice_info)
         if data is None:
             raise ValueError(f"No data returned for key {key!r}")
         return np.asarray(data)
 
-    def get_dimension_ui_info(
-        self, ykey: str, xkeys: List[str]
-    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Any]]:
+    def get_data(self, key: str, slice_info=None) -> np.ndarray:
+        """
+        Load array data for a catalog or frozen key.
+
+        Compatibility shim over :meth:`read`.
+
+        Parameters
+        ----------
+        key : str
+            Data key.
+        slice_info : tuple, optional
+            Per-axis slice tuple.
+
+        Returns
+        -------
+        np.ndarray
+            Storage array for the key.
+        """
+        return self.read(key, slice_info)
+
+    def describe_axes(self, ykey: str, xkeys: Sequence[str]) -> AxisLayout:
         """
         Return shape and placeholder axis coordinates for dimension UI.
+
+        Applies the frozen-key overlay. Catalog keys use
+        ``CatalogRun.analyze_dimensions`` with the same name truncation as
+        ``get_dimension_ui_info``.
 
         Parameters
         ----------
         ykey : str
             Y data key.
-        xkeys : list of str
+        xkeys : sequence of str
             Selected X-axis keys.
 
         Returns
         -------
-        tuple
-            ``(shape, dimension_names, axis_arrays, associated_data)``.
+        AxisLayout
+            Shape, truncated names, index placeholders, and analysis.
         """
+        xkey_list = list(xkeys)
         entry = self._frozen_entry(ykey)
         if entry is not None:
-            shape = entry.get_shape()
-            ndim = len(shape)
-            names = list(entry.bundle.axis_names) if entry.bundle.axis_names else []
-            if entry.label and ndim == 1:
-                names = [entry.label]
-            while len(names) < ndim:
-                names.append(f"dim_{len(names)}")
-            names = names[:ndim]
-            axis_arrays = [np.arange(size, dtype=float) for size in shape]
-            return shape, names, axis_arrays, {}
-        return self._run.get_dimension_ui_info(ykey, xkeys)
+            shape = tuple(entry.get_shape())
+            names = self._frozen_axis_names(entry)
+            placeholders = tuple(
+                np.arange(size, dtype=float) for size in shape
+            )
+            return AxisLayout(
+                shape=shape,
+                names=tuple(names),
+                placeholders=placeholders,
+                associated=MappingProxyType({}),
+                analysis=MappingProxyType({}),
+            )
+        dim_info = self._run.analyze_dimensions(ykey, xkey_list)
+        shape = tuple(dim_info["effective_shape"])
+        names = self._truncate_dim_names(dim_info["ordered_dims"], len(shape))
+        placeholders = tuple(np.arange(size, dtype=float) for size in shape)
+        return AxisLayout(
+            shape=shape,
+            names=tuple(names),
+            placeholders=placeholders,
+            associated=MappingProxyType({}),
+            analysis=MappingProxyType(dict(dim_info)),
+        )
 
-    def get_dimension_axes(
-        self, ykey: str, xkeys: List[str], slice_info=None
-    ):
+    def load_axes(
+        self, ykey: str, xkeys: Sequence[str], slice_info=None
+    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Any]]:
         """
-        Return axis coordinates for a catalog or frozen Y key.
+        Return real axis coordinates for a catalog or frozen Y key.
 
         Stack spectra resolve X from the selected catalog keys so the
         same frozen Y can be plotted against any scan-length independent
@@ -227,7 +394,7 @@ class RunModel(QObject):
         ----------
         ykey : str
             Y data key.
-        xkeys : list of str
+        xkeys : sequence of str
             Selected X-axis keys.
         slice_info : tuple, optional
             Per-axis slice tuple.
@@ -242,14 +409,67 @@ class RunModel(QObject):
         ValueError
             If a catalog X key length does not match the frozen spectrum.
         """
+        xkey_list = list(xkeys)
         entry = self._frozen_entry(ykey)
         if entry is not None:
-            if entry.kind == "stack_spectrum" and xkeys:
+            if entry.kind == "stack_spectrum" and xkey_list:
                 return self._stack_spectrum_dimension_axes(
-                    entry, xkeys, slice_info
+                    entry, xkey_list, slice_info
                 )
-            return entry.get_dimension_axes(xkeys, slice_info)
-        return self._run.get_dimension_axes(ykey, xkeys, slice_info)
+            return entry.get_dimension_axes(xkey_list, slice_info)
+        return self._run.get_dimension_axes(ykey, xkey_list, slice_info)
+
+    def get_dimension_ui_info(
+        self, ykey: str, xkeys: List[str]
+    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Any]]:
+        """
+        Return shape and placeholder axis coordinates for dimension UI.
+
+        Compatibility shim over :meth:`describe_axes`.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+        xkeys : list of str
+            Selected X-axis keys.
+
+        Returns
+        -------
+        tuple
+            ``(shape, dimension_names, axis_arrays, associated_data)``.
+        """
+        layout = self.describe_axes(ykey, xkeys)
+        return (
+            layout.shape,
+            list(layout.names),
+            list(layout.placeholders),
+            dict(layout.associated),
+        )
+
+    def get_dimension_axes(
+        self, ykey: str, xkeys: List[str], slice_info=None
+    ):
+        """
+        Return axis coordinates for a catalog or frozen Y key.
+
+        Compatibility shim over :meth:`load_axes`.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key.
+        xkeys : list of str
+            Selected X-axis keys.
+        slice_info : tuple, optional
+            Per-axis slice tuple.
+
+        Returns
+        -------
+        tuple
+            ``(axis_arrays, axis_names, associated_data)``.
+        """
+        return self.load_axes(ykey, xkeys, slice_info)
 
     def _stack_spectrum_dimension_axes(
         self,
@@ -291,7 +511,7 @@ class RunModel(QObject):
         axis_arrays: List[np.ndarray] = []
         axis_names: List[str] = []
         for xkey in xkeys:
-            raw_full = np.asarray(self._run.getData(xkey), dtype=float).ravel()
+            raw_full = np.asarray(self.read(xkey), dtype=float).ravel()
             if raw_full.size != n_full:
                 raise ValueError(
                     f"X key {xkey!r} length {raw_full.size} does not match "
@@ -316,6 +536,9 @@ class RunModel(QObject):
         tuple of int
             Storage shape.
         """
+        info = self.key_table().get(key)
+        if info is not None:
+            return info.shape
         entry = self._frozen_entry(key)
         if entry is not None:
             return entry.get_shape()
@@ -364,9 +587,9 @@ class RunModel(QObject):
         str
             Human-readable legend text.
         """
-        entry = self._frozen_entry(ykey)
-        if entry is not None:
-            return f"{entry.label}.{self.scan_id}"
+        info = self.key_table().get(ykey)
+        if info is not None and info.synthetic:
+            return f"{info.label}.{self.scan_id}"
         return f"{ykey}.{self.scan_id}"
 
     def register_frozen_spectrum(self, entry: FrozenSpectrum) -> str:
@@ -384,6 +607,7 @@ class RunModel(QObject):
             Synthetic key.
         """
         self._frozen_spectra[entry.key] = entry
+        self._invalidate_key_table()
         self.available_keys_changed.emit()
         self.frozen_spectra_changed.emit()
         return entry.key
@@ -405,6 +629,7 @@ class RunModel(QObject):
         if key not in self._frozen_spectra:
             return False
         del self._frozen_spectra[key]
+        self._invalidate_key_table()
         x_keys, y_keys, norm_keys = self.get_selected_keys()
         if key in x_keys or key in y_keys or key in norm_keys:
             self.set_selected_keys(
@@ -425,8 +650,10 @@ class RunModel(QObject):
             f"available_keys for {self.uid}: {new_keys} from run {id(self._run)}",
             "run",
         )
-        if set(new_keys) != set(self._catalog_keys):
-            self._catalog_keys = new_keys
+        keys_changed = set(new_keys) != set(self._catalog_keys)
+        self._catalog_keys = new_keys
+        self._invalidate_key_table()
+        if keys_changed:
             self.available_keys_changed.emit()
 
     def _set_default_selection(self) -> None:
@@ -529,15 +756,16 @@ class RunModel(QObject):
         roles = request.view.roles
         reduced = []
         for norm_key in request.norm_keys:
-            _, norm_names, _, _ = self.get_dimension_ui_info(norm_key, xkeys)
+            layout = self.describe_axes(norm_key, xkeys)
+            norm_names = list(layout.names)
             if self._frozen_entry(norm_key) is not None:
-                arr = self.get_data(norm_key, slice_info)
+                arr = self.read(norm_key, slice_info)
                 reduced.append((arr, list(norm_names)))
                 continue
             key_slice = slice_info_for_key(
                 slice_info, y_storage_names, norm_names
             )
-            arr = self.get_data(norm_key, key_slice)
+            arr = self.read(norm_key, key_slice)
             reduced.append(
                 reduce_loaded_array(
                     arr, list(norm_names), y_storage_names, roles
@@ -629,10 +857,10 @@ class RunModel(QObject):
         )
 
         t0 = ttime.time()
-        storage_axes, storage_names, _extra = self.get_dimension_axes(
+        storage_axes, storage_names, _extra = self.load_axes(
             ykey, xkeys, slice_info
         )
-        y = self.get_data(ykey, slice_info)
+        y = self.read(ykey, slice_info)
         t_load = ttime.time() - t0
 
         t0 = ttime.time()
@@ -667,7 +895,10 @@ class RunModel(QObject):
         frozen = self._frozen_entry(ykey)
         if frozen is not None and y.ndim == 1:
             names = [label or frozen.label]
-        hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+        info = self.key_table().get(ykey)
+        hint = info.render_hint if info is not None else None
+        if hint is None and frozen is None:
+            hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
         return build_plot_bundle(
             y,
             coords,
@@ -814,3 +1045,6 @@ class RunModel(QObject):
         if is_visible != self._is_visible:
             self._is_visible = is_visible  # Save visibility state
             self.visibility_changed.emit(is_visible)
+
+
+RunSource = RunModel
