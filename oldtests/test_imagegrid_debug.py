@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from nbs_viewer.models.plot.plotModel import PlotModel
-from nbs_viewer.models.plot.runModel import RunModel
+from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.utils import print_debug
 import numpy as np
 from tiled.client import from_uri
@@ -31,7 +31,7 @@ def setup_catalog_and_run():
 
 
 def test_direct_data_access(run):
-    """Test direct data access without RunModel."""
+    """Test direct data access without RunSource."""
     print("\n=== Testing Direct Data Access ===")
 
     # Test the slice indices that work for matplotlib
@@ -51,12 +51,12 @@ def test_direct_data_access(run):
 
 
 def test_runmodel_data_access(run):
-    """Test data access through RunModel."""
-    print("\n=== Testing RunModel Data Access ===")
+    """Test data access through RunSource."""
+    print("\n=== Testing RunSource Data Access ===")
 
-    # Create a RunModel for the run
-    run_model = RunModel(run)
-    print(f"Created RunModel for run: {run_model.uid}")
+    # Create a RunSource for the run
+    run_model = RunSource(run)
+    print(f"Created RunSource for run: {run_model.uid}")
 
     # Get the default selection
     x_keys, y_keys, norm_keys = run_model.get_selected_keys()
@@ -65,11 +65,11 @@ def test_runmodel_data_access(run):
     # Test getting plot data with default selection
     try:
         x_data, y_data = run_model.get_plot_data(x_keys, y_keys[0], norm_keys)
-        print(f"RunModel data - x shapes: {[x.shape for x in x_data]}")
-        print(f"RunModel data - y shape: {y_data.shape}")
+        print(f"RunSource data - x shapes: {[x.shape for x in x_data]}")
+        print(f"RunSource data - y shape: {y_data.shape}")
         return True
     except Exception as e:
-        print(f"RunModel data access failed: {e}")
+        print(f"RunSource data access failed: {e}")
         return False
 
 
@@ -106,9 +106,9 @@ def test_image_data_access(run):
     """Test data access with explicitly selected image data."""
     print("\n=== Testing Image Data Access ===")
 
-    # Create a RunModel for the run
-    run_model = RunModel(run)
-    print(f"Created RunModel for run: {run_model.uid}")
+    # Create a RunSource for the run
+    run_model = RunSource(run)
+    print(f"Created RunSource for run: {run_model.uid}")
 
     # Explicitly select image data
     image_keys = [key for key in run.available_keys if "image" in key.lower()]
@@ -146,7 +146,7 @@ def get_shape_info_from_models(visible_models):
     Parameters
     ----------
     visible_models : list
-        List of visible RunModel instances
+        List of visible RunSource instances
 
     Returns
     -------
@@ -234,8 +234,8 @@ def test_imagegrid_methods(run):
     """Test the ImageGridWidget methods with the actual data."""
     print("\n=== Testing ImageGridWidget Methods ===")
 
-    # Create a RunModel and PlotModel
-    run_model = RunModel(run)
+    # Create a RunSource and PlotModel
+    run_model = RunSource(run)
     plot_model = PlotModel(is_main_canvas=True)
     plot_model.add_run(run)
 

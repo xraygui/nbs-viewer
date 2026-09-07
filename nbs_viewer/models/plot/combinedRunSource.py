@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 import uuid
 from ..data.base import CatalogRun
-from .runModel import RunModel
+from .runSource import RunSource
 from asteval import Interpreter
 
 
@@ -40,13 +40,13 @@ def make_scan_id(scan_ids: List[int]) -> str:
         return f"{sorted_ids[0]}...{sorted_ids[-1]}"
 
 
-class CombinedRunModel(RunModel):
+class CombinedRunSource(RunSource):
     """
     Represents multiple runs combined into a single virtual run.
 
     Parameters
     ----------
-    runs : List[RunModel]
+    runs : List[RunSource]
         List of runs to combine
     method : CombinationMethod, optional
         Method to use for combining runs, by default AVERAGE
@@ -54,7 +54,7 @@ class CombinedRunModel(RunModel):
 
     def __init__(
         self,
-        runs: List[RunModel],
+        runs: List[RunSource],
         method: CombinationMethod = CombinationMethod.AVERAGE,
         expression: str = None,
     ):
@@ -248,7 +248,7 @@ class CombinedRunModel(RunModel):
         return self._method
 
     @property
-    def source_runs(self) -> List[RunModel]:
+    def source_runs(self) -> List[RunSource]:
         """Get list of source runs being combined."""
         return self._source_runs.copy()
 

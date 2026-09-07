@@ -47,10 +47,10 @@ class CatalogSwitcher(QWidget):
         super().__init__(parent)
         self.app_model = app_model
         self.display_id = display_id
-        self.run_list_model = app_model.display_manager.get_run_list_model(display_id)
+        self.presenter = app_model.display_manager.get_presenter(display_id)
         display_manager = app_model.display_manager
         self.display_controls = DisplayControlWidget(
-            display_manager, self.run_list_model, self
+            display_manager, self.presenter, self
         )
         self.config_file = app_model.config.path
         self._label_to_index = {}

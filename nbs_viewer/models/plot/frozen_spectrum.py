@@ -1,5 +1,5 @@
 """
-Frozen ROI-derived spectra registered as synthetic keys on RunModel.
+Frozen ROI-derived spectra registered as synthetic keys on RunSource.
 """
 
 from __future__ import annotations
@@ -221,7 +221,7 @@ class FrozenSpectrum:
 
         Used for local profiles and as a fallback when no X keys are
         selected. Stack spectra plotted as Y resolve catalog X keys in
-        :meth:`RunModel.get_dimension_axes` instead.
+        :meth:`RunSource.load_axes` instead.
 
         Parameters
         ----------

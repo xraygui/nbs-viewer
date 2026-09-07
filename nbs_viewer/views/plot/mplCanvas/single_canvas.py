@@ -136,7 +136,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
         self.presenter = presenter
         self.run_list_model = presenter.run_list
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self._connected_plot_data = set()
         self._worker_generations = {}
         self._active_workers = {}
@@ -170,7 +170,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
 
-        self.run_list_model.run_removed.connect(self._on_run_removed)
+        self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
         self.plot_model.region_invalidation_requested.connect(
@@ -451,17 +451,17 @@ class MplCanvas(FigureCanvasQTAgg):
 
         return True
 
-    def updatePlotData(self, runModel, xkey, ykey, norm_keys=None):
+    def updatePlotData(self, runSource, xkey, ykey, norm_keys=None):
         """
         Create or refresh a plot model for one x/y key pair.
 
         List-owned path: updates metadata without emitting ``data_changed`` and
         starts at most one worker when a refetch is needed.
         """
-        key = (xkey, ykey, runModel.uid)
+        key = (xkey, ykey, runSource.uid)
         is_new = key not in self._connected_plot_data
         plotData = self.plot_model.ensure_plot_data(
-            runModel, xkey, ykey, norm_keys=norm_keys
+            runSource, xkey, ykey, norm_keys=norm_keys
         )
         if is_new:
             print_debug(
@@ -577,12 +577,13 @@ class MplCanvas(FigureCanvasQTAgg):
         t0 = ttime.time()
         try:
             visible_keys = set()
-            xkeys, ykeys, normkeys = self.plot_model.get_selected_keys()
-            for runModel in self.run_list_model.visible_models:
+            for runSource in self.plot_model.visible_models:
+                sel = self.plot_model.selection_for(runSource.uid)
+                xkeys, ykeys, normkeys = sel.as_lists()
                 for xkey in xkeys:
                     for ykey in ykeys:
-                        visible_keys.add((xkey, ykey, runModel.uid))
-                        self.updatePlotData(runModel, xkey, ykey, normkeys)
+                        visible_keys.add((xkey, ykey, runSource.uid))
+                        self.updatePlotData(runSource, xkey, ykey, normkeys)
 
             for key, plotDataModel in self.plotArtists.items():
                 tuple_key = key.as_tuple()

@@ -3,10 +3,10 @@ from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 import uuid
 from ..data.base import CatalogRun
-from .runModel import RunModel
+from .runSource import RunSource
 
 
-class FrozenRunModel(RunModel):
+class FrozenRunSource(RunSource):
     """
     A frozen run is a run that has been frozen and cannot be modified.
     """

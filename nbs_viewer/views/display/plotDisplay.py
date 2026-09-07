@@ -58,7 +58,7 @@ class PlotDisplay(QWidget):
         """Resolve presenter-owned models for this display."""
         self.presenter = self.display_manager.get_presenter(self.display_id)
         self.run_list_model = self.presenter.run_list
-        self.plot_model = self.presenter.plot
+        self.plot_model = self.presenter.session
         self.data_source = RunListView(
             self.run_list_model, self.display_manager, self.display_id
         )

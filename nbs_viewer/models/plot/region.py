@@ -27,6 +27,7 @@ from .region_mesh import (
 
 PlotAxisName = Literal["plot_x", "plot_y"]
 MaskMode = Literal["inside", "outside"]
+ReduceOp = Literal["sum", "mean"]
 
 
 @dataclass(frozen=True)
@@ -617,3 +618,35 @@ def expand_region_for_profile(
     if not region.separable_for_profile:
         return region
     return region.expand_for_profile(frame, profile_axis)
+
+
+def reduce_masked_plane(
+    y: np.ndarray,
+    compiled: CompiledRegion,
+    op: ReduceOp,
+) -> float:
+    """
+    Reduce all masked values in a 2D array to a scalar.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Data array matching ``compiled.mask`` shape.
+    compiled : CompiledRegion
+        Compiled region mask.
+    op : str
+        ``sum`` or ``mean``.
+
+    Returns
+    -------
+    float
+        Reduced value, or NaN if the mask is empty.
+    """
+    values = y[compiled.mask]
+    if values.size == 0:
+        return float("nan")
+    if op == "sum":
+        return float(np.nansum(values))
+    if op == "mean":
+        return float(np.nanmean(values))
+    raise ValueError(f"Unknown reduce op {op!r}")

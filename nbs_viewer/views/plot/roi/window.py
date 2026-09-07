@@ -72,7 +72,7 @@ class RoiWindow(QDialog):
         self.setModal(False)
         self.setMinimumSize(760, 640)
         self.presenter = presenter
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self.dimension_control = dimension_control
         self._parent_spec: Optional[CubeViewSpec] = None
         self._axis_names: Sequence[str] = ()

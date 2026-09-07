@@ -4,26 +4,24 @@ from unittest.mock import MagicMock
 
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.runListModel import RunListModel
 from nbs_viewer.models.plot.view_crop import ViewCrop
+from tests.fixtures.plot_session import make_plot_session
 
 
 def test_plot_model_exposes_roi_set():
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, run_list = make_plot_session()
     assert plot_model.roi_set is not None
     assert plot_model.run_list_model is run_list
 
 
 def test_two_plot_models_get_distinct_roi_sets():
-    run_list = RunListModel()
-    first = PlotModel(run_list)
-    second = PlotModel(run_list)
+    first, _ = make_plot_session()
+    second, _ = make_plot_session()
     assert first.roi_set is not second.roi_set
 
 
 def test_roi_set_add_via_plot_model():
-    plot_model = PlotModel(RunListModel())
+    plot_model = PlotModel()
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))
     assert plot_model.roi_set.selected_id == entry_id
@@ -31,7 +29,7 @@ def test_roi_set_add_via_plot_model():
 
 
 def test_sync_region_state_with_view_marks_mismatched_roi_stale(qapp):
-    plot_model = PlotModel(RunListModel())
+    plot_model = PlotModel()
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))
     statuses = []
@@ -44,7 +42,7 @@ def test_sync_region_state_with_view_marks_mismatched_roi_stale(qapp):
 
 
 def test_invalidate_all_region_state_clears_crop_and_marks_rois_stale(qapp):
-    plot_model = PlotModel(RunListModel())
+    plot_model = PlotModel()
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))
     crop = MagicMock(spec=ViewCrop)

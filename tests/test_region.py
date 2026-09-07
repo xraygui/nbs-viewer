@@ -10,9 +10,9 @@ from nbs_viewer.models.plot.region import (
     PolygonRegion,
     RectRegion,
     expand_region_for_profile,
+    reduce_masked_plane,
     region_from_dict,
 )
-from nbs_viewer.models.plot.region_reduce import reduce_masked_plane
 
 
 def test_reduce_masked_plane_sum():

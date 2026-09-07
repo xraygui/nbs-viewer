@@ -55,8 +55,7 @@ class PlotSettingsWidget(QWidget):
         super().__init__(parent)
         self.presenter = presenter
         self.plot_canvas = plot_canvas
-        run_list_model = presenter.run_list
-        plot_model = presenter.plot
+        plot_model = presenter.session
 
         form = QFormLayout(self)
         form.setContentsMargins(0, 0, 0, 0)
@@ -75,15 +74,15 @@ class PlotSettingsWidget(QWidget):
         self.auto_add_checkbox = _add_checkbox_row(
             form,
             "Auto Add",
-            run_list_model.auto_add,
-            run_list_model.set_auto_add,
+            plot_model.auto_add,
+            plot_model.set_auto_add,
         )
 
         self.dynamic_update_checkbox = _add_checkbox_row(
             form,
             "Dynamic Update",
-            run_list_model.dynamic_update,
-            run_list_model.set_dynamic_update,
+            plot_model.dynamic_update,
+            plot_model.set_dynamic_update,
         )
 
         self.lock_aspect_checkbox = None

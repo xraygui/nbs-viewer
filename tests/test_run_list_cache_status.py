@@ -4,18 +4,19 @@ from types import SimpleNamespace
 
 from nbs_viewer.models.cache.chunk_cache_progress import ChunkCacheProgress
 from nbs_viewer.models.plot.displayManager import PlotPresenter
-from nbs_viewer.models.plot.runListModel import RunListModel
+from tests.fixtures.plot_session import make_plot_session
 
 
-def _fake_run_model(chunk_cache):
+def _fake_run_model(uid, chunk_cache):
     return SimpleNamespace(
-        uid="test-uid",
+        uid=uid,
+        display_name=uid,
         _run=SimpleNamespace(_chunk_cache=chunk_cache),
     )
 
 
 def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
-    model = RunListModel()
+    session, model = make_plot_session()
     progress_a = ChunkCacheProgress()
     progress_b = ChunkCacheProgress()
     cache_a = SimpleNamespace(progress=progress_a)
@@ -24,8 +25,8 @@ def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
     statuses = []
     model.cache_status_changed.connect(statuses.append)
 
-    model._run_models["uid-a"] = _fake_run_model(cache_a)
-    model._run_models["uid-b"] = _fake_run_model(cache_b)
+    session.collection.add(_fake_run_model("uid-a", cache_a))
+    session.collection.add(_fake_run_model("uid-b", cache_b))
     model._refresh_cache_progress_connections()
 
     progress_a.update("uid-a", "det", 2, 4, active=True)
@@ -35,19 +36,19 @@ def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
 
 
 def test_run_list_model_clears_cache_status_when_runs_removed(qapp):
-    model = RunListModel()
+    session, model = make_plot_session()
     progress = ChunkCacheProgress()
     cache = SimpleNamespace(progress=progress)
 
     statuses = []
-    model.cache_status_changed.connect(statuses.append)
+    session.cache_status_changed.connect(statuses.append)
 
-    model._run_models["uid-a"] = _fake_run_model(cache)
-    model._refresh_cache_progress_connections()
+    session.collection.add(_fake_run_model("uid-a", cache))
+    session._refresh_cache_progress_connections()
     progress.update("uid-a", "det", 2, 4, active=True)
 
-    model._run_models.clear()
-    model._refresh_cache_progress_connections()
+    session.collection.clear()
+    session._refresh_cache_progress_connections()
 
     assert statuses[-1] == ""
 
@@ -57,6 +58,6 @@ def test_plot_presenter_forwards_cache_status(qapp):
     statuses = []
     presenter.status_changed.connect(statuses.append)
 
-    presenter.run_list.cache_status_changed.emit("Fetching 1/4")
+    presenter.session.cache_status_changed.emit("Fetching 1/4")
 
     assert statuses == ["Fetching 1/4"]

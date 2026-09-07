@@ -1,33 +1,32 @@
 """
-Plot session model bound to a run list.
+Plot session: membership, visibility, selection, view, and plot-data map.
 
-Owns selected keys, transform, retain-selection, cube/slice/crop view state,
-the ``PlotDataModel`` map, and the ROI set. Subscribes to the bound
-``RunListModel`` for membership, visibility, and available-key changes.
+Owns a :class:`RunCollection`, the visible-uid set, selected keys, transform,
+cube/slice/crop view state, the ``PlotDataModel`` map, and the ROI set.
+:class:`RunListModel` is a Qt facade that observes this session.
 
-Run-list protocol
------------------
-* ``run_removed`` — drop all plot-data entries for that uid.
-* ``visible_runs_changed`` — keep plot-data on uncheck; emit
-  ``request_plot_update`` so views plot only visible runs; ensure plot-data
-  for newly visible runs when keys are selected.
-* ``available_keys_changed`` — filter this plot's selected keys (honor
-  retain-selection when the universe is empty).
-* ``run_added`` — apply transform and current key selection to the new run;
-  apply default selection when this is the first run and retain is off.
+``rebuild()`` is the sole mutator of plot-data *membership*. Retention is
+membership × selection; visibility only filters drawing.
 
-``RunModel.set_selected_keys`` is still synced from this model as a temporary
-compatibility bridge for callers that read per-run selection (e.g. freeze).
+Key selection is a session :class:`Selection` (default + per-uid overrides).
+Freeze and unlinked display read :meth:`selection_for`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
 
 from qtpy.QtCore import QObject, Signal
 
+from nbs_viewer.models.catalog.base import CatalogRun
 from nbs_viewer.utils import print_debug
 
+from nbs_viewer.models.cache.chunk_cache_progress import (
+    ChunkCacheProgress,
+    TiledFetchStatus,
+    aggregate_tiled_fetch_label,
+)
+from .combinedRunSource import CombinationMethod, CombinedRunSource
 from .cube_view import (
     _fetch_plot_plane_storage_axes,
     classify_profile_kind,
@@ -36,6 +35,7 @@ from .cube_view import (
     scan_profile_storage_axis,
 )
 from .derived_fetch import _profile_uses_nd_load, build_roi_profile_request_from_operation
+from .frozenRunSource import FrozenRunSource
 from .plotDataModel import PlotDataModel
 from .plot_request import TraceKey, build_plot_request
 from .plot_view_frame import (
@@ -45,6 +45,9 @@ from .plot_view_frame import (
 )
 from .region import RectRegion, RegionDefinition, expand_region_for_profile
 from .roi_set import RoiEntry, RoiSetModel
+from .run_collection import RunCollection
+from .runSource import RunSource
+from .selection import KeySelection, Selection
 from .view_crop import ViewCrop, view_crop_from_region
 
 if TYPE_CHECKING:
@@ -52,17 +55,18 @@ if TYPE_CHECKING:
     from .frozen_spectrum import FrozenSpectrum
     from .plot_geometry import PlotBundle
     from .runListModel import RunListModel
-    from .runModel import RunModel
 
 
 class PlotModel(QObject):
     """
-    One plot session associated with a :class:`RunListModel`.
+    One plot session (membership + plot state).
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        Run collection and visibility source for this plot.
+    is_main_display : bool, optional
+        If True, newly added runs become visible by default.
+    single_selection_mode : bool, optional
+        If True, only one run can be visible at a time.
     parent : QObject, optional
         Qt parent.
     """
@@ -78,15 +82,31 @@ class PlotModel(QObject):
     ellipse_circle_locked_changed = Signal(bool)
     roi_live_region_sync_requested = Signal()
     plot_data_added = Signal(object)
+    available_keys_changed = Signal()
+    frozen_spectra_changed = Signal()
+    run_added = Signal(object)
+    run_removed = Signal(object)
+    available_runs_changed = Signal(list)
+    visible_runs_changed = Signal(set)
+    cache_status_changed = Signal(str)
 
-    def __init__(self, run_list_model: "RunListModel", parent: Optional[QObject] = None):
+    def __init__(
+        self,
+        is_main_display: bool = False,
+        single_selection_mode: bool = False,
+        parent: Optional[QObject] = None,
+    ):
         super().__init__(parent)
-        self._run_list_model = run_list_model
+        self._run_list_model: Optional["RunListModel"] = None
+        self._collection = RunCollection()
+        self._is_main_display = is_main_display
+        self._single_selection_mode = single_selection_mode
+        self._available_keys: List[str] = []
+        self._auto_add = True
+        self._visible_uids: Set[str] = set()
         self._roi_set = RoiSetModel(parent=self)
 
-        self._current_x_keys: List[str] = []
-        self._current_y_keys: List[str] = []
-        self._current_norm_keys: List[str] = []
+        self._selection = Selection()
         self._retain_selection = False
         self._transform = {"enabled": False, "text": ""}
 
@@ -100,26 +120,444 @@ class PlotModel(QObject):
         self._plot_data: Dict[TraceKey, PlotDataModel] = {}
         self._connected_run_uids = set()
 
-        self._run_list_model.run_added.connect(self._on_run_added)
-        self._run_list_model.run_removed.connect(self._on_run_removed)
-        self._run_list_model.visible_runs_changed.connect(
-            self._on_visible_runs_changed
-        )
-        self._run_list_model.available_keys_changed.connect(
-            self._on_available_keys_changed
-        )
+        self._progress_sources: Dict[int, ChunkCacheProgress] = {}
+        self._cache_statuses: Dict[int, TiledFetchStatus] = {}
+
+
+        self.available_keys_changed.connect(self._on_available_keys_changed)
         self.cube_view_changed.connect(self._on_cube_view_changed_for_region)
         self.selected_keys_changed.connect(self._on_selected_keys_changed_for_region)
+        self.run_added.connect(self._refresh_cache_progress_connections)
+        self.run_removed.connect(self._refresh_cache_progress_connections)
+        self._refresh_cache_progress_connections()
 
-        for run_model in self._run_list_model.available_models:
-            self._attach_run_model(run_model)
+    def bind_run_list(self, run_list_model: "RunListModel") -> None:
+        """
+        Attach the Qt run-list facade for this session.
+
+        Parameters
+        ----------
+        run_list_model : RunListModel
+            Sidebar item model that observes this session.
+        """
+        self._run_list_model = run_list_model
 
     @property
-    def run_list_model(self) -> "RunListModel":
+    def run_list_model(self) -> Optional["RunListModel"]:
         """
-        Return the bound run list model.
+        Return the bound run list facade, if any.
         """
         return self._run_list_model
+
+    @property
+    def collection(self) -> RunCollection:
+        """
+        Return the owned run collection.
+        """
+        return self._collection
+
+    @property
+    def visible_uids(self) -> Set[str]:
+        """
+        Return visible run uids.
+        """
+        return set(self._visible_uids)
+
+    @property
+    def available_keys(self) -> List[str]:
+        """
+        Return the available-key universe (visible catalog-key intersection).
+        """
+        return list(self._available_keys)
+
+    @property
+    def available_models(self) -> List[RunSource]:
+        """
+        Return all member run models.
+        """
+        return self._collection.sources()
+
+    @property
+    def available_runs(self) -> List[CatalogRun]:
+        """
+        Return underlying CatalogRun objects for all members.
+        """
+        return [model._run for model in self._collection.sources()]
+
+    @property
+    def available_uids(self) -> List[str]:
+        """
+        Return member uids in order.
+        """
+        return self._collection.uids()
+
+    @property
+    def visible_models(self) -> List[RunSource]:
+        """
+        Return visible run models.
+        """
+        return [
+            model
+            for model in self._collection.sources()
+            if model.uid in self._visible_uids
+        ]
+
+    @property
+    def visible_runs(self) -> Set[str]:
+        """
+        Return visible run uids (alias of :attr:`visible_uids`).
+        """
+        return set(self._visible_uids)
+
+    @property
+    def auto_add(self) -> bool:
+        """
+        Whether newly added runs become visible automatically.
+        """
+        return self._auto_add
+
+    def set_auto_add(self, enabled: bool) -> None:
+        """
+        Set whether newly added runs become visible automatically.
+
+        Parameters
+        ----------
+        enabled : bool
+            When True, new runs are checked/visible on add.
+        """
+        self._auto_add = enabled
+
+    def set_dynamic_update(self, enabled: bool) -> None:
+        """
+        Set dynamic update state on every member source.
+
+        Parameters
+        ----------
+        enabled : bool
+            Whether to enable dynamic updates.
+        """
+        for model in self._collection.sources():
+            model.set_dynamic(enabled)
+
+    @property
+    def dynamic_update(self) -> bool:
+        """
+        Whether dynamic update is enabled on all members.
+        """
+        models = self._collection.sources()
+        return all(model.dynamic_update for model in models) if models else True
+
+    def update_available_keys(self) -> None:
+        """
+        Update the intersection of catalog keys among visible runs.
+        """
+        runs = self.visible_models
+        if not runs:
+            if self._available_keys:
+                self._available_keys = []
+                self.available_keys_changed.emit()
+            return
+
+        first_run = runs[0]
+        print_debug(
+            "PlotModel.update_available_keys",
+            f"available_keys from first_run.uid {first_run.uid}: "
+            f"{first_run.available_keys}",
+            "run",
+        )
+        available_keys = list(first_run.catalog_keys)
+        for run in runs[1:]:
+            available_keys = [
+                key for key in available_keys if key in run.catalog_keys
+            ]
+
+        if available_keys != self._available_keys:
+            self._available_keys = available_keys
+            self.available_keys_changed.emit()
+
+    def synthetic_display_entries(self):
+        """
+        Return frozen stack spectra for visible runs.
+
+        Returns
+        -------
+        list of tuple
+            ``(run_model, key, display_label)`` entries for Run Display.
+        """
+        entries = []
+        runs = self.visible_models
+        multi = len(runs) > 1
+        for run_model in runs:
+            for entry in run_model.frozen_spectra():
+                if entry.kind != "stack_spectrum":
+                    continue
+                label = entry.label
+                if multi:
+                    label = f"{run_model.scan_id} · {label}"
+                entries.append((run_model, entry.key, label))
+        return entries
+
+    def _connect_run_keys(self, run_model: RunSource) -> None:
+        run_model.available_keys_changed.connect(self.update_available_keys)
+        run_model.frozen_spectra_changed.connect(self._on_frozen_spectra_changed)
+
+    def _disconnect_run_keys(self, run_model: RunSource) -> None:
+        try:
+            run_model.available_keys_changed.disconnect(self.update_available_keys)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            run_model.frozen_spectra_changed.disconnect(
+                self._on_frozen_spectra_changed
+            )
+        except (TypeError, RuntimeError):
+            pass
+
+    def _on_frozen_spectra_changed(self) -> None:
+        self.frozen_spectra_changed.emit()
+        self.rebuild()
+        self.request_plot_update.emit()
+
+    def add_runs(
+        self, run_list: Union[List[CatalogRun], List[RunSource]]
+    ) -> None:
+        """
+        Add CatalogRun or RunSource instances to the session.
+
+        Parameters
+        ----------
+        run_list : list of CatalogRun or RunSource
+            Runs to add.
+        """
+        print_debug("PlotModel.add_runs", f"Adding {len(run_list)} runs", "run")
+        run_list = sorted(run_list, key=lambda x: x.scan_id)
+        uid_list = []
+        for run in run_list:
+            uid = run.uid
+            uid_list.append(uid)
+            if uid in self._collection:
+                print_debug(
+                    "PlotModel.add_runs", f"Run {uid} already in model", "run"
+                )
+                continue
+
+            run_model = self._collection.wrap(run)
+            self._connect_run_keys(run_model)
+            self._collection.add(run_model)
+            self._attach_run_model(run_model)
+            self.run_added.emit(run_model)
+
+        self.update_available_keys()
+
+        if self._is_main_display or self._auto_add:
+            self.set_uids_visible(uid_list, True)
+        else:
+            self._maybe_apply_default_selection()
+            self.rebuild()
+            self.request_plot_update.emit()
+
+        self.available_runs_changed.emit(self.available_runs)
+
+    def add_run(self, run: Union[CatalogRun, RunSource]) -> None:
+        """
+        Add a single run to the session.
+
+        Parameters
+        ----------
+        run : CatalogRun or RunSource
+            Run to add.
+        """
+        self.add_runs([run])
+
+    def validate_combine(self, runs: List[RunSource]) -> None:
+        """
+        Check whether runs can be combined.
+
+        Parameters
+        ----------
+        runs : list of RunSource
+            Candidate source runs.
+        """
+        self._collection.validate_combine(runs)
+
+    def combine_runs(
+        self,
+        runs: List[RunSource],
+        method: CombinationMethod = CombinationMethod.AVERAGE,
+        expression: Optional[str] = None,
+    ) -> CombinedRunSource:
+        """
+        Build a combined run via the collection and add it.
+
+        Parameters
+        ----------
+        runs : list of RunSource
+            Source runs to combine.
+        method : CombinationMethod, optional
+            Combination method, by default AVERAGE.
+        expression : str, optional
+            Expression used when method is EXPRESSION.
+
+        Returns
+        -------
+        CombinedRunSource
+            The combined run that was added.
+        """
+        combined = self._collection.make_combined(
+            runs, method=method, expression=expression
+        )
+        self.add_run(combined)
+        return combined
+
+    def freeze_runs(self, runs: List[RunSource]) -> List[FrozenRunSource]:
+        """
+        Freeze selected Y keys via the collection and add the results.
+
+        Parameters
+        ----------
+        runs : list of RunSource
+            Runs whose currently selected Y keys should be frozen.
+
+        Returns
+        -------
+        list of FrozenRunSource
+            Frozen runs that were added.
+        """
+        to_freeze = []
+        for model in runs:
+            sel = self.selection_for(model.uid)
+            for key in sel.y:
+                to_freeze.append((model, key))
+        frozen_runs = self._collection.make_frozen(to_freeze)
+        if frozen_runs:
+            self.add_runs(frozen_runs)
+        return frozen_runs
+
+    def remove_uids(self, uid_list) -> None:
+        """
+        Remove runs from the session by uid.
+
+        Parameters
+        ----------
+        uid_list : list of str
+            UIDs to remove.
+        """
+        print_debug(
+            "PlotModel.remove_uids",
+            f"Removing uids {uid_list}",
+            category="runlist",
+        )
+        for uid in uid_list:
+            run_model = self._collection.remove(uid)
+            if run_model is None:
+                continue
+            self._disconnect_run_keys(run_model)
+            self._detach_run_model(run_model)
+            run_model.cleanup()
+            self._visible_uids.discard(uid)
+            self._selection.drop_uid(uid)
+            self.run_removed.emit(run_model)
+
+        self.update_available_keys()
+        self.visible_runs_changed.emit(self.visible_runs)
+        self.available_runs_changed.emit(self.available_runs)
+        self.rebuild()
+        self.request_plot_update.emit()
+
+    def remove_run(self, run: Union[CatalogRun, RunSource]) -> None:
+        """
+        Remove a single run by uid.
+
+        Parameters
+        ----------
+        run : CatalogRun or RunSource
+            Run to remove.
+        """
+        self.remove_uids([run.uid])
+
+    def set_runs(self, run_list, display_id="main") -> None:
+        """
+        Replace membership with ``run_list``.
+
+        Parameters
+        ----------
+        run_list : list
+            CatalogRun objects that should remain.
+        display_id : str, optional
+            Unused; kept for API compatibility.
+        """
+        print_debug("PlotModel.set_runs", f"Setting runs {len(run_list)}", "run")
+        current_uids = {run.uid for run in run_list}
+        existing_uids = set(self._collection.uids())
+        self.remove_uids(list(existing_uids - current_uids))
+        self.add_runs(run_list)
+        self.cleanup_state()
+
+    def set_uids_visible(self, uids, is_visible: bool) -> None:
+        """
+        Set visibility for specific run uids.
+
+        Parameters
+        ----------
+        uids : list of str
+            UIDs to update.
+        is_visible : bool
+            New visibility state.
+        """
+        print_debug(
+            "PlotModel.set_uids_visible",
+            f"Setting uids {uids} to {is_visible}",
+            category="runlist",
+        )
+        if self._single_selection_mode and is_visible and uids:
+            all_uids = list(self._collection.uids())
+            for uid in all_uids:
+                self._visible_uids.discard(uid)
+
+            first_uid = uids[0]
+            if first_uid in self._collection:
+                self._visible_uids.add(first_uid)
+        else:
+            for uid in uids:
+                if uid not in self._collection:
+                    continue
+                if is_visible:
+                    self._visible_uids.add(uid)
+                else:
+                    self._visible_uids.discard(uid)
+
+        self.update_available_keys()
+        self.visible_runs_changed.emit(self.visible_runs)
+        self._maybe_apply_default_selection()
+        self.rebuild()
+        self.request_plot_update.emit()
+        print_debug(
+            "PlotModel.set_uids_visible",
+            f"visible_runs_changed uids={uids} visible={is_visible}",
+            category="plots",
+        )
+
+    def set_run_visible(
+        self, run: Union[CatalogRun, RunSource], is_visible: bool
+    ) -> None:
+        """
+        Update visibility for one run.
+
+        Parameters
+        ----------
+        run : CatalogRun or RunSource
+            Run to update.
+        is_visible : bool
+            New visibility state.
+        """
+        self.set_uids_visible([run.uid], is_visible)
+
+    def cleanup_state(self) -> None:
+        """
+        Drop visible uids that are no longer members.
+        """
+        valid_uids = set(self._collection.uids())
+        self._visible_uids.intersection_update(valid_uids)
 
     @property
     def roi_set(self) -> RoiSetModel:
@@ -162,7 +600,7 @@ class PlotModel(QObject):
 
     def set_transform(self, transform_state: dict) -> None:
         """
-        Set transform state and apply it to all run models.
+        Set transform state for the session.
 
         Parameters
         ----------
@@ -170,36 +608,86 @@ class PlotModel(QObject):
             Transform configuration with ``enabled`` and ``text``.
         """
         self._transform = transform_state.copy()
-        for model in self._run_list_model.available_models:
-            model.set_transform(self._transform)
         self.transform_changed.emit(self.transform)
-        self._sync_plot_data_requests()
+        self._refresh_held_requests()
+        self.request_plot_update.emit()
         print_debug(
             "PlotModel.set_transform",
-            "applied (artist bus via transform_changed)",
+            "applied (request refresh via transform_changed)",
             category="plots",
         )
 
     @property
     def selected_keys(self) -> tuple:
         """
-        Return current ``(x_keys, y_keys, norm_keys)`` copies.
+        Return session-default ``(x_keys, y_keys, norm_keys)`` copies.
         """
-        return (
-            self._current_x_keys.copy(),
-            self._current_y_keys.copy(),
-            self._current_norm_keys.copy(),
-        )
+        return self._selection.default.as_lists()
 
     def get_selected_keys(self):
         """
-        Return current selected x, y, and norm keys.
+        Return session-default selected x, y, and norm keys.
         """
-        return self._current_x_keys, self._current_y_keys, self._current_norm_keys
+        return self._selection.default.as_lists()
+
+    def selection_for(self, uid: str) -> KeySelection:
+        """
+        Resolve selection for ``uid`` (override or default, filtered).
+
+        Parameters
+        ----------
+        uid : str
+            Run uid.
+
+        Returns
+        -------
+        KeySelection
+            Filtered selection for that run.
+        """
+        source = self._collection.get(uid)
+        available = None
+        if source is not None:
+            available = source.available_keys
+        return self._selection.selection_for(uid, available)
+
+    def set_selection_for(
+        self,
+        uid: str,
+        x_keys: List[str],
+        y_keys: List[str],
+        norm_keys: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Set a per-run selection override and rebuild.
+
+        Parameters
+        ----------
+        uid : str
+            Run uid.
+        x_keys, y_keys : list of str
+            Axis keys.
+        norm_keys : list of str, optional
+            Normalization keys.
+        """
+        self._selection.set_override(uid, x_keys, y_keys, norm_keys)
+        self.rebuild()
+        sel = self.selection_for(uid)
+        self.selected_keys_changed.emit(list(sel.x), list(sel.y), list(sel.norm))
+        self.request_plot_update.emit()
+
+    def clear_selection_overrides(self) -> None:
+        """
+        Clear per-run overrides (Link Runs) and rebuild from the default.
+        """
+        self._selection.clear_overrides()
+        self.rebuild()
+        x, y, n = self._selection.default.as_lists()
+        self.selected_keys_changed.emit(x, y, n)
+        self.request_plot_update.emit()
 
     def is_key_selected(self, key: str, axis: str) -> bool:
         """
-        Return whether a key is selected for an axis.
+        Return whether a key is selected on the session default.
 
         Parameters
         ----------
@@ -208,12 +696,13 @@ class PlotModel(QObject):
         axis : str
             One of ``'x'``, ``'y'``, or ``'norm'``.
         """
+        default = self._selection.default
         if axis == "x":
-            return key in self._current_x_keys
+            return key in default.x
         if axis == "y":
-            return key in self._current_y_keys
+            return key in default.y
         if axis == "norm":
-            return key in self._current_norm_keys
+            return key in default.norm
         return False
 
     def set_selected_keys(
@@ -224,10 +713,7 @@ class PlotModel(QObject):
         force_update: bool = False,
     ) -> None:
         """
-        Set key selection for this plot session.
-
-        Temporarily syncs the same selection onto every ``RunModel`` in the
-        bound list for compatibility with freeze and similar callers.
+        Set the session-default key selection.
 
         Parameters
         ----------
@@ -240,22 +726,10 @@ class PlotModel(QObject):
         force_update : bool, optional
             Accepted for API compatibility; plot refresh is always requested.
         """
-        self._current_x_keys = list(x_keys)
-        self._current_y_keys = list(y_keys)
-        self._current_norm_keys = list(norm_keys or [])
-
-        for model in self._run_list_model.available_models:
-            model.set_selected_keys(
-                self._current_x_keys,
-                self._current_y_keys,
-                self._current_norm_keys,
-                force_update=False,
-            )
-
-        self._ensure_plot_data_for_visible()
-        self.selected_keys_changed.emit(
-            self._current_x_keys, self._current_y_keys, self._current_norm_keys
-        )
+        self._selection.set_default(x_keys, y_keys, norm_keys)
+        self.rebuild()
+        x, y, n = self._selection.default.as_lists()
+        self.selected_keys_changed.emit(x, y, n)
         print_debug(
             "PlotModel.set_selected_keys",
             f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
@@ -317,7 +791,7 @@ class PlotModel(QObject):
             self.cube_view_changed.emit(self._cube_view_spec)
 
         if changed:
-            self._sync_plot_data_requests()
+            self._refresh_held_requests()
             self.request_plot_update.emit()
 
     @property
@@ -338,7 +812,7 @@ class PlotModel(QObject):
         """
         self._view_crop = crop
         self.view_crop_changed.emit(crop)
-        self._sync_plot_data_requests()
+        self._refresh_held_requests()
         self.request_plot_update.emit()
 
     def clear_view_crop(self) -> None:
@@ -395,7 +869,7 @@ class PlotModel(QObject):
 
         full_frame = self._resolve_full_view_frame_for_crop(plot_data)
         slice_info = parent_spec.to_load_slice_info()
-        xlist, _names, _extra = plot_data._run.get_dimension_axes(
+        xlist, _names, _extra = plot_data._run.load_axes(
             plot_data._ykey,
             [plot_data._xkey],
             slice_info,
@@ -549,21 +1023,23 @@ class PlotModel(QObject):
             raise ValueError("Select a single 2D dataset")
         return frame_from_bundle(bundle)
 
-    def _effective_transform_text(self, run_model: "RunModel") -> str:
+    def _effective_transform_text(self, run_model: "RunSource" = None) -> str:
         """
-        Return the effective transform expression for a run.
+        Return the session effective transform expression.
 
         Parameters
         ----------
-        run_model : RunModel
-            Run whose transform state is read.
+        run_model : RunSource, optional
+            Unused; kept for call-site compatibility.
 
         Returns
         -------
         str
-            Transform text when enabled on the run, otherwise empty.
+            Transform text when enabled on the session, otherwise empty.
         """
-        return getattr(run_model, "_transform_text", "") or ""
+        if self._transform.get("enabled"):
+            return self._transform.get("text", "") or ""
+        return ""
 
     def _crop_for_trace(self, trace_key: TraceKey):
         """
@@ -588,7 +1064,7 @@ class PlotModel(QObject):
 
     def _build_plot_request(
         self,
-        run_model: "RunModel",
+        run_model: "RunSource",
         xkey: str,
         ykey: str,
         norm_keys: Optional[List[str]] = None,
@@ -598,7 +1074,7 @@ class PlotModel(QObject):
 
         Parameters
         ----------
-        run_model : RunModel
+        run_model : RunSource
             Source run.
         xkey : str
             X key.
@@ -626,22 +1102,9 @@ class PlotModel(QObject):
             transform=self._effective_transform_text(run_model),
         )
 
-    def _sync_plot_data_requests(self) -> None:
-        """
-        Rewrite held requests from current session view without replacing models.
-        """
-        for key, plot_data in self._plot_data.items():
-            request = self._build_plot_request(
-                plot_data._run,
-                key.xkey,
-                key.ykey,
-                plot_data._norm_keys,
-            )
-            plot_data.set_request(request)
-
     def ensure_plot_data(
         self,
-        run_model: "RunModel",
+        run_model: "RunSource",
         xkey: str,
         ykey: str,
         norm_keys: Optional[List[str]] = None,
@@ -654,7 +1117,7 @@ class PlotModel(QObject):
 
         Parameters
         ----------
-        run_model : RunModel
+        run_model : RunSource
             Source run.
         xkey : str
             X key.
@@ -699,17 +1162,13 @@ class PlotModel(QObject):
         """
         keys = [key for key in self._plot_data if key.uid == uid]
         for key in keys:
-            plot_data = self._plot_data.pop(key)
-            try:
-                plot_data.clear()
-            except Exception:
-                pass
+            self._dispose_plot_data(key)
 
     def iter_visible_plot_data(self):
         """
         Yield plot-data models whose run uid is currently visible.
         """
-        visible = self._run_list_model.visible_runs
+        visible = self.visible_uids
         for key, plot_data in self._plot_data.items():
             if key.uid in visible:
                 yield plot_data
@@ -1176,7 +1635,8 @@ class PlotModel(QObject):
             or default_profile_label(request, names, parent_spec=spec)
         )
         if committed_xkey is None:
-            committed_xkey = self._current_x_keys[0] if self._current_x_keys else ""
+            default_x = self._selection.default.x
+            committed_xkey = default_x[0] if default_x else ""
         if cube_fingerprint is None:
             cube_fingerprint = (
                 tuple(self._slice) if self._slice else None,
@@ -1279,23 +1739,121 @@ class PlotModel(QObject):
             committed_xkey=committed_xkey,
         )
 
-    def _ensure_plot_data_for_visible(self) -> None:
-        if not (self._current_x_keys and self._current_y_keys):
-            return
-        for run_model in self._run_list_model.visible_models:
-            for xkey in self._current_x_keys:
-                for ykey in self._current_y_keys:
-                    self.ensure_plot_data(
-                        run_model, xkey, ykey, self._current_norm_keys
-                    )
+    def _retained_trace_keys(self) -> Set[TraceKey]:
+        """
+        Return TraceKeys that should exist (membership × selection).
 
-    def _attach_run_model(self, run_model: "RunModel") -> None:
+        Returns
+        -------
+        set of TraceKey
+            Desired plot-data identities. Visibility is not applied here.
+        """
+        keys: Set[TraceKey] = set()
+        for source in self.collection.sources():
+            sel = self.selection_for(source.uid)
+            if not (sel.x and sel.y):
+                continue
+            for xkey in sel.x:
+                for ykey in sel.y:
+                    keys.add(TraceKey(source.uid, xkey, ykey))
+        return keys
+
+    def _request_for(self, source: RunSource, key: TraceKey):
+        """
+        Build the current session PlotRequest for one TraceKey.
+
+        Parameters
+        ----------
+        source : RunSource
+            Source run.
+        key : TraceKey
+            Trace identity.
+
+        Returns
+        -------
+        PlotRequest
+            Request assembled from session view state.
+        """
+        sel = self.selection_for(source.uid)
+        return self._build_plot_request(
+            source,
+            key.xkey,
+            key.ykey,
+            list(sel.norm),
+        )
+
+    def _dispose_plot_data(self, key: TraceKey) -> None:
+        """
+        Remove and clean up one plot-data entry.
+
+        Parameters
+        ----------
+        key : TraceKey
+            Entry to dispose.
+        """
+        plot_data = self._plot_data.pop(key, None)
+        if plot_data is None:
+            return
+        try:
+            plot_data.clear()
+        except Exception:
+            pass
+
+    def _refresh_held_requests(self) -> None:
+        """
+        Rewrite requests on every held plot-data model from session view state.
+
+        Used for view / crop / transform changes so ``ensure_plot_data``
+        orphans (e.g. canvas-created keys) keep their artists and pick up
+        the new request. Membership pruning stays in :meth:`rebuild`.
+        """
+        for key, plot_data in list(self._plot_data.items()):
+            source = self.collection.get(key.uid)
+            if source is None:
+                self._dispose_plot_data(key)
+                continue
+            plot_data.set_request(self._request_for(source, key))
+
+    def rebuild(self) -> None:
+        """
+        Diff retained TraceKeys against ``_plot_data`` and sync requests.
+
+        Creates or updates models for membership × selection; disposes extras.
+        Visibility does not dispose — use :meth:`iter_visible_plot_data` for
+        the draw set.
+        """
+        desired = self._retained_trace_keys()
+        for key in set(self._plot_data) - desired:
+            self._dispose_plot_data(key)
+        for key in desired:
+            source = self.collection.get(key.uid)
+            if source is None:
+                continue
+            request = self._request_for(source, key)
+            if key in self._plot_data:
+                self._plot_data[key].set_request(request)
+            else:
+                plot_data = PlotDataModel(
+                    source,
+                    request,
+                    parent=self,
+                    trace_key=key,
+                )
+                self._plot_data[key] = plot_data
+                self.plot_data_added.emit(plot_data)
+                print_debug(
+                    "PlotModel.rebuild",
+                    f"create {key.xkey}/{key.ykey} uid={key.uid}",
+                    category="plots",
+                )
+
+    def _attach_run_model(self, run_model: RunSource) -> None:
         if run_model.uid in self._connected_run_uids:
             return
         run_model.plot_update_needed.connect(self.request_plot_update)
         self._connected_run_uids.add(run_model.uid)
 
-    def _detach_run_model(self, run_model: "RunModel") -> None:
+    def _detach_run_model(self, run_model: RunSource) -> None:
         if run_model.uid not in self._connected_run_uids:
             return
         try:
@@ -1304,50 +1862,86 @@ class PlotModel(QObject):
             pass
         self._connected_run_uids.discard(run_model.uid)
 
-    def _on_run_added(self, run_model: "RunModel") -> None:
-        self._attach_run_model(run_model)
-        run_model.set_transform(self._transform)
-        run_model.set_selected_keys(
-            self._current_x_keys,
-            self._current_y_keys,
-            self._current_norm_keys,
-            force_update=False,
-        )
-        self._maybe_apply_default_selection()
-
-    def _on_run_removed(self, run_model: "RunModel") -> None:
-        self._detach_run_model(run_model)
-        self.drop_plot_data_for_uid(run_model.uid)
-        self.request_plot_update.emit()
-
-    def _on_visible_runs_changed(self, _visible_uids) -> None:
-        self._ensure_plot_data_for_visible()
-        self.request_plot_update.emit()
-
     def _on_available_keys_changed(self) -> None:
-        available_keys = self._run_list_model.available_keys
+        available_keys = self.available_keys
         if not available_keys:
-            if not self._retain_selection:
+            if not self._retain_selection and len(self.collection) == 0:
                 self.set_selected_keys([], [], [])
             return
 
-        valid_x = [k for k in self._current_x_keys if k in available_keys]
-        valid_y = [k for k in self._current_y_keys if k in available_keys]
-        valid_norm = [k for k in self._current_norm_keys if k in available_keys]
+        default = self._selection.default
+        valid_x = [k for k in default.x if k in available_keys]
+        valid_y = [k for k in default.y if k in available_keys]
+        valid_norm = [k for k in default.norm if k in available_keys]
         if (
-            valid_x != self._current_x_keys
-            or valid_y != self._current_y_keys
-            or valid_norm != self._current_norm_keys
+            tuple(valid_x) != default.x
+            or tuple(valid_y) != default.y
+            or tuple(valid_norm) != default.norm
         ):
             self.set_selected_keys(valid_x, valid_y, valid_norm)
 
     def _maybe_apply_default_selection(self) -> None:
         if self._retain_selection:
             return
-        if self._current_x_keys or self._current_y_keys or self._current_norm_keys:
+        default = self._selection.default
+        if default.x or default.y or default.norm:
             return
-        models = self._run_list_model.available_models
+        models = self.available_models
         if len(models) != 1:
             return
         x_keys, y_keys, norm_keys = models[0].run.get_default_selection()
         self.set_selected_keys(x_keys, y_keys, norm_keys)
+
+    def _discover_cache_progress_sources(self) -> Dict[int, ChunkCacheProgress]:
+        sources: Dict[int, ChunkCacheProgress] = {}
+        for model in self.available_models:
+            run = getattr(model, "_run", None)
+            if run is None:
+                continue
+            chunk_cache = getattr(run, "_chunk_cache", None)
+            if chunk_cache is None:
+                continue
+            progress = getattr(chunk_cache, "progress", None)
+            if progress is None:
+                continue
+            sources[id(progress)] = progress
+        return sources
+
+    def _refresh_cache_progress_connections(self, *_args) -> None:
+        desired = self._discover_cache_progress_sources()
+        desired_ids = set(desired)
+        current_ids = set(self._progress_sources)
+
+        for progress_id in current_ids - desired_ids:
+            progress = self._progress_sources.pop(progress_id)
+            try:
+                progress.status_changed.disconnect(
+                    self._on_cache_progress_status_changed
+                )
+            except (TypeError, RuntimeError):
+                pass
+            self._cache_statuses.pop(progress_id, None)
+
+        for progress_id in desired_ids - current_ids:
+            progress = desired[progress_id]
+            progress.status_changed.connect(self._on_cache_progress_status_changed)
+            self._progress_sources[progress_id] = progress
+
+        self._emit_aggregated_cache_status()
+
+    def _on_cache_progress_status_changed(self, status: TiledFetchStatus) -> None:
+        progress = self.sender()
+        if progress is None:
+            return
+        progress_id = id(progress)
+        if progress_id not in self._progress_sources:
+            return
+        self._cache_statuses[progress_id] = status
+        self._emit_aggregated_cache_status()
+
+    def _emit_aggregated_cache_status(self) -> None:
+        text = aggregate_tiled_fetch_label(self._cache_statuses.values())
+        self.cache_status_changed.emit(text)
+
+
+PlotSession = PlotModel

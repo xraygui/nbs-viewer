@@ -11,7 +11,7 @@ from nbs_viewer.models.plot.plot_geometry import PlotBundle
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.presenter import PlotPresenter
 from nbs_viewer.models.plot.runListModel import RunListModel
-from nbs_viewer.models.plot.runModel import RunModel
+from nbs_viewer.models.plot.runSource import RunSource
 
 from .catalog_recipes import build_catalog
 
@@ -42,11 +42,16 @@ class HeadlessSession:
     @property
     def plot(self) -> PlotModel:
         """Plot session model for the bound presenter."""
-        return self.presenter.plot
+        return self.presenter.session
+
+    @property
+    def session(self) -> PlotModel:
+        """Alias of :attr:`plot` (session root)."""
+        return self.presenter.session
 
     @property
     def run_list(self) -> RunListModel:
-        """Run list for the bound presenter."""
+        """Qt run-list item model for the bound presenter."""
         return self.presenter.run_list
 
     @property
@@ -107,7 +112,7 @@ class HeadlessSession:
         self._catalog_label = registered
         return registered
 
-    def select_run(self, index: int = 0) -> RunModel:
+    def select_run(self, index: int = 0) -> RunSource:
         """
         Select a catalog run and route it through the app signal path.
 
@@ -118,7 +123,7 @@ class HeadlessSession:
 
         Returns
         -------
-        RunModel
+        RunSource
             Run model added to the presenter run list.
         """
         runs = self.catalog.get_runs()
@@ -130,7 +135,7 @@ class HeadlessSession:
         self.catalog.select_run(catalog_run.uid)
         return self._run_model_for_uid(catalog_run.uid)
 
-    def add_run_direct(self, run: MemoryRun) -> RunModel:
+    def add_run_direct(self, run: MemoryRun) -> RunSource:
         """
         Add a run to the presenter without going through catalog selection.
 
@@ -141,7 +146,7 @@ class HeadlessSession:
 
         Returns
         -------
-        RunModel
+        RunSource
             Wrapper stored on the run list.
         """
         self.presenter.add_run(run)
@@ -152,7 +157,7 @@ class HeadlessSession:
         x_keys: Sequence[str],
         y_keys: Sequence[str],
         *,
-        run: Optional[RunModel] = None,
+        run: Optional[RunSource] = None,
         norm_keys: Optional[Sequence[str]] = None,
     ) -> PlotBundle:
         """
@@ -164,7 +169,7 @@ class HeadlessSession:
             X axis keys.
         y_keys : sequence of str
             Y data keys (first entry is plotted).
-        run : RunModel, optional
+        run : RunSource, optional
             Target run. Defaults to the first visible run model.
         norm_keys : sequence of str, optional
             Normalization keys.
@@ -196,14 +201,14 @@ class HeadlessSession:
         )
         return plot_data.get_plot_bundle()
 
-    def _first_run_model(self) -> RunModel:
-        models = self.run_list.available_models
+    def _first_run_model(self) -> RunSource:
+        models = self.plot.available_models
         if not models:
             raise RuntimeError("run list has no runs; select or add a run first")
         return models[0]
 
-    def _run_model_for_uid(self, uid: str) -> RunModel:
-        for model in self.run_list.available_models:
+    def _run_model_for_uid(self, uid: str) -> RunSource:
+        for model in self.plot.available_models:
             if model.uid == uid:
                 return model
         raise RuntimeError(f"run {uid!r} was not added to the presenter run list")

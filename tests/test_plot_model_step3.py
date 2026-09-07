@@ -16,14 +16,14 @@ from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plotModel import PlotModel
-from nbs_viewer.models.plot.runListModel import RunListModel
-from nbs_viewer.models.plot.runModel import RunModel
+from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_crop import ViewCrop
 from tests.fixtures.catalog_recipes import line_scan_run
+from tests.fixtures.plot_session import make_plot_session
 
 
-def _make_run_model(memory_run: MemoryRun) -> RunModel:
-    return RunModel(memory_run)
+def _make_run_model(memory_run: MemoryRun) -> RunSource:
+    return RunSource(memory_run)
 
 
 def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> MemoryRun:
@@ -39,10 +39,9 @@ def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> Me
 
 
 def test_ensure_plot_data_same_keys_same_instance(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
 
     first = plot_model.ensure_plot_data(run_model, "time", "det")
     second = plot_model.ensure_plot_data(run_model, "time", "det")
@@ -51,10 +50,9 @@ def test_ensure_plot_data_same_keys_same_instance(qapp):
 
 
 def test_ensure_plot_data_different_keys_different_instances(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
 
     first = plot_model.ensure_plot_data(run_model, "time", "det")
     second = plot_model.ensure_plot_data(run_model, "time", "i0")
@@ -62,64 +60,62 @@ def test_ensure_plot_data_different_keys_different_instances(qapp):
 
 
 def test_remove_run_drops_plot_data(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
     assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
 
-    run_list.remove_run(run_model)
+    plot_model.remove_run(run_model)
     assert all(key.uid != run_model.uid for key in plot_model.plot_data_map)
 
 
 def test_uncheck_keeps_plot_data_in_map(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
     assert len(plot_model.plot_data_map) >= 1
 
-    run_list.set_uids_visible([run_model.uid], False)
+    plot_model.set_uids_visible([run_model.uid], False)
     assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
     assert list(plot_model.iter_visible_plot_data()) == []
 
 
 def test_visibility_ensures_plot_data_when_keys_selected(qapp):
-    run_list = RunListModel(is_main_display=False)
-    run_list.set_auto_add(False)
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session(is_main_display=False)
+    plot_model.set_auto_add(False)
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    run_list.set_uids_visible([run_model.uid], False)
+    plot_model.set_uids_visible([run_model.uid], False)
     plot_model.drop_plot_data_for_uid(run_model.uid)
     assert run_model.uid not in {key.uid for key in plot_model.plot_data_map}
 
-    run_list.set_uids_visible([run_model.uid], True)
+    plot_model.set_uids_visible([run_model.uid], True)
     assert TraceKey(run_model.uid, "time", "det") in plot_model.plot_data_map
 
 
 def test_two_plot_models_independent_keys_and_maps(qapp):
-    run_list = RunListModel()
-    first = PlotModel(run_list)
-    second = PlotModel(run_list)
-    run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
-    run_list.add_run(run_model)
+    first, _ = make_plot_session()
+    second, _ = make_plot_session()
+    run_a = _make_run_model(_custom_run(1, ("time", "det", "i0")))
+    run_b = _make_run_model(_custom_run(2, ("time", "det", "i0")))
+    first.add_run(run_a)
+    second.add_run(run_b)
 
     first.set_selected_keys(["time"], ["det"])
     second.set_selected_keys(["time"], ["i0"])
 
     assert first.get_selected_keys()[1] == ["det"]
     assert second.get_selected_keys()[1] == ["i0"]
-    assert TraceKey(run_model.uid, "time", "det") in first.plot_data_map
-    assert TraceKey(run_model.uid, "time", "i0") in second.plot_data_map
-    assert TraceKey(run_model.uid, "time", "i0") not in first.plot_data_map
+    assert TraceKey(run_a.uid, "time", "det") in first.plot_data_map
+    assert TraceKey(run_b.uid, "time", "i0") in second.plot_data_map
+    assert TraceKey(run_a.uid, "time", "i0") not in first.plot_data_map
 
 
 def test_cube_view_and_crop_without_canvas(qapp):
-    plot_model = PlotModel(RunListModel())
+    plot_model = PlotModel()
     spec = default_spec(3, 2)
     plot_model.set_view_state(
         indices=spec.to_load_slice_info(),
@@ -137,10 +133,9 @@ def test_cube_view_and_crop_without_canvas(qapp):
 
 
 def test_apply_view_crop_from_region(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("x", "y")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     plot_model.set_selected_keys(["x"], ["y"])
 
     parent = CubeViewSpec(
@@ -162,7 +157,7 @@ def test_apply_view_crop_from_region(qapp):
         ["y", "x"],
         render_mode_hint="image",
     )
-    run_model.get_dimension_axes = MagicMock(
+    run_model.load_axes = MagicMock(
         return_value=(
             [np.arange(5), np.arange(6)],
             ["y", "x"],
@@ -179,10 +174,9 @@ def test_apply_view_crop_from_region(qapp):
 
 
 def test_apply_view_crop_from_region_rejects_second_crop(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("x", "y")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     plot_model.set_selected_keys(["x"], ["y"])
 
     parent = CubeViewSpec(
@@ -204,7 +198,7 @@ def test_apply_view_crop_from_region_rejects_second_crop(qapp):
         ["y", "x"],
         render_mode_hint="image",
     )
-    run_model.get_dimension_axes = MagicMock(
+    run_model.load_axes = MagicMock(
         return_value=(
             [np.arange(5), np.arange(6)],
             ["y", "x"],
@@ -220,10 +214,9 @@ def test_apply_view_crop_from_region_rejects_second_crop(qapp):
 
 
 def test_default_selection_on_first_run(qapp):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
+    plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    run_list.add_run(run_model)
+    plot_model.add_run(run_model)
     x_keys, y_keys, _ = plot_model.get_selected_keys()
     assert x_keys == ["time"]
     assert y_keys == ["det"]

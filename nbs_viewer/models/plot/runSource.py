@@ -2,7 +2,6 @@ from types import MappingProxyType
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
 
 from qtpy.QtCore import QObject, Signal
-from asteval import Interpreter
 import numpy as np
 import time as ttime
 
@@ -21,18 +20,17 @@ from .plot_bundle import (
     slice_info_for_key,
 )
 from .plot_geometry import PlotBundle, get_render_mode_hint
-from .plot_request import PlotRequest, build_plot_request
+from .plot_request import PlotRequest
 from nbs_viewer.utils import print_debug
 
 
-class RunModel(QObject):
+class RunSource(QObject):
     """
     Uniform key access over a catalog run plus frozen synthetic keys.
 
     The RunSource surface is ``key_table``, ``identity``, ``read``,
     ``describe_axes``, ``load_axes``, and ``get_plot_bundle``. Selection,
-    visibility, and transform text remain on this object until PlotSession
-    owns them.
+    visibility, and transform live on :class:`PlotModel`.
 
     Parameters
     ----------
@@ -42,48 +40,29 @@ class RunModel(QObject):
 
     available_keys_changed = Signal()
     frozen_spectra_changed = Signal()
-    selected_keys_changed = Signal(list, list, list)
-    transform_changed = Signal(dict)
     data_changed = Signal()
-    visibility_changed = Signal(bool)  # (artist, is_visible)
-    plot_update_needed = Signal()  # Signal to trigger plot refresh
+    plot_update_needed = Signal()
 
     def __init__(self, run: CatalogRun):
         super().__init__()
         self._run = run
-        print_debug("RunModel.__init__", f"RunModel for run {run.uid}", "run")
-        # Selection state
-        self._selected_x: List[str] = []
-        self._selected_y: List[str] = []
-        self._selected_norm: List[str] = []
-        self._is_visible = True
+        print_debug("RunSource.__init__", f"RunSource for run {run.uid}", "run")
         self._catalog_keys: List[str] = []
         self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
-
-        self._transform_text = ""
-        self._transform = Interpreter()
         self._dynamic = False
         self._key_table: Optional[Dict[str, KeyInfo]] = None
         self._update_available_keys()
-        self._set_default_selection()
         self._connect_run()
 
     def _connect_run(self):
         self._run.data_changed.connect(self._on_data_changed)
-        # Also react to async key init signals to update available keys quickly
         if hasattr(self._run, "keys_ready"):
             self._run.keys_ready.connect(self._on_keys_event)
         if hasattr(self._run, "keys_error"):
             self._run.keys_error.connect(self._on_keys_event)
 
     def _on_keys_event(self, *_):
-        # Single place to update keys and default selection on first load
-        previous_empty = len(self._catalog_keys) == 0
         self._update_available_keys()
-        if previous_empty and self._catalog_keys:
-            # First time keys become available; set defaults if none selected
-            if not (self._selected_x or self._selected_y or self._selected_norm):
-                self._set_default_selection()
 
     def _disconnect_run(self):
         """Disconnect RunData signals."""
@@ -312,26 +291,6 @@ class RunModel(QObject):
             raise ValueError(f"No data returned for key {key!r}")
         return np.asarray(data)
 
-    def get_data(self, key: str, slice_info=None) -> np.ndarray:
-        """
-        Load array data for a catalog or frozen key.
-
-        Compatibility shim over :meth:`read`.
-
-        Parameters
-        ----------
-        key : str
-            Data key.
-        slice_info : tuple, optional
-            Per-axis slice tuple.
-
-        Returns
-        -------
-        np.ndarray
-            Storage array for the key.
-        """
-        return self.read(key, slice_info)
-
     def describe_axes(self, ykey: str, xkeys: Sequence[str]) -> AxisLayout:
         """
         Return shape and placeholder axis coordinates for dimension UI.
@@ -418,58 +377,6 @@ class RunModel(QObject):
                 )
             return entry.get_dimension_axes(xkey_list, slice_info)
         return self._run.get_dimension_axes(ykey, xkey_list, slice_info)
-
-    def get_dimension_ui_info(
-        self, ykey: str, xkeys: List[str]
-    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Any]]:
-        """
-        Return shape and placeholder axis coordinates for dimension UI.
-
-        Compatibility shim over :meth:`describe_axes`.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key.
-        xkeys : list of str
-            Selected X-axis keys.
-
-        Returns
-        -------
-        tuple
-            ``(shape, dimension_names, axis_arrays, associated_data)``.
-        """
-        layout = self.describe_axes(ykey, xkeys)
-        return (
-            layout.shape,
-            list(layout.names),
-            list(layout.placeholders),
-            dict(layout.associated),
-        )
-
-    def get_dimension_axes(
-        self, ykey: str, xkeys: List[str], slice_info=None
-    ):
-        """
-        Return axis coordinates for a catalog or frozen Y key.
-
-        Compatibility shim over :meth:`load_axes`.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key.
-        xkeys : list of str
-            Selected X-axis keys.
-        slice_info : tuple, optional
-            Per-axis slice tuple.
-
-        Returns
-        -------
-        tuple
-            ``(axis_arrays, axis_names, associated_data)``.
-        """
-        return self.load_axes(ykey, xkeys, slice_info)
 
     def _stack_spectrum_dimension_axes(
         self,
@@ -630,14 +537,6 @@ class RunModel(QObject):
             return False
         del self._frozen_spectra[key]
         self._invalidate_key_table()
-        x_keys, y_keys, norm_keys = self.get_selected_keys()
-        if key in x_keys or key in y_keys or key in norm_keys:
-            self.set_selected_keys(
-                [k for k in x_keys if k != key],
-                [k for k in y_keys if k != key],
-                [k for k in norm_keys if k != key],
-                force_update=True,
-            )
         self.available_keys_changed.emit()
         self.frozen_spectra_changed.emit()
         return True
@@ -646,7 +545,7 @@ class RunModel(QObject):
         """Update catalog keys from the run; preserve synthetic keys."""
         new_keys = self._run.available_keys
         print_debug(
-            "RunModel._update_available_keys",
+            "RunSource._update_available_keys",
             f"available_keys for {self.uid}: {new_keys} from run {id(self._run)}",
             "run",
         )
@@ -656,14 +555,9 @@ class RunModel(QObject):
         if keys_changed:
             self.available_keys_changed.emit()
 
-    def _set_default_selection(self) -> None:
-        """Set default key selection based on run hints."""
-        x_keys, y_keys, norm_keys = self._run.get_default_selection()
-        self.set_selected_keys(x_keys, y_keys, norm_keys)
-
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
-        print_debug("RunModel._on_data_changed", f"Data changed for {self.uid}", "run")
+        print_debug("RunSource._on_data_changed", f"Data changed for {self.uid}", "run")
         self._update_available_keys()
         self.data_changed.emit()
 
@@ -773,49 +667,6 @@ class RunModel(QObject):
             )
         return apply_normalization(y, y_plot_names, reduced)
 
-    def get_plot_data(
-        self, xkeys, ykey, norm_keys=None, slice_info=None, transform=True
-    ) -> Tuple[List[np.ndarray], np.ndarray]:
-        """
-        Get plot x arrays and y data (backward-compatible API).
-
-        Parameters
-        ----------
-        xkeys : list of str
-            X axis keys.
-        ykey : str
-            Y data key.
-        norm_keys : list of str, optional
-            Normalization keys.
-        slice_info : tuple, optional
-            Slice specification.
-        transform : bool
-            Whether to apply the run model's transform expression.
-
-        Returns
-        -------
-        tuple
-            (xlist, y)
-        """
-        shape = self.get_shape(ykey)
-        plot_ndim = 2 if len(shape) >= 2 else 1
-        request = build_plot_request(
-            uid=self.uid,
-            xkeys=xkeys,
-            ykey=ykey,
-            shape=shape,
-            norm_keys=norm_keys,
-            plot_ndim=plot_ndim,
-            slice_info=slice_info,
-            transform=self._transform_text if transform else "",
-        )
-        bundle = self.get_plot_bundle(request)
-        if bundle.ndim == 1:
-            xlist = [] if bundle.x_line is None else [bundle.x_line]
-        else:
-            xlist = []
-        return xlist, bundle.y
-
     def get_plot_bundle(
         self,
         request: PlotRequest,
@@ -885,7 +736,7 @@ class RunModel(QObject):
         t_transform = ttime.time() - t0
 
         print_debug(
-            "RunModel.get_plot_bundle",
+            "RunSource.get_plot_bundle",
             f"{ykey} shape={getattr(y, 'shape', None)} "
             f"load={t_load:.4f}s materialize={t_materialize:.4f}s "
             f"norm={t_norm:.4f}s transform={t_transform:.4f}s",
@@ -907,46 +758,6 @@ class RunModel(QObject):
             render_mode_hint=hint,
             label=label,
         )
-
-    def transform_data(
-        self, xlist: List[np.ndarray], y: np.ndarray
-    ) -> Tuple[List[np.ndarray], np.ndarray]:
-        """
-        Transform data using this run's current expression text.
-
-        Parameters
-        ----------
-        xlist : list of np.ndarray
-            Plot-plane coordinate arrays.
-        y : np.ndarray
-            Plot-plane data.
-
-        Returns
-        -------
-        tuple
-            Transformed ``(xlist, y)``.
-        """
-        return apply_transform(xlist, y, self._transform_text)
-
-    def set_transform(self, transform_state: Dict[str, Any]) -> None:
-        """
-        Set the transformation expression.
-
-        Parameters
-        ----------
-        transform_state : Dict[str, Any]
-            Dictionary with transform settings:
-            - enabled: bool, whether transform is enabled
-            - text: str, Python expression for data transformation
-        """
-        if transform_state["enabled"]:
-            transform_text = transform_state["text"]
-        else:
-            transform_text = ""
-
-        if transform_text != self._transform_text:
-            self._transform_text = transform_text
-            self.transform_changed.emit(transform_state)
 
     @property
     def dynamic_update(self) -> bool:
@@ -974,77 +785,8 @@ class RunModel(QObject):
 
     def cleanup(self):
         """Clean up resources and disconnect signals."""
-        # Disconnect RunData signals
-        print_debug("RunModel.cleanup", f"Cleaning up run {self.uid}", "run")
+        print_debug("RunSource.cleanup", f"Cleaning up run {self.uid}", "run")
         try:
             self._disconnect_run()
         except Exception as e:
             print(f"Warning: Error disconnecting run signals: {e}")
-
-        # Clear selection state
-        self._selected_x.clear()
-        self._selected_y.clear()
-        self._selected_norm.clear()
-
-        self.visibility_changed.emit(False)
-
-    def get_selected_keys(self):
-        return self._selected_x, self._selected_y, self._selected_norm
-
-    def set_selected_keys(
-        self,
-        x_keys: List[str],
-        y_keys: List[str],
-        norm_keys: Optional[List[str]] = None,
-        force_update: bool = False,
-    ) -> None:
-        """
-        Set the current key selection.
-
-        Parameters
-        ----------
-        x_keys : List[str]
-            Keys to select for x-axis
-        y_keys : List[str]
-            Keys to select for y-axis
-        norm_keys : Optional[List[str]], optional
-            Keys to select for normalization, by default None
-        force_update : bool, optional
-            Whether to force update the plot regardless of auto_add setting
-        """
-        # Check if any selections have changed
-        x_keys = [key for key in x_keys if key in self.available_keys]
-        y_keys = [key for key in y_keys if key in self.available_keys]
-        if norm_keys is None:
-            norm_keys = []
-        norm_keys = [key for key in norm_keys if key in self.available_keys]
-        if (
-            x_keys != self._selected_x
-            or y_keys != self._selected_y
-            or norm_keys != self._selected_norm
-        ):
-
-            self._selected_x = x_keys
-            self._selected_y = y_keys
-            self._selected_norm = norm_keys
-            self.selected_keys_changed.emit(
-                self._selected_x, self._selected_y, self._selected_norm
-            )
-            if force_update:
-                self.plot_update_needed.emit()
-
-    def set_visible(self, is_visible):
-        """
-        Set visibility for all artists.
-
-        Parameters
-        ----------
-        is_visible : bool
-            New visibility state
-        """
-        if is_visible != self._is_visible:
-            self._is_visible = is_visible  # Save visibility state
-            self.visibility_changed.emit(is_visible)
-
-
-RunSource = RunModel

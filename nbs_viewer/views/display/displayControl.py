@@ -22,7 +22,7 @@ class DisplayControlWidget(QWidget):
     displays. Used by both runListView and DataSourceManager.
     """
 
-    def __init__(self, display_manager, run_list_model, parent=None):
+    def __init__(self, display_manager, presenter, parent=None):
         """
         Initialize the display control widget.
 
@@ -37,7 +37,8 @@ class DisplayControlWidget(QWidget):
         """
         super().__init__(parent)
         self.display_manager = display_manager
-        self.run_list_model = run_list_model
+        self.presenter = presenter
+        self.session = presenter.session
 
         self.add_to_new_display_btn = QPushButton("New Display", self)
         self.add_to_new_display_btn.setToolTip(
@@ -103,7 +104,7 @@ class DisplayControlWidget(QWidget):
 
     def _on_new_display(self, display_type):
         """Create new display with current selection and selected display type."""
-        visible_models = self.run_list_model.visible_models
+        visible_models = self.session.visible_models
         selected_runs = [model._run for model in visible_models]
         single_selection_mode = get_frontend_registry().single_selection_mode_for_type(
             display_type
@@ -116,23 +117,14 @@ class DisplayControlWidget(QWidget):
 
     def _on_display_selected(self, display_id):
         """Add current selection to existing display."""
-        visible_models = self.run_list_model.visible_models
+        visible_models = self.session.visible_models
         selected_runs = [model._run for model in visible_models]
         if selected_runs:
             self.display_manager.add_runs_to_display(selected_runs, display_id)
 
     def _on_clear_display(self):
         """Clear the current plot model and deselect all runs."""
-        visible_uids = set(self.run_list_model.visible_runs)
+        visible_uids = set(self.session.visible_uids)
         if visible_uids:
-            self.run_list_model.set_uids_visible(visible_uids, False)
-            plot_model = self._plot_model_for_list()
-            if plot_model is not None:
-                plot_model.set_selected_keys([], [], [], force_update=True)
-
-    def _plot_model_for_list(self):
-        for display_id in self.display_manager.get_display_ids():
-            presenter = self.display_manager.get_presenter(display_id)
-            if presenter.run_list is self.run_list_model:
-                return presenter.plot
-        return None
+            self.session.set_uids_visible(visible_uids, False)
+            self.session.set_selected_keys([], [], [], force_update=True)

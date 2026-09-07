@@ -235,7 +235,7 @@ class DimensionControl(QWidget):
         )
         self.presenter = presenter
         self.run_list_model = presenter.run_list
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self.canvas = canvas
         self._slice_rows = []
         self._plot_rows = []
@@ -246,8 +246,8 @@ class DimensionControl(QWidget):
         self._cube_view_spec = None
         self._updating_ui = False
 
-        self.run_list_model.run_added.connect(self.on_run_added)
-        self.run_list_model.run_removed.connect(self.on_run_removed)
+        self.plot_model.run_added.connect(self.on_run_added)
+        self.plot_model.run_removed.connect(self.on_run_removed)
         self.plot_model.selected_keys_changed.connect(self.on_selection_changed)
         self.canvas.plot_view_updated.connect(self.refresh_axis_coordinates)
         self.canvas.plot_view_updated.connect(self.refresh_plot_axis_labels)
@@ -613,19 +613,14 @@ class DimensionControl(QWidget):
                 associated_data.get(dim_name, {}),
             )
 
-    def _axis_coordinates_for_run(self, run_model, ykey, x_keys, shape, dim_names):
+    def _axis_coordinates_for_run(self, run_model, ykey, x_keys, shape, placeholders):
         """
         Return axis coordinate arrays, preferring loaded data over index placeholders.
         """
-        _, _, placeholders, _ = run_model.get_dimension_ui_info(
-            ykey, x_keys
-        )
         try:
-            axis_arrays, _, associated_data = run_model.get_dimension_axes(
-                ykey, x_keys
-            )
+            axis_arrays, _, associated_data = run_model.load_axes(ykey, x_keys)
         except Exception:
-            return placeholders, {}
+            return list(placeholders), {}
 
         aligned = []
         for i, size in enumerate(shape):
@@ -648,10 +643,10 @@ class DimensionControl(QWidget):
         tuple or None
             ``(shape, dimension_names, axis_arrays, associated_data)`` or None.
         """
-        if not self.run_list_model:
+        if not self.plot_model:
             return None
 
-        run_models = self.run_list_model.visible_models
+        run_models = self.plot_model.visible_models
         if not run_models:
             return None
 
@@ -662,7 +657,8 @@ class DimensionControl(QWidget):
 
         for run_model in run_models:
             try:
-                x_keys, y_keys, norm_keys = run_model.get_selected_keys()
+                sel = self.plot_model.selection_for(run_model.uid)
+                x_keys, y_keys = list(sel.x), list(sel.y)
                 if not y_keys:
                     continue
 
@@ -670,12 +666,16 @@ class DimensionControl(QWidget):
                     if run_model.is_synthetic_key(ykey):
                         continue
                     try:
-                        shape, axis_names, _, _ = (
-                            run_model.get_dimension_ui_info(ykey, x_keys)
-                        )
+                        layout = run_model.describe_axes(ykey, x_keys)
+                        shape = layout.shape
+                        axis_names = list(layout.names)
                         axis_arrays, associated_data = (
                             self._axis_coordinates_for_run(
-                                run_model, ykey, x_keys, shape, axis_names
+                                run_model,
+                                ykey,
+                                x_keys,
+                                shape,
+                                layout.placeholders,
                             )
                         )
 
@@ -743,21 +743,11 @@ class DimensionControl(QWidget):
         self.dimensionChanged.emit(new_dim)
 
     def on_run_added(self, run_model):
-        run_model.selected_keys_changed.connect(self._on_run_selection_changed)
         self.create_sliders()
 
     def on_run_removed(self, run_model):
-        try:
-            run_model.selected_keys_changed.disconnect(
-                self._on_run_selection_changed
-            )
-        except (TypeError, RuntimeError):
-            pass
         self.create_sliders()
 
     def on_selection_changed(self):
-        self._on_run_selection_changed()
-
-    def _on_run_selection_changed(self, *_args):
         self._cube_view_spec = None
         self.create_sliders()

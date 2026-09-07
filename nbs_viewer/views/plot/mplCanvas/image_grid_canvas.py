@@ -40,7 +40,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
         self.presenter = presenter
         self.run_list_model = presenter.run_list
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
 
         self.plotArtists = {}
         self._worker_generations = {}
@@ -98,7 +98,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
 
     def _connect_signals(self):
         self.plot_model.selected_keys_changed.connect(self._on_selection_changed)
-        self.run_list_model.visible_runs_changed.connect(self._on_visible_runs_changed)
+        self.plot_model.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.plot_model.request_plot_update.connect(self._update_grid)
 
     def draw(self):
@@ -132,13 +132,14 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             ``(shape, dim_names, axis_arrays, associated_data)`` or None.
         """
         print_debug("ImageGridCanvas", "Getting shape info", category="plots")
-        visible_models = self.run_list_model.visible_models
+        visible_models = self.plot_model.visible_models
         if not visible_models:
             print_debug("ImageGridCanvas", "No visible models", category="plots")
             return None
 
         run_model = visible_models[0]
-        x_keys, y_keys, norm_keys = run_model.get_selected_keys()
+        sel = self.plot_model.selection_for(run_model.uid)
+        x_keys, y_keys, norm_keys = sel.as_lists()
 
         print_debug(
             "ImageGridCanvas",
@@ -158,9 +159,11 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         )
 
         try:
-            shape, dim_names, axis_arrays, associated_data = (
-                run_model.get_dimension_ui_info(y_key, x_keys)
-            )
+            layout = run_model.describe_axes(y_key, x_keys)
+            shape = layout.shape
+            dim_names = list(layout.names)
+            axis_arrays = list(layout.placeholders)
+            associated_data = dict(layout.associated)
 
             print_debug("ImageGridCanvas", f"Shape: {shape}", category="plots")
             print_debug(
@@ -308,7 +311,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             f"Displaying images {start_idx} to {end_idx-1}",
             category="plots",
         )
-        visible_models = self.run_list_model.visible_models
+        visible_models = self.plot_model.visible_models
         if not visible_models:
             return
 
@@ -316,7 +319,9 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         print_debug(
             "ImageGridCanvas", f"Run model: {run_model.uid}", category="plots"
         )
-        x_keys, y_keys, norm_keys = run_model.get_selected_keys()
+        x_keys, y_keys, norm_keys = self.plot_model.selection_for(
+            run_model.uid
+        ).as_lists()
 
         if not y_keys:
             return
@@ -382,7 +387,8 @@ class ImageGridCanvas(FigureCanvasQTAgg):
 
     def _create_image_plot_data(self, run_model, slice_info, image_idx):
         key = (run_model.uid, image_idx)
-        x_keys, y_keys, norm_keys = run_model.get_selected_keys()
+        sel = self.plot_model.selection_for(run_model.uid)
+        x_keys, y_keys, norm_keys = sel.as_lists()
         y_key = y_keys[0]
         if key not in self.plotArtists:
             print_debug(
@@ -392,6 +398,9 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             )
 
             xkey = x_keys[0] if x_keys else ""
+            transform = ""
+            if self.plot_model.transform.get("enabled"):
+                transform = self.plot_model.transform.get("text", "") or ""
             request = build_plot_request(
                 uid=run_model.uid,
                 xkeys=[xkey] if xkey else (),
@@ -400,7 +409,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 norm_keys=norm_keys,
                 plot_ndim=2,
                 slice_info=slice_info,
-                transform=getattr(run_model, "_transform_text", "") or "",
+                transform=transform,
             )
             plot_data = PlotDataModel(
                 run_model,

@@ -31,7 +31,7 @@ class RegionControlWidget(QWidget):
     def __init__(self, presenter, plot_canvas, dimension_control, parent=None):
         super().__init__(parent)
         self.presenter = presenter
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self.canvas = plot_canvas
         self.dimension_control = dimension_control
         self.setup_ui()

@@ -12,8 +12,8 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
-from ...models.plot.combinedRunModel import CombinationMethod, CombineError
-from ...models.plot.runModel import RunModel
+from ...models.plot.combinedRunSource import CombinationMethod, CombineError
+from ...models.plot.runSource import RunSource
 from ..plot.metadataView import FullMetadataBrowser
 from typing import List
 from nbs_viewer.utils import get_top_level_model
@@ -55,6 +55,7 @@ class RunListView(QWidget):
         """
         super().__init__(parent)
         self.run_list_model = run_list_model
+        self.session = run_list_model.plot_model
         self.display_id = display_id
         self._handling_selection = False
         self._metadata_browser_dialog = None
@@ -109,9 +110,9 @@ class RunListView(QWidget):
         uids_to_remove = [run.uid for run in selected_runs]
 
         # Remove from plot model
-        self.run_list_model.remove_uids(uids_to_remove)
+        self.session.remove_uids(uids_to_remove)
 
-    def get_selected_runs(self) -> List[RunModel]:
+    def get_selected_runs(self) -> List[RunSource]:
         """Get the currently selected runs."""
         selected_indexes = self.list_view.selectedIndexes()
         selected_runs = []
@@ -144,7 +145,7 @@ class RunListView(QWidget):
             self._addSinglePlotItem(plotItem)
 
     def _addSinglePlotItem(self, plotItem):
-        self.run_list_model.add_run(plotItem)
+        self.session.add_run(plotItem)
 
     def removePlotItem(self, plotItem):
         """
@@ -156,13 +157,13 @@ class RunListView(QWidget):
             The plot item to be removed from the list widget.
         """
         plotItem.clear()
-        self.run_list_model.remove_run(plotItem)
+        self.session.remove_run(plotItem)
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
         selected_runs = self.get_selected_runs()
         try:
-            self.run_list_model.validate_combine(selected_runs)
+            self.session.validate_combine(selected_runs)
         except CombineError as e:
             QMessageBox.warning(self, "Cannot Combine", str(e))
             return
@@ -184,7 +185,7 @@ class RunListView(QWidget):
             expression = None
 
         try:
-            self.run_list_model.combine_runs(
+            self.session.combine_runs(
                 selected_runs, method=method, expression=expression
             )
         except CombineError as e:
@@ -195,17 +196,17 @@ class RunListView(QWidget):
 
     def _freeze_selected_runs(self):
         """Freeze selected runs."""
-        self.run_list_model.freeze_runs(self.get_selected_runs())
+        self.session.freeze_runs(self.get_selected_runs())
 
     def uncheck_selected_runs(self):
         """Uncheck all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.run_list_model.set_uids_visible(uids, False)
+        self.session.set_uids_visible(uids, False)
 
     def check_selected_runs(self):
         """Check all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.run_list_model.set_uids_visible(uids, True)
+        self.session.set_uids_visible(uids, True)
 
     def move_selected_runs_to_new_display(self, display_type: str):
         runs = self.get_selected_runs()
@@ -359,7 +360,7 @@ class RunListView(QWidget):
         menu.exec_(self.list_view.mapToGlobal(pos))
 
     def _browse_metadata_for_run(self, run):
-        runs = self.run_list_model.available_models
+        runs = self.session.available_models
         if not runs:
             return
         self._metadata_browser_dialog = FullMetadataBrowser(

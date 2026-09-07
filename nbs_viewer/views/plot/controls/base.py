@@ -41,7 +41,7 @@ class PlotControlWidget(QWidget):
         super().__init__(parent)
         self.presenter = presenter
         self.run_list_model = presenter.run_list
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._setup_ui()
 

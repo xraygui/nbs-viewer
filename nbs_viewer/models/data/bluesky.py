@@ -221,7 +221,7 @@ class BlueskyRun(CatalogRun):
         """
         if is_synthetic_key(key):
             raise KeyError(
-                f"Synthetic key {key!r} must be accessed via RunModel, not CatalogRun"
+                f"Synthetic key {key!r} must be accessed via RunSource, not CatalogRun"
             )
         t_start = time.time()
         if key not in self._shape_cache:

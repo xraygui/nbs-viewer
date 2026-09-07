@@ -1,101 +1,85 @@
-"""Run list model managing run membership, visibility, and available keys."""
+"""Qt run-list adapter over a :class:`PlotModel` session."""
 
-from typing import Dict, List, Optional, Union, Set
-from nbs_viewer.models.catalog.base import CatalogRun
-from nbs_viewer.models.cache.chunk_cache_progress import (
-    ChunkCacheProgress,
-    TiledFetchStatus,
-    aggregate_tiled_fetch_label,
-)
-from qtpy.QtCore import Signal, Qt
-from qtpy.QtGui import QStandardItemModel, QStandardItem
-from .runModel import RunModel
-from .combinedRunModel import CombinedRunModel, CombinationMethod, CombineError
-from .frozenRunModel import FrozenRunModel
-from nbs_viewer.utils import print_debug
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Dict
+
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QStandardItem, QStandardItemModel
+
+from .runSource import RunSource
+
+if TYPE_CHECKING:
+    from .plotModel import PlotModel
 
 
 class RunListModel(QStandardItemModel):
     """
-    Model for run membership, visibility, and the available key universe.
+    Sidebar rows for one plot session.
 
-    Plot-session state (selected keys, transform, retain-selection, plot-data
-    maps, cube/crop) lives on :class:`PlotModel`. Auto-add here only controls
-    whether newly added runs become visible.
+    Membership, visibility, keys, and combine/freeze live on
+    :class:`PlotModel`. This model only keeps ``QStandardItem`` rows in
+    sync, exposes index helpers for the list view, and aggregates cache
+    status.
+
+    Parameters
+    ----------
+    plot_model : PlotModel
+        Session that owns the run collection and visibility set.
     """
 
-    available_keys_changed = Signal()
-    frozen_spectra_changed = Signal()
-    run_added = Signal(object)
-    run_removed = Signal(object)
-    available_runs_changed = Signal(list)
-    visible_runs_changed = Signal(set)
-    add_runs_to_display = Signal(list, str)
-    cache_status_changed = Signal(str)
-
-    def __init__(self, is_main_display=False, single_selection_mode=False):
-        """
-        Initialize the run list model.
-
-        Parameters
-        ----------
-        is_main_display : bool
-            If True, all runs are automatically selected
-        single_selection_mode : bool
-            If True, only one run can be visible at a time (radio button behavior)
-        """
+    def __init__(self, plot_model: "PlotModel"):
         super().__init__()
-        self._run_models = {}  # run_uid -> RunModel
-        self._is_main_display = is_main_display
-        self._single_selection_mode = single_selection_mode
+        self._plot = plot_model
+        self._plot.bind_run_list(self)
 
-        self.available_keys = list()
-        self._auto_add = True
-        self._visible_runs = set()
-        self._progress_sources: Dict[int, ChunkCacheProgress] = {}
-        self._cache_statuses: Dict[int, TiledFetchStatus] = {}
-
-        self.run_added.connect(self._on_run_added)
-        self.run_removed.connect(self._on_run_removed)
-        self.run_added.connect(self._refresh_cache_progress_connections)
-        self.run_removed.connect(self._refresh_cache_progress_connections)
-        self.visible_runs_changed.connect(self._on_visible_runs_changed)
+        self._plot.run_added.connect(self._on_session_run_added)
+        self._plot.run_removed.connect(self._on_session_run_removed)
+        self._plot.visible_runs_changed.connect(self._on_session_visible_changed)
         self.itemChanged.connect(self._on_item_changed)
 
-        self._refresh_cache_progress_connections()
+        for run in self._plot.available_models:
+            self._add_run_item(run)
 
-    def _add_run_item(self, run: RunModel):
-        """Add a run as a QStandardItem to the model."""
+    @property
+    def plot_model(self) -> "PlotModel":
+        """
+        Return the bound plot session.
+        """
+        return self._plot
+
+    def _add_run_item(self, run: RunSource) -> None:
         item = QStandardItem(run.display_name)
         item.setData(run.uid, Qt.UserRole)
-        item.setData(run, Qt.UserRole + 1)  # Store run object
+        item.setData(run, Qt.UserRole + 1)
         item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
         item.setCheckState(
-            Qt.Checked if run.uid in self._visible_runs else Qt.Unchecked
+            Qt.Checked if run.uid in self._plot.visible_uids else Qt.Unchecked
         )
         self.appendRow(item)
 
-    def _on_run_added(self, run: RunModel):
-        """Handle new run added to model."""
+    def _on_session_run_added(self, run: RunSource) -> None:
         self._add_run_item(run)
 
-    def _on_run_removed(self, run: RunModel):
-        """Handle run removed from model."""
+    def _on_session_run_removed(self, run: RunSource) -> None:
         for row in range(self.rowCount()):
             item = self.item(row)
             if item.data(Qt.UserRole) == run.uid:
                 self.removeRow(row)
                 break
 
-    def _on_visible_runs_changed(self, visible_runs):
-        """Handle visible runs changed in model."""
-        # Update checkbox states for all items
-        for row in range(self.rowCount()):
-            item = self.item(row)
-            uid = item.data(Qt.UserRole)
-            item.setCheckState(
-                Qt.Checked if uid in self._visible_runs else Qt.Unchecked
-            )
+    def _on_session_visible_changed(self, _visible_runs) -> None:
+        visible = self._plot.visible_uids
+        self.blockSignals(True)
+        try:
+            for row in range(self.rowCount()):
+                item = self.item(row)
+                uid = item.data(Qt.UserRole)
+                item.setCheckState(
+                    Qt.Checked if uid in visible else Qt.Unchecked
+                )
+        finally:
+            self.blockSignals(False)
 
     def get_run_at_index(self, index):
         """
@@ -108,7 +92,7 @@ class RunListModel(QStandardItemModel):
 
         Returns
         -------
-        RunModel or None
+        RunSource or None
             The run object or None if invalid index
         """
         if not index.isValid():
@@ -157,15 +141,31 @@ class RunListModel(QStandardItemModel):
             item = self.item(row)
             if item.data(Qt.UserRole) == uid:
                 return self.indexFromItem(item)
-        return self.index(-1, -1)  # Invalid index
+        return self.index(-1, -1)
 
     def get_first_run(self):
+        """
+        Return the first run in the list, or ``None``.
+        """
         index = self.index(0, 0)
         if not index.isValid():
             return None
         return self.get_run_at_index(index)
 
     def get_siblings_of_run(self, run):
+        """
+        Return the previous and next runs adjacent to ``run``.
+
+        Parameters
+        ----------
+        run : RunSource
+            Reference run.
+
+        Returns
+        -------
+        list
+            ``[previous, next]``, each ``None`` when absent.
+        """
         index = self.find_index_by_uid(run.uid)
         if not index.isValid():
             return [None, None]
@@ -174,502 +174,14 @@ class RunListModel(QStandardItemModel):
             sibling_index = index.sibling(index.row() + offset, index.column())
             if sibling_index.isValid():
                 sibling = self.get_run_at_index(sibling_index)
-                if sibling:
-                    siblings.append(sibling)
-                else:
-                    siblings.append(None)
+                siblings.append(sibling if sibling else None)
             else:
                 siblings.append(None)
         return siblings
 
-    def _on_item_changed(self, item):
-        """Handle checkbox state changes."""
+    def _on_item_changed(self, item) -> None:
         uid = item.data(Qt.UserRole)
         if uid:
             is_visible = item.checkState() == Qt.Checked
-            self.set_uids_visible([uid], is_visible)
+            self._plot.set_uids_visible([uid], is_visible)
 
-    def getHeaderLabel(self) -> str:
-        models = self.visible_models
-        if len(models) == 0:
-            return "No Runs Selected"
-        elif len(models) == 1:
-            run = models[0]
-            return f"Run: {run.plan_name} ({run.scan_id})"
-        else:
-            return f"Multiple Runs Selected ({len(models)})"
-
-    def update_available_keys(self) -> None:
-        """
-        Update the intersection of catalog keys among visible runs.
-        """
-        runs = self.visible_models
-        if not runs:
-            if self.available_keys:
-                self.available_keys = []
-                self.available_keys_changed.emit()
-            return
-
-        first_run = runs[0]
-        print_debug(
-            "RunListModel.update_available_keys",
-            f"available_keys from first_run.uid {first_run.uid}: {first_run.available_keys}",
-            "run",
-        )
-        available_keys = first_run.catalog_keys
-        for run in runs:
-            available_keys = [
-                key for key in available_keys if key in run.catalog_keys
-            ]
-
-        if set(available_keys) != set(self.available_keys):
-            self.available_keys = available_keys
-            self.available_keys_changed.emit()
-
-    @property
-    def available_runs(self) -> List[CatalogRun]:
-        """Get list of all available CatalogRun objects."""
-        return [model._run for model in self._run_models.values()]
-
-    @property
-    def available_models(self) -> List[RunModel]:
-        """Get list of all available RunModels."""
-        return list(self._run_models.values())
-
-    @property
-    def available_uids(self):
-        """Get list of all available CatalogRun UIDs."""
-        return list(self._run_models.keys())
-
-    @property
-    def auto_add(self) -> bool:
-        """Whether newly added runs are automatically made visible."""
-        return self._auto_add
-
-    def set_auto_add(self, enabled: bool) -> None:
-        """
-        Set whether newly added runs become visible automatically.
-
-        Parameters
-        ----------
-        enabled : bool
-            When True, new runs are checked/visible on add.
-        """
-        self._auto_add = enabled
-
-    def set_dynamic_update(self, enabled: bool) -> None:
-        """
-        Set dynamic update state.
-
-        Parameters
-        ----------
-        enabled : bool
-            Whether to enable dynamic updates
-        """
-        for model in self._run_models.values():
-            model.set_dynamic(enabled)
-
-    @property
-    def dynamic_update(self) -> bool:
-        """Whether dynamic update is enabled."""
-        return all(model.dynamic_update for model in self._run_models.values())
-
-    def synthetic_display_entries(self):
-        """
-        Return frozen stack spectra for visible runs.
-
-        Returns
-        -------
-        list of tuple
-            ``(run_model, key, display_label)`` entries for Run Display.
-        """
-        entries = []
-        runs = self.visible_models
-        multi = len(runs) > 1
-        for run_model in runs:
-            for entry in run_model.frozen_spectra():
-                if entry.kind != "stack_spectrum":
-                    continue
-                label = entry.label
-                if multi:
-                    label = f"{run_model.scan_id} · {label}"
-                entries.append((run_model, entry.key, label))
-        return entries
-
-    def _connect_run_model(self, run_model: RunModel):
-        """Connect signals from a RunModel."""
-        run_model.available_keys_changed.connect(self.update_available_keys)
-        run_model.frozen_spectra_changed.connect(self._on_frozen_spectra_changed)
-
-    def _disconnect_run_model(self, run_model: RunModel):
-        """Disconnect signals from a RunModel."""
-        run_model.available_keys_changed.disconnect(self.update_available_keys)
-        run_model.frozen_spectra_changed.disconnect(
-            self._on_frozen_spectra_changed
-        )
-
-    def _on_frozen_spectra_changed(self):
-        self.frozen_spectra_changed.emit()
-
-    def add_runs(self, run_list: Union[List[CatalogRun], List[RunModel]]):
-        """
-        Add CatalogRun or RunModel instances to the list.
-
-        Parameters
-        ----------
-        run_list : list of CatalogRun or RunModel
-            Runs to add.
-        """
-        print_debug("RunListModel.add_runs", f"Adding {len(run_list)} runs", "run")
-        run_list = sorted(run_list, key=lambda x: x.scan_id)
-        uid_list = []
-        for run in run_list:
-            uid = run.uid
-            uid_list.append(uid)
-            if uid in self._run_models:
-                print_debug(
-                    "RunListModel.add_runs", f"Run {uid} already in model", "run"
-                )
-                continue
-
-            if not isinstance(run, RunModel):
-                run_model = RunModel(run)
-            else:
-                run_model = run
-            self._connect_run_model(run_model)
-            self._run_models[uid] = run_model
-            self.run_added.emit(run_model)
-
-        self.update_available_keys()
-
-        if self._is_main_display or self._auto_add:
-            self.set_uids_visible(uid_list, True)
-
-        self.available_runs_changed.emit(self.available_runs)
-
-    def add_run(self, run: Union[CatalogRun, RunModel]):
-        """Add a single CatalogRun to the model."""
-        self.add_runs([run])
-
-    def validate_combine(self, runs: List[RunModel]) -> None:
-        """
-        Check whether runs can be combined.
-
-        Parameters
-        ----------
-        runs : list of RunModel
-            Candidate source runs.
-
-        Raises
-        ------
-        CombineError
-            If fewer than two runs are given, they share no keys, shapes
-            disagree, or shape data cannot be read.
-        """
-        if len(runs) < 2:
-            raise CombineError("Please select at least 2 runs to combine")
-
-        try:
-            common_keys = set(runs[0].available_keys)
-            for run in runs[1:]:
-                common_keys &= set(run.available_keys)
-
-            if not common_keys:
-                raise CombineError(
-                    "Selected runs have no common data keys. Cannot combine "
-                    "runs with completely different data structures."
-                )
-
-            preferred_keys = ["time"]
-            test_key = None
-            for key in preferred_keys:
-                if key in common_keys:
-                    test_key = key
-                    break
-            if test_key is None:
-                test_key = list(common_keys)[0]
-
-            shapes = []
-            for run in runs:
-                try:
-                    shapes.append(run.get_shape(test_key))
-                except Exception:
-                    raise CombineError(
-                        f"Could not access data for key '{test_key}' in one "
-                        "or more runs."
-                    ) from None
-
-            if len(set(shapes)) > 1:
-                raise CombineError(
-                    f"Selected runs have different data shapes for key "
-                    f"'{test_key}': {shapes}. All runs must have the same "
-                    "data dimensions to be combined."
-                )
-        except CombineError:
-            raise
-        except Exception as e:
-            raise CombineError(
-                f"Error checking run compatibility: {str(e)}"
-            ) from e
-
-    def combine_runs(
-        self,
-        runs: List[RunModel],
-        method: CombinationMethod = CombinationMethod.AVERAGE,
-        expression: Optional[str] = None,
-    ) -> CombinedRunModel:
-        """
-        Construct a CombinedRunModel from runs and add it to this list.
-
-        Parameters
-        ----------
-        runs : list of RunModel
-            Source runs to combine.
-        method : CombinationMethod, optional
-            Combination method, by default AVERAGE.
-        expression : str, optional
-            Expression used when method is EXPRESSION.
-
-        Returns
-        -------
-        CombinedRunModel
-            The combined run that was added.
-
-        Raises
-        ------
-        CombineError
-            If the runs fail ``validate_combine``.
-        """
-        self.validate_combine(runs)
-        combined = CombinedRunModel(
-            runs=runs, method=method, expression=expression
-        )
-        self.add_run(combined)
-        return combined
-
-    def freeze_runs(self, runs: List[RunModel]) -> List[FrozenRunModel]:
-        """
-        Create FrozenRunModel entries for each selected Y key on each run.
-
-        Parameters
-        ----------
-        runs : list of RunModel
-            Runs whose currently selected Y keys should be frozen.
-
-        Returns
-        -------
-        list of FrozenRunModel
-            Frozen runs that were added to this list.
-        """
-        to_freeze = []
-        for model in runs:
-            _, y_keys, _ = model.get_selected_keys()
-            for key in list(y_keys):
-                to_freeze.append((model.run, key))
-
-        frozen_runs = [
-            FrozenRunModel(catalog_run, key) for catalog_run, key in to_freeze
-        ]
-        if frozen_runs:
-            self.add_runs(frozen_runs)
-        return frozen_runs
-
-    def remove_uids(self, uid_list):
-        """
-        Remove a list of runs from the model.
-
-        Parameters
-        ----------
-        run_list : List[CatalogRun]
-            Runs to remove from the model
-        """
-        print_debug(
-            "RunListModel.remove_uids",
-            f"Removing uids {uid_list}",
-            category="runlist",
-        )
-        for uid in uid_list:
-            if uid in self._run_models:
-                run_model = self._run_models.pop(uid)
-                self._disconnect_run_model(run_model)
-                run_model.cleanup()
-                # Update plot and notify views
-                self.run_removed.emit(run_model)
-
-            if uid in self._visible_runs:
-                self._visible_runs.remove(uid)
-
-        self.update_available_keys()
-        self.visible_runs_changed.emit(self.visible_runs)
-        self.available_runs_changed.emit(self.available_runs)
-
-    def remove_run(self, run: Union[CatalogRun, RunModel]):
-        """Remove a single CatalogRun from the model via UID."""
-        self.remove_uids([run.uid])
-
-    def set_runs(self, run_list, display_id="main"):
-        """Update the complete selection state.
-        Takes a list of CatalogRun objects and updates the model to contain
-        only these runs.
-        """
-        print_debug("RunListModel.set_runs", f"Setting runs {len(run_list)}", "run")
-        current_uids = {run.uid for run in run_list}
-        existing_uids = set(self._run_models.keys())
-
-        # Remove RunModels that are no longer in list
-        uids_to_remove = list(existing_uids - current_uids)
-        self.remove_uids(uids_to_remove)
-
-        # Add new RunModels
-        self.add_runs(run_list)
-        # Clean up any inconsistent state
-        self.cleanup_state()
-
-    def set_uids_visible(self, uids, is_visible: bool):
-        """
-        Select specific runs for plotting.
-
-        Parameters
-        ----------
-        uids : List[str]
-            List of UIDs to set visibility for
-        is_visible : bool
-            Whether to make the runs visible
-        """
-        print_debug(
-            "RunListModel.set_uids_visible",
-            f"Setting uids {uids} to {is_visible}",
-            category="runlist",
-        )
-        if self._single_selection_mode and is_visible and uids:
-            # In single-selection mode, only the first UID should be visible
-            # Set all runs to not visible first
-            all_uids = list(self._run_models.keys())
-            for uid in all_uids:
-                if uid in self._visible_runs:
-                    self._visible_runs.remove(uid)
-                self._run_models[uid].set_visible(False)
-
-            # Then set only the first UID to visible
-            first_uid = uids[0]
-            if first_uid in self._run_models:
-                self._visible_runs.add(first_uid)
-                self._run_models[first_uid].set_visible(True)
-        else:
-            # Normal behavior
-            for uid in uids:
-                if uid in self._run_models:
-                    if is_visible:
-                        self._visible_runs.add(uid)
-                    elif uid in self._visible_runs:
-                        self._visible_runs.remove(uid)
-                    self._run_models[uid].set_visible(is_visible)
-
-        self.update_available_keys()
-        self.visible_runs_changed.emit(self.visible_runs)
-        print_debug(
-            "RunListModel.set_uids_visible",
-            f"visible_runs_changed uids={uids} visible={is_visible}",
-            category="plots",
-        )
-
-    def set_run_visible(self, run: Union[CatalogRun, RunModel], is_visible: bool):
-        """
-        Update run visibility.
-
-        Parameters
-        ----------
-        run : CatalogRun
-            Run to update visibility for
-        is_visible : bool
-            New visibility state
-        """
-        self.set_uids_visible([run.uid], is_visible)
-
-    @property
-    def visible_models(self) -> List[RunModel]:
-        """
-        Get currently selected RunModels.
-        """
-        return [
-            model
-            for model in self._run_models.values()
-            if model.uid in self._visible_runs
-        ]
-
-    @property
-    def visible_runs(self) -> Set[str]:
-        """Get visible run UIDs"""
-        if self._is_main_display:
-            return set(self._run_models.keys())
-        else:
-            return self._visible_runs
-
-    def cleanup_state(self):
-        """Clean up any inconsistent state in the model."""
-        # Remove any visible or selected runs that aren't in run_models
-        valid_uids = set(self._run_models.keys())
-        self._visible_runs.intersection_update(valid_uids)
-
-    def _discover_cache_progress_sources(self) -> Dict[int, ChunkCacheProgress]:
-        """
-        Return unique chunk-cache progress notifiers for available runs.
-        """
-        sources: Dict[int, ChunkCacheProgress] = {}
-        for model in self.available_models:
-            run = getattr(model, "_run", None)
-            if run is None:
-                continue
-            chunk_cache = getattr(run, "_chunk_cache", None)
-            if chunk_cache is None:
-                continue
-            progress = getattr(chunk_cache, "progress", None)
-            if progress is None:
-                continue
-            sources[id(progress)] = progress
-        return sources
-
-    def _refresh_cache_progress_connections(self, *_args) -> None:
-        """
-        Connect to chunk-cache progress notifiers for the current run set.
-        """
-        desired = self._discover_cache_progress_sources()
-        desired_ids = set(desired)
-        current_ids = set(self._progress_sources)
-
-        for progress_id in current_ids - desired_ids:
-            progress = self._progress_sources.pop(progress_id)
-            try:
-                progress.status_changed.disconnect(
-                    self._on_cache_progress_status_changed
-                )
-            except (TypeError, RuntimeError):
-                pass
-            self._cache_statuses.pop(progress_id, None)
-
-        for progress_id in desired_ids - current_ids:
-            progress = desired[progress_id]
-            progress.status_changed.connect(self._on_cache_progress_status_changed)
-            self._progress_sources[progress_id] = progress
-
-        self._emit_aggregated_cache_status()
-
-    def _on_cache_progress_status_changed(self, status: TiledFetchStatus) -> None:
-        """
-        Track a progress update and publish aggregated cache status text.
-        """
-        progress = self.sender()
-        if progress is None:
-            return
-        progress_id = id(progress)
-        if progress_id not in self._progress_sources:
-            return
-        self._cache_statuses[progress_id] = status
-        self._emit_aggregated_cache_status()
-
-    def _emit_aggregated_cache_status(self) -> None:
-        """
-        Emit summed in-flight fetch status across connected chunk caches.
-        """
-        text = aggregate_tiled_fetch_label(self._cache_statuses.values())
-        self.cache_status_changed.emit(text)

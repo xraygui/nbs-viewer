@@ -3,7 +3,7 @@ from qtpy.QtCore import QObject, Signal
 from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
 from ...models.plot.plotModel import PlotModel
-from ...models.plot.runModel import RunModel
+from ...models.plot.runSource import RunSource
 from ...utils import print_debug
 from .presenter import PlotPresenter
 
@@ -231,7 +231,7 @@ class DisplayManager(QObject):
             self._presenters[display_id].add_runs(run_list)
 
     def add_run_to_display(
-        self, run: Union[CatalogRun, RunModel], display_id: str
+        self, run: Union[CatalogRun, RunSource], display_id: str
     ) -> None:
         """
         Add a run to a specific display.

@@ -1,4 +1,4 @@
-"""Tests for frozen synthetic spectra on RunModel."""
+"""Tests for frozen synthetic spectra on RunSource."""
 
 from __future__ import annotations
 
@@ -23,13 +23,13 @@ from nbs_viewer.models.plot.frozen_spectrum import (
 )
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import build_plot_request
-from nbs_viewer.models.plot.runModel import RunModel
+from nbs_viewer.models.plot.runSource import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
 
 
 def _run_model(catalog_keys=None):
     run = image_scan_run(1)
-    model = RunModel(run)
+    model = RunSource(run)
     if catalog_keys is not None:
         model._catalog_keys = list(catalog_keys)
     return model
@@ -140,7 +140,7 @@ def test_register_and_available_keys(qapp):
 
 
 def test_frozen_get_data_respects_slice_info():
-    entry = _frozen_entry(RunModel(line_scan_run(0)), y=[10.0, 20.0, 30.0])
+    entry = _frozen_entry(RunSource(line_scan_run(0)), y=[10.0, 20.0, 30.0])
     np.testing.assert_allclose(entry.get_data((1,)), [20.0])
     np.testing.assert_allclose(
         entry.get_data((slice(None),)), [10.0, 20.0, 30.0]
@@ -151,21 +151,19 @@ def test_run_model_get_data_delegates_to_frozen(qapp):
     model = _run_model()
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
-    np.testing.assert_allclose(model.get_data(entry.key, (0,)), [10.0])
+    np.testing.assert_allclose(model.read(entry.key, (0,)), [10.0])
     np.testing.assert_allclose(model.get_shape(entry.key), (3,))
 
 
-def test_run_model_get_dimension_ui_info_for_frozen(qapp):
+def test_run_source_describe_axes_for_frozen(qapp):
     model = _run_model()
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
-    shape, names, axis_arrays, associated = model.get_dimension_ui_info(
-        entry.key, ["en_energy"]
-    )
-    assert shape == (3,)
-    assert names == [entry.label]
-    np.testing.assert_allclose(axis_arrays[0], [0.0, 1.0, 2.0])
-    assert associated == {}
+    layout = model.describe_axes(entry.key, ["en_energy"])
+    assert layout.shape == (3,)
+    assert list(layout.names) == [entry.label]
+    np.testing.assert_allclose(layout.placeholders[0], [0.0, 1.0, 2.0])
+    assert dict(layout.associated) == {}
 
 
 def test_synthetic_y_fetch_ignores_catalog_get_data(qapp):
@@ -296,7 +294,6 @@ def test_transform_assignment_updates_y(qapp):
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
-    model.set_transform({"enabled": True, "text": "y = y * 2"})
     bundle = model.get_plot_bundle(
         _plot_request(
             model, ["en_energy"], entry.key, transform="y = y * 2"
@@ -305,12 +302,10 @@ def test_transform_assignment_updates_y(qapp):
     np.testing.assert_allclose(bundle.y, [20.0, 40.0, 60.0])
 
 
-def test_remove_frozen_spectrum_clears_selection(qapp):
+def test_remove_frozen_spectrum_drops_key(qapp):
     model = _run_model()
     entry = _frozen_entry(model)
     model.register_frozen_spectrum(entry)
-    model.set_selected_keys([], [entry.key], [], force_update=False)
+    assert entry.key in model.available_keys
     assert model.remove_frozen_spectrum(entry.key)
     assert entry.key not in model.available_keys
-    y_keys = model.get_selected_keys()[1]
-    assert entry.key not in y_keys

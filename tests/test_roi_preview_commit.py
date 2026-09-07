@@ -11,19 +11,17 @@ import pytest
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.roi_set import RoiOperation
-from nbs_viewer.models.plot.runListModel import RunListModel
-from nbs_viewer.models.plot.runModel import RunModel
+from nbs_viewer.models.plot.runSource import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
+from tests.fixtures.plot_session import make_plot_session
 
 
 def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
-    run_list = RunListModel()
-    plot_model = PlotModel(run_list)
-    run_model = RunModel(image_scan_run(1))
-    run_list.add_run(run_model)
+    plot_model, _ = make_plot_session()
+    run_model = RunSource(image_scan_run(1))
+    plot_model.add_run(run_model)
 
     parent_spec = CubeViewSpec(
         ndim=2,

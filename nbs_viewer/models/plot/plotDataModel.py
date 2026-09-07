@@ -61,7 +61,7 @@ class PlotDataModel(QObject):
 
         Parameters
         ----------
-        run : RunModel
+        run : RunSource
             Run model providing data.
         request : PlotRequest
             Current fetch description.
@@ -81,10 +81,7 @@ class PlotDataModel(QObject):
         self.artist = None
         self.last_bundle: Optional[PlotBundle] = None
         self._render_mode: Optional[RenderMode] = None
-        self._visible = self._run._is_visible
-        self._run.visibility_changed.connect(self._on_run_visibility_changed)
-        self._run.selected_keys_changed.connect(self._on_keys_changed)
-        self._run.transform_changed.connect(self._on_data_changed)
+        self._visible = True
         self._run.data_changed.connect(self._on_data_changed)
 
     @property
@@ -325,27 +322,6 @@ class PlotDataModel(QObject):
             cube_fingerprint=cube_fingerprint,
         )
 
-    def get_plot_data(self, indices=None, dimension=None):
-        """
-        Backward-compatible API returning raw x list and y array.
-
-        Parameters
-        ----------
-        indices : tuple, optional
-            Slice indices.
-        dimension : int, optional
-            Plot dimension count.
-
-        Returns
-        -------
-        tuple
-            (xlist, y) for legacy callers.
-        """
-        bundle = self.get_plot_bundle()
-        if bundle.ndim == 1:
-            return [bundle.x_line], bundle.y
-        return [], bundle.y
-
     def _update_render_mode(self, bundle: PlotBundle) -> None:
         if bundle.render_mode != self._render_mode:
             self._render_mode = bundle.render_mode
@@ -416,7 +392,7 @@ class PlotDataModel(QObject):
             )
             if self.set_request(request):
                 changed = True
-        if not self._run._is_visible:
+        if not self._visible:
             changed = False
         if changed:
             print_debug(
@@ -427,13 +403,6 @@ class PlotDataModel(QObject):
             if emit:
                 self.data_changed.emit(self)
         return changed
-
-    def _on_run_visibility_changed(self, visible):
-        xkeys, ykeys, normkeys = self._run.get_selected_keys()
-        if self._xkey not in xkeys or self._ykey not in ykeys:
-            self.set_visible(False)
-        else:
-            self.set_visible(visible)
 
     def set_norm_keys(self, norm_keys):
         request = replace(self._request, norm_keys=tuple(norm_keys or ()))
@@ -449,7 +418,6 @@ class PlotDataModel(QObject):
         visible : bool
             Whether to show or hide the artist.
         """
-        visible = visible and self._run._is_visible
         self._visible = visible
         if self.artist is not None:
             was_visible = self.artist.get_visible()
@@ -464,16 +432,7 @@ class PlotDataModel(QObject):
                 self.autoscale_requested.emit()
                 self.draw_requested.emit()
 
-    def _on_keys_changed(self, xkeys, ykeys, normkeys):
-        if self._xkey not in xkeys or self._ykey not in ykeys:
-            self.set_visible(False)
-        else:
-            self.set_visible(True)
-
     def _on_data_changed(self, *args):
-        text = getattr(self._run, "_transform_text", "") or ""
-        if text != self._request.transform:
-            self.set_request(replace(self._request, transform=text))
         if self._visible:
             print_debug(
                 "PlotDataModel._on_data_changed",

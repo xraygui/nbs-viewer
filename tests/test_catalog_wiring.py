@@ -39,8 +39,8 @@ def test_multi_run_selection_accumulates_on_run_list(qapp, app_model):
     session.select_run(2)
 
     assert len(session.catalog.get_selected_runs()) == 3
-    assert len(session.run_list.available_models) == 3
-    run_list_uids = {model.uid for model in session.run_list.available_models}
+    assert len(session.plot.available_models) == 3
+    run_list_uids = {model.uid for model in session.plot.available_models}
     selected_uids = {run.uid for run in session.catalog.get_selected_runs()}
     assert run_list_uids == selected_uids
 
@@ -73,11 +73,11 @@ def test_deselect_run_removes_run_from_presenter_run_list(qapp, app_model):
     session.load_catalog(recipe="line_scan", runs=3)
     first = session.select_run(0)
     second = session.select_run(1)
-    assert len(session.run_list.available_models) == 2
+    assert len(session.plot.available_models) == 2
 
     session.catalog.deselect_run(first.uid)
 
-    remaining = {model.uid for model in session.run_list.available_models}
+    remaining = {model.uid for model in session.plot.available_models}
     assert remaining == {second.uid}
     assert first.uid not in remaining
 
@@ -91,6 +91,6 @@ def test_source_load_then_select_wires_to_presenter(qapp, app_model):
 
     catalog.select_run(run.uid)
 
-    run_list = app_model.display_manager.get_presenter("main").run_list
-    assert len(run_list.available_models) == 1
-    assert run_list.available_models[0].uid == run.uid
+    plot = app_model.display_manager.get_presenter("main").plot
+    assert len(plot.available_models) == 1
+    assert plot.available_models[0].uid == run.uid

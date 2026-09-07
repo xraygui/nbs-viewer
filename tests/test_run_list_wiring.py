@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from nbs_viewer.models.plot.combinedRunModel import (
+from nbs_viewer.models.plot.combinedRunSource import (
     CombinationMethod,
-    CombinedRunModel,
+    CombinedRunSource,
 )
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, MaterializeRequest
-from nbs_viewer.models.plot.frozenRunModel import FrozenRunModel
+from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -32,7 +32,7 @@ def _select_catalog_runs(session: HeadlessSession, indices: tuple[int, ...]):
 
     Returns
     -------
-    list of RunModel
+    list of RunSource
         Run models present on the presenter run list.
     """
     models = []
@@ -70,16 +70,16 @@ def test_combine_runs_on_catalog_selected_runs(qapp, app_model):
     session = HeadlessSession(app_model)
     session.load_catalog(recipe="line_scan", runs=3)
     first, second = _select_catalog_runs(session, (0, 1))
-    before = len(session.run_list.available_models)
+    before = len(session.plot.available_models)
 
-    combined = session.run_list.combine_runs(
+    combined = session.plot.combine_runs(
         [first, second],
         method=CombinationMethod.SUM,
     )
 
-    assert isinstance(combined, CombinedRunModel)
-    assert combined in session.run_list.available_models
-    assert len(session.run_list.available_models) == before + 1
+    assert isinstance(combined, CombinedRunSource)
+    assert combined in session.plot.available_models
+    assert len(session.plot.available_models) == before + 1
     assert combined.combination_method == CombinationMethod.SUM
     assert set(combined.source_runs) == {first, second}
 
@@ -92,15 +92,15 @@ def test_freeze_runs_on_catalog_selected_runs(qapp, app_model):
     session = HeadlessSession(app_model)
     session.load_catalog(recipe="line_scan", runs=3)
     first, second = _select_catalog_runs(session, (0, 1))
-    first.set_selected_keys(["time"], ["y"])
-    second.set_selected_keys(["time"], ["y"])
-    before = len(session.run_list.available_models)
+    session.plot.set_selection_for(first.uid, ["time"], ["y"])
+    session.plot.set_selection_for(second.uid, ["time"], ["y"])
+    before = len(session.plot.available_models)
 
-    frozen = session.run_list.freeze_runs([first, second])
+    frozen = session.plot.freeze_runs([first, second])
 
     assert len(frozen) == 2
-    assert all(isinstance(item, FrozenRunModel) for item in frozen)
-    assert len(session.run_list.available_models) == before + 2
+    assert all(isinstance(item, FrozenRunSource) for item in frozen)
+    assert len(session.plot.available_models) == before + 2
     assert {item.display_name for item in frozen} == {"y of 0", "y of 1"}
 
     for item in frozen:
@@ -114,7 +114,7 @@ def test_frozen_spectra_changed_refreshes_run_list(qapp, app_model):
     run_model = session.select_run(0)
 
     run_list_signals = []
-    session.run_list.frozen_spectra_changed.connect(
+    session.plot.frozen_spectra_changed.connect(
         lambda: run_list_signals.append(True)
     )
 
@@ -122,5 +122,5 @@ def test_frozen_spectra_changed_refreshes_run_list(qapp, app_model):
     run_model.register_frozen_spectrum(entry)
 
     assert run_list_signals == [True]
-    display_entries = session.run_list.synthetic_display_entries()
+    display_entries = session.plot.synthetic_display_entries()
     assert any(model is run_model and key == entry.key for model, key, _ in display_entries)

@@ -15,7 +15,7 @@ class MainDisplay(PlotDisplay):
     def setup_models(self):
         self.presenter = self.display_manager.get_presenter(self.display_id)
         run_list_model = self.presenter.run_list
-        plot_model = self.presenter.plot
+        plot_model = self.presenter.session
         self.run_list_model = run_list_model
         self.plot_model = plot_model
         self.catalog_switcher = CatalogSwitcher(

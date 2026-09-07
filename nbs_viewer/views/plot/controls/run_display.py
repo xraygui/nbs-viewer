@@ -51,7 +51,7 @@ class RunDisplayWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.presenter = presenter
         self.run_list_model = presenter.run_list
-        self.plot_model = presenter.plot
+        self.plot_model = presenter.session
         self._show_all = False
         self._linked_mode = True
         self._current_run = None
@@ -60,9 +60,9 @@ class RunDisplayWidget(QWidget):
         self._setup_ui()
 
         # Connect signals
-        self.run_list_model.available_keys_changed.connect(self._update_display)
-        self.run_list_model.frozen_spectra_changed.connect(self._update_display)
-        self.run_list_model.visible_runs_changed.connect(self._build_header)
+        self.plot_model.available_keys_changed.connect(self._update_display)
+        self.plot_model.frozen_spectra_changed.connect(self._update_display)
+        self.plot_model.visible_runs_changed.connect(self._build_header)
         self.plot_model.selected_keys_changed.connect(self._update_checkboxes)
 
         # Initial update
@@ -147,7 +147,7 @@ class RunDisplayWidget(QWidget):
 
     def _build_header(self) -> None:
         """Update the header label and run selector."""
-        run_models = self.run_list_model.visible_models
+        run_models = self.plot_model.visible_models
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
         for run in run_models:
@@ -155,10 +155,27 @@ class RunDisplayWidget(QWidget):
         self._run_selector.blockSignals(False)
         self._update_header()
 
+    def _header_label_text(self) -> str:
+        """
+        Format the linked-mode header from visible runs.
+
+        Returns
+        -------
+        str
+            Header text for the run display.
+        """
+        models = self.plot_model.visible_models
+        if len(models) == 0:
+            return "No Runs Selected"
+        if len(models) == 1:
+            run = models[0]
+            return f"Run: {run.plan_name} ({run.scan_id})"
+        return f"Multiple Runs Selected ({len(models)})"
+
     def _update_header(self, run_uids: Optional[int] = None) -> None:
         # Update header label
         if self._linked_mode:
-            self._header_label.setText(self.run_list_model.getHeaderLabel())
+            self._header_label.setText(self._header_label_text())
         elif self._current_run:
             self._header_label.setText(f"Run {self._current_run.scan_id}")
         else:
@@ -169,15 +186,14 @@ class RunDisplayWidget(QWidget):
         self._clear_grid()
         # Get keys based on mode
         if self._linked_mode:
-            available_keys = self.run_list_model.available_keys
+            available_keys = self.plot_model.available_keys
             selected_x, selected_y, selected_norm = (
                 self.plot_model.get_selected_keys()
             )
         elif self._current_run:
             available_keys = self._current_run.available_keys
-            selected_x, selected_y, selected_norm = (
-                self._current_run.get_selected_keys()
-            )
+            sel = self.plot_model.selection_for(self._current_run.uid)
+            selected_x, selected_y, selected_norm = sel.as_lists()
         else:
             available_keys = []
             selected_x = []
@@ -332,7 +348,7 @@ class RunDisplayWidget(QWidget):
             ``(run_model, key, label)`` entries.
         """
         if self._linked_mode:
-            return self.run_list_model.synthetic_display_entries()
+            return self.plot_model.synthetic_display_entries()
         if self._current_run:
             return [
                 (self._current_run, entry.key, entry.label)
@@ -347,7 +363,7 @@ class RunDisplayWidget(QWidget):
 
         Parameters
         ----------
-        run_model : RunModel
+        run_model : RunSource
             Run owning the synthetic key.
         key : str
             Synthetic key to delete.
@@ -404,8 +420,8 @@ class RunDisplayWidget(QWidget):
                 x_keys, y_keys, norm_keys, force_update=False
             )
         elif self._current_run:
-            self._current_run.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=True
+            self.plot_model.set_selection_for(
+                self._current_run.uid, x_keys, y_keys, norm_keys
             )
 
     def _on_update_clicked(self) -> None:
@@ -442,7 +458,7 @@ class RunDisplayWidget(QWidget):
         self._run_selector.setEnabled(not self._linked_mode)
 
         if self._linked_mode:
-            self._synchronize_selections()
+            self.plot_model.clear_selection_overrides()
             self._update_display()
             self._update_header()
         else:
@@ -460,37 +476,8 @@ class RunDisplayWidget(QWidget):
         self._update_header()
 
     def _synchronize_selections(self) -> None:
-        """Find common selections across all runs and apply them."""
-        run_models = self.run_list_model.visible_models
-        if not run_models:
-            return
-
-        # Get selections from all runs
-        x_selections = set()
-        y_selections = set()
-        norm_selections = set()
-        first = True
-
-        for run in run_models:
-            if first:
-                x_selections, y_selections, norm_selections = run.get_selected_keys()
-                x_selections = set(x_selections)
-                y_selections = set(y_selections)
-                norm_selections = set(norm_selections)
-                first = False
-            else:
-                new_x, new_y, new_norm = run.get_selected_keys()
-                x_selections &= set(new_x)
-                y_selections &= set(new_y)
-                norm_selections &= set(new_norm)
-
-        # Apply common selections
-        self.plot_model.set_selected_keys(
-            list(x_selections),
-            list(y_selections),
-            list(norm_selections),
-            force_update=True,
-        )
+        """Clear per-run overrides when re-linking (Link Runs)."""
+        self.plot_model.clear_selection_overrides()
 
     def _update_checkboxes(self, x_keys, y_keys, norm_keys):
         """Update checkbox states from model."""

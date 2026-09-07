@@ -61,10 +61,10 @@ class KafkaViewerTab(QWidget):
         self.kafkaSource = kafkaSource
         self.catalog = catalog
 
-        self.run_list_model = RunListModel()
-        self.plot_model = PlotModel(self.run_list_model)
-        self.catalog.item_selected.connect(self.run_list_model.add_run)
-        self.catalog.item_deselected.connect(self.run_list_model.remove_run)
+        self.plot_model = PlotModel()
+        self.run_list_model = RunListModel(self.plot_model)
+        self.catalog.item_selected.connect(self.plot_model.add_run)
+        self.catalog.item_deselected.connect(self.plot_model.remove_run)
         self.plotWidget = PlotWidget(self.run_list_model, self.plot_model)
 
         self.layout = QHBoxLayout(self)
