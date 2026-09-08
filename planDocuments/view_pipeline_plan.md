@@ -380,6 +380,18 @@ belongs to; `spatial_fingerprint` was never read. Only the last-but-one
 survives, as `PlotModel._view_crop_key` — one field, and step 6's `ViewIntent`
 absorbs it.
 
+**Bug 8 is not closed, and `cached_plane` was never going to close it.**
+Step 3 moved it here on the premise that not refetching after a transform
+change needs "the loaded plane held across requests, which is step 4's
+`cached_plane`". Wrong plane: `cached_plane` is a packed, *post-transform*
+bundle, and `reduce_cached_plane` only knows how to mask one down to an ROI
+profile. Re-applying a transform needs the array as it stood before
+`apply_transform`, which nothing keeps, and a `needs_fetch` that compares
+`FetchPlan`s rather than whole requests — `FetchPlan` is already frozen and
+hashable with the frames excluded from comparison, so the comparison half is
+ready. Both halves belong to step 7, which is the step that moves the
+transform stage.
+
 **Transform and ROI still disagree across the two paths.** `reduce_cached_plane`
 reduces a plane the transform has already been applied to; the load path
 carries `transform=""` on profile requests, as the old ND path did. Making
@@ -457,6 +469,17 @@ of domain policy (problem statement item 7).
 **Not started.** `reduce_to_plot_plane` becomes `request.view.apply(...)`;
 `build_plot_bundle` moves to `plot_geometry.py`; norm / transform helpers move
 to `runSource.py`.
+
+Carries two things from step 4, both about where the transform runs:
+
+- **Bug 8.** `needs_fetch` compares `FetchPlan`s instead of whole requests,
+  and the pre-transform plane is held so a transform change re-runs
+  `apply_transform` rather than reading the database. Extends to containment:
+  shrinking a crop, or moving an ROI inside an already-loaded box, needs no
+  round trip either.
+- **The cached / loaded ROI asymmetry.** Applying the transform to the 2-D
+  plane before the reduce, rather than to the finished output, makes the two
+  paths agree.
 
 ---
 

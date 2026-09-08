@@ -5,7 +5,7 @@ goal, the invariants, and the order of work. **Detail lives in the sub-plans**
 — keep this file short enough to read before every session.
 
 **Status:** in progress on branch `mesh-transpose-removal` off `image_viewing`.
-Suite green at 351 tests.
+Suite green at 350 tests.
 
 ## The diagnosis, in one sentence
 
@@ -62,14 +62,14 @@ They interleave; the order below is the merged sequence.
 |---|------|----------|--------|
 | 1 | Delete the mesh transpose | view pipeline | ✅ `321bf53` |
 | 2 | Selection-driven default axis order | view pipeline | ✅ `11c7a0d` |
-| 3 | Orientation once after load, one planner, one mask | view pipeline | ✅ |
-| 4 | One request, no side channels | view pipeline | next |
+| 3 | Orientation once after load, one planner, one mask | view pipeline | ✅ `dbe6083` |
+| 4 | One request, no side channels | view pipeline | ✅ `b431c47` |
 | A | `PlotSession` / `RunListItemModel` rename and move | session & traces | independent, any time |
-| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | after 4 |
-| B | `Trace` | session & traces | after 4 |
+| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | next |
+| B | `Trace` | session & traces | unblocked |
 | 6 | Adopt `ViewIntent`, or delete it | view pipeline | after 5, needs B |
 | C | Consumer sweep — canvas `TraceSet`, `DimensionControl` pushes intent | session & traces | after 6 |
-| D | Extract the ROI pipeline off the session | session & traces | after 4 |
+| D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
 | 7 | `plot_bundle.py` | view pipeline | after 5 |
 | F | Final deletions and renames | session & traces | last |
@@ -78,6 +78,9 @@ Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong
 in ways that cancelled, so fixing one alone made things worse. It landed as
 one non-behaviour-preserving commit; see the view pipeline plan's findings,
 including the one decision point the plan had not predicted.
+
+Step 4 shipped its own content in full but **did not close bug 8**, which
+step 3 had moved into it on a wrong premise; see the bug table.
 
 ## Shared backlog
 
@@ -94,7 +97,7 @@ Recorded regardless of whether the step that fixes them lands.
 | 5 | Unlinked mode double-lists synthetic keys — `available_keys` is catalog plus frozen, so a frozen spectrum gets a catalog row with an X checkbox it should not have. | open |
 | 6 | `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)` where `MemoryRun` uses `range(1, ndim)`, so every dimension receives the previous dimension's `axes` hint when `getAxisHints` is non-empty. Masked by name-list truncation. | open |
 | 7 | `BlueskyRun.getRunKeys` ends with `ykeys[1] = all_keys`, so rank-3 camera keys are reported as rank 1 and the two backends disagree about the grouping. | open — own commit |
-| 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — step 4; needs `cached_plane`, not reachable in step 3 |
+| 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
 N-D y key by a lower-rank norm key raised; `visible_runs` and `visible_models`
@@ -103,7 +106,10 @@ the cell index; plot-axis row labels did not follow a manual reorder; the
 trailing-axis default plotted a rank-3 detector against its own column index;
 an ROI reaching past an active crop raised a shape mismatch instead of taking
 the intersection; committing a crop read coordinate arrays from the database
-it did not need.
+it did not need; "span full profile axis" widened the reduction axis instead
+of the profile axis whenever the X-key selection put the plot axes out of
+storage order, which also inverted the ROI window's full-height / full-width
+buttons.
 
 ### Open questions
 
@@ -156,3 +162,4 @@ them.
 |------|--------|
 | 2026-09-08 | Written. Absorbs the live parts of `model_core_refactor_plan.md`, `plot_session_list_adapter_plan.md`, `model_ownership_headless_plan.md`, `plot_package_reorganization.md` and `layout.md`, all deleted in the same commit and recoverable from `57f6d7b`. |
 | 2026-09-08 | Step 3 landed; bugs 2 and 3 closed, bug 8 moved to step 4. Step 4 is next. |
+| 2026-09-08 | Step 4 landed (`b431c47`); `derived_fetch.py` and `view_crop.py` deleted, steps B and D unblocked, step 5 next. Bug 8 not closed and moved on to step 7 with the reason. A profile-axis / reduction-axis inversion was found and fixed en route. |
