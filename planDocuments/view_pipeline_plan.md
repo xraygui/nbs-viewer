@@ -1,11 +1,12 @@
 # View pipeline plan
 
 How a plot request becomes storage indices, and how those indices become a
-`PlotBundle`. This is the single plan for the view / crop / ROI / fetch
-stack.
+`PlotBundle`. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
+half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
+owns who holds what.
 
 **Status:** steps 1 and 2 landed on branch `mesh-transpose-removal`
-(2026-09-08). Steps 3–6 not started.
+(2026-09-08). Steps 3–7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -334,29 +335,19 @@ to `runSource.py`.
 
 ---
 
-## Relationship to the remaining plans
+## Interlock with the other sub-plan
 
-- **`structural_remediation_plan.md`** — steps 3–8 assume a `models/plot/cube/`
-  and `models/plot/roi/` package split. That is superseded: this plan deletes
-  those files rather than moving them. **Steps 2 and 9–12 are unaffected and
-  still live** (CI, data-layer contract, `ChunkCache`, logging sweep, repo
-  hygiene) and are the reason that document survives.
-- **`plot_package_reorganization.md`** — superseded on file splits for the same
-  reason. Its inventory of private model APIs used by views is still the best
-  record of that surface.
-- **`codebase_problem_statement.md`** — still the backlog. Item 2
-  (display-vs-storage) is what steps 3 and 4 close.
-- **`model_core_refactor_plan.md`** and **`plot_session_list_adapter_plan.md`**
-  — active and adjacent, not superseded. They cover ownership and naming
-  (`Trace`, `PlotSession`, `RunListItemModel`); this plan covers the view and
-  fetch pipeline. Step 6 here needs their `ViewIntent` slot on the session.
-- **`headless_testing_plan.md`** — the suite runs on `QCoreApplication` only.
-  Constructing a `QWidget` in `tests/` aborts the interpreter, so widget
-  behaviour has to be either driven from a scratch script under a real
-  `QApplication` or moved model-side to be testable. Prefer the second.
+Step 6 here (adopt `ViewIntent`) needs the session to hold the intent, which
+is session-and-traces step C. Step 4 here removes the extra `get_plot_bundle`
+kwargs, which session-and-traces step D depends on. The merged order is the
+table in [`refactor_plan.md`](refactor_plan.md).
+
+Shared invariants, the bug list and the open questions live in the master
+plan, not here.
 
 ## Modification log
 
 | Date | Change |
 |------|--------|
 | 2026-09-08 | Written; replaces `view_spec_consolidation_plan.md`, `materialize_view_refactor_plan.md`, `mixed_rank_plot_view_plan.md`. Steps 1 and 2 recorded as landed. |
+| 2026-09-08 | Became a sub-plan of `refactor_plan.md`; shared backlog and cross-plan notes moved there. |
