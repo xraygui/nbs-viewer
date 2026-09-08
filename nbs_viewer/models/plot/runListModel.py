@@ -17,10 +17,10 @@ class RunListModel(QStandardItemModel):
     """
     Sidebar rows for one plot session.
 
-    Membership, visibility, keys, and combine/freeze live on
-    :class:`PlotModel`. This model only keeps ``QStandardItem`` rows in
-    sync, exposes index helpers for the list view, and aggregates cache
-    status.
+    Membership, visibility, keys, combine/freeze, and cache-status
+    aggregation live on :class:`PlotModel`. This model only keeps
+    ``QStandardItem`` rows in sync and exposes index helpers for the list
+    view.
 
     Parameters
     ----------

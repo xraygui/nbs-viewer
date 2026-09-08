@@ -70,6 +70,13 @@ class PlotPresenter(QObject):
         """
         return self._plot
 
+    @property
+    def plot(self) -> PlotModel:
+        """
+        Session root, legacy name. Prefer :attr:`session` in new code.
+        """
+        return self._plot
+
     def add_run(self, run: Union[CatalogRun, RunSource]) -> None:
         """Add a run to this presenter's session."""
         self.session.add_run(run)

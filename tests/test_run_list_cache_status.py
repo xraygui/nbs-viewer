@@ -1,4 +1,4 @@
-"""Tests for cache status aggregation on RunListModel and PlotPresenter."""
+"""Tests for cache status aggregation on the session and PlotPresenter."""
 
 from types import SimpleNamespace
 
@@ -15,19 +15,19 @@ def _fake_run_model(uid, chunk_cache):
     )
 
 
-def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
-    session, model = make_plot_session()
+def test_session_aggregates_multiple_cache_progress_sources(qapp):
+    session, _run_list = make_plot_session()
     progress_a = ChunkCacheProgress()
     progress_b = ChunkCacheProgress()
     cache_a = SimpleNamespace(progress=progress_a)
     cache_b = SimpleNamespace(progress=progress_b)
 
     statuses = []
-    model.cache_status_changed.connect(statuses.append)
+    session.cache_status_changed.connect(statuses.append)
 
     session.collection.add(_fake_run_model("uid-a", cache_a))
     session.collection.add(_fake_run_model("uid-b", cache_b))
-    model._refresh_cache_progress_connections()
+    session._refresh_cache_progress_connections()
 
     progress_a.update("uid-a", "det", 2, 4, active=True)
     progress_b.update("uid-b", "det", 1, 3, active=True)
@@ -35,8 +35,8 @@ def test_run_list_model_aggregates_multiple_cache_progress_sources(qapp):
     assert statuses[-1] == "Fetching 4/7"
 
 
-def test_run_list_model_clears_cache_status_when_runs_removed(qapp):
-    session, model = make_plot_session()
+def test_session_clears_cache_status_when_runs_removed(qapp):
+    session, _run_list = make_plot_session()
     progress = ChunkCacheProgress()
     cache = SimpleNamespace(progress=progress)
 
