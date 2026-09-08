@@ -532,26 +532,16 @@ class DimensionControl(QWidget):
         self.indicesUpdated.emit(slice_info)
         self.cubeViewChanged.emit(self._cube_view_spec)
 
-    def _view_frame_for_labels(self):
-        """
-        Return the rendered 2D view frame used for plot-axis labels.
-
-        Returns
-        -------
-        PlotViewFrame or None
-            Last rendered frame, or None when no 2D plot is available.
-        """
-        frame = getattr(self.canvas, "_last_view_frame", None)
-        if frame is not None:
-            return frame
-        try:
-            return self.canvas.get_view_frame()
-        except ValueError:
-            return None
-
     def _plot_axis_label_for_storage(self, storage_axis: int) -> str:
         """
-        Return the Plot X / Plot Y label for a storage axis on the live view.
+        Return the Plot X / Plot Y label for a storage axis.
+
+        The view spec's roles are authoritative and are kept in step with
+        ``axis_order`` by ``resolve_roles``. The rendered frame cannot answer
+        this: ``PlotViewFrame.plot_x_dim`` / ``plot_y_dim`` are positions
+        within the displayed plane (rows and columns), not storage axes, so
+        reading them here returned a fixed mapping that stopped matching the
+        plot as soon as the user reordered the rows.
 
         Parameters
         ----------
@@ -561,23 +551,13 @@ class DimensionControl(QWidget):
         Returns
         -------
         str
-            Plot axis role label, or empty when unknown.
+            Plot axis role label, or empty when the axis is not a plot axis.
         """
-        frame = self._view_frame_for_labels()
-        if frame is not None:
-            if storage_axis == frame.plot_x_dim:
-                return ROLE_LABELS[DimRole.PLOT_X]
-            if storage_axis == frame.plot_y_dim:
-                return ROLE_LABELS[DimRole.PLOT_Y]
-        if (
-            self._cube_view_spec is not None
-            and self._cube_view_spec.ndim > 2
-        ):
-            role = self._cube_view_spec.roles[storage_axis]
-            if role == DimRole.PLOT_X:
-                return ROLE_LABELS[DimRole.PLOT_X]
-            if role == DimRole.PLOT_Y:
-                return ROLE_LABELS[DimRole.PLOT_Y]
+        if self._cube_view_spec is None:
+            return ""
+        role = self._cube_view_spec.roles[storage_axis]
+        if role in (DimRole.PLOT_X, DimRole.PLOT_Y):
+            return ROLE_LABELS[role]
         return ""
 
     def refresh_plot_axis_labels(self):
