@@ -119,31 +119,18 @@ def _mesh_cell_bounds(
     )
 
 
-def _storage_indices_for_plot_axis(
-    frame: PlotViewFrame, axis: str, index: int
-) -> Tuple[int, int]:
+def _cell_bounds(
+    frame: PlotViewFrame, row: int, col: int
+) -> Tuple[float, float, float, float]:
     """
-    Return display (row, col) indices for a cell index along plot X or Y.
+    Return ``(x_lo, x_hi, y_lo, y_hi)`` for the cell at display (row, col).
+
+    Display rows are plot Y and display columns are plot X in both render
+    modes, so no per-mode index juggling is needed here.
     """
-    if frame.render_mode == "mesh":
-        if axis == "plot_x":
-            if frame.plot_x_dim == 0:
-                return 0, index
-            return index, 0
-        if axis == "plot_y":
-            if frame.plot_y_dim == 1:
-                return index, 0
-            return 0, index
-        raise ValueError(f"Unknown axis {axis!r}")
-    if axis == "plot_x":
-        if frame.plot_x_dim == 0:
-            return index, 0
-        return 0, index
-    if axis == "plot_y":
-        if frame.plot_y_dim == 0:
-            return index, 0
-        return 0, index
-    raise ValueError(f"Unknown axis {axis!r}")
+    if frame.render_mode == "image":
+        return _image_cell_bounds(frame, row, col)
+    return _mesh_cell_bounds(frame, row, col)
 
 
 def _cell_x_bounds_mesh(
@@ -157,25 +144,17 @@ def _cell_x_bounds_mesh(
     frame : PlotViewFrame
         View frame.
     index : int
-        Cell index along plot X.
+        Cell index along plot X (display column).
     along : int
-        Reference index along plot Y for mesh cells.
+        Reference index along plot Y (display row), which matters only for
+        curvilinear mesh grids.
 
     Returns
     -------
     tuple of float
         ``(x_lo, x_hi)``.
     """
-    row, col = _storage_indices_for_plot_axis(frame, "plot_x", index)
-    if frame.plot_y_dim == 0:
-        row = along
-    else:
-        col = along
-    x_lo, x_hi, _, _ = (
-        _image_cell_bounds(frame, row, col)
-        if frame.render_mode == "image"
-        else _mesh_cell_bounds(frame, row, col)
-    )
+    x_lo, x_hi, _, _ = _cell_bounds(frame, along, index)
     return x_lo, x_hi
 
 
@@ -190,25 +169,17 @@ def _cell_y_bounds_mesh(
     frame : PlotViewFrame
         View frame.
     index : int
-        Cell index along plot Y.
+        Cell index along plot Y (display row).
     along : int
-        Reference index along plot X for mesh cells.
+        Reference index along plot X (display column), which matters only
+        for curvilinear mesh grids.
 
     Returns
     -------
     tuple of float
         ``(y_lo, y_hi)``.
     """
-    row, col = _storage_indices_for_plot_axis(frame, "plot_y", index)
-    if frame.plot_x_dim == 0:
-        col = along
-    else:
-        row = along
-    _, _, y_lo, y_hi = (
-        _image_cell_bounds(frame, row, col)
-        if frame.render_mode == "image"
-        else _mesh_cell_bounds(frame, row, col)
-    )
+    _, _, y_lo, y_hi = _cell_bounds(frame, index, along)
     return y_lo, y_hi
 
 

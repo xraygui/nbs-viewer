@@ -33,13 +33,17 @@ def test_frame_from_mesh_bundle_axes():
     assert bundle.render_mode == "mesh"
     frame = frame_from_bundle(bundle)
     assert frame.shape == bundle.y.shape
-    assert frame.plot_x_dim == 0
-    assert frame.plot_y_dim == 1
-    assert frame.plot_x_name == "en_energy"
-    assert frame.plot_y_name == "tes_mca_energies"
+    # Mesh frames use the same display convention as images: display rows are
+    # plot Y, display columns are plot X, in storage order. Which dimension a
+    # user wants on the horizontal axis is a view-spec choice, not something
+    # the renderer decides.
+    assert frame.plot_x_dim == 1
+    assert frame.plot_y_dim == 0
+    assert frame.plot_y_name == "en_energy"
+    assert frame.plot_x_name == "tes_mca_energies"
     assert frame.mesh_x is not None
-    assert frame.shape[0] == 400
-    assert frame.shape[1] == 30
+    assert frame.shape[0] == 30
+    assert frame.shape[1] == 400
 
 
 def test_rect_on_non_uniform_col_selects_cells():
@@ -47,10 +51,10 @@ def test_rect_on_non_uniform_col_selects_cells():
 
     bundle = _tes_like_mesh_bundle()
     frame = frame_from_bundle(bundle)
-    x0, _ = _cell_x_bounds_mesh(frame, 5, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, 15, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 50, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 60, 0)
+    x0, _ = _cell_x_bounds_mesh(frame, 50, 0)
+    _, x1 = _cell_x_bounds_mesh(frame, 60, 0)
+    y0, _ = _cell_y_bounds_mesh(frame, 5, 0)
+    _, y1 = _cell_y_bounds_mesh(frame, 15, 0)
     mask = mask_from_data_rect(frame, x0, x1, y0, y1)
     assert mask.shape == bundle.y.shape
     assert mask.sum() > 0
@@ -73,12 +77,12 @@ def test_profile_along_en_energy_sums_over_tes_band():
     bundle = _tes_like_mesh_bundle()
     y = np.arange(bundle.y.size, dtype=float).reshape(bundle.y.shape)
     frame = frame_from_bundle(bundle)
-    from nbs_viewer.models.plot.region_mesh import _cell_y_bounds_mesh, _data_limits
+    from nbs_viewer.models.plot.region_mesh import _cell_x_bounds_mesh, _data_limits
 
-    x_lo, x_hi, _, _ = _data_limits(frame)
-    y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 5, 0)
-    region = RectRegion(x0=x_lo, x1=x_hi, y0=y0, y1=y1)
+    _, _, y_lo, y_hi = _data_limits(frame)
+    x0, _ = _cell_x_bounds_mesh(frame, 100, 0)
+    _, x1 = _cell_x_bounds_mesh(frame, 150, 0)
+    region = RectRegion(x0=x0, x1=x1, y0=y_lo, y1=y_hi)
     compiled = region.compile(frame)
     parent = CubeViewSpec(
         ndim=2,
@@ -101,14 +105,14 @@ def test_profile_along_en_energy_sums_over_tes_band():
         plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
     )
     assert names == ["en_energy"]
-    assert profile.shape == (bundle.y.shape[1],)
+    assert profile.shape == (bundle.y.shape[0],)
     assert np.isfinite(profile).any()
     expected = np.array(
         [
-            np.nansum(y[compiled.mask[:, j], j])
-            if compiled.mask[:, j].any()
+            np.nansum(y[i, compiled.mask[i, :]])
+            if compiled.mask[i, :].any()
             else np.nan
-            for j in range(y.shape[1])
+            for i in range(y.shape[0])
         ]
     )
     np.testing.assert_allclose(profile, expected, rtol=1e-5, equal_nan=True)
@@ -234,3 +238,83 @@ def test_polygon_on_non_uniform_mesh_selects_cells():
     assert compiled.mask.shape == bundle.y.shape
     assert compiled.pixel_count > 0
     assert compiled.pixel_count < compiled.mask.size
+
+
+def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
+    """
+    An ROI drawn on a mesh plane must reduce the cells it actually covers.
+
+    While ``prepare_2d_bundle`` transposed mesh data, the compiled mask was
+    shaped for the displayed plane and the array was in storage order, so this
+    path raised a shape mismatch rather than producing a profile.
+    """
+    n_stack, n_row, n_col = 3, 5, 6
+    row_axis = np.cumsum(np.linspace(1.0, 2.0, n_row))
+    col_axis = np.cumsum(np.linspace(1.0, 3.0, n_col))
+    plane = np.arange(n_row)[:, None] * 100.0 + np.arange(n_col)[None, :]
+    cube = np.stack([plane, plane * 2.0, plane * 3.0])
+
+    bundle = prepare_2d_bundle(plane, [row_axis, col_axis], ["row", "col"])
+    assert bundle.render_mode == "mesh"
+    frame = frame_from_bundle(bundle)
+
+    region = RectRegion(
+        x0=float(col_axis[2]) - 0.1,
+        x1=float(col_axis[3]) + 0.1,
+        y0=float(row_axis[1]) - 0.1,
+        y1=float(row_axis[2]) + 0.1,
+    )
+    compiled = region.compile(frame)
+    assert compiled.pixel_count == 4
+
+    parent = CubeViewSpec(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0, 0),
+    )
+    request = MaterializeRequest(
+        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+        region=region,
+    )
+    profile, _coords, _names = materialize_view(
+        cube,
+        [np.arange(n_stack, dtype=float), row_axis, col_axis],
+        ["stack", "row", "col"],
+        request,
+        region_frame=frame,
+        plot_plane_storage_axes=(1, 2),
+    )
+
+    expected = np.array(
+        [np.nansum(np.where(compiled.mask, cube[i], np.nan)) for i in range(n_stack)]
+    )
+    np.testing.assert_allclose(profile, expected, rtol=1e-5)
+
+
+def test_cell_bounds_vary_with_index_on_an_image_frame():
+    """
+    Cell bounds must depend on the cell index in both render modes.
+
+    The per-mode index juggling this replaced overwrote the requested row
+    with the reference index on image frames, so every plot-Y index returned
+    the bounds of the same cell.
+    """
+    from nbs_viewer.models.plot.region_mesh import (
+        _cell_x_bounds_mesh,
+        _cell_y_bounds_mesh,
+    )
+
+    bundle = prepare_2d_bundle(
+        np.zeros((10, 12)),
+        [np.arange(10.0), np.arange(12.0)],
+        ["y", "x"],
+        render_mode_hint="image",
+    )
+    frame = frame_from_bundle(bundle)
+
+    assert _cell_y_bounds_mesh(frame, 2, 0) != _cell_y_bounds_mesh(frame, 7, 0)
+    assert _cell_x_bounds_mesh(frame, 3, 0) != _cell_x_bounds_mesh(frame, 9, 0)
+    # display row 0 is the top of an origin="upper" image, so plot Y descends
+    assert _cell_y_bounds_mesh(frame, 2, 0) > _cell_y_bounds_mesh(frame, 7, 0)
+    assert _cell_x_bounds_mesh(frame, 3, 0) == (2.5, 3.5)

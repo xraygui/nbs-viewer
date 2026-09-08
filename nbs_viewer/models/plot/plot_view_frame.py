@@ -17,6 +17,11 @@ class PlotViewFrame:
     """
     Coordinate frame for the currently displayed 2D plot plane.
 
+    Display rows are plot Y and display columns are plot X, in both render
+    modes, so frames built by :func:`frame_from_bundle` always have
+    ``plot_y_dim == 0`` and ``plot_x_dim == 1``. Orientation is chosen by the
+    view spec upstream, not by the render mode.
+
     Parameters
     ----------
     shape : tuple of int
@@ -79,36 +84,10 @@ class PlotViewFrame:
         return _plot_axis_length(self, self.plot_y_dim)
 
 
-def _infer_mesh_plot_dims(
-    mesh_x: np.ndarray, mesh_y: np.ndarray
-) -> Tuple[int, int]:
-    """
-    Infer which storage axis maps to matplotlib horizontal (X) and vertical (Y).
-    """
-    mesh_x = np.asarray(mesh_x, dtype=float)
-    mesh_y = np.asarray(mesh_y, dtype=float)
-    x_span_col = 0.0
-    x_span_row = 0.0
-    if mesh_x.shape[1] > 1:
-        x_span_col = float(np.nanmax(np.abs(np.diff(mesh_x, axis=1))))
-    if mesh_x.shape[0] > 1:
-        x_span_row = float(np.nanmax(np.abs(np.diff(mesh_x, axis=0))))
-    if x_span_col >= x_span_row:
-        plot_x_dim = 0
-    else:
-        plot_x_dim = 1
-    return plot_x_dim, 1 - plot_x_dim
-
-
 def _plot_axis_length(frame: PlotViewFrame, storage_dim: int) -> int:
     """
     Return the number of cells along a storage axis on the displayed plane.
     """
-    ny, nx = frame.shape
-    if frame.render_mode == "mesh":
-        if storage_dim == frame.plot_x_dim:
-            return nx if frame.plot_x_dim == 0 else ny
-        return ny if frame.plot_y_dim == 1 else nx
     return frame.shape[storage_dim]
 
 
@@ -142,26 +121,13 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
         names.append(f"dim_{len(names)}")
 
     shape = (int(bundle.y.shape[0]), int(bundle.y.shape[1]))
-    if bundle.render_mode == "image":
-        plot_x_dim = 1
-        plot_y_dim = 0
-        axis_names = names[-2:]
-    else:
-        plot_x_dim, plot_y_dim = _infer_mesh_plot_dims(
-            bundle.mesh_x, bundle.mesh_y
-        )
-        mesh_names = list(bundle.axis_names)
-        if len(mesh_names) >= 2:
-            axis_names = [mesh_names[1], mesh_names[0]]
-        else:
-            axis_names = names[-2:]
 
     return PlotViewFrame(
         shape=shape,
         render_mode=bundle.render_mode,
-        axis_names=axis_names,
-        plot_x_dim=plot_x_dim,
-        plot_y_dim=plot_y_dim,
+        axis_names=names[-2:],
+        plot_x_dim=1,
+        plot_y_dim=0,
         extent=bundle.extent if bundle.render_mode == "image" else None,
         mesh_x=(
             np.asarray(bundle.mesh_x, dtype=float)

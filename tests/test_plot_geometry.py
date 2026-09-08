@@ -81,7 +81,9 @@ def test_prepare_2d_mesh_has_grids():
     assert bundle.render_mode == "mesh"
     assert bundle.mesh_x is not None
     assert bundle.mesh_y is not None
-    assert bundle.y.shape == (400, 30)
+    # Storage order is preserved: rows stay rows, as in image mode.
+    assert bundle.y.shape == (30, 400)
+    assert bundle.axis_names == ["motor", "energy"]
     assert bundle.mesh_x.shape == bundle.mesh_y.shape
     assert bundle.y.shape[0] == bundle.mesh_x.shape[0] - 1
     assert bundle.y.shape[1] == bundle.mesh_x.shape[1] - 1
@@ -93,7 +95,8 @@ def test_prepare_2d_mesh_mca_like_shape():
     col_axis = np.cumsum(np.linspace(0.1, 0.3, 800))
     bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["energy", "channel"])
     assert bundle.render_mode == "mesh"
-    assert bundle.y.shape == (800, 202)
+    assert bundle.y.shape == (202, 800)
+    assert bundle.axis_names == ["energy", "channel"]
     assert bundle.mesh_x.shape[0] - 1 == bundle.y.shape[0]
     assert bundle.mesh_x.shape[1] - 1 == bundle.y.shape[1]
 
@@ -143,3 +146,50 @@ def test_image_extent_decreasing_row_axis_is_not_inverted():
     dy = (top - bottom) / 8
     assert top - 0.5 * dy == pytest.approx(645.0, rel=0.01)
     assert bottom + 0.5 * dy == pytest.approx(361.0, rel=0.01)
+
+
+def _screen_position(bundle, value):
+    """
+    Return the (horizontal, vertical) data coordinate of a marked cell.
+
+    Works for either render mode so the two can be compared directly.
+    """
+    arr = np.asarray(bundle.y)
+    (row,), (col,) = np.where(arr == value)
+    if bundle.render_mode == "image":
+        left, right, bottom, top = bundle.extent
+        return (
+            left + (col + 0.5) * (right - left) / arr.shape[1],
+            top - (row + 0.5) * (top - bottom) / arr.shape[0],
+        )
+    return (
+        float(np.mean(bundle.mesh_x[row : row + 2, col : col + 2])),
+        float(np.mean(bundle.mesh_y[row : row + 2, col : col + 2])),
+    )
+
+
+def test_image_and_mesh_agree_on_axis_placement():
+    """
+    The renderer must not decide which dimension goes on which screen axis.
+
+    ``classify_render_mode`` switches to mesh whenever an axis is non-uniform,
+    so if the two modes disagreed here a dataset would silently rotate when
+    its coordinates drifted off a uniform grid.
+    """
+    row_axis = np.array([10.0, 20.0, 30.0, 40.0])
+    col_axis = np.array([100.0, 200.0, 300.0, 400.0, 500.0, 600.0])
+    y = np.zeros((4, 6))
+    y[2, 4] = 1.0
+
+    image = prepare_2d_bundle(
+        y, [row_axis, col_axis], ["axis0", "axis1"], render_mode_hint="image"
+    )
+    mesh = prepare_2d_bundle(
+        y, [row_axis, col_axis], ["axis0", "axis1"], render_mode_hint="mesh"
+    )
+
+    assert image.y.shape == mesh.y.shape == y.shape
+    assert image.axis_names == mesh.axis_names == ["axis0", "axis1"]
+    assert _screen_position(image, 1.0) == _screen_position(mesh, 1.0)
+    # storage axis 1 is horizontal, storage axis 0 is vertical, in both modes
+    assert _screen_position(image, 1.0) == (500.0, 30.0)

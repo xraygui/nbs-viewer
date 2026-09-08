@@ -74,9 +74,6 @@ def _storage_axis_arrays_for_bundle(
         if mesh_x.shape == (ny, nx):
             row_axis = np.nanmean(mesh_y, axis=1)
             col_axis = np.nanmean(mesh_x, axis=0)
-    if frame.render_mode == "mesh" and len(names) >= 2:
-        storage_names = [names[1], names[0]]
-        return [col_axis, row_axis], storage_names
     axis_arrays = [None, None]
     axis_arrays[frame.plot_y_dim] = row_axis
     axis_arrays[frame.plot_x_dim] = col_axis

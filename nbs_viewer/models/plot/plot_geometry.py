@@ -434,7 +434,11 @@ def prepare_2d_bundle(
     Build a PlotBundle for 2D data with auto-detected render mode.
 
     Data orientation: row index maps to the vertical axis, column index to
-    the horizontal axis (consistent with matplotlib imshow).
+    the horizontal axis (consistent with matplotlib imshow). This holds for
+    both render modes. Which storage dimension ends up on which screen axis
+    is decided upstream by the view spec's plot-axis roles, which have
+    already permuted ``y`` before it arrives here; the renderer must not
+    reorder it again.
 
     Parameters
     ----------
@@ -488,19 +492,13 @@ def prepare_2d_bundle(
             extent=extent,
         )
 
-    y_mesh = y.T
-    if len(x_axes) >= 2:
-        mesh_axes = [np.asarray(x_axes[1]), np.asarray(x_axes[0])]
-        mesh_names = [names[1], names[0]]
-    else:
-        mesh_axes = list(x_axes)
-        mesh_names = names[-2:]
-    mesh_x, mesh_y = _build_mesh_grids(y_mesh, mesh_axes)
+    mesh_axes = [np.asarray(axis) for axis in x_axes[-2:]]
+    mesh_x, mesh_y = _build_mesh_grids(y, mesh_axes)
     return PlotBundle(
         ndim=2,
-        y=y_mesh,
+        y=y,
         render_mode="mesh",
-        axis_names=mesh_names,
+        axis_names=names[-2:],
         mesh_x=mesh_x,
         mesh_y=mesh_y,
     )

@@ -175,10 +175,10 @@ def test_materialize_in_plane_profile_mesh():
     compiled = region.compile(frame)
     expected = np.array(
         [
-            np.nansum(bundle.y[compiled.mask[:, j], j])
-            if compiled.mask[:, j].any()
+            np.nansum(bundle.y[i, compiled.mask[i, :]])
+            if compiled.mask[i, :].any()
             else np.nan
-            for j in range(bundle.y.shape[1])
+            for i in range(bundle.y.shape[0])
         ]
     )
 
