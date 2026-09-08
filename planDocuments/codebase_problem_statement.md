@@ -37,8 +37,9 @@ valuable mainly because they protect them.
   and no network. This is the single most valuable thing the recent work
   produced.
 - **`models/` has zero `qtpy.QtWidgets` imports** and exactly **one**
-  matplotlib import (`plotDataModel.py:8`). H1 genuinely holds except at that
-  one point.
+  matplotlib import, in `region_mesh.py` (a function-level
+  `from matplotlib.path import Path`). H1 holds. The second import,
+  `plotDataModel.py:8`, went with session-plan step B.
 - **The geometry / cube / materialize layer is mostly pure numpy** with frozen
   dataclasses (`CubeViewSpec`, `MaterializeRequest`, `PlotViewFrame`,
   `ViewCrop`, `CompiledRegion`) and ~83 tests that need no fixtures.
@@ -65,7 +66,7 @@ categories of feature expensive. P3 items compound slowly.
 | 3 | Eight pairs of hand-synced duplicate state | P1 | New code reads the stale copy |
 | 4 | Three god classes at the feature-add points | P1 | Every feature touches 1000+ line files |
 | 5 | Data layer interface is not enforceable | P2 | New backend requires editing views |
-| 6 | `PlotDataModel` owns matplotlib artists | P2 | Blocks a headless plot frontend |
+| 6 | ~~`PlotDataModel` owns matplotlib artists~~ | P2 | ✅ closed by session-plan step B — `Trace` holds no artist, `MplCanvas` owns a `TraceKey` → artist map |
 | 7 | Domain policy still in views | P2 | Parallel spec state; untestable policy |
 | 8 | No CI | P2 | Refactors have no automated safety net |
 | 9 | 132 `print()`, 100 broad `except`, 22 silent `pass` | P3 | Failures are invisible |
@@ -83,11 +84,11 @@ Signals are connected liberally and disconnected almost nowhere. Only **11 of
 
 Confirmed instances:
 
-- **`PlotDataModel.__init__`** subscribes to four `RunModel` signals
-  (`visibility_changed`, `selected_keys_changed`, `transform_changed`,
-  `data_changed`, `plotDataModel.py:96–99`). `clear()` removes the matplotlib
-  artist but never disconnects. `PlotModel.drop_plot_data_for_uid`
-  (`plotModel.py:608–615`) pops and clears without disconnecting either.
+- ~~**`PlotDataModel.__init__`** subscribes to four `RunModel` signals and
+  never disconnects~~ — ✅ closed. The subscription is down to one
+  (`RunSource.data_changed`), and session-plan step B added
+  `Trace.dispose`, which `TraceSet.discard` calls on every removal, so
+  `drop_traces_for_uid` and `rebuild` both disconnect.
 - **`DisplayManager.remove_display`** (`displayManager.py:133`) drops the
   presenter with no teardown, so a closed tab's `PlotModel` stays subscribed
   to its `RunListModel`.
@@ -167,12 +168,12 @@ Each pair is a place where new code reads the stale copy. Confirmed:
 |------|-----------|------------|
 | Selected x/y/norm keys | `PlotModel._current_*_keys` | `RunModel._selected_*` |
 | Visible run set | `RunListModel._visible_runs` | `RunModel._is_visible` + `QStandardItem` check state |
-| Cube view spec | `PlotModel._cube_view_spec` | `DimensionControl._cube_view_spec`, `PlotDataModel._cube_view_spec`, `canvas._cube_view_spec` |
-| Slice / dimension | `PlotModel._slice`, `_dimension` | each `PlotDataModel._indices`, `_dimension` |
+| Cube view spec | `PlotSession._cube_view_spec` | `DimensionControl._cube_view_spec`, `canvas._cube_view_spec` (the `Trace` copy went with step B — it reads `request.view`) |
+| Slice / dimension | `PlotSession._slice`, `_dimension` | ~~each trace's `_indices`, `_dimension`~~ — ✅ deleted in step B; a trace reads `request.view` |
 | Transform | `PlotModel._transform` | `RunModel._transform_text` + `Interpreter` |
-| Per-trace visibility | `PlotDataModel._visible` | `artist.get_visible()` + `RunModel._is_visible` |
+| Per-trace visibility | `Trace._visible` (now the single intent) | `artist.get_visible()`, set *from* the trace since step B, + `RunSource._is_visible` |
 | Available key universe | `RunListModel.available_keys` (intersection) | each `RunModel.available_keys` |
-| Norm keys | `PlotModel._current_norm_keys` | `PlotDataModel._norm_keys` |
+| Norm keys | `PlotSession` selection | ~~`PlotDataModel._norm_keys`~~ — ✅ deleted in step B; a trace reads `request.norm_keys` |
 
 The three that matter most:
 
@@ -286,17 +287,24 @@ Alongside this, `get_default_selection`, `get_md_value`, `getRunKeys`, and
 default keys by a different algorithm than the other two, so the same data
 yields different default axes depending on backend.
 
-### 6. `PlotDataModel` owns matplotlib artists
+### 6. ~~`PlotDataModel` owns matplotlib artists~~ ✅
 
-It is the only matplotlib import under `models/` and it owns `self.artist`
-plus `set_artist`, `clear`, `remove_artist_from_axes`, `add_artist_to_axes`,
-and `move_artist_to_axes`. `set_visible(bool)` means `artist.set_visible`.
+**Closed by session-plan step B.** It was the only matplotlib import under
+`models/` and it owned `self.artist` plus `set_artist`, `clear`,
+`remove_artist_from_axes`, `add_artist_to_axes` and `move_artist_to_axes`,
+with `set_visible(bool)` meaning `artist.set_visible`.
 
-Two consequences: a genuinely headless plot frontend (the "save plot to disk"
-driver in ownership Step 8) cannot exist, and `ImageGridCanvas` still
-constructs `PlotDataModel` directly because the artist **is** the handle for
-"is this drawn" (`image_grid_canvas.py:393–401`, the last remaining ownership
-allowlist violation).
+`Trace` now holds request identity, `last_bundle` and visibility intent only;
+`MplCanvas` and `ImageGridCanvas` each own a `TraceKey` → artist map. A
+headless plot frontend is unblocked, and a full `ensure_trace` →
+`get_plot_bundle` → `set_visible` cycle is tested in an interpreter that never
+imports matplotlib.
+
+What did **not** close with it: `ImageGridCanvas` still constructs a `Trace`
+directly (`image_grid_canvas.py`), so the ownership allowlist still has one
+entry. The artist was never the reason — the bypass is the private
+`(uid, image_idx)` fan-out map, which `intent.fan_out()` absorbs in
+session-plan step C.
 
 ### 7. Domain policy still lives in views
 
@@ -306,7 +314,7 @@ allowlist violation).
   `:337–343`, `:491–509`). `get_shape_info` (66 lines) scans runs and picks a
   max shape across y-keys — data-selection policy.
 - **`MplCanvas._do_update_plot`** computes the x × y × run cartesian product
-  that drives `ensure_plot_data` (`single_canvas.py:584–607`), and shows a
+  that drives `ensure_trace` (`single_canvas.py:584–607`), and shows a
   `QMessageBox` for the 2-D multi-dataset rule (`:422–437`).
 - **`ImageGridCanvas`** builds slice tuples in `_make_slice_info`
   (`:263–277`) and calls `figure.clear()` on every page change (`:333–342`).

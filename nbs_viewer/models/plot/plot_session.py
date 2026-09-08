@@ -2,10 +2,10 @@
 Plot session: membership, visibility, selection, view, and plot-data map.
 
 Owns a :class:`RunCollection`, the visible-uid set, selected keys, transform,
-cube/slice/crop view state, the ``PlotDataModel`` map, and the ROI set.
+cube/slice/crop view state, the :class:`TraceSet`, and the ROI set.
 :class:`RunListItemModel` (in ``views/``) is a Qt facade that observes it.
 
-``rebuild()`` is the sole mutator of plot-data *membership*. Retention is
+``rebuild()`` is the sole mutator of trace *membership*. Retention is
 membership × selection; visibility only filters drawing.
 
 Key selection is a session :class:`Selection` (default + per-uid overrides).
@@ -29,7 +29,6 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
 from .combinedRunSource import CombinationMethod, CombinedRunSource
 
 from .frozenRunSource import FrozenRunSource
-from .plotDataModel import PlotDataModel
 from .plot_request import (
     PlotRequest,
     TraceKey,
@@ -47,6 +46,8 @@ from .roi_set import RoiEntry, RoiSetModel
 from .run_collection import RunCollection
 from .runSource import RunSource
 from .selection import KeySelection, Selection
+from .trace import Trace
+from .trace_set import TraceSet
 from .view_spec import (
     ViewCrop,
     classify_profile_kind,
@@ -84,7 +85,6 @@ class PlotSession(QObject):
     roi_draw_enabled_changed = Signal(bool)
     ellipse_circle_locked_changed = Signal(bool)
     roi_live_region_sync_requested = Signal()
-    plot_data_added = Signal(object)
     available_keys_changed = Signal()
     frozen_spectra_changed = Signal()
     run_added = Signal(object)
@@ -120,7 +120,7 @@ class PlotSession(QObject):
         self._roi_draw_enabled = False
         self._ellipse_circle_locked = False
 
-        self._plot_data: Dict[TraceKey, PlotDataModel] = {}
+        self._traces = TraceSet(parent=self)
         self._connected_run_uids = set()
 
         self._progress_sources: Dict[int, ChunkCacheProgress] = {}
@@ -552,11 +552,11 @@ class PlotSession(QObject):
         return self._roi_set
 
     @property
-    def plot_data_map(self) -> Dict[TraceKey, PlotDataModel]:
+    def traces(self) -> TraceSet:
         """
         Return the live map of plot-data models keyed by :class:`TraceKey`.
         """
-        return self._plot_data
+        return self._traces
 
     @property
     def retain_selection(self) -> bool:
@@ -854,8 +854,8 @@ class PlotSession(QObject):
         if crop is None:
             return ""
         r0, r1, c0, c1 = crop.storage_bbox
-        plot_data = self.resolve_single_visible_2d_plot_data()
-        bundle = plot_data.last_bundle if plot_data is not None else None
+        trace = self.resolve_single_visible_2d_trace()
+        bundle = trace.last_bundle if trace is not None else None
         if (
             bundle is not None
             and bundle.ndim == 2
@@ -873,7 +873,7 @@ class PlotSession(QObject):
         self,
         region: RegionDefinition,
         *,
-        plot_data: Optional[PlotDataModel] = None,
+        trace: Optional[Trace] = None,
     ) -> ViewCrop:
         """
         Commit a drawn rectangle to the persistent view crop.
@@ -883,7 +883,7 @@ class PlotSession(QObject):
         region : RegionDefinition
             Crop rectangle in matplotlib data coordinates on the oriented plot
             plane. Only :class:`RectRegion` is supported.
-        plot_data : PlotDataModel, optional
+        trace : Trace, optional
             Parent 2D plot-data model. Defaults to the sole visible 2D model.
 
         Returns
@@ -906,18 +906,18 @@ class PlotSession(QObject):
         if width == 0.0 or height == 0.0:
             raise ValueError("Crop region has zero width or height")
 
-        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = trace or self.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
-        plane_axes = plot_data.request.plane_axes
+        plane_axes = trace.request.plane_axes
         if plane_axes is None:
             raise ValueError("Select a single 2D dataset")
 
-        bundle = plot_data.last_bundle
+        bundle = trace.last_bundle
         if bundle is None or bundle.ndim != 2:
             raise ValueError("Select a single 2D dataset")
         crop = crop_from_region(region, frame_from_bundle(bundle), plane_axes)
-        self.set_view_crop(crop, plot_data._key)
+        self.set_view_crop(crop, trace.trace_key.as_tuple())
         return crop
 
     def invalidate_view_crop_if_invalid(self) -> Optional[str]:
@@ -932,8 +932,8 @@ class PlotSession(QObject):
         crop = self._view_crop
         if crop is None:
             return None
-        plot_data = self.resolve_single_visible_2d_plot_data()
-        if plot_data is None or plot_data._key != self._view_crop_key:
+        trace = self.resolve_single_visible_2d_trace()
+        if trace is None or trace.trace_key.as_tuple() != self._view_crop_key:
             self.clear_view_crop()
             return "dataset changed"
         parent_spec = self._cube_view_spec
@@ -958,11 +958,11 @@ class PlotSession(QObject):
         tuple or None
             View fingerprint from the active plot bundle, if available.
         """
-        plot_data = self.resolve_single_visible_2d_plot_data()
-        if plot_data is None or plot_data.last_bundle is None:
+        trace = self.resolve_single_visible_2d_trace()
+        if trace is None or trace.last_bundle is None:
             return None
         try:
-            return view_fingerprint_from_bundle(plot_data.last_bundle)
+            return view_fingerprint_from_bundle(trace.last_bundle)
         except ValueError:
             return None
 
@@ -1092,13 +1092,13 @@ class PlotSession(QObject):
             transform=self._effective_transform_text(run_model),
         )
 
-    def ensure_plot_data(
+    def ensure_trace(
         self,
         run_model: "RunSource",
         xkey: str,
         ykey: str,
         norm_keys: Optional[List[str]] = None,
-    ) -> PlotDataModel:
+    ) -> Trace:
         """
         Return the plot-data model for ``(xkey, ykey, run uid)``, creating it.
 
@@ -1118,30 +1118,21 @@ class PlotSession(QObject):
 
         Returns
         -------
-        PlotDataModel
+        Trace
             Existing or newly created plot-data model.
         """
         key = TraceKey(run_model.uid, xkey, ykey)
         request = self._build_plot_request(run_model, xkey, ykey, norm_keys)
-        if key not in self._plot_data:
-            plot_data = PlotDataModel(
-                run_model,
-                request,
-                parent=self,
-                trace_key=key,
-            )
-            self._plot_data[key] = plot_data
-            self.plot_data_added.emit(plot_data)
+        trace, created = self._traces.ensure(run_model, request, key)
+        if created:
             print_debug(
-                "PlotSession.ensure_plot_data",
+                "PlotSession.ensure_trace",
                 f"create {xkey}/{ykey}",
                 category="plots",
             )
-        else:
-            self._plot_data[key].set_request(request)
-        return self._plot_data[key]
+        return trace
 
-    def drop_plot_data_for_uid(self, uid: str) -> None:
+    def drop_traces_for_uid(self, uid: str) -> None:
         """
         Remove and clean up all plot-data entries for a run uid.
 
@@ -1150,20 +1141,19 @@ class PlotSession(QObject):
         uid : str
             Run uid whose plot-data entries should be dropped.
         """
-        keys = [key for key in self._plot_data if key.uid == uid]
-        for key in keys:
-            self._dispose_plot_data(key)
+        for key in self._traces.keys_for_uid(uid):
+            self._dispose_trace(key)
 
-    def iter_visible_plot_data(self):
+    def iter_visible_traces(self):
         """
         Yield plot-data models whose run uid is currently visible.
         """
         visible = self.visible_uids
-        for key, plot_data in self._plot_data.items():
+        for key, trace in self._traces.items():
             if key.uid in visible:
-                yield plot_data
+                yield trace
 
-    def resolve_single_visible_2d_plot_data(self) -> Optional[PlotDataModel]:
+    def resolve_single_visible_2d_trace(self) -> Optional[Trace]:
         """
         Return the sole visible 2D plot-data model, if exactly one exists.
 
@@ -1172,24 +1162,28 @@ class PlotSession(QObject):
 
         Returns
         -------
-        PlotDataModel or None
+        Trace or None
         """
-        models = []
-        for plot_data in self.iter_visible_plot_data():
-            if not getattr(plot_data, "_visible", True):
+        matches = []
+        for trace in self.iter_visible_traces():
+            if not trace.visible:
                 continue
-            render_mode = plot_data.render_mode
+            render_mode = trace.render_mode
             if render_mode in ("image", "mesh"):
-                models.append(plot_data)
+                matches.append(trace)
                 continue
-            bundle = plot_data.last_bundle
+            bundle = trace.last_bundle
             if bundle is not None and bundle.ndim == 2:
-                models.append(plot_data)
+                matches.append(trace)
                 continue
-            if plot_data._dimension == 2 and render_mode is None and bundle is None:
-                models.append(plot_data)
-        if len(models) == 1:
-            return models[0]
+            if (
+                trace.projection.plot_ndim == 2
+                and render_mode is None
+                and bundle is None
+            ):
+                matches.append(trace)
+        if len(matches) == 1:
+            return matches[0]
         return None
 
     def is_roi_draw_enabled(self) -> bool:
@@ -1242,38 +1236,38 @@ class PlotSession(QObject):
 
     def resolve_parent_frame(
         self,
-        plot_data: Optional[PlotDataModel] = None,
+        trace: Optional[Trace] = None,
     ) -> Optional[PlotViewFrame]:
         """
         Return the view frame for the visible 2D plot-data model.
 
         Parameters
         ----------
-        plot_data : PlotDataModel, optional
+        trace : Trace, optional
             Plot-data model. Defaults to the sole visible 2D model.
 
         Returns
         -------
         PlotViewFrame or None
         """
-        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None or plot_data.last_bundle is None:
+        trace = trace or self.resolve_single_visible_2d_trace()
+        if trace is None or trace.last_bundle is None:
             return None
         try:
-            return frame_from_bundle(plot_data.last_bundle)
+            return frame_from_bundle(trace.last_bundle)
         except ValueError:
             return None
 
     def cached_parent_bundle_for_preview(
         self,
-        plot_data: PlotDataModel,
+        trace: Trace,
     ) -> Optional["PlotBundle"]:
         """
         Return the loaded plot plane when it still matches the session view.
 
         Parameters
         ----------
-        plot_data : PlotDataModel
+        trace : Trace
             Parent plot-data model.
 
         Returns
@@ -1283,16 +1277,16 @@ class PlotSession(QObject):
             actually serve a given profile is the fetch's decision, not this
             one; this only answers whether it is still the right plane.
         """
-        bundle = plot_data.last_bundle
+        bundle = trace.last_bundle
         if bundle is None or bundle.ndim != 2:
             return None
         session_request = self._build_plot_request(
-            plot_data._run,
-            plot_data._xkey,
-            plot_data._ykey,
-            plot_data._norm_keys,
+            trace.run,
+            trace.xkey,
+            trace.ykey,
+            list(trace.request.norm_keys),
         )
-        if plot_data.request.view != session_request.view:
+        if trace.request.view != session_request.view:
             return None
         return bundle
 
@@ -1387,7 +1381,7 @@ class PlotSession(QObject):
         self,
         entry: RoiEntry,
         *,
-        plot_data: Optional[PlotDataModel] = None,
+        trace: Optional[Trace] = None,
         parent_frame=None,
         span_full_override: Optional[bool] = None,
         default_profile_axis=None,
@@ -1403,7 +1397,7 @@ class PlotSession(QObject):
         ----------
         entry : RoiEntry
             ROI geometry and operation.
-        plot_data : PlotDataModel, optional
+        trace : Trace, optional
             Parent 2D plot-data model. Defaults to the sole visible one.
         parent_frame : PlotViewFrame, optional
             Parent view frame for span-full expansion.
@@ -1422,10 +1416,10 @@ class PlotSession(QObject):
         ValueError
             If no parent plane or no profile axis can be resolved.
         """
-        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = trace or self.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
-        parent = plot_data.request
+        parent = trace.request
         if parent.plane_axes is None:
             raise ValueError("Parent projection is unavailable")
         profile_axis = entry.operation.profile_storage_axis
@@ -1464,7 +1458,7 @@ class PlotSession(QObject):
         self,
         entry: RoiEntry,
         *,
-        plot_data: Optional[PlotDataModel] = None,
+        trace: Optional[Trace] = None,
         parent_frame=None,
         axis_names=None,
         default_profile_axis=None,
@@ -1476,7 +1470,7 @@ class PlotSession(QObject):
         ----------
         entry : RoiEntry
             ROI entry to commit.
-        plot_data : PlotDataModel, optional
+        trace : Trace, optional
             Parent 2D plot-data model.
         parent_frame : PlotViewFrame, optional
             Parent frame for span-full expansion.
@@ -1523,7 +1517,7 @@ class PlotSession(QObject):
         )
         request = self.build_roi_profile_request(
             entry,
-            plot_data=plot_data,
+            trace=trace,
             parent_frame=parent_frame,
             span_full_override=span_full,
             default_profile_axis=default_profile_axis,
@@ -1535,7 +1529,7 @@ class PlotSession(QObject):
         entry_id: Optional[str] = None,
         *,
         entry: Optional[RoiEntry] = None,
-        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_trace: Optional[Trace] = None,
         parent_frame=None,
         cached_plane: Optional["PlotBundle"] = None,
         span_full_override: Optional[bool] = None,
@@ -1551,7 +1545,7 @@ class PlotSession(QObject):
             ROI entry id. Ignored when ``entry`` is provided.
         entry : RoiEntry, optional
             ROI entry. Defaults to resolving ``entry_id`` / selection.
-        parent_plot_data : PlotDataModel, optional
+        parent_trace : Trace, optional
             Parent 2D plot-data model. Defaults to the sole visible 2D model.
         parent_frame : PlotViewFrame, optional
             Parent frame used when building the request.
@@ -1572,20 +1566,20 @@ class PlotSession(QObject):
         """
         if entry is None and request is None:
             entry = self.resolve_roi_entry(entry_id)
-        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = parent_trace or self.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
         if request is None:
             request = self.build_roi_profile_request(
                 entry,
-                plot_data=plot_data,
+                trace=trace,
                 parent_frame=parent_frame,
                 span_full_override=span_full_override,
                 default_profile_axis=default_profile_axis,
             )
         if cached_plane is None:
-            cached_plane = self.cached_parent_bundle_for_preview(plot_data)
-        return plot_data.preview_roi_profile(
+            cached_plane = self.cached_parent_bundle_for_preview(trace)
+        return trace.preview_roi_profile(
             request, cached_plane=cached_plane
         )
 
@@ -1595,7 +1589,7 @@ class PlotSession(QObject):
         bundle: "PlotBundle",
         request: PlotRequest,
         *,
-        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_trace: Optional[Trace] = None,
         axis_names=None,
         cube_fingerprint=None,
         committed_xkey: Optional[str] = None,
@@ -1611,7 +1605,7 @@ class PlotSession(QObject):
             Fetched 1D profile bundle.
         request : PlotRequest
             Request used for the fetch.
-        parent_plot_data : PlotDataModel, optional
+        parent_trace : Trace, optional
             Parent plot-data model. Defaults to the sole visible 2D model.
         axis_names : sequence of str, optional
             Storage axis names for default labels.
@@ -1625,8 +1619,8 @@ class PlotSession(QObject):
         FrozenSpectrum
             Registered frozen spectrum.
         """
-        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = parent_trace or self.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
         names = tuple(axis_names or ())
         label = (
@@ -1647,7 +1641,7 @@ class PlotSession(QObject):
                 tuple(self._slice) if self._slice else None,
                 str(self._cube_view_spec),
             )
-        frozen = plot_data.build_roi_frozen_spectrum(
+        frozen = trace.build_roi_frozen_spectrum(
             bundle,
             request,
             label=label,
@@ -1655,7 +1649,7 @@ class PlotSession(QObject):
             cube_fingerprint=cube_fingerprint,
             committed_xkey=committed_xkey,
         )
-        plot_data._run.register_frozen_spectrum(frozen)
+        trace.run.register_frozen_spectrum(frozen)
         return frozen
 
     def commit_roi_profile(
@@ -1663,7 +1657,7 @@ class PlotSession(QObject):
         entry_id: Optional[str] = None,
         *,
         entry: Optional[RoiEntry] = None,
-        parent_plot_data: Optional[PlotDataModel] = None,
+        parent_trace: Optional[Trace] = None,
         parent_frame=None,
         cached_plane: Optional["PlotBundle"] = None,
         axis_names=None,
@@ -1680,7 +1674,7 @@ class PlotSession(QObject):
             ROI entry id. Ignored when ``entry`` is provided.
         entry : RoiEntry, optional
             ROI entry. Defaults to resolving ``entry_id`` / selection.
-        parent_plot_data : PlotDataModel, optional
+        parent_trace : Trace, optional
             Parent 2D plot-data model.
         parent_frame : PlotViewFrame, optional
             Parent frame for request construction.
@@ -1707,19 +1701,19 @@ class PlotSession(QObject):
         """
         if entry is None:
             entry = self.resolve_roi_entry(entry_id)
-        plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = parent_trace or self.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
         _span_full, request = self.prepare_roi_commit(
             entry,
-            plot_data=plot_data,
+            trace=trace,
             parent_frame=parent_frame,
             axis_names=axis_names,
             default_profile_axis=default_profile_axis,
         )
         bundle = self.preview_roi_profile(
             entry=entry,
-            parent_plot_data=plot_data,
+            parent_trace=trace,
             cached_plane=cached_plane,
             request=request,
         )
@@ -1727,7 +1721,7 @@ class PlotSession(QObject):
             entry,
             bundle,
             request,
-            parent_plot_data=plot_data,
+            parent_trace=trace,
             axis_names=axis_names,
             cube_fingerprint=cube_fingerprint,
             committed_xkey=committed_xkey,
@@ -1776,7 +1770,7 @@ class PlotSession(QObject):
             list(sel.norm),
         )
 
-    def _dispose_plot_data(self, key: TraceKey) -> None:
+    def _dispose_trace(self, key: TraceKey) -> None:
         """
         Remove and clean up one plot-data entry.
 
@@ -1785,56 +1779,42 @@ class PlotSession(QObject):
         key : TraceKey
             Entry to dispose.
         """
-        plot_data = self._plot_data.pop(key, None)
-        if plot_data is None:
-            return
-        try:
-            plot_data.clear()
-        except Exception:
-            pass
+        self._traces.discard(key)
 
     def _refresh_held_requests(self) -> None:
         """
         Rewrite requests on every held plot-data model from session view state.
 
-        Used for view / crop / transform changes so ``ensure_plot_data``
+        Used for view / crop / transform changes so ``ensure_trace``
         orphans (e.g. canvas-created keys) keep their artists and pick up
         the new request. Membership pruning stays in :meth:`rebuild`.
         """
-        for key, plot_data in list(self._plot_data.items()):
+        for key, trace in list(self._traces.items()):
             source = self.collection.get(key.uid)
             if source is None:
-                self._dispose_plot_data(key)
+                self._dispose_trace(key)
                 continue
-            plot_data.set_request(self._request_for(source, key))
+            trace.set_request(self._request_for(source, key))
 
     def rebuild(self) -> None:
         """
-        Diff retained TraceKeys against ``_plot_data`` and sync requests.
+        Diff retained TraceKeys against the trace set and sync requests.
 
-        Creates or updates models for membership × selection; disposes extras.
-        Visibility does not dispose — use :meth:`iter_visible_plot_data` for
+        Creates or updates traces for membership × selection; disposes extras.
+        Visibility does not dispose — use :meth:`iter_visible_traces` for
         the draw set.
         """
         desired = self._retained_trace_keys()
-        for key in set(self._plot_data) - desired:
-            self._dispose_plot_data(key)
+        for key in set(self._traces) - desired:
+            self._dispose_trace(key)
         for key in desired:
             source = self.collection.get(key.uid)
             if source is None:
                 continue
-            request = self._request_for(source, key)
-            if key in self._plot_data:
-                self._plot_data[key].set_request(request)
-            else:
-                plot_data = PlotDataModel(
-                    source,
-                    request,
-                    parent=self,
-                    trace_key=key,
-                )
-                self._plot_data[key] = plot_data
-                self.plot_data_added.emit(plot_data)
+            _trace, created = self._traces.ensure(
+                source, self._request_for(source, key), key
+            )
+            if created:
                 print_debug(
                     "PlotSession.rebuild",
                     f"create {key.xkey}/{key.ykey} uid={key.uid}",

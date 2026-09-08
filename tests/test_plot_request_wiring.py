@@ -122,7 +122,7 @@ def test_plot_data_model_holds_request_and_fetches():
     from nbs_viewer.models.plot.view_spec import (
     Projection,
 )
-    from nbs_viewer.models.plot.plotDataModel import PlotDataModel
+    from nbs_viewer.models.plot.trace import Trace
     from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
 
     run = make_vppem_run()
@@ -142,7 +142,7 @@ def test_plot_data_model_holds_request_and_fetches():
         plot_ndim=1,
         projection=cube,
     )
-    plot_data = PlotDataModel(model, request)
+    plot_data = Trace(model, request)
     assert plot_data.trace_key == TraceKey(
         run.uid, "sampleVoltage_VSource", "PCOEdge_image"
     )
@@ -152,7 +152,7 @@ def test_plot_data_model_holds_request_and_fetches():
 
 
 def test_set_request_keeps_trace_key():
-    from nbs_viewer.models.plot.plotDataModel import PlotDataModel
+    from nbs_viewer.models.plot.trace import Trace
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -165,7 +165,7 @@ def test_set_request_keeps_trace_key():
         plot_ndim=2,
         projection=cube,
     )
-    plot_data = PlotDataModel(model, first)
+    plot_data = Trace(model, first)
     key = plot_data.trace_key
     second = build_plot_request(
         uid=run.uid,
@@ -190,7 +190,7 @@ def test_set_request_keeps_trace_key():
         plot_data.set_request(other)
 
 
-def test_ensure_plot_data_assembles_request(qapp):
+def test_ensure_trace_assembles_request(qapp):
     from nbs_viewer.models.plot.plot_request import TraceKey
     from tests.fixtures.plot_session import make_plot_session
 
@@ -204,13 +204,13 @@ def test_ensure_plot_data_assembles_request(qapp):
         dimension=2,
         cube_view_spec=cube,
     )
-    first = plot_model.ensure_plot_data(
+    first = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
     key = TraceKey(run.uid, "sampleVoltage_VSource", "PCOEdge_image")
-    assert key in plot_model.plot_data_map
+    assert key in plot_model.traces
     assert first.request.view.indices[0] == 4
-    same = plot_model.ensure_plot_data(
+    same = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
     assert same is first

@@ -19,7 +19,6 @@ from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from nbs_viewer.models.plot.view_spec import Projection
-from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle, view_fingerprint_from_bundle
@@ -136,7 +135,8 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
         self.presenter = presenter
         self.plot_model = presenter.session
-        self._connected_plot_data = set()
+        self._connected_traces = set()
+        self._artists = {}
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -169,6 +169,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
 
+        self.plot_model.traces.trace_removed.connect(self._on_trace_removed)
         self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
@@ -190,8 +191,82 @@ class MplCanvas(FigureCanvasQTAgg):
         roi_set.selection_changed.connect(self._on_roi_selection_changed)
 
     @property
-    def plotArtists(self):
-        return self.plot_model.plot_data_map
+    def traces(self):
+        """
+        Trace set owned by the plot session.
+        """
+        return self.plot_model.traces
+
+    def artist_for(self, trace_key):
+        """
+        Return the artist drawn for one trace, if the canvas has made it.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace identity.
+
+        Returns
+        -------
+        Artist or None
+        """
+        return self._artists.get(trace_key)
+
+    def _set_artist(self, trace, artist):
+        """
+        File an artist under a trace key and apply the trace's visibility.
+
+        Parameters
+        ----------
+        trace : Trace
+            Trace the artist draws.
+        artist : Artist or None
+            Artist to file, or None to forget the entry.
+        """
+        if artist is None:
+            self._artists.pop(trace.trace_key, None)
+            return
+        self._artists[trace.trace_key] = artist
+        artist.set_visible(trace.visible)
+
+    def _destroy_artist(self, trace_key):
+        """
+        Remove one trace's artist from the axes and forget it.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace whose artist should go.
+        """
+        artist = self._artists.pop(trace_key, None)
+        if artist is None:
+            return
+        try:
+            if artist.axes is not None:
+                artist.remove()
+            if isinstance(artist, AxesImage):
+                artist.set_data([[]])
+            elif hasattr(artist, "set_data"):
+                artist.set_data([], [])
+            elif hasattr(artist, "set_array"):
+                artist.set_array([])
+        except Exception as e:
+            print(f"[MplCanvas._destroy_artist] Error cleaning up artist: {e}")
+
+    def _on_trace_removed(self, trace_key):
+        """
+        Drop the artist for a trace the session no longer retains.
+
+        The session owns membership and cannot touch artists, so this is the
+        only place a dropped trace's drawing is undone.
+        """
+        self._worker_generations.pop(trace_key, None)
+        retire_plot_worker(
+            self._active_workers.pop(trace_key, None), self._pending_workers
+        )
+        self._connected_traces.discard(trace_key)
+        self._destroy_artist(trace_key)
+        self.draw()
 
     @property
     def _slice(self):
@@ -259,19 +334,19 @@ class MplCanvas(FigureCanvasQTAgg):
 
         Returns
         -------
-        PlotDataModel or None
+        Trace or None
         """
-        models = []
-        for model in self.plotArtists.values():
-            if not getattr(model, "_visible", False):
+        matches = []
+        for key, trace in self.traces.items():
+            if not trace.visible:
                 continue
-            artist = model.artist
+            artist = self.artist_for(key)
             if artist is None or not artist.get_visible():
                 continue
-            if model.render_mode in ("image", "mesh"):
-                models.append(model)
-        if len(models) == 1:
-            return models[0]
+            if trace.render_mode in ("image", "mesh"):
+                matches.append(trace)
+        if len(matches) == 1:
+            return matches[0]
         return None
 
     def get_active_plot_bundle(self):
@@ -420,8 +495,9 @@ class MplCanvas(FigureCanvasQTAgg):
         if dimension == 2 and validate:
             visible_count = sum(
                 1
-                for model in self.plotArtists.values()
-                if model.artist is not None and model.artist.get_visible()
+                for key in self.traces
+                if (artist := self.artist_for(key)) is not None
+                and artist.get_visible()
             )
             if visible_count > 1:
                 msg = QMessageBox()
@@ -457,27 +533,25 @@ class MplCanvas(FigureCanvasQTAgg):
         List-owned path: updates metadata without emitting ``data_changed`` and
         starts at most one worker when a refetch is needed.
         """
-        key = (xkey, ykey, runSource.uid)
-        is_new = key not in self._connected_plot_data
-        plotData = self.plot_model.ensure_plot_data(
+        plotData = self.plot_model.ensure_trace(
             runSource, xkey, ykey, norm_keys=norm_keys
         )
-        if is_new:
+        key = plotData.trace_key
+        if key not in self._connected_traces:
             print_debug(
                 "MplCanvas.updatePlotData",
                 f"connect {xkey}/{ykey}",
                 category="plots",
             )
             plotData.data_changed.connect(self.plot_data)
-            plotData.draw_requested.connect(self.draw)
-            plotData.autoscale_requested.connect(self.autoscale)
-            plotData.visibility_changed.connect(self._on_artist_visibility_changed)
+            plotData.visibility_changed.connect(
+                self._on_trace_visibility_changed
+            )
             plotData.render_mode_changed.connect(self._on_render_mode_changed)
-            self._connected_plot_data.add(key)
+            self._connected_traces.add(key)
             self.plot_data(plotData)
-        else:
-            if plotData.needs_fetch():
-                self.plot_data(plotData)
+        elif plotData.needs_fetch() or self.artist_for(key) is None:
+            self.plot_data(plotData)
 
     def set_lock_aspect(self, locked: bool) -> None:
         """
@@ -522,7 +596,7 @@ class MplCanvas(FigureCanvasQTAgg):
         else:
             self.axes.set_aspect("auto")
 
-    def _on_render_mode_changed(self, plot_data, mode):
+    def _on_render_mode_changed(self, trace, mode):
         """
         Prepare axes when switching between 1D and 2D render modes.
 
@@ -531,7 +605,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         print_debug(
             "MplCanvas",
-            f"Render mode changed to {mode} for {plot_data.label}",
+            f"Render mode changed to {mode} for {trace.label}",
             category="plots",
         )
         was_2d = self._canvas_is_2d()
@@ -539,18 +613,27 @@ class MplCanvas(FigureCanvasQTAgg):
         if was_2d == will_be_2d:
             return
 
-        if plot_data.artist is not None:
-            plot_data.clear()
+        self._destroy_artist(trace.trace_key)
         self._reset_plot_axes()
         self.plot_view_updated.emit()
 
-    def _on_artist_visibility_changed(self, _plot_data, _visible):
+    def _on_trace_visibility_changed(self, trace, visible):
         """
-        Refresh the legend after an artist show/hide.
+        Apply a trace's visibility intent to its artist.
 
-        Paint is requested separately via ``draw_requested``.
+        The trace records intent and keeps its bundle; hiding therefore costs
+        an artist flag rather than a refetch, and showing again needs no
+        round trip.
         """
+        artist = self.artist_for(trace.trace_key)
+        if artist is None:
+            return
+        if artist.get_visible() != visible:
+            artist.set_visible(visible)
         self.updateLegend()
+        if self._autoscale:
+            self.autoscale()
+        self.draw()
 
     def _on_run_removed(self, run):
         self.remove_run_data(run.uid)
@@ -581,29 +664,27 @@ class MplCanvas(FigureCanvasQTAgg):
                 xkeys, ykeys, normkeys = sel.as_lists()
                 for xkey in xkeys:
                     for ykey in ykeys:
-                        visible_keys.add((xkey, ykey, runSource.uid))
+                        visible_keys.add(TraceKey(runSource.uid, xkey, ykey))
                         self.updatePlotData(runSource, xkey, ykey, normkeys)
 
-            for key, plotDataModel in self.plotArtists.items():
-                tuple_key = key.as_tuple()
-                if tuple_key not in visible_keys:
-                    plotDataModel.set_visible(False)
-                    plotDataModel.clear()
-                else:
-                    plotDataModel.set_visible(True)
-                    artist = plotDataModel.artist
-                    needs_artist = artist is None or (
-                        isinstance(artist, Line2D)
-                        and not self._line_artist_on_axes(artist)
-                    )
-                    if needs_artist and tuple_key not in self._active_workers:
-                        self.plot_data(plotDataModel)
+            for key, trace in self.traces.items():
+                if key not in visible_keys:
+                    trace.set_visible(False)
+                    continue
+                trace.set_visible(True)
+                artist = self.artist_for(key)
+                needs_artist = artist is None or (
+                    isinstance(artist, Line2D)
+                    and not self._line_artist_on_axes(artist)
+                )
+                if needs_artist and key not in self._active_workers:
+                    self.plot_data(trace)
 
             workers_pending = len(self._active_workers) > 0
             if workers_pending:
                 print_debug(
                     "MplCanvas._do_update_plot",
-                    f"visible={len(visible_keys)} artists={len(self.plotArtists)} "
+                    f"visible={len(visible_keys)} artists={len(self._artists)} "
                     f"active_workers={len(self._active_workers)} "
                     f"skip_paint (workers pending) {ttime.time() - t0:.4f}s",
                     category="plots",
@@ -620,7 +701,7 @@ class MplCanvas(FigureCanvasQTAgg):
             self.draw()
             print_debug(
                 "MplCanvas._do_update_plot",
-                f"visible={len(visible_keys)} artists={len(self.plotArtists)} "
+                f"visible={len(visible_keys)} artists={len(self._artists)} "
                 f"active_workers=0 {ttime.time() - t0:.4f}s",
                 category="plots",
             )
@@ -628,7 +709,7 @@ class MplCanvas(FigureCanvasQTAgg):
             print_debug("MplCanvas._do_update_plot", str(e), category="plots")
 
     def plot_data(self, plotData):
-        model_key = plotData._key
+        model_key = plotData.trace_key
         generation = self._worker_generations.get(model_key, 0) + 1
         self._worker_generations[model_key] = generation
 
@@ -640,7 +721,7 @@ class MplCanvas(FigureCanvasQTAgg):
             plotData,
             plotData.request,
             generation,
-            plotData.artist,
+            self.artist_for(model_key),
         )
         worker.data_ready.connect(self._handle_plot_data)
         worker.error_occurred.connect(self._handle_plot_error)
@@ -663,7 +744,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
     @time_function(function_name="MplCanvas._handle_plot_data", category="plots")
     def _handle_plot_data(self, bundle, plotData, artist, generation):
-        model_key = plotData._key
+        model_key = plotData.trace_key
         if generation != self._worker_generations.get(model_key):
             print_debug(
                 "MplCanvas._handle_plot_data",
@@ -673,7 +754,7 @@ class MplCanvas(FigureCanvasQTAgg):
             return
 
         if artist is None:
-            artist = plotData.artist
+            artist = self.artist_for(model_key)
 
         print_debug(
             "MplCanvas._handle_plot_data",
@@ -692,14 +773,14 @@ class MplCanvas(FigureCanvasQTAgg):
                 self._active_render_mode = "line"
                 self._apply_aspect()
             elif bundle.render_mode == "image":
-                self._prepare_2d_axes(plotData._key)
+                self._prepare_2d_axes(model_key)
                 artist = self._render_image(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "image"
                 self._last_view_frame = frame_from_bundle(bundle)
                 self._apply_aspect()
             elif bundle.render_mode == "mesh":
-                self._prepare_2d_axes(plotData._key)
+                self._prepare_2d_axes(model_key)
                 artist = self._render_mesh(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "mesh"
@@ -709,9 +790,9 @@ class MplCanvas(FigureCanvasQTAgg):
             print(f"[MplCanvas._handle_plot_data] Error: {e}")
             artist = None
 
-        plotData.set_artist(artist)
+        self._set_artist(plotData, artist)
         if bundle.render_mode == "line":
-            self._ensure_sibling_lines_on_axes(except_key=plotData._key)
+            self._ensure_sibling_lines_on_axes(except_key=model_key)
         self._sync_roi_display()
         self.plot_model.sync_region_state_with_view()
         self.plot_view_updated.emit()
@@ -728,12 +809,12 @@ class MplCanvas(FigureCanvasQTAgg):
 
         Covers races where another handler cleared lines but left plot models.
         """
-        for key, model in self.plotArtists.items():
-            if key.as_tuple() == except_key or not getattr(model, "_visible", False):
+        for key, model in self.traces.items():
+            if key == except_key or not model.visible:
                 continue
             if model.render_mode != "line":
                 continue
-            artist = model.artist
+            artist = self.artist_for(key)
             if artist is None or (
                 isinstance(artist, Line2D) and not self._line_artist_on_axes(artist)
             ):
@@ -892,8 +973,7 @@ class MplCanvas(FigureCanvasQTAgg):
                 self.axes.lines[0].remove()
             except Exception:
                 break
-        for model in self.plotArtists.values():
-            model.artist = None
+        self._artists.clear()
         self._destroy_roi_selector()
         self._destroy_crop_selector()
         self._remove_roi_overlays()
@@ -1388,9 +1468,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.currentDim = 1
         self._active_render_mode = None
         self._artist_count = 0
-
-        for model in self.plotArtists.values():
-            model.artist = None
+        self._artists.clear()
 
     def updateLegend(self):
         """
@@ -1578,7 +1656,7 @@ class MplCanvas(FigureCanvasQTAgg):
             category="plots",
         )
         keys_to_remove = [
-            key for key in list(self._connected_plot_data) if key[2] == run_uid
+            key for key in list(self._connected_traces) if key.uid == run_uid
         ]
 
         for key in keys_to_remove:
@@ -1587,22 +1665,20 @@ class MplCanvas(FigureCanvasQTAgg):
             retire_plot_worker(worker, self._pending_workers)
 
         for key in keys_to_remove:
-            trace_key = TraceKey(key[2], key[0], key[1])
-            plot_data = self.plotArtists.get(trace_key)
-            if plot_data is not None:
+            trace = self.traces.get(key)
+            if trace is not None:
                 try:
-                    plot_data.data_changed.disconnect(self.plot_data)
-                    plot_data.draw_requested.disconnect(self.draw)
-                    plot_data.autoscale_requested.disconnect(self.autoscale)
-                    plot_data.render_mode_changed.disconnect(
+                    trace.data_changed.disconnect(self.plot_data)
+                    trace.render_mode_changed.disconnect(
                         self._on_render_mode_changed
                     )
-                    plot_data.visibility_changed.disconnect(
-                        self._on_artist_visibility_changed
+                    trace.visibility_changed.disconnect(
+                        self._on_trace_visibility_changed
                     )
                 except (TypeError, RuntimeError):
                     pass
-            self._connected_plot_data.discard(key)
+            self._destroy_artist(key)
+            self._connected_traces.discard(key)
 
         self.draw()
         self.updateLegend()

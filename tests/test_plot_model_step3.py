@@ -16,7 +16,7 @@ from nbs_viewer.models.plot.view_spec import (
 )
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
-from nbs_viewer.models.plot.plotDataModel import PlotDataModel
+from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
@@ -41,24 +41,24 @@ def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> Me
     return MemoryRun(base.metadata, data)
 
 
-def test_ensure_plot_data_same_keys_same_instance(qapp):
+def test_ensure_trace_same_keys_same_instance(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
     plot_model.add_run(run_model)
 
-    first = plot_model.ensure_plot_data(run_model, "time", "det")
-    second = plot_model.ensure_plot_data(run_model, "time", "det")
+    first = plot_model.ensure_trace(run_model, "time", "det")
+    second = plot_model.ensure_trace(run_model, "time", "det")
     assert first is second
-    assert isinstance(first, PlotDataModel)
+    assert isinstance(first, Trace)
 
 
-def test_ensure_plot_data_different_keys_different_instances(qapp):
+def test_ensure_trace_different_keys_different_instances(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
     plot_model.add_run(run_model)
 
-    first = plot_model.ensure_plot_data(run_model, "time", "det")
-    second = plot_model.ensure_plot_data(run_model, "time", "i0")
+    first = plot_model.ensure_trace(run_model, "time", "det")
+    second = plot_model.ensure_trace(run_model, "time", "i0")
     assert first is not second
 
 
@@ -67,10 +67,10 @@ def test_remove_run_drops_plot_data(qapp):
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
     plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
+    assert any(key.uid == run_model.uid for key in plot_model.traces)
 
     plot_model.remove_run(run_model)
-    assert all(key.uid != run_model.uid for key in plot_model.plot_data_map)
+    assert all(key.uid != run_model.uid for key in plot_model.traces)
 
 
 def test_uncheck_keeps_plot_data_in_map(qapp):
@@ -78,11 +78,11 @@ def test_uncheck_keeps_plot_data_in_map(qapp):
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
     plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
-    assert len(plot_model.plot_data_map) >= 1
+    assert len(plot_model.traces) >= 1
 
     plot_model.set_uids_visible([run_model.uid], False)
-    assert any(key.uid == run_model.uid for key in plot_model.plot_data_map)
-    assert list(plot_model.iter_visible_plot_data()) == []
+    assert any(key.uid == run_model.uid for key in plot_model.traces)
+    assert list(plot_model.iter_visible_traces()) == []
 
 
 def test_visibility_ensures_plot_data_when_keys_selected(qapp):
@@ -92,11 +92,11 @@ def test_visibility_ensures_plot_data_when_keys_selected(qapp):
     plot_model.add_run(run_model)
     plot_model.set_selected_keys(["time"], ["det"])
     plot_model.set_uids_visible([run_model.uid], False)
-    plot_model.drop_plot_data_for_uid(run_model.uid)
-    assert run_model.uid not in {key.uid for key in plot_model.plot_data_map}
+    plot_model.drop_traces_for_uid(run_model.uid)
+    assert run_model.uid not in {key.uid for key in plot_model.traces}
 
     plot_model.set_uids_visible([run_model.uid], True)
-    assert TraceKey(run_model.uid, "time", "det") in plot_model.plot_data_map
+    assert TraceKey(run_model.uid, "time", "det") in plot_model.traces
 
 
 def test_two_plot_models_independent_keys_and_maps(qapp):
@@ -112,9 +112,9 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
 
     assert first.get_selected_keys()[1] == ["det"]
     assert second.get_selected_keys()[1] == ["i0"]
-    assert TraceKey(run_a.uid, "time", "det") in first.plot_data_map
-    assert TraceKey(run_b.uid, "time", "i0") in second.plot_data_map
-    assert TraceKey(run_a.uid, "time", "i0") not in first.plot_data_map
+    assert TraceKey(run_a.uid, "time", "det") in first.traces
+    assert TraceKey(run_b.uid, "time", "i0") in second.traces
+    assert TraceKey(run_a.uid, "time", "i0") not in first.traces
 
 
 def test_cube_view_and_crop_without_canvas(qapp):
@@ -155,7 +155,7 @@ def _image_session(qapp):
         dimension=2,
         cube_view_spec=parent,
     )
-    plot_data = plot_model.ensure_plot_data(
+    plot_data = plot_model.ensure_trace(
         run_model, "pixel", "detector_image"
     )
     plot_data.last_bundle = display_bundle(
@@ -197,7 +197,7 @@ def test_default_selection_on_first_run(qapp):
     assert y_keys == ["det"]
 
 
-def test_views_do_not_construct_plot_data_except_image_grid():
+def test_views_do_not_construct_traces_except_image_grid():
     views_root = Path(__file__).resolve().parents[1] / "nbs_viewer" / "views"
     allowed = {
         str(views_root / "plot" / "mplCanvas" / "image_grid_canvas.py"),
@@ -210,7 +210,7 @@ def test_views_do_not_construct_plot_data_except_image_grid():
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     name = alias.asname or alias.name
-                    if alias.name == "PlotDataModel":
+                    if alias.name == "Trace":
                         imported.add(name)
             elif isinstance(node, ast.Call):
                 func = node.func

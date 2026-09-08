@@ -1,14 +1,22 @@
+"""
+One trace: request identity plus the bundle last fetched for it.
+
+A :class:`Trace` is model state only. It knows *what* should be drawn and
+*whether* it should be drawn, never *how*: the matplotlib artist lives in a
+canvas-side map keyed by :class:`TraceKey`, so a headless frontend can run a
+full ``ensure_trace`` -> ``get_plot_bundle`` -> ``set_visible`` cycle with no
+matplotlib import.
+"""
+
 from dataclasses import replace
 from typing import Optional
 from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
-import numpy as np
 
 from nbs_viewer.utils import print_debug
-from matplotlib.image import AxesImage
 
-from .view_spec import Projection, classify_profile_kind
+from .view_spec import classify_profile_kind
 from .frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -16,26 +24,25 @@ from .frozen_spectrum import (
 )
 from .plot_geometry import PlotBundle, RenderMode
 from .plot_request import PlotRequest, TraceKey, build_plot_request
+from .view_spec import Projection
 
 
-class PlotDataModel(QObject):
+class Trace(QObject):
     """
     Long-lived plot object for one :class:`TraceKey`.
 
-    Holds a :class:`PlotRequest` describing the current fetch. Changing the
-    request (crop, slice, transform, norm) reuses this model and its artist.
+    Holds a :class:`PlotRequest` describing the current fetch and the bundle
+    that request last produced. Changing the request (crop, slice, transform,
+    norm) reuses this object, and the canvas reuses the artist filed under
+    :attr:`trace_key`.
 
     Attributes
     ----------
-    artist : matplotlib Artist or None
-        The matplotlib artist representing the plotted data.
     last_bundle : PlotBundle or None
-        Most recently prepared plot payload.
+        Most recently prepared plot payload for :attr:`last_fetched_request`.
+        Dropped when the underlying run reports new data.
     """
 
-    artist_needed = Signal(object)
-    draw_requested = Signal()
-    autoscale_requested = Signal()
     visibility_changed = Signal(object, bool)
     data_changed = Signal(object)
     render_mode_changed = Signal(object, str)
@@ -50,7 +57,7 @@ class PlotDataModel(QObject):
         trace_key: Optional[TraceKey] = None,
     ):
         """
-        Initialize plot data model for one trace key.
+        Initialize a trace for one trace key.
 
         Parameters
         ----------
@@ -60,7 +67,7 @@ class PlotDataModel(QObject):
             Current fetch description.
         label : str, optional
             Plot label override.
-        parent : QWidget, optional
+        parent : QObject, optional
             Parent QObject.
         trace_key : TraceKey, optional
             Object identity. Defaults to ``request.trace_key()``.
@@ -71,11 +78,17 @@ class PlotDataModel(QObject):
         self._trace_key = trace_key or request.trace_key()
         self._fetched_request: Optional[PlotRequest] = None
         self._label = label
-        self.artist = None
         self.last_bundle: Optional[PlotBundle] = None
         self._render_mode: Optional[RenderMode] = None
         self._visible = True
         self._run.data_changed.connect(self._on_data_changed)
+
+    @property
+    def run(self):
+        """
+        Source run this trace reads from.
+        """
+        return self._run
 
     @property
     def request(self) -> PlotRequest:
@@ -87,9 +100,30 @@ class PlotDataModel(QObject):
     @property
     def trace_key(self) -> TraceKey:
         """
-        Object identity for this model / artist.
+        Object identity for this trace and its artist.
         """
         return self._trace_key
+
+    @property
+    def xkey(self) -> str:
+        """
+        Primary X key.
+        """
+        return self._trace_key.xkey
+
+    @property
+    def ykey(self) -> str:
+        """
+        Y data key.
+        """
+        return self._trace_key.ykey
+
+    @property
+    def projection(self) -> Optional[Projection]:
+        """
+        Rank-bound view of the plane this trace loads.
+        """
+        return self._request.view
 
     @property
     def last_fetched_request(self) -> Optional[PlotRequest]:
@@ -99,32 +133,11 @@ class PlotDataModel(QObject):
         return self._fetched_request
 
     @property
-    def _key(self):
-        return self._trace_key.as_tuple()
-
-    @property
-    def _xkey(self):
-        return self._trace_key.xkey
-
-    @property
-    def _ykey(self):
-        return self._trace_key.ykey
-
-    @property
-    def _norm_keys(self):
-        return list(self._request.norm_keys)
-
-    @property
-    def _indices(self):
-        return self._request.view.base_slice()
-
-    @property
-    def _cube_view_spec(self):
-        return self._request.view
-
-    @property
-    def _dimension(self):
-        return self._request.view.plot_ndim
+    def visible(self) -> bool:
+        """
+        Whether this trace should currently be drawn.
+        """
+        return self._visible
 
     def set_request(self, request: PlotRequest) -> bool:
         """
@@ -162,15 +175,18 @@ class PlotDataModel(QObject):
 
     def needs_fetch(self) -> bool:
         """
-        Return whether a worker should fetch for the current request.
+        Return whether the held request still has to be fetched.
+
+        Purely a question about model state: no bundle, or a bundle produced
+        by a different request. A canvas that has lost its artist but still
+        holds a matching bundle asks for a redraw, not a refetch.
 
         Returns
         -------
         bool
-            True if there is no artist or the held request has not been
-            fetched yet.
+            True if a worker should fetch for the current request.
         """
-        if self.artist is None:
+        if self.last_bundle is None:
             return True
         return self._fetched_request != self._request
 
@@ -178,7 +194,7 @@ class PlotDataModel(QObject):
     def label(self):
         if self._label:
             return self._label
-        return self._run.legend_label_for_ykey(self._ykey)
+        return self._run.legend_label_for_ykey(self.ykey)
 
     @property
     def axis_names(self):
@@ -277,7 +293,7 @@ class PlotDataModel(QObject):
         cube_fingerprint : tuple, optional
             Slice / cube-view snapshot at commit time.
         committed_xkey : str, optional
-            X key selected at save time. Defaults to this model's x key.
+            X key selected at save time. Defaults to this trace's x key.
 
         Returns
         -------
@@ -291,21 +307,21 @@ class PlotDataModel(QObject):
         """
         if bundle.render_mode != "line" or bundle.ndim != 1:
             raise ValueError("Saved ROI profiles must be 1D line profiles")
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        spec = parent_spec if parent_spec is not None else self.projection
         kind = "stack_spectrum"
         if spec is not None and request.profile_axis is not None:
             kind = classify_profile_kind(spec, request.profile_axis)
         if committed_xkey is None:
-            committed_xkey = self._xkey
+            committed_xkey = self.xkey
         return FrozenSpectrum(
             key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
             label=label,
             bundle=copy_plot_bundle(bundle),
             kind=kind,
-            source_ykey=self._ykey,
+            source_ykey=self.ykey,
             committed_xkey=committed_xkey or "",
             request=request,
-            source_key=self._key,
+            source_key=self._trace_key.as_tuple(),
             cube_fingerprint=cube_fingerprint,
         )
 
@@ -345,36 +361,35 @@ class PlotDataModel(QObject):
         bool
             True if plot data should be refreshed.
         """
-        changed = False
-        if self.artist is None:
-            changed = True
+        view = self._request.view
+        changed = self.last_bundle is None
         if (
             norm_keys is not None
             or indices is not None
             or cube_view_spec is not None
             or dimension is not None
         ):
-            shape = self._run.get_shape(self._ykey)
+            shape = self._run.get_shape(self.ykey)
             request = build_plot_request(
                 uid=self._run.uid,
-                xkeys=[self._xkey] if self._xkey else (),
-                ykey=self._ykey,
+                xkeys=[self.xkey] if self.xkey else (),
+                ykey=self.ykey,
                 shape=shape,
                 norm_keys=(
-                    norm_keys if norm_keys is not None else self._norm_keys
+                    norm_keys
+                    if norm_keys is not None
+                    else list(self._request.norm_keys)
                 ),
                 plot_ndim=(
-                    dimension if dimension is not None else self._dimension
+                    dimension if dimension is not None else view.plot_ndim
                 ),
                 projection=(
-                    cube_view_spec
-                    if cube_view_spec is not None
-                    else self._cube_view_spec
+                    cube_view_spec if cube_view_spec is not None else view
                 ),
                 slice_info=(
-                    indices if indices is not None else self._indices
+                    indices if indices is not None else view.base_slice()
                 ),
-                crop=self._request.view.crop,
+                crop=view.crop,
                 transform=self._request.transform,
             )
             if self.set_request(request):
@@ -383,7 +398,7 @@ class PlotDataModel(QObject):
             changed = False
         if changed:
             print_debug(
-                "PlotDataModel.update_data_info",
+                "Trace.update_data_info",
                 f"changed for {self.label} emit={emit}",
                 category="plots",
             )
@@ -398,86 +413,59 @@ class PlotDataModel(QObject):
 
     def set_visible(self, visible):
         """
-        Set the visibility of the artist.
+        Record whether this trace should be drawn.
+
+        Session intent only. The canvas listens on ``visibility_changed`` and
+        applies it to the artist; nothing here touches matplotlib, and a
+        hidden trace keeps ``last_bundle`` so showing it again is free.
 
         Parameters
         ----------
         visible : bool
-            Whether to show or hide the artist.
+            Whether the trace should be drawn.
         """
+        visible = bool(visible)
+        if visible == self._visible:
+            return
+        print_debug(
+            "Trace.set_visible",
+            f"{self.label} {self._visible} -> {visible}",
+            category="plots",
+        )
         self._visible = visible
-        if self.artist is not None:
-            was_visible = self.artist.get_visible()
-            if was_visible != visible:
-                print_debug(
-                    "PlotDataModel.set_visible",
-                    f"{self.label} {was_visible} -> {visible}",
-                    category="plots",
-                )
-                self.artist.set_visible(visible)
-                self.visibility_changed.emit(self, visible)
-                self.autoscale_requested.emit()
-                self.draw_requested.emit()
+        self.visibility_changed.emit(self, visible)
+
+    def invalidate_bundle(self) -> None:
+        """
+        Drop the cached bundle so the next :meth:`needs_fetch` asks for a read.
+
+        Called when the run's data changes underneath a request that has not
+        itself changed — live scans, and cache fills. Without it a hidden
+        trace would come back showing the arrays as they stood when it was
+        hidden.
+        """
+        self.last_bundle = None
+        self._fetched_request = None
+
+    def dispose(self) -> None:
+        """
+        Detach from the run before this trace leaves the set.
+
+        A trace outlives individual requests but not membership; without the
+        disconnect a dropped trace keeps waking on every fetch its old run
+        makes.
+        """
+        try:
+            self._run.data_changed.disconnect(self._on_data_changed)
+        except (TypeError, RuntimeError):
+            pass
 
     def _on_data_changed(self, *args):
+        self.invalidate_bundle()
         if self._visible:
             print_debug(
-                "PlotDataModel._on_data_changed",
+                "Trace._on_data_changed",
                 f"data_changed for {self.label}",
                 category="plots",
             )
             self.data_changed.emit(self)
-
-    def set_artist(self, artist):
-        """
-        Set the artist for this model.
-
-        Parameters
-        ----------
-        artist : Artist
-            The matplotlib artist.
-        """
-        self.artist = artist
-
-    def clear(self):
-        """
-        Remove artist from plot and clean up.
-        """
-        print_debug(
-            "PlotDataModel.clear",
-            f"Clearing {self.label}",
-            category="plots",
-        )
-        if self.artist is not None:
-            try:
-                if self.artist.axes is not None:
-                    self.artist.remove()
-
-                if isinstance(self.artist, AxesImage):
-                    self.artist.set_data([[]])
-                elif hasattr(self.artist, "set_data"):
-                    self.artist.set_data([], [])
-                elif hasattr(self.artist, "set_array"):
-                    self.artist.set_array([])
-            except Exception as e:
-                print(f"[PlotDataModel.clear] Error cleaning up artist: {e}")
-            finally:
-                self.artist = None
-                self.draw_requested.emit()
-
-    def remove_artist_from_axes(self):
-        if self.artist is not None and self.artist.axes is not None:
-            self.artist.remove()
-            self.draw_requested.emit()
-
-    def add_artist_to_axes(self, axes):
-        if self.artist is not None:
-            axes.add_artist(self.artist)
-            self.draw_requested.emit()
-
-    def move_artist_to_axes(self, axes):
-        if self.artist is not None and self.artist.axes != axes:
-            if self.artist.axes is not None:
-                self.artist.remove()
-            axes.add_artist(self.artist)
-            self.draw_requested.emit()

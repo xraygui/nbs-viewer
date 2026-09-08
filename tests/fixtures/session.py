@@ -182,7 +182,7 @@ class HeadlessSession:
         y_list = list(y_keys)
         norm_list = list(norm_keys or [])
         self.session.set_selected_keys(x_list, y_list, norm_list)
-        plot_data = self.session.ensure_plot_data(
+        plot_data = self.session.ensure_trace(
             run_model,
             x_list[0] if x_list else "",
             y_list[0],

@@ -5,7 +5,7 @@ goal, the invariants, and the order of work. **Detail lives in the sub-plans**
 — keep this file short enough to read before every session.
 
 **Status:** in progress on branch `mesh-transpose-removal` off `image_viewing`.
-Suite green at 350 tests.
+Suite green at 351 tests.
 
 ## The diagnosis, in one sentence
 
@@ -24,7 +24,7 @@ Carried forward from the closed ownership plan. These bind every step.
 1. **Only models create domain models.** Views may create Qt proxies used
    purely as view adapters (`ReverseModel`, `FilterModel`, item models).
 2. **A view that needs a model asks the model it already holds** —
-   `session.roi_set`, `session.ensure_plot_data(...)`.
+   `session.roi_set`, `session.ensure_trace(...)`.
 3. **Domain code stays under `models/`.** No `QtWidgets` imports there.
 4. **Each step ships with its tests in the same PR.**
 5. **No `feature/{models,views}` tree inversion.**
@@ -66,8 +66,8 @@ They interleave; the order below is the merged sequence.
 | 4 | One request, no side channels | view pipeline | ✅ `b431c47` |
 | A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ `5330b81` |
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
-| B | `Trace` | session & traces | unblocked — next |
-| 6 | Adopt `ViewIntent`, or delete it | view pipeline | needs B |
+| B | `Trace` | session & traces | ✅ `__COMMIT__` |
+| 6 | Adopt `ViewIntent`, or delete it | view pipeline | unblocked — next |
 | C | Consumer sweep — canvas `TraceSet`, `DimensionControl` pushes intent | session & traces | after 6 |
 | D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
@@ -86,6 +86,15 @@ Step A was a rename, but the plan's mechanics for it contradicted invariant 1:
 having `PlotPresenter` construct the item model would have made `models/`
 import `views/`. `RunListView` builds it instead. Counting consumers is what
 settled it, and the count also found bugs 9 and 10; see the sub-plan.
+
+Step B moved the artist off the trace, which is what problem-statement
+item 6 was blocking on. Two things the sub-plan had left open were only
+answerable while writing it: a bundle cache that survives hide/show has to be
+invalidated by the run's `data_changed`, not by the request; and a session
+that cannot touch artists cannot dispose one, so removal is announced by
+`TraceKey` and the canvas performs it. Its `EXPECTED_VIOLATIONS` exit
+criterion moved to step C, which is the step that deletes the construction it
+names.
 
 Step 5 named the types to delete but no destination for the fifteen live
 functions in `cube_view.py` that were not types. The import graph settled it —
@@ -109,10 +118,10 @@ Recorded regardless of whether the step that fixes them lands.
 | 5 | Unlinked mode double-lists synthetic keys — `available_keys` is catalog plus frozen, so a frozen spectrum gets a catalog row with an X checkbox it should not have. | open |
 | 6 | `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)` where `MemoryRun` uses `range(1, ndim)`, so every dimension receives the previous dimension's `axes` hint when `getAxisHints` is non-empty. Masked by name-list truncation. | open |
 | 7 | `BlueskyRun.getRunKeys` ends with `ykeys[1] = all_keys`, so rank-3 camera keys are reported as rank 1 and the two backends disagree about the grouping. | open — own commit |
-| 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
+| 8 | `Trace.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
 | 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A (`5330b81`) |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
-| 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` pops the trace and calls `plot_data.clear()`, so the artist leaves the axes but the trace is gone from `plot_data_map` before `_do_update_plot` iterates it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
+| 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` popped the trace and called `plot_data.clear()`, so the artist left the axes but the trace was gone from the map before `_do_update_plot` iterated it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
 N-D y key by a lower-rank norm key raised; `visible_runs` and `visible_models`

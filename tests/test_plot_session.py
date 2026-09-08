@@ -36,10 +36,10 @@ def test_add_remove_rebuilds_plot_data_keys():
         for x in x_keys
         for y in y_keys[:1]
     }
-    assert set(plot.plot_data_map) == desired
+    assert set(plot.traces) == desired
 
     plot.remove_run(run)
-    assert set(plot.plot_data_map) == set()
+    assert set(plot.traces) == set()
     assert len(plot.collection) == 0
 
 
@@ -49,18 +49,18 @@ def test_hide_show_retains_plot_data():
     plot.add_run(run)
     x_keys, y_keys, _norm = run.run.get_default_selection()
     plot.set_selected_keys(x_keys, y_keys[:1], [])
-    keys_before = set(plot.plot_data_map)
+    keys_before = set(plot.traces)
     assert keys_before
 
     plot.set_uids_visible([run.uid], False)
     assert run.uid not in plot.visible_uids
-    assert set(plot.plot_data_map) == keys_before
-    assert list(plot.iter_visible_plot_data()) == []
+    assert set(plot.traces) == keys_before
+    assert list(plot.iter_visible_traces()) == []
 
     plot.set_uids_visible([run.uid], True)
     assert run.uid in plot.visible_uids
-    assert set(plot.plot_data_map) == keys_before
-    assert len(list(plot.iter_visible_plot_data())) == len(keys_before)
+    assert set(plot.traces) == keys_before
+    assert len(list(plot.iter_visible_traces())) == len(keys_before)
 
 
 def test_list_rows_track_session_membership():
@@ -96,7 +96,7 @@ def test_retained_keys_respect_per_run_selection():
     plot.set_selected_keys(x_keys, y_keys[:1], [])
     plot.set_selection_for(runs[0].uid, x_keys, [], [])
 
-    keys = set(plot.plot_data_map)
+    keys = set(plot.traces)
     assert all(k.uid != runs[0].uid for k in keys)
     assert any(k.uid == runs[1].uid for k in keys)
 

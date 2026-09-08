@@ -38,7 +38,7 @@ class RoiPreviewWorker(QThread):
 
     def __init__(
         self,
-        plot_data,
+        trace,
         request: PlotRequest,
         generation: int,
         parent=None,
@@ -46,7 +46,7 @@ class RoiPreviewWorker(QThread):
         cached_plane: PlotBundle | None = None,
     ):
         super().__init__(parent)
-        self.plot_data = plot_data
+        self.trace = trace
         self.request = request
         self.cached_plane = cached_plane
         self.generation = generation
@@ -59,7 +59,7 @@ class RoiPreviewWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t0 = time.perf_counter()
-            bundle = self.plot_data.preview_roi_profile(
+            bundle = self.trace.preview_roi_profile(
                 self.request,
                 cached_plane=self.cached_plane,
             )

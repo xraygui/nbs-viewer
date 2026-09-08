@@ -64,7 +64,7 @@ class PlotWorker(QThread):
 
     def __init__(
         self,
-        plot_data,
+        trace,
         plot_request: PlotRequest,
         generation,
         artist=None,
@@ -72,8 +72,8 @@ class PlotWorker(QThread):
         """
         Parameters
         ----------
-        plot_data : PlotDataModel
-            Trace model that owns the fetch.
+        trace : Trace
+            Trace that owns the fetch.
         plot_request : PlotRequest
             Frozen description of what to fetch.
         generation : int
@@ -82,7 +82,7 @@ class PlotWorker(QThread):
             Existing matplotlib artist to update.
         """
         super().__init__()
-        self.plot_data = plot_data
+        self.trace = trace
         self.plot_request = plot_request
         self.generation = generation
         self.artist = artist
@@ -93,7 +93,7 @@ class PlotWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t1 = ttime.time()
-            bundle = self.plot_data.get_plot_bundle(
+            bundle = self.trace.get_plot_bundle(
                 plot_request=self.plot_request
             )
             if self.isInterruptionRequested():
@@ -105,13 +105,13 @@ class PlotWorker(QThread):
                 return
             print_debug(
                 "PlotWorker.run",
-                f"bundle ready label={self.plot_data.label} "
+                f"bundle ready label={self.trace.label} "
                 f"mode={bundle.render_mode} y.shape={bundle.y.shape} "
                 f"gen={self.generation} {ttime.time() - t1:.4f}s",
                 category="plots",
             )
             self.data_ready.emit(
-                bundle, self.plot_data, self.artist, self.generation
+                bundle, self.trace, self.artist, self.generation
             )
         except Exception as e:
             if self.isInterruptionRequested():

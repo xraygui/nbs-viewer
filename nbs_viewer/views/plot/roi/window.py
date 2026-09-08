@@ -86,9 +86,9 @@ class RoiWindow(QDialog):
         self._commit_generation = 0
         self._pending_commit_request = None
         self._pending_commit_entry_id = None
-        self._pending_commit_plot_data = None
+        self._pending_commit_trace = None
         self._save_all_queue = []
-        self._connected_plot_data = None
+        self._connected_trace = None
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -306,7 +306,7 @@ class RoiWindow(QDialog):
                 dimension_control=dimension_control,
             )
             cls._instances[presenter.id] = window
-        window._connect_plot_data_signals()
+        window._connect_trace_signals()
         window.refresh_context()
         window.show()
         window.raise_()
@@ -321,22 +321,22 @@ class RoiWindow(QDialog):
                 return names
         return ()
 
-    def _connect_plot_data_signals(self):
-        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
-        if plot_data is self._connected_plot_data:
+    def _connect_trace_signals(self):
+        trace = self.plot_model.resolve_single_visible_2d_trace()
+        if trace is self._connected_trace:
             return
-        self._disconnect_plot_data_signals()
-        self._connected_plot_data = plot_data
-        if plot_data is not None:
-            plot_data.data_changed.connect(self._schedule_preview)
+        self._disconnect_trace_signals()
+        self._connected_trace = trace
+        if trace is not None:
+            trace.data_changed.connect(self._schedule_preview)
 
-    def _disconnect_plot_data_signals(self):
-        plot_data = self._connected_plot_data
-        self._connected_plot_data = None
-        if plot_data is None:
+    def _disconnect_trace_signals(self):
+        trace = self._connected_trace
+        self._connected_trace = None
+        if trace is None:
             return
         try:
-            plot_data.data_changed.disconnect(self._schedule_preview)
+            trace.data_changed.disconnect(self._schedule_preview)
         except (TypeError, RuntimeError):
             pass
 
@@ -344,15 +344,15 @@ class RoiWindow(QDialog):
         """
         Refresh source summary and profile-axis controls from the plot model.
         """
-        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = self.plot_model.resolve_single_visible_2d_trace()
+        if trace is None:
             source = "No single 2D dataset selected"
         else:
-            source = f"{plot_data.label} · {plot_data._ykey}"
+            source = f"{trace.label} · {trace.ykey}"
         self.set_context(source)
 
         parent_spec = self.plot_model.cube_view_spec
-        parent_frame = self.plot_model.resolve_parent_frame(plot_data)
+        parent_frame = self.plot_model.resolve_parent_frame(trace)
         self.set_profile_context(
             parent_spec,
             self._dimension_axis_names(),
@@ -365,7 +365,7 @@ class RoiWindow(QDialog):
         self._cancel_preview_worker()
         self._cancel_commit_worker()
         self._save_all_queue.clear()
-        self._disconnect_plot_data_signals()
+        self._disconnect_trace_signals()
         self.plot_model.set_roi_draw_enabled(False)
         self.plot_model.set_ellipse_circle_locked(False)
         self.set_draw_checked(False)
@@ -373,7 +373,7 @@ class RoiWindow(QDialog):
     def _on_view_context_changed(self, *_args):
         if not self.isVisible():
             return
-        self._connect_plot_data_signals()
+        self._connect_trace_signals()
         self.refresh_context()
         self._schedule_preview()
 
@@ -435,25 +435,25 @@ class RoiWindow(QDialog):
         QTimer.singleShot(0, self._run_preview)
 
     def _start_preview_worker(self, generation: int, entry, span_full_override=None):
-        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = self.plot_model.resolve_single_visible_2d_trace()
+        if trace is None:
             raise ValueError("Select a single 2D dataset")
 
         request = self.plot_model.build_roi_profile_request(
             entry,
-            plot_data=plot_data,
-            parent_frame=self.plot_model.resolve_parent_frame(plot_data),
+            trace=trace,
+            parent_frame=self.plot_model.resolve_parent_frame(trace),
             span_full_override=span_full_override,
             default_profile_axis=self.get_profile_storage_axis(),
         )
 
         return RoiPreviewWorker(
-            plot_data,
+            trace,
             request,
             generation,
             self,
             cached_plane=self.plot_model.cached_parent_bundle_for_preview(
-                plot_data
+                trace
             ),
         )
 
@@ -473,7 +473,7 @@ class RoiWindow(QDialog):
             self.set_status("")
             return
 
-        if self.plot_model.resolve_single_visible_2d_plot_data() is None:
+        if self.plot_model.resolve_single_visible_2d_trace() is None:
             self.show_preview_message("Select a single 2D dataset")
             self.set_status("")
             return
@@ -573,8 +573,8 @@ class RoiWindow(QDialog):
             self._save_all_queue.clear()
             return
 
-        plot_data = self.plot_model.resolve_single_visible_2d_plot_data()
-        if plot_data is None:
+        trace = self.plot_model.resolve_single_visible_2d_trace()
+        if trace is None:
             self.set_status("Select a single 2D dataset")
             return
 
@@ -582,8 +582,8 @@ class RoiWindow(QDialog):
         try:
             span_full, request = self.plot_model.prepare_roi_commit(
                 entry,
-                plot_data=plot_data,
-                parent_frame=self.plot_model.resolve_parent_frame(plot_data),
+                trace=trace,
+                parent_frame=self.plot_model.resolve_parent_frame(trace),
                 axis_names=self._dimension_axis_names(),
                 default_profile_axis=default_axis,
             )
@@ -597,7 +597,7 @@ class RoiWindow(QDialog):
         generation = self._commit_generation
         self._pending_commit_request = request
         self._pending_commit_entry_id = entry_id
-        self._pending_commit_plot_data = plot_data
+        self._pending_commit_trace = trace
         self.set_status(f"Saving {entry.display_label}…")
 
         try:
@@ -623,9 +623,9 @@ class RoiWindow(QDialog):
             return
 
         entry = self.roi_set.get(self._pending_commit_entry_id)
-        plot_data = self._pending_commit_plot_data
+        trace = self._pending_commit_trace
         request = self._pending_commit_request
-        if entry is None or plot_data is None or request is None:
+        if entry is None or trace is None or request is None:
             return
 
         try:
@@ -633,7 +633,7 @@ class RoiWindow(QDialog):
                 entry,
                 bundle,
                 request,
-                parent_plot_data=plot_data,
+                parent_trace=trace,
                 parent_spec=self.plot_model.cube_view_spec,
                 axis_names=self._dimension_axis_names(),
             )

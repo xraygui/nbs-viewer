@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import QTimer, Signal
 from qtpy.QtWidgets import QSizePolicy
 
-from nbs_viewer.models.plot.plotDataModel import PlotDataModel
+from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker
@@ -41,7 +41,8 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         self.presenter = presenter
         self.plot_model = presenter.session
 
-        self.plotArtists = {}
+        self._traces = {}
+        self._artists = {}
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -286,17 +287,47 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             artist = ax.imshow(np.zeros(image_or_shape), cmap=self.cmap, aspect="auto")
         return artist
 
-    def _move_plot_data_to_axes(self, plot_data, ax):
-        if hasattr(plot_data.artist, "get_array"):
-            image_data = plot_data.artist.get_array()
-            if plot_data.artist.axes is not None:
-                plot_data.artist.remove()
+    def _artist_for(self, grid_key):
+        """
+        Return the artist drawn for one grid cell, if any.
 
+        Parameters
+        ----------
+        grid_key : tuple
+            ``(run uid, image index)`` cell key.
+
+        Returns
+        -------
+        Artist or None
+        """
+        return self._artists.get(grid_key)
+
+    def _move_artist_to_axes(self, grid_key, ax):
+        """
+        Re-home one cell's artist on a freshly created subplot.
+
+        Parameters
+        ----------
+        grid_key : tuple
+            ``(run uid, image index)`` cell key.
+        ax : Axes
+            Destination axes.
+        """
+        artist = self._artists.get(grid_key)
+        if artist is None:
+            return
+        if hasattr(artist, "get_array"):
+            image_data = artist.get_array()
+            if artist.axes is not None:
+                artist.remove()
             new_artist = self._create_artist(ax, image_data)
-            plot_data.set_artist(new_artist)
+            self._artists[grid_key] = new_artist
             new_artist.autoscale()
-        else:
-            plot_data.move_artist_to_axes(ax)
+        elif artist.axes is not ax:
+            if artist.axes is not None:
+                artist.remove()
+            ax.add_artist(artist)
+            self.draw()
 
     def _style_axes(self, ax, slice_info, image_idx):
         ax.set_title(f"Image {image_idx}")
@@ -355,21 +386,22 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                     f"Processing image {image_idx} with indices {slice_info}",
                     category="plots",
                 )
-                plot_data = self._create_image_plot_data(
+                trace = self._create_image_trace(
                     run_model, slice_info, image_idx
                 )
-                if plot_data.artist is None:
+                grid_key = self._grid_worker_key(run_model.uid, image_idx)
+                if self._artist_for(grid_key) is None:
                     artist = self._create_artist(ax, image_shape)
                     self._start_image_worker(
-                        plot_data, slice_info, artist, image_idx
+                        trace, slice_info, artist, image_idx
                     )
                 else:
                     print_debug(
                         "ImageGridCanvas",
-                        f"Moving artist {plot_data.label} to new axes",
+                        f"Moving artist {trace.label} to new axes",
                         category="plots",
                     )
-                    self._move_plot_data_to_axes(plot_data, ax)
+                    self._move_artist_to_axes(grid_key, ax)
 
             except Exception as e:
                 print_debug(
@@ -384,15 +416,15 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             "ImageGridCanvas", "Finished creating subplots", category="plots"
         )
 
-    def _create_image_plot_data(self, run_model, slice_info, image_idx):
+    def _create_image_trace(self, run_model, slice_info, image_idx):
         key = (run_model.uid, image_idx)
         sel = self.plot_model.selection_for(run_model.uid)
         x_keys, y_keys, norm_keys = sel.as_lists()
         y_key = y_keys[0]
-        if key not in self.plotArtists:
+        if key not in self._traces:
             print_debug(
                 "ImageGridCanvas",
-                f"Creating PlotDataModel for image {image_idx}",
+                f"Creating Trace for image {image_idx}",
                 category="plots",
             )
 
@@ -410,7 +442,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 slice_info=slice_info,
                 transform=transform,
             )
-            plot_data = PlotDataModel(
+            trace = Trace(
                 run_model,
                 request,
                 label=f"Image {image_idx}",
@@ -419,52 +451,51 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 ),
             )
 
-            plot_data.data_changed.connect(self._start_image_worker)
-            plot_data.draw_requested.connect(self._handle_image_draw)
+            trace.data_changed.connect(self._start_image_worker)
 
-            self.plotArtists[key] = plot_data
+            self._traces[key] = trace
         else:
-            plot_data = self.plotArtists[key]
-            plot_data.update_data_info(indices=slice_info)
-        return plot_data
+            trace = self._traces[key]
+            trace.update_data_info(indices=slice_info)
+        return trace
 
     def _grid_worker_key(self, run_uid, image_idx):
         return (run_uid, image_idx)
 
-    def _image_idx_for_plot_data(self, plot_data):
-        for key, model in self.plotArtists.items():
-            if model is plot_data:
+    def _image_idx_for_trace(self, trace):
+        for key, model in self._traces.items():
+            if model is trace:
                 return key[1]
-        raise KeyError(f"No grid index for plot data {plot_data.label}")
+        raise KeyError(f"No grid index for plot data {trace.label}")
 
     def _start_image_worker(
-        self, plot_data, slice_info=None, artist=None, image_idx=None
+        self, trace, slice_info=None, artist=None, image_idx=None
     ):
         print_debug(
             "ImageGridCanvas",
-            f"Starting worker for image {plot_data.label}",
+            f"Starting worker for image {trace.label}",
             category="plots",
         )
         dimension = 2
         if slice_info is None:
-            slice_info = plot_data._indices
+            slice_info = trace.request.view.base_slice()
         if image_idx is None:
-            image_idx = self._image_idx_for_plot_data(plot_data)
+            image_idx = self._image_idx_for_trace(trace)
 
-        worker_key = self._grid_worker_key(plot_data._run.uid, image_idx)
+        worker_key = self._grid_worker_key(trace.run.uid, image_idx)
         generation = self._worker_generations.get(worker_key, 0) + 1
         self._worker_generations[worker_key] = generation
 
         old_worker = self._active_workers.pop(worker_key, None)
         retire_plot_worker(old_worker, self._pending_workers)
 
-        request = plot_data.request
+        request = trace.request
         if slice_info is not None:
-            plot_data.update_data_info(
+            trace.update_data_info(
                 indices=slice_info, dimension=dimension, emit=False
             )
-            request = plot_data.request
-        worker = PlotWorker(plot_data, request, generation, artist)
+            request = trace.request
+        worker = PlotWorker(trace, request, generation, artist)
         worker.data_ready.connect(self._handle_image_data)
         worker.error_occurred.connect(self._handle_image_error)
         worker.finished.connect(
@@ -477,28 +508,28 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         if self._active_workers.get(worker_key) is worker:
             self._active_workers.pop(worker_key, None)
 
-    def _handle_image_data(self, bundle, plot_data, artist=None, generation=0):
+    def _handle_image_data(self, bundle, trace, artist=None, generation=0):
         worker_key = self._grid_worker_key(
-            plot_data._run.uid, self._image_idx_for_plot_data(plot_data)
+            trace.run.uid, self._image_idx_for_trace(trace)
         )
         if generation != self._worker_generations.get(worker_key):
             print_debug(
                 "ImageGridCanvas",
-                f"Stale worker gen={generation} for {plot_data.label}, skipping",
+                f"Stale worker gen={generation} for {trace.label}, skipping",
                 category="plots",
             )
             return
         y = bundle.y
         print_debug(
             "ImageGridCanvas",
-            f"Received data for {plot_data.label}: shape {y.shape}",
+            f"Received data for {trace.label}: shape {y.shape}",
             category="plots",
         )
 
         if artist is None:
-            artist = plot_data.artist
+            artist = self._artist_for(worker_key)
         else:
-            plot_data.set_artist(artist)
+            self._artists[worker_key] = artist
         if artist is None:
             print_debug(
                 "ImageGridCanvas", "No artist found for plot data", category="plots"
@@ -509,7 +540,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             if len(y.shape) == 2:
                 print_debug(
                     "ImageGridCanvas",
-                    f"Successfully plotted {plot_data.label}",
+                    f"Successfully plotted {trace.label}",
                     category="plots",
                 )
                 artist.set_data(y)
@@ -527,9 +558,6 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 "ImageGridCanvas", f"Error plotting image data: {e}", category="plots"
             )
 
-    def _handle_image_draw(self):
-        self.draw()
-
     def _handle_image_error(self, error_msg):
         print_debug(
             "ImageGridCanvas", f"Image worker error: {error_msg}", category="plots"
@@ -545,8 +573,9 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             self.figure.clear()
             super().draw()
 
-        for plot_data in self.plotArtists.values():
-            plot_data.remove_artist_from_axes()
+        for artist in self._artists.values():
+            if artist.axes is not None:
+                artist.remove()
 
         self.axes.clear()
 

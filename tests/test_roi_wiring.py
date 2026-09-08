@@ -57,11 +57,10 @@ def _wired_image_scan_with_roi(
     session.session.set_view_state(dimension=2, cube_view_spec=parent_spec)
     session.session.set_selected_keys(["en_energy"], ["detector_image"])
 
-    plot_data = session.session.ensure_plot_data(
+    plot_data = session.session.ensure_trace(
         run_model, "en_energy", "detector_image"
     )
     bundle = plot_data.get_plot_bundle()
-    plot_data._visible = True
 
     frame = frame_from_bundle(bundle)
     x0, _ = _cell_x_bounds_mesh(frame, 5, 0)
@@ -91,7 +90,7 @@ def test_preview_roi_profile_on_catalog_selected_run(qapp, app_model):
 
     bundle = session.session.preview_roi_profile(
         entry_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
     )
@@ -108,7 +107,7 @@ def test_commit_roi_profile_registers_frozen_spectrum(qapp, app_model):
 
     frozen = session.session.commit_roi_profile(
         entry_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
@@ -126,7 +125,7 @@ def test_committed_synthetic_key_fetchable_via_fetch_bundle(qapp, app_model):
 
     frozen = session.session.commit_roi_profile(
         entry_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
@@ -147,7 +146,7 @@ def test_preview_rejects_stale_roi_on_wired_session(qapp, app_model):
     with pytest.raises(ValueError, match="stale"):
         session.session.preview_roi_profile(
             entry_id,
-            parent_plot_data=plot_data,
+            parent_trace=plot_data,
                 parent_frame=frame,
             cached_plane=plot_data.last_bundle,
         )
@@ -161,7 +160,7 @@ def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
     with pytest.raises(ValueError, match="Select a profile along"):
         session.session.commit_roi_profile(
             entry_id,
-            parent_plot_data=plot_data,
+            parent_trace=plot_data,
                 parent_frame=frame,
             cached_plane=plot_data.last_bundle,
             axis_names=("en_energy", "pixel"),

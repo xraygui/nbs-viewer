@@ -35,11 +35,10 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     plot_model.set_view_state(dimension=2, cube_view_spec=parent_spec)
     plot_model.set_selected_keys(["en_energy"], ["detector_image"])
 
-    plot_data = plot_model.ensure_plot_data(
+    plot_data = plot_model.ensure_trace(
         run_model, "en_energy", "detector_image"
     )
     bundle = plot_data.get_plot_bundle()
-    plot_data._visible = True
 
     frame = frame_from_bundle(bundle)
     from nbs_viewer.models.plot.region_mesh import (
@@ -72,7 +71,7 @@ def test_preview_roi_profile_returns_1d_bundle(qapp):
 
     bundle = plot_model.preview_roi_profile(
         entry_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
     )
@@ -84,11 +83,11 @@ def test_preview_roi_profile_returns_1d_bundle(qapp):
 
 def test_commit_roi_profile_registers_synthetic_keys(qapp):
     plot_model, plot_data, entry_id, frame, region = _setup_plot_with_roi()
-    run_model = plot_data._run
+    run_model = plot_data.run
 
     first = plot_model.commit_roi_profile(
         entry_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
@@ -109,7 +108,7 @@ def test_commit_roi_profile_registers_synthetic_keys(qapp):
     )
     second = plot_model.commit_roi_profile(
         second_id,
-        parent_plot_data=plot_data,
+        parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
@@ -132,7 +131,7 @@ def test_preview_rejects_stale_roi(qapp):
     with pytest.raises(ValueError, match="stale"):
         plot_model.preview_roi_profile(
             entry_id,
-            parent_plot_data=plot_data,
+            parent_trace=plot_data,
             parent_frame=frame,
             cached_plane=plot_data.last_bundle,
         )
@@ -146,7 +145,7 @@ def test_commit_rejects_local_profile(qapp):
     with pytest.raises(ValueError, match="Select a profile along"):
         plot_model.commit_roi_profile(
             entry_id,
-            parent_plot_data=plot_data,
+            parent_trace=plot_data,
             parent_frame=frame,
             cached_plane=plot_data.last_bundle,
             axis_names=("en_energy", "pixel"),
@@ -192,11 +191,10 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     parent_spec = default_spec(3, 2).with_index(0, 4)
     plot_model.set_view_state(dimension=2, cube_view_spec=parent_spec)
     plot_model.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
-    plot_data = plot_model.ensure_plot_data(
+    plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
     bundle = plot_data.get_plot_bundle()
-    plot_data._visible = True
     frame = frame_from_bundle(bundle)
     assert frame.row_reversed
 

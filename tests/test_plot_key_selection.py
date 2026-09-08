@@ -51,19 +51,19 @@ def test_y_image_y_selection_sequence():
     xkey = x_keys[0]
 
     plot.set_selected_keys(x_keys, ["y"], norm_keys)
-    bundle_y = plot.ensure_plot_data(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y.render_mode == "line"
 
     plot.set_selected_keys(x_keys, ["image"], norm_keys)
     plot.set_view_state(dimension=2)
-    bundle_image = plot.ensure_plot_data(
+    bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
     ).get_plot_bundle()
     assert bundle_image.render_mode == "image"
 
     plot.set_selected_keys(x_keys, ["y"], norm_keys)
     plot.set_view_state(indices=None, dimension=1, cube_view_spec=None)
-    bundle_y_again = plot.ensure_plot_data(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y_again.render_mode == "line"
     assert "dim_1" not in bundle_y_again.axis_names
 
@@ -83,8 +83,8 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     plot.set_selected_keys(x_keys, ["y", "image"], norm_keys)
     plot.set_view_state(dimension=2, cube_view_spec=spec)
 
-    bundle_y = plot.ensure_plot_data(run, xkey, "y", norm_keys).get_plot_bundle()
-    bundle_image = plot.ensure_plot_data(
+    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
     ).get_plot_bundle()
 
