@@ -11,7 +11,10 @@ onto storage slices.
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.plot_bundle import reduce_to_plot_plane
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
@@ -25,12 +28,12 @@ from nbs_viewer.models.plot.region import (
     RectRegion,
     compile_with_mask_mode,
 )
-from nbs_viewer.models.plot.view_spec import ViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.display_plane import display_frame, oriented_plane
 
 E_COUNT, S_COUNT, NY, NX = 4, 3, 7, 8
-PARENT = CubeViewSpec(
+PARENT = Projection(
     ndim=4,
     plot_ndim=2,
     roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -81,7 +84,7 @@ def _plane_request(parent=PARENT):
         xkeys=("x",),
         ykey="y",
         norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(parent),
+        view=parent,
     )
 
 
@@ -247,7 +250,7 @@ def test_region_frame_for_bbox_image_extent_keeps_bottom_below_top():
 def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
     e_count, d0_count, y_count, x_count = 20, 5, 100, 100
     stack = np.random.default_rng(0).random((e_count, d0_count, y_count, x_count))
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),

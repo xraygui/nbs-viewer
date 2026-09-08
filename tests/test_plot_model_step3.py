@@ -9,7 +9,11 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, default_spec
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+    default_spec,
+)
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
@@ -117,7 +121,7 @@ def test_cube_view_and_crop_without_canvas(qapp):
     plot_model = PlotSession()
     spec = default_spec(3, 2)
     plot_model.set_view_state(
-        indices=spec.to_load_slice_info(),
+        indices=spec.base_slice(),
         dimension=2,
         cube_view_spec=spec,
     )
@@ -140,14 +144,14 @@ def _image_session(qapp):
     plot_model.add_run(run_model)
     plot_model.set_selected_keys(["pixel"], ["detector_image"])
 
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
     plot_model.set_view_state(
-        indices=parent.to_load_slice_info(),
+        indices=parent.base_slice(),
         dimension=2,
         cube_view_spec=parent,
     )

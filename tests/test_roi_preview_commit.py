@@ -8,7 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
@@ -23,7 +26,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     run_model = RunSource(image_scan_run(1))
     plot_model.add_run(run_model)
 
-    parent_spec = CubeViewSpec(
+    parent_spec = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -176,7 +179,9 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.cube_view import default_spec
+    from nbs_viewer.models.plot.view_spec import (
+    default_spec,
+)
     from nbs_viewer.models.plot.region import PolygonRegion, compile_with_mask_mode
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 

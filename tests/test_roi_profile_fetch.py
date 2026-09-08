@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
+from nbs_viewer.models.plot.view_spec import (
     DimRole,
+    Projection,
     plot_axis_to_storage_axis,
     storage_axis_to_plot_axis,
 )
@@ -24,12 +24,12 @@ from nbs_viewer.models.plot.plot_request import (
 )
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.display_plane import display_frame
 
 
-def _plane_request(parent: CubeViewSpec) -> PlotRequest:
+def _plane_request(parent: Projection) -> PlotRequest:
     """
     Build the request that draws the parent 2-D plane.
     """
@@ -38,7 +38,7 @@ def _plane_request(parent: CubeViewSpec) -> PlotRequest:
         xkeys=("x",),
         ykey="y",
         norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(parent),
+        view=parent,
     )
 
 
@@ -54,7 +54,7 @@ def _profile_request(parent, region, *, profile_axis, reduce="sum"):
     )
 
 
-_PLANE_2D = CubeViewSpec(
+_PLANE_2D = Projection(
     ndim=2,
     plot_ndim=2,
     roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -114,7 +114,7 @@ def test_span_full_expands_an_in_plane_profile_only():
     assert expanded.x0 == pytest.approx(-0.5)
     assert expanded.x1 == pytest.approx(19.5)
 
-    stack_parent = CubeViewSpec(
+    stack_parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -139,7 +139,7 @@ def test_cached_plane_profile_with_4d_parent_spec():
         ["dim_1", "dim_2"],
         render_mode_hint="image",
     )
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -165,7 +165,7 @@ def test_cached_plane_refuses_an_off_plane_profile():
         ["dim_1", "dim_2"],
         render_mode_hint="image",
     )
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -182,7 +182,7 @@ def test_cached_plane_refuses_an_off_plane_profile():
 # The selection-driven default from step 2: X key ``x`` is storage axis 0 and
 # is plotted horizontally, so the plot-axis order is (1, 0) and neither plot
 # axis sits at its own storage index.
-_SELECTION_DRIVEN = CubeViewSpec(
+_SELECTION_DRIVEN = Projection(
     ndim=2,
     plot_ndim=2,
     roles=(DimRole.PLOT_X, DimRole.PLOT_Y),
@@ -258,7 +258,7 @@ def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
         render_mode_hint="image",
     )
     frame = frame_from_bundle(plane)
-    parent_spec = CubeViewSpec(
+    parent_spec = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -278,7 +278,7 @@ def test_stack_profile_fetch_slice_widens_the_profile_axis():
     while every other indexed axis keeps its index.
     """
     y_count, x_count = 8, 10
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -314,7 +314,7 @@ def test_roi_profile_along_dim1_matches_plane_means():
         y_full[None, ...], (e_count, d0_count, y_count, x_count)
     ).copy()
     en_idx = 0
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),

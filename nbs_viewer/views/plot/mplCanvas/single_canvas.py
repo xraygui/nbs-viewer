@@ -18,7 +18,7 @@ from matplotlib.widgets import RectangleSelector
 from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
 from nbs_viewer.models.plot.plot_request import TraceKey

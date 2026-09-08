@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from nbs_viewer.models.plot.cube_view import DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+)
 from nbs_viewer.models.plot.plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -13,7 +15,7 @@ from nbs_viewer.models.plot.plot_bundle import (
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_spec import ViewCrop, ViewIntent, ViewSpec
+from nbs_viewer.models.plot.view_spec import ViewCrop, ViewIntent, Projection
 from nbs_viewer.models.sources.fixtures import (
     make_vppem_run,
     voltage_axis,
@@ -25,7 +27,7 @@ def _request(
     run,
     ykey,
     xkeys,
-    view: ViewSpec,
+    view: Projection,
     *,
     norm_keys=(),
     transform="",

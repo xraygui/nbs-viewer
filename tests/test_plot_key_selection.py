@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.cube_view import (
+from nbs_viewer.models.plot.view_spec import (
     default_spec,
-    resolve_roles,
     spec_for_plot_ndim,
 )
 from nbs_viewer.models.plot.plot_session import PlotSession
@@ -31,7 +30,7 @@ def test_set_view_state_clears_cube_view_spec():
     """
     _, plot, x_keys, _, norm_keys = _test_session()
     shape = (100, 32)
-    spec = resolve_roles(spec_for_plot_ndim(default_spec(2, 2), 2, shape))
+    spec = spec_for_plot_ndim(default_spec(2, 2), 2, shape)
     plot.set_view_state(dimension=2, cube_view_spec=spec)
 
     plot.set_view_state(indices=None, dimension=1, cube_view_spec=None)
@@ -79,7 +78,7 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     run, plot, x_keys, _, norm_keys = _test_session()
     xkey = x_keys[0]
     shape = (100, 32)
-    spec = resolve_roles(spec_for_plot_ndim(default_spec(2, 2), 2, shape))
+    spec = spec_for_plot_ndim(default_spec(2, 2), 2, shape)
 
     plot.set_selected_keys(x_keys, ["y", "image"], norm_keys)
     plot.set_view_state(dimension=2, cube_view_spec=spec)

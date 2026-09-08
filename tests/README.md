@@ -10,7 +10,7 @@ for the full migration plan.
 ```bash
 pixi run pytest tests/           # preferred (project env)
 pytest tests/                    # or PYTHONPATH=. pytest tests/
-pytest tests/test_cube_view.py   # single file
+pytest tests/test_view_spec.py   # single file
 ```
 
 `oldtests/` is excluded via `testpaths` in `pyproject.toml`. To run a legacy
@@ -54,7 +54,7 @@ def test_fetch(headless_session):
 
 | Tier | Meaning | Examples |
 |------|---------|----------|
-| H0 | Pure numpy / logic; no Qt | `test_cube_view.py`, `test_plot_geometry.py` |
+| H0 | Pure numpy / logic; no Qt | `test_view_spec.py`, `test_plot_geometry.py` |
 | H1 | QObject models; no widgets | `test_plot_model.py`, `test_plot_presenter.py` |
 | H2 | Qt widgets / manual scripts | deferred to `test/` or `scripts/` |
 

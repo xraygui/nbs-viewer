@@ -12,11 +12,10 @@ from nbs_viewer.models.plot.region import (
     RectRegion,
 )
 from nbs_viewer.models.plot.region_mesh import mask_from_data_rect
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
+from nbs_viewer.models.plot.plot_bundle import materialize_view
+from nbs_viewer.models.plot.view_spec import (
     DimRole,
-    MaterializeRequest,
-    materialize_view,
+    Projection,
     profile_view_spec,
 )
 
@@ -84,15 +83,11 @@ def test_profile_along_en_energy_sums_over_tes_band():
     _, x1 = _cell_x_bounds_mesh(frame, 150, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y_lo, y1=y_hi)
     compiled = region.compile(frame)
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
-    )
-    request = MaterializeRequest(
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
-        region=region,
     )
     row_axis = np.nanmean(bundle.mesh_y, axis=1)
     col_axis = np.nanmean(bundle.mesh_x, axis=0)
@@ -100,7 +95,8 @@ def test_profile_along_en_energy_sums_over_tes_band():
         y,
         [row_axis, col_axis],
         ["en_energy", "tes_mca_energies"],
-        request,
+        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+        region=region,
         region_frame=frame,
         plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
     )
@@ -267,21 +263,18 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
     compiled = region.compile(frame)
     assert compiled.pixel_count == 4
 
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0),
     )
-    request = MaterializeRequest(
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
-        region=region,
-    )
     profile, _coords, _names = materialize_view(
         cube,
         [np.arange(n_stack, dtype=float), row_axis, col_axis],
         ["stack", "row", "col"],
-        request,
+        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+        region=region,
         region_frame=frame,
         plot_plane_storage_axes=(1, 2),
     )

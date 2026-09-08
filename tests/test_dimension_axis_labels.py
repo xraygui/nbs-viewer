@@ -2,7 +2,10 @@
 
 import numpy as np
 
-from nbs_viewer.models.plot.cube_view import DimRole, default_spec
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    default_spec,
+)
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 

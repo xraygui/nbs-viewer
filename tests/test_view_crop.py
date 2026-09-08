@@ -1,8 +1,13 @@
 """Tests for the persistent view crop on the main display fetch path."""
 
+from dataclasses import replace
+
 import numpy as np
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.plot_bundle import reduce_to_plot_plane
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
@@ -12,7 +17,7 @@ from nbs_viewer.models.plot.plot_request import (
     roi_profile_request,
 )
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewCrop, ViewSpec
+from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
 
 from tests.fixtures.display_plane import display_bundle, display_frame
 
@@ -32,12 +37,12 @@ def _plane_request(parent, crop=None):
         xkeys=("x",),
         ykey="y",
         norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(parent, crop=crop),
+        view=replace(parent, crop=crop),
     )
 
 
 def test_plan_fetch_narrows_plot_plane_axes_with_a_crop():
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -97,7 +102,7 @@ def test_cropped_fetch_matches_full_plane_slice():
     ).astype(float)
     y_step = y.sum(axis=1)[1]
 
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -140,7 +145,7 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
     """
     e_count, s_count, ny, nx = 10, 5, 2200, 2600
     y = np.random.default_rng(0).random((e_count, s_count, ny, nx))
-    parent = CubeViewSpec(
+    parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),

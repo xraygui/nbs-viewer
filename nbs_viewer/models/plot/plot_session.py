@@ -27,12 +27,7 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     aggregate_tiled_fetch_label,
 )
 from .combinedRunSource import CombinationMethod, CombinedRunSource
-from .cube_view import (
-    classify_profile_kind,
-    default_profile_label,
-    is_plot_plane_storage_axis,
-    scan_profile_storage_axis,
-)
+
 from .frozenRunSource import FrozenRunSource
 from .plotDataModel import PlotDataModel
 from .plot_request import (
@@ -52,10 +47,15 @@ from .roi_set import RoiEntry, RoiSetModel
 from .run_collection import RunCollection
 from .runSource import RunSource
 from .selection import KeySelection, Selection
-from .view_spec import ViewCrop
+from .view_spec import (
+    ViewCrop,
+    classify_profile_kind,
+    default_profile_label,
+    is_plot_plane_storage_axis,
+    scan_profile_storage_axis,
+)
 
 if TYPE_CHECKING:
-    from .cube_view import CubeViewSpec
     from .frozen_spectrum import FrozenSpectrum
     from .plot_geometry import PlotBundle
 
@@ -739,7 +739,7 @@ class PlotSession(QObject):
     @property
     def cube_view_spec(self):
         """
-        Current cube view specification, if any.
+        Current projection, if any.
         """
         return self._cube_view_spec
 
@@ -747,10 +747,10 @@ class PlotSession(QObject):
         self,
         indices=None,
         dimension: Optional[int] = None,
-        cube_view_spec: Optional["CubeViewSpec"] = None,
+        cube_view_spec: Optional["Projection"] = None,
     ) -> None:
         """
-        Update slice, plot dimension, and cube view specification.
+        Update slice, plot dimension, and projection.
 
         Parameters
         ----------
@@ -758,7 +758,7 @@ class PlotSession(QObject):
             Load slice info.
         dimension : int, optional
             Plot dimensionality.
-        cube_view_spec : CubeViewSpec, optional
+        cube_view_spec : Projection, optional
             N-D view specification.
         """
         changed = False
@@ -1086,7 +1086,7 @@ class PlotSession(QObject):
             shape=run_model.get_shape(ykey),
             norm_keys=norm_keys,
             plot_ndim=self._dimension,
-            cube_view_spec=self._cube_view_spec,
+            projection=self._cube_view_spec,
             slice_info=self._slice,
             crop=self._crop_for_trace(trace_key),
             transform=self._effective_transform_text(run_model),
@@ -1427,7 +1427,7 @@ class PlotSession(QObject):
             raise ValueError("Select a single 2D dataset")
         parent = plot_data.request
         if parent.plane_axes is None:
-            raise ValueError("Parent cube view is unavailable")
+            raise ValueError("Parent projection is unavailable")
         profile_axis = entry.operation.profile_storage_axis
         if profile_axis is None:
             profile_axis = default_profile_axis
@@ -1450,7 +1450,7 @@ class PlotSession(QObject):
 
     def _commit_span_full(
         self,
-        parent_spec: "CubeViewSpec",
+        parent_spec: "Projection",
         profile_storage_axis: int,
         span_full: bool,
     ) -> bool:
@@ -1497,7 +1497,7 @@ class PlotSession(QObject):
         """
         spec = self._cube_view_spec
         if spec is None:
-            raise ValueError("Parent cube view is unavailable")
+            raise ValueError("Parent projection is unavailable")
 
         profile_axis = entry.operation.profile_storage_axis
         if profile_axis is None:

@@ -7,7 +7,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -16,7 +19,7 @@ from nbs_viewer.models.plot.key_info import KeyInfo
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 from nbs_viewer.models.plot.runSource import RunSource, RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_UID,
@@ -46,7 +49,7 @@ def _frozen_entry(model, key_suffix="abc", y=None, label=None):
             xkeys=("sampleVoltage_VSource",),
             ykey="PCOEdge_image",
             norm_keys=(),
-            view=ViewSpec(
+            view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -172,7 +175,7 @@ def test_get_plot_bundle_1d_closed_form(qapp):
 
 def test_get_plot_bundle_index_slice_closed_form(qapp):
     model = RunSource(make_vppem_run())
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -184,7 +187,7 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=2,
-            cube_view_spec=spec,
+            projection=spec,
         )
     )
     expected = vppem_image()[4]
@@ -193,7 +196,7 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
 
 def test_get_plot_bundle_mean_mean_matches_stats(qapp):
     model = RunSource(make_vppem_run())
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=3,
         plot_ndim=1,
         roles=(DimRole.MEAN, DimRole.MEAN, DimRole.MEAN),
@@ -206,7 +209,7 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=1,
-            cube_view_spec=spec,
+            projection=spec,
         )
     )
     stats_bundle = model.get_plot_bundle(

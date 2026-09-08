@@ -2,7 +2,7 @@
 
 import pytest
 
-from nbs_viewer.models.plot.cube_view import (
+from nbs_viewer.models.plot.view_spec import (
     DimRole,
     default_spec,
     default_spec_for_selection,

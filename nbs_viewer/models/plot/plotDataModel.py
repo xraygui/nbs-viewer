@@ -8,7 +8,7 @@ import numpy as np
 from nbs_viewer.utils import print_debug
 from matplotlib.image import AxesImage
 
-from .cube_view import CubeViewSpec, classify_profile_kind
+from .view_spec import Projection, classify_profile_kind
 from .frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -120,7 +120,7 @@ class PlotDataModel(QObject):
 
     @property
     def _cube_view_spec(self):
-        return self._request.view.to_cube_view_spec()
+        return self._request.view
 
     @property
     def _dimension(self):
@@ -254,7 +254,7 @@ class PlotDataModel(QObject):
         request: PlotRequest,
         *,
         label: str,
-        parent_spec: Optional[CubeViewSpec] = None,
+        parent_spec: Optional[Projection] = None,
         cube_fingerprint=None,
         committed_xkey: Optional[str] = None,
     ) -> FrozenSpectrum:
@@ -272,8 +272,8 @@ class PlotDataModel(QObject):
             Provenance request used for the profile.
         label : str
             Display label for Run Display.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view used to classify profile kind.
+        parent_spec : Projection, optional
+            Parent projection used to classify profile kind.
         cube_fingerprint : tuple, optional
             Slice / cube-view snapshot at commit time.
         committed_xkey : str, optional
@@ -331,8 +331,8 @@ class PlotDataModel(QObject):
             Normalization keys.
         indices : tuple, optional
             Legacy slice indices.
-        cube_view_spec : CubeViewSpec, optional
-            N-D cube view specification.
+        cube_view_spec : Projection, optional
+            N-D projection.
         dimension : int, optional
             Plot dimensionality.
         emit : bool, optional
@@ -366,7 +366,7 @@ class PlotDataModel(QObject):
                 plot_ndim=(
                     dimension if dimension is not None else self._dimension
                 ),
-                cube_view_spec=(
+                projection=(
                     cube_view_spec
                     if cube_view_spec is not None
                     else self._cube_view_spec

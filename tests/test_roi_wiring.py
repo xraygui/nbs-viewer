@@ -5,7 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
@@ -45,7 +48,7 @@ def _wired_image_scan_with_roi(
     session.load_catalog(recipe="image_scan", runs=1)
     run_model = session.select_run(0)
 
-    parent_spec = CubeViewSpec(
+    parent_spec = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),

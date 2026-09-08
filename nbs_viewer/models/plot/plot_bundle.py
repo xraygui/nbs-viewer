@@ -7,59 +7,32 @@ pure in the arrays they receive so they can be tested without a run.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from asteval import Interpreter
 
-from .cube_view import (
-    CubeViewSpec,
-    DimRole,
-    MaterializeRequest,
-    materialize_view,
-    profile_view_spec,
-)
 from .plot_geometry import (
     PlotBundle,
     prepare_1d_bundle,
     prepare_2d_bundle,
 )
 from .plot_request import PlotRequest
-from .plot_view_frame import frame_from_bundle
+from .plot_view_frame import PlotViewFrame, frame_from_bundle
+from .region import RegionDefinition, compile_with_mask_mode
+from .view_spec import (
+    DimRole,
+    PlotAxisName,
+    SpatialReduce,
+    Projection,
+    profile_storage_axis,
+    profile_view_spec,
+    storage_axis_to_plot_axis,
+)
 
 SliceItem = Union[int, slice]
+MaskMode = Literal["inside", "outside"]
 
-
-def _materialize_request(request: PlotRequest) -> MaterializeRequest:
-    """
-    Build the reduce spec for a request.
-
-    Without a region the view *is* the output. With one, the view is the
-    parent plane and the output is the profile it reduces to, so the profile
-    axis and the spatial reduce are folded into a 1-D spec here -- at the
-    reduce, not in the request, which keeps the plane's identity intact for
-    the fetch and the mask.
-
-    Parameters
-    ----------
-    request : PlotRequest
-        View, optional region, profile axis, and spatial reduce.
-
-    Returns
-    -------
-    MaterializeRequest
-        Spec plus ROI parameters for :func:`materialize_view`.
-    """
-    spec = request.view.to_cube_view_spec()
-    if request.region is not None:
-        spec = profile_view_spec(
-            spec, request.profile_axis, request.spatial_reduce
-        )
-    return MaterializeRequest(
-        spec=spec,
-        region=request.region,
-        mask_mode=request.mask_mode,
-    )
 
 
 def reduce_to_plot_plane(
@@ -98,11 +71,22 @@ def reduce_to_plot_plane(
     tuple
         ``(y, axis_arrays, axis_names)`` on the plot plane.
     """
+    spec = request.view
+    if request.region is not None:
+        # With a region the view is the parent plane and the output is the
+        # profile it reduces to, so the profile axis and the spatial reduce
+        # fold into a 1-D spec here -- at the reduce, not in the request,
+        # which keeps the plane's identity intact for the fetch and the mask.
+        spec = profile_view_spec(
+            spec, request.profile_axis, request.spatial_reduce
+        )
     return materialize_view(
         y,
         axis_arrays,
         axis_names,
-        _materialize_request(request),
+        spec,
+        region=request.region,
+        mask_mode=request.mask_mode,
         region_frame=region_frame,
         plot_plane_storage_axes=plot_plane_storage_axes,
     )
@@ -189,25 +173,22 @@ def reduce_cached_plane(
 
     frame = frame_from_bundle(plane)
     bundle_profile_axis = 0 if request.profile_axis == plane_axes[0] else 1
-    plane_view = CubeViewSpec(
+    plane_view = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
-    )
-    materialize_request = MaterializeRequest(
-        spec=profile_view_spec(
-            plane_view, bundle_profile_axis, request.spatial_reduce
-        ),
-        region=request.region,
-        mask_mode=request.mask_mode,
     )
     axis_arrays, axis_names = _plane_axis_arrays(plane, frame)
     y, coords, names = materialize_view(
         plane.y,
         axis_arrays,
         axis_names,
-        materialize_request,
+        profile_view_spec(
+            plane_view, bundle_profile_axis, request.spatial_reduce
+        ),
+        region=request.region,
+        mask_mode=request.mask_mode,
         region_frame=frame,
         plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
     )
@@ -484,3 +465,369 @@ def build_plot_bundle(
             col_reversed=col_reversed,
         )
     raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")
+
+
+def _spatial_reduce_storage_axes(
+    spec: Projection,
+    plot_plane_storage_axes: Optional[Tuple[int, int]],
+) -> frozenset[int]:
+    """
+    Return storage axes reduced within the ROI on the parent plot plane.
+    """
+    if spec.plot_ndim != 1:
+        return frozenset()
+    profile_axis = profile_storage_axis(spec)
+    if plot_plane_storage_axes is not None:
+        return frozenset(
+            storage_axis
+            for storage_axis in plot_plane_storage_axes
+            if spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+        )
+    order = spec.axis_order
+    if len(order) < 2:
+        return frozenset()
+    plot_plane = {order[-2], order[-1]}
+    return frozenset(
+        storage_axis
+        for storage_axis in plot_plane
+        if storage_axis != profile_axis
+        and spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+    )
+
+
+def _global_reduce_storage_axes(
+    spec: Projection,
+    spatial_storage_axes: frozenset[int],
+) -> frozenset[int]:
+    """
+    Return SUM/MEAN storage axes reduced before ROI masking.
+    """
+    return frozenset(
+        storage_axis
+        for storage_axis, role in enumerate(spec.roles)
+        if role in (DimRole.SUM, DimRole.MEAN)
+        and storage_axis not in spatial_storage_axes
+    )
+
+
+def _profile_coords(
+    frame: PlotViewFrame, profile_axis: PlotAxisName, n_profile: int
+) -> np.ndarray:
+    """
+    Return profile bin-center coordinates along one plot axis.
+    """
+    if frame.render_mode == "mesh":
+        from .region_mesh import _mesh_separable_edge_grids
+
+        edges = _mesh_separable_edge_grids(frame)
+        if edges is not None:
+            x_edges, y_edges = edges
+            axis_edges = x_edges if profile_axis == "plot_x" else y_edges
+            if axis_edges.size == n_profile + 1:
+                return 0.5 * (axis_edges[:-1] + axis_edges[1:])
+            if axis_edges.size == n_profile:
+                return np.asarray(axis_edges, dtype=float)
+    return np.array(
+        [
+            _coord_for_profile_index(frame, profile_axis, k)
+            for k in range(n_profile)
+        ],
+        dtype=float,
+    )
+
+
+def _coord_for_profile_index(
+    frame: PlotViewFrame, profile_axis: PlotAxisName, index: int
+) -> float:
+    """
+    Return a representative data coordinate for a profile bin.
+    """
+    if frame.render_mode == "image" and frame.extent is not None:
+        left, right, bottom, top = frame.extent
+        if profile_axis == "plot_x":
+            nx = frame.shape[1]
+            dx = (right - left) / nx if nx else 1.0
+            return float(left + (index + 0.5) * dx)
+        ny = frame.shape[0]
+        dy = (top - bottom) / ny if ny else 1.0
+        return float(top - (index + 0.5) * dy)
+
+    if frame.render_mode == "mesh":
+        from .region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh
+
+        if profile_axis == "plot_x":
+            x0, x1 = _cell_x_bounds_mesh(frame, index, 0)
+            return 0.5 * (x0 + x1)
+        y0, y1 = _cell_y_bounds_mesh(frame, index, 0)
+        return 0.5 * (y0 + y1)
+
+    if profile_axis == "plot_x":
+        return float(index)
+    return float(index)
+
+
+def _reduce_axis_index(
+    remaining: Sequence[int],
+    storage_axis: int,
+) -> int:
+    """
+    Return the tensor axis index for a storage dimension.
+    """
+    return list(remaining).index(storage_axis)
+
+
+def _materialize_without_region(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: Projection,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Apply a projection without ROI masking.
+    """
+    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
+    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
+    names = [axis_names[i] for i in remaining]
+    roles = [spec.roles[i] for i in remaining]
+
+    for j in range(len(remaining) - 1, -1, -1):
+        role = roles[j]
+        if role == DimRole.SUM:
+            y = np.sum(y, axis=j)
+            del arrays[j], names[j], roles[j], remaining[j]
+        elif role == DimRole.MEAN:
+            y = np.mean(y, axis=j)
+            del arrays[j], names[j], roles[j], remaining[j]
+
+    non_plot = [
+        j for j, role in enumerate(roles) if role not in (DimRole.PLOT_X, DimRole.PLOT_Y)
+    ]
+    y_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_Y]
+    x_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_X]
+
+    if spec.plot_ndim == 1:
+        perm = non_plot + x_positions
+    else:
+        perm = non_plot + y_positions + x_positions
+
+    if len(perm) != y.ndim:
+        raise ValueError(
+            f"transpose rank {len(perm)} does not match data ndim {y.ndim}"
+        )
+
+    if perm != list(range(y.ndim)):
+        y = np.transpose(y, perm)
+        arrays = [arrays[p] for p in perm]
+        names = [names[p] for p in perm]
+
+    if spec.plot_ndim == 1:
+        arrays = arrays[-1:]
+        names = names[-1:]
+    elif spec.plot_ndim == 2:
+        arrays = arrays[-2:]
+        names = names[-2:]
+
+    return y, arrays, names
+
+
+def _reduce_along_axis(y: np.ndarray, axis: int, role: DimRole) -> np.ndarray:
+    """
+    Collapse one tensor axis using the spec role semantics.
+    """
+    if role == DimRole.SUM:
+        return np.sum(y, axis=axis)
+    if role == DimRole.MEAN:
+        return np.mean(y, axis=axis)
+    raise ValueError(f"cannot reduce axis with role {role!r}")
+
+
+def _masked_reduce_along_axes(
+    y: np.ndarray,
+    axes: Tuple[int, ...],
+    role: DimRole,
+) -> np.ndarray:
+    """
+    Collapse tensor axes after ROI masking with NaN-aware reducers.
+    """
+    if role == DimRole.SUM:
+        profile = np.nansum(y, axis=axes)
+    elif role == DimRole.MEAN:
+        profile = np.nanmean(y, axis=axes)
+    else:
+        raise ValueError(f"unexpected spatial reduce role {role!r}")
+    empty_bins = np.isnan(y).all(axis=axes)
+    return np.where(empty_bins, np.nan, profile)
+
+
+def _materialize_roi_profile(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: Projection,
+    region: RegionDefinition,
+    mask_mode: MaskMode,
+    region_frame: PlotViewFrame,
+    *,
+    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Reduce masked plot-plane data to a 1D profile using the output view spec.
+    """
+    if spec.plot_ndim != 1:
+        raise ValueError("ROI profile materialization requires plot_ndim=1")
+
+    profile_axis_idx = profile_storage_axis(spec)
+    spatial_storage_axes = _spatial_reduce_storage_axes(
+        spec, plot_plane_storage_axes
+    )
+    if not spatial_storage_axes:
+        raise ValueError("expected at least one spatial reduce axis")
+    global_storage_axes = _global_reduce_storage_axes(
+        spec, spatial_storage_axes
+    )
+
+    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
+    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
+    names = [axis_names[i] for i in remaining]
+    roles = [spec.roles[i] for i in remaining]
+
+    for j in range(len(remaining) - 1, -1, -1):
+        storage_axis = remaining[j]
+        role = roles[j]
+        if storage_axis in global_storage_axes:
+            y = _reduce_along_axis(y, j, role)
+            del arrays[j], names[j], roles[j], remaining[j]
+
+    if y.ndim < 2:
+        raise ValueError(
+            f"expected at least 2D plot plane before ROI reduction, got {y.shape}"
+        )
+    if y.shape[-2:] != region_frame.shape:
+        raise ValueError(
+            f"plot plane shape {y.shape[-2:]} does not match region frame "
+            f"{region_frame.shape}"
+        )
+
+    compiled = compile_with_mask_mode(
+        region_frame,
+        region,
+        mask_mode,
+    )
+    if compiled.pixel_count == 0:
+        raise ValueError("ROI does not cover any cells")
+
+    y = np.asarray(y, dtype=float)
+    lead_shape = y.shape[:-2]
+    if lead_shape:
+        mask = compiled.mask.reshape((1,) * len(lead_shape) + compiled.mask.shape)
+    else:
+        mask = compiled.mask
+    y = np.where(mask, y, np.nan)
+
+    spatial_tensor_axes = tuple(
+        _reduce_axis_index(remaining, storage_axis)
+        for storage_axis in sorted(spatial_storage_axes)
+    )
+    spatial_roles = {spec.roles[storage_axis] for storage_axis in spatial_storage_axes}
+    if len(spatial_roles) != 1:
+        raise ValueError("mixed spatial reduce roles are not supported")
+    spatial_role = next(iter(spatial_roles))
+    profile = _masked_reduce_along_axes(y, spatial_tensor_axes, spatial_role)
+
+    if plot_plane_storage_axes is not None:
+        on_plot_plane = profile_axis_idx in plot_plane_storage_axes
+    else:
+        on_plot_plane = profile_axis_idx in (
+            region_frame.plot_x_dim,
+            region_frame.plot_y_dim,
+        )
+    if on_plot_plane:
+        if plot_plane_storage_axes is not None:
+            plot_y_storage, plot_x_storage = plot_plane_storage_axes
+            profile_axis = (
+                "plot_x"
+                if profile_axis_idx == plot_x_storage
+                else "plot_y"
+            )
+        else:
+            profile_axis = storage_axis_to_plot_axis(
+                region_frame, profile_axis_idx
+            )
+        coords = _profile_coords(
+            region_frame, profile_axis, int(profile.shape[-1])
+        )
+        axis_name = (
+            region_frame.plot_x_name
+            if profile_axis == "plot_x"
+            else region_frame.plot_y_name
+        )
+    else:
+        profile_axis_index = _reduce_axis_index(remaining, profile_axis_idx)
+        coords = np.asarray(arrays[profile_axis_index], dtype=float)
+        if coords.shape != profile.shape:
+            raise ValueError(
+                f"profile coordinate length {coords.shape} does not match "
+                f"profile shape {profile.shape}"
+            )
+        axis_name = axis_names[profile_axis_idx]
+
+    return np.asarray(profile, dtype=float).reshape(-1), [coords], [axis_name]
+
+
+def materialize_view(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    axis_names: Sequence[str],
+    spec: Projection,
+    *,
+    region: Optional[RegionDefinition] = None,
+    mask_mode: MaskMode = "inside",
+    region_frame: Optional[PlotViewFrame] = None,
+    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
+) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+    """
+    Reduce and transpose loaded data to match a projection.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Array loaded with :meth:`Projection.base_slice` for ``spec``.
+    axis_arrays : sequence of np.ndarray
+        Per-storage-axis coordinate arrays (full length along each axis).
+    axis_names : sequence of str
+        Names per storage axis.
+    spec : Projection
+        Projection describing the output view.
+    region : RegionDefinition, optional
+        ROI in data coordinates on the parent 2D plot plane.
+    mask_mode : str
+        ``inside`` or ``outside`` the ROI when reducing masked data.
+    region_frame : PlotViewFrame, optional
+        Parent 2D view frame required when ``region`` is set.
+    plot_plane_storage_axes : tuple of int, optional
+        Parent plot Y and plot X storage axis indices for stack profiles.
+
+    Returns
+    -------
+    tuple
+        ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
+    """
+    if region is None:
+        return _materialize_without_region(y, axis_arrays, axis_names, spec)
+    if region_frame is None:
+        raise ValueError("region_frame is required when region is set")
+    if spec.plot_ndim != 1:
+        raise ValueError(
+            f"ROI materialization always reduces to a profile, got "
+            f"plot_ndim {spec.plot_ndim}"
+        )
+    return _materialize_roi_profile(
+        y,
+        axis_arrays,
+        axis_names,
+        spec,
+        region,
+        mask_mode,
+        region_frame,
+        plot_plane_storage_axes=plot_plane_storage_axes,
+    )

@@ -65,13 +65,13 @@ They interleave; the order below is the merged sequence.
 | 3 | Orientation once after load, one planner, one mask | view pipeline | ✅ `dbe6083` |
 | 4 | One request, no side channels | view pipeline | ✅ `b431c47` |
 | A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ |
-| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | next |
-| B | `Trace` | session & traces | unblocked |
-| 6 | Adopt `ViewIntent`, or delete it | view pipeline | after 5, needs B |
+| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ |
+| B | `Trace` | session & traces | unblocked — next |
+| 6 | Adopt `ViewIntent`, or delete it | view pipeline | needs B |
 | C | Consumer sweep — canvas `TraceSet`, `DimensionControl` pushes intent | session & traces | after 6 |
 | D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
-| 7 | `plot_bundle.py` | view pipeline | after 5 |
+| 7 | `plot_bundle.py` | view pipeline | unblocked |
 | F | Final deletions and renames | session & traces | last |
 
 Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong
@@ -86,6 +86,13 @@ Step A was a rename, but the plan's mechanics for it contradicted invariant 1:
 having `PlotPresenter` construct the item model would have made `models/`
 import `views/`. `RunListView` builds it instead. Counting consumers is what
 settled it, and the count also found bugs 9 and 10; see the sub-plan.
+
+Step 5 named the types to delete but no destination for the fifteen live
+functions in `cube_view.py` that were not types. The import graph settled it —
+spec queries to `view_spec.py`, materialize to `plot_bundle.py` — and the two
+deviations it forced are recorded in the sub-plan rather than absorbed
+silently: `materialize_view` takes a `Projection`, and `build_plot_request`
+was renamed rather than deleted.
 
 ## Shared backlog
 
@@ -203,3 +210,4 @@ them.
 | 2026-09-08 | Step A landed, net −77 lines. Compatibility aliases dropped rather than held for a commit, which also empties step F's alias list. The item model moved to `views/` and `RunListView` now constructs it, so `models/` imports no view code. Bugs 9 and 10 added; 9 closed. Step 5 remains next. |
 | 2026-09-08 | Bug 11 fixed: the legend kept labels for deselected keys. One `updateLegend()` before the paint in `_do_update_plot`. Reproduced and verified with a scratch script under a real `QApplication`; `tests/` cannot reach it, since `MplCanvas` is a `QWidget`. |
 | 2026-09-08 | Recorded widget-level testing as the work that follows this refactor, under "After this refactor". Three bugs in one step (9, 10, 11) were unreachable from `tests/`; deferred deliberately so the harness is not written against constructors steps B–F will change. |
+| 2026-09-08 | Step 5 landed. `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |

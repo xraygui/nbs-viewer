@@ -28,8 +28,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
+from nbs_viewer.models.plot.view_spec import (
+    Projection,
     eligible_profile_axes,
     profile_axis_name,
     plot_axis_to_storage_axis,
@@ -74,7 +74,7 @@ class RoiWindow(QDialog):
         self.presenter = presenter
         self.plot_model = presenter.session
         self.dimension_control = dimension_control
-        self._parent_spec: Optional[CubeViewSpec] = None
+        self._parent_spec: Optional[Projection] = None
         self._axis_names: Sequence[str] = ()
         self._parent_frame: Optional[PlotViewFrame] = None
         self._loading_form = False
@@ -1059,7 +1059,7 @@ class RoiWindow(QDialog):
 
     def set_profile_context(
         self,
-        parent_spec: Optional[CubeViewSpec],
+        parent_spec: Optional[Projection],
         axis_names: Sequence[str],
         parent_frame: Optional[PlotViewFrame] = None,
     ):

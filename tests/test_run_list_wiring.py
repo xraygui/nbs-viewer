@@ -8,7 +8,10 @@ from nbs_viewer.models.plot.combinedRunSource import (
     CombinationMethod,
     CombinedRunSource,
 )
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
@@ -17,7 +20,7 @@ from nbs_viewer.models.plot.frozen_spectrum import (
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.session import HeadlessSession
 
@@ -62,7 +65,7 @@ def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectr
             xkeys=("en_energy",),
             ykey="detector_image",
             norm_keys=(),
-            view=ViewSpec(
+            view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),

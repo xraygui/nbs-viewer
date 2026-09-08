@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
+from nbs_viewer.models.plot.view_spec import (
     DimRole,
+    Projection,
     classify_profile_kind,
     default_spec,
     scan_profile_storage_axis,
@@ -23,7 +23,7 @@ from nbs_viewer.models.plot.frozen_spectrum import (
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewSpec
+from nbs_viewer.models.plot.view_spec import Projection
 from nbs_viewer.models.plot.runSource import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
 
@@ -56,7 +56,7 @@ def _frozen_entry(model, key_suffix="abc", y=None):
             xkeys=("en_energy",),
             ykey="detector_image",
             norm_keys=(),
-            view=ViewSpec(
+            view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -86,7 +86,7 @@ def test_is_synthetic_key():
 
 
 def test_scan_profile_storage_axis_4d():
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(
@@ -104,7 +104,7 @@ def test_scan_profile_storage_axis_4d():
 
 
 def test_scan_profile_storage_axis_2d_mesh():
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -116,7 +116,7 @@ def test_scan_profile_storage_axis_2d_mesh():
 
 
 def test_scan_profile_storage_axis_unchanged_after_swap():
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(
@@ -240,7 +240,7 @@ def test_local_profile_keeps_frozen_x(qapp):
             xkeys=("en_energy",),
             ykey="detector_image",
             norm_keys=(),
-            view=ViewSpec(
+            view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -297,7 +297,7 @@ def test_frozen_plot_ignores_parent_cube_view_spec(qapp):
             ["en_energy"],
             entry.key,
             plot_ndim=2,
-            cube_view_spec=spec,
+            projection=spec,
         )
     )
     assert bundle.render_mode == "line"

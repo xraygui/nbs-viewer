@@ -1,21 +1,28 @@
-"""Headless tests for ViewIntent, ViewSpec, ViewCrop, and PlotRequest."""
+"""Headless tests for ViewIntent, Projection, ViewCrop, and PlotRequest."""
 
+import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import DimRole, default_spec
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+    default_spec,
+    spec_for_plot_ndim,
+    spec_from_slice_info,
+)
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.view_spec import (
     ViewCrop,
     ViewIntent,
-    ViewSpec,
+    Projection,
     default_view_spec,
     plot_axis_names,
 )
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
 
-def test_default_view_spec_matches_cube_default():
+def test_default_view_spec_uses_trailing_axes():
     for ndim in (1, 2, 3, 4):
         for plot_ndim in (1, 2):
             if ndim < plot_ndim:
@@ -25,19 +32,13 @@ def test_default_view_spec_matches_cube_default():
             assert view.roles == cube.roles
             assert view.indices == cube.indices
             assert view.axis_order == cube.axis_order
-            assert view.base_slice() == cube.to_load_slice_info()
+            assert view.base_slice() == cube.base_slice()
 
-
-def test_view_spec_roundtrip_cube_view_spec():
-    cube = default_spec(3, 2).with_index(0, 4)
-    view = ViewSpec.from_cube_view_spec(cube)
-    assert view.to_cube_view_spec() == cube
-    assert view.base_slice() == (4, slice(None), slice(None))
 
 
 def test_view_spec_rejects_ndim_below_plot_ndim():
     with pytest.raises(ValueError, match="below plot_ndim"):
-        ViewSpec(
+        Projection(
             ndim=1,
             plot_ndim=2,
             roles=(DimRole.PLOT_X,),
@@ -56,7 +57,7 @@ def test_view_spec_base_slice_ignores_crop():
         plot_x_axis=2,
     )
     view = default_view_spec(3, 2).with_index(0, 4)
-    view = ViewSpec(
+    view = Projection(
         ndim=view.ndim,
         plot_ndim=view.plot_ndim,
         roles=view.roles,
@@ -74,7 +75,7 @@ def test_view_spec_crop_allowed_on_a_profile_view():
     unrepresentable.
     """
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
-    view = ViewSpec(
+    view = Projection(
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.INDEX, DimRole.PLOT_X),
@@ -87,7 +88,7 @@ def test_view_spec_crop_allowed_on_a_profile_view():
 def test_view_spec_crop_axes_must_be_in_range():
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=5)
     with pytest.raises(ValueError, match="out of range"):
-        ViewSpec(
+        Projection(
             ndim=2,
             plot_ndim=1,
             roles=(DimRole.INDEX, DimRole.PLOT_X),
@@ -100,7 +101,7 @@ def test_view_spec_crop_axes_must_match_plot_order():
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
     with pytest.raises(ValueError, match="crop plot axes must match"):
         # default 3-D 2-D plot has plot axes (1, 2), not (0, 1)
-        ViewSpec(
+        Projection(
             ndim=3,
             plot_ndim=2,
             roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -111,7 +112,7 @@ def test_view_spec_crop_axes_must_match_plot_order():
 
 def test_plan_fetch_intersects_the_crop_with_an_indexed_axis():
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
-    view = ViewSpec(
+    view = Projection(
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -318,7 +319,7 @@ def test_plot_request_roi_requires_the_parent_plane():
     A profile request carries the plane the ROI was drawn on, not the profile
     it reduces to. A 1-D view has no plane for the region to mean anything on.
     """
-    view_1d = ViewSpec(
+    view_1d = Projection(
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.MEAN, DimRole.PLOT_X),
@@ -353,7 +354,7 @@ def test_plot_request_roi_rejects_a_reduced_profile_axis():
     A profile axis has to be on the plane or held at an index. A summed axis
     is already gone by the time the profile is taken.
     """
-    view = ViewSpec(
+    view = Projection(
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -372,7 +373,7 @@ def test_plot_request_roi_rejects_a_reduced_profile_axis():
 
 
 def test_plot_request_roi_profile_ok():
-    view = ViewSpec(
+    view = Projection(
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
@@ -398,3 +399,79 @@ def test_plot_request_roi_profile_ok():
 def test_view_crop_rejects_empty_bbox():
     with pytest.raises(ValueError, match="non-empty"):
         ViewCrop(storage_bbox=(2, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
+
+
+def test_default_spec_1d_trailing_axis():
+    spec = default_spec(4, plot_ndim=1)
+    assert spec.roles == (
+        DimRole.INDEX,
+        DimRole.INDEX,
+        DimRole.INDEX,
+        DimRole.PLOT_X,
+    )
+    assert spec.base_slice() == (0, 0, 0, slice(None))
+
+
+def test_default_spec_2d_trailing_axes():
+    spec = default_spec(4, plot_ndim=2)
+    assert spec.roles[-2:] == (DimRole.PLOT_Y, DimRole.PLOT_X)
+    assert spec.base_slice()[-2:] == (slice(None), slice(None))
+
+
+def test_spec_from_slice_info_roundtrip():
+    legacy = (0, 0, slice(None))
+    spec = spec_from_slice_info(legacy, plot_ndim=1)
+    assert spec.roles[0] == DimRole.INDEX
+    assert spec.roles[-1] == DimRole.PLOT_X
+
+
+
+
+
+def test_swap_rows_exchanges_roles():
+    spec = default_spec(3, plot_ndim=1)
+    swapped = spec.swap_rows(1)
+    d0, d1 = spec.axis_order[0], spec.axis_order[1]
+    assert swapped.roles[d0] == spec.roles[d1]
+    assert swapped.roles[d1] == spec.roles[d0]
+
+
+def test_construction_assigns_plot_x_from_axis_order():
+    spec = Projection(
+        ndim=3,
+        plot_ndim=1,
+        roles=(DimRole.SUM, DimRole.INDEX, DimRole.INDEX),
+        indices=(0, 0, 0),
+        axis_order=(2, 0, 1),
+    )
+    assert spec.roles[1] == DimRole.PLOT_X
+    assert spec.roles[0] == DimRole.SUM
+
+
+def test_swap_rows_moves_plot_axis():
+    spec = default_spec(3, plot_ndim=1)
+    swapped = spec.swap_rows(2)
+    assert swapped.roles[swapped.axis_order[-1]] == DimRole.PLOT_X
+
+
+def test_with_slice_role():
+    spec = default_spec(3, plot_ndim=1)
+    updated = spec.with_slice_role(0, DimRole.SUM)
+    assert updated.roles[0] == DimRole.SUM
+
+
+def test_spec_for_plot_ndim_switches_to_2d():
+    spec = default_spec(4, plot_ndim=1)
+    spec2 = spec_for_plot_ndim(spec, 2)
+    assert spec2.plot_ndim == 2
+    assert spec2.roles[-2:] == (DimRole.PLOT_Y, DimRole.PLOT_X)
+
+
+def test_construction_fixes_duplicate_plot_x():
+    spec = Projection(
+        ndim=2,
+        plot_ndim=1,
+        roles=(DimRole.PLOT_X, DimRole.PLOT_X),
+        indices=(0, 0),
+    )
+    assert sum(1 for r in spec.roles if r == DimRole.PLOT_X) == 1

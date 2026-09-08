@@ -13,12 +13,11 @@ from qtpy.QtWidgets import (
 import numpy as np
 from qtpy.QtCore import Qt, Signal
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
+from nbs_viewer.models.plot.view_spec import (
     DimRole,
     ROLE_LABELS,
     SLICE_ROLES,
-    resolve_roles,
+    Projection,
     spec_for_plot_ndim,
     spec_for_shape_and_selection,
 )
@@ -206,7 +205,7 @@ class _PlotAxisRow(QWidget):
 
 class DimensionControl(QWidget):
     """
-    Widget for controlling N-dimensional cube views in plots.
+    Widget for controlling the N-dimensional projection of a plot.
 
     Slice/reduce dimensions appear above a separator; trailing rows are
     Plot Y (2D only) and Plot X, assigned only by row order.
@@ -347,7 +346,6 @@ class DimensionControl(QWidget):
             derived_from_xkey=self._default_xkey,
             shape=y_shape,
         )
-        self._cube_view_spec = resolve_roles(self._cube_view_spec)
 
         order = self._cube_view_spec.axis_order
         visible_positions = [
@@ -505,21 +503,19 @@ class DimensionControl(QWidget):
             roles[storage_axis] = role
             indices[storage_axis] = row.get_index()
 
-        self._cube_view_spec = resolve_roles(
-            CubeViewSpec(
-                ndim=self._cube_view_spec.ndim,
-                plot_ndim=self.dimension_spinbox.value(),
-                roles=tuple(roles),
-                indices=tuple(indices),
-                axis_order=self._cube_view_spec.axis_order,
-            )
+        self._cube_view_spec = Projection(
+            ndim=self._cube_view_spec.ndim,
+            plot_ndim=self.dimension_spinbox.value(),
+            roles=tuple(roles),
+            indices=tuple(indices),
+            axis_order=self._cube_view_spec.axis_order,
         )
 
     def _apply_view_state(self, update_plot=True):
         if self._cube_view_spec is None:
             return
 
-        slice_info = self._cube_view_spec.to_load_slice_info()
+        slice_info = self._cube_view_spec.base_slice()
         plot_ndim = self.dimension_spinbox.value()
 
         print_debug(
@@ -544,7 +540,7 @@ class DimensionControl(QWidget):
         Return the Plot X / Plot Y label for a storage axis.
 
         The view spec's roles are authoritative and are kept in step with
-        ``axis_order`` by ``resolve_roles``. The rendered frame cannot answer
+        ``axis_order`` by the constructor. The rendered frame cannot answer
         this: ``PlotViewFrame.plot_x_dim`` / ``plot_y_dim`` are positions
         within the displayed plane (rows and columns), not storage axes, so
         reading them here returned a fixed mapping that stopped matching the
@@ -727,7 +723,7 @@ class DimensionControl(QWidget):
         self._updating_ui = False
 
         slice_info = (
-            self._cube_view_spec.to_load_slice_info()
+            self._cube_view_spec.base_slice()
             if self._cube_view_spec
             else None
         )

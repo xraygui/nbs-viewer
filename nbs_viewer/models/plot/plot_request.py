@@ -14,14 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple, Union
 
-from .cube_view import (
-    CubeViewSpec,
-    DimRole,
-    SpatialReduce,
-    plot_axis_to_storage_axis,
-    spec_from_slice_info,
-    storage_axis_to_plot_axis,
-)
 from .plot_geometry import display_flips
 from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
 from .region import (
@@ -32,24 +24,33 @@ from .region import (
     compile_with_mask_mode,
     expand_region_for_profile,
 )
-from .view_spec import ViewCrop, ViewSpec, default_view_spec
+from .view_spec import (
+    DimRole,
+    SpatialReduce,
+    ViewCrop,
+    Projection,
+    default_view_spec,
+    plot_axis_to_storage_axis,
+    spec_from_slice_info,
+    storage_axis_to_plot_axis,
+)
 
 SliceItem = Union[int, slice]
 
 
-def view_spec_from_legacy(
+def projection_for_shape(
     *,
     shape: Sequence[int],
     plot_ndim: int = 1,
-    cube_view_spec: Optional[CubeViewSpec] = None,
+    projection: Optional[Projection] = None,
     slice_info: Optional[Tuple[SliceItem, ...]] = None,
     crop=None,
-) -> ViewSpec:
+) -> Projection:
     """
-    Build a :class:`ViewSpec` from today's session fields.
+    Choose the :class:`Projection` for an array of this shape.
 
-    Prefer ``cube_view_spec`` when it fits the array rank. Otherwise infer
-    from ``slice_info``, then fall back to a trailing-axis default.
+    Prefer ``projection`` when it fits the array rank. Otherwise infer from
+    ``slice_info``, then fall back to a trailing-axis default.
 
     Parameters
     ----------
@@ -57,16 +58,16 @@ def view_spec_from_legacy(
         Shape of the y key.
     plot_ndim : int
         Desired plot dimensionality (1 or 2).
-    cube_view_spec : CubeViewSpec, optional
-        Session cube view.
+    projection : Projection, optional
+        Session projection.
     slice_info : tuple, optional
-        Legacy per-axis slice tuple.
+        Per-axis slice tuple from session state.
     crop : ViewCrop, optional
         Plot-plane crop in storage indices.
 
     Returns
     -------
-    ViewSpec
+    Projection
         Rank-bound view for the request.
     """
     ndim = len(shape)
@@ -75,12 +76,12 @@ def view_spec_from_legacy(
 
     effective_plot_ndim = plot_ndim if ndim >= plot_ndim else 1
 
-    if cube_view_spec is not None and cube_view_spec.ndim == ndim:
-        return ViewSpec.from_cube_view_spec(cube_view_spec, crop=crop)
+    if projection is not None and projection.ndim == ndim:
+        return replace(projection, crop=crop)
 
     if slice_info is not None and len(slice_info) == ndim:
-        cube = spec_from_slice_info(tuple(slice_info), effective_plot_ndim)
-        return ViewSpec.from_cube_view_spec(cube, crop=crop)
+        inferred = spec_from_slice_info(tuple(slice_info), effective_plot_ndim)
+        return replace(inferred, crop=crop)
 
     return default_view_spec(ndim, effective_plot_ndim)
 
@@ -93,13 +94,13 @@ def build_plot_request(
     shape: Sequence[int],
     norm_keys: Optional[Sequence[str]] = None,
     plot_ndim: int = 1,
-    cube_view_spec: Optional[CubeViewSpec] = None,
+    projection: Optional[Projection] = None,
     slice_info: Optional[Tuple[SliceItem, ...]] = None,
     crop: Optional[ViewCrop] = None,
     transform: str = "",
 ) -> "PlotRequest":
     """
-    Build a :class:`PlotRequest` from run identity and legacy view state.
+    Build a :class:`PlotRequest` from run identity and session view state.
 
     Parameters
     ----------
@@ -115,10 +116,10 @@ def build_plot_request(
         Normalization keys.
     plot_ndim : int
         Desired plot dimensionality.
-    cube_view_spec : CubeViewSpec, optional
-        Session cube view.
+    projection : Projection, optional
+        Session projection.
     slice_info : tuple, optional
-        Legacy slice tuple.
+        Per-axis slice tuple from session state.
     crop : ViewCrop, optional
         Plot-plane crop in storage indices.
     transform : str
@@ -129,10 +130,10 @@ def build_plot_request(
     PlotRequest
         Frozen request for the fetch path.
     """
-    view = view_spec_from_legacy(
+    view = projection_for_shape(
         shape=shape,
         plot_ndim=plot_ndim,
-        cube_view_spec=cube_view_spec,
+        projection=projection,
         slice_info=slice_info,
         crop=crop,
     )
@@ -201,7 +202,7 @@ class PlotRequest:
         Y data key.
     norm_keys : tuple of str
         Normalization keys. Empty means no normalization.
-    view : ViewSpec
+    view : Projection
         Rank-bound view of the plane that is loaded, including its optional
         crop. When ``region`` is set this is still the *parent* 2-D plane:
         the ROI reduces it afterwards, and the plane's identity is what the
@@ -230,7 +231,7 @@ class PlotRequest:
     xkeys: Tuple[str, ...]
     ykey: str
     norm_keys: Tuple[str, ...]
-    view: ViewSpec
+    view: Projection
     region: Optional[RegionDefinition] = None
     mask_mode: MaskMode = "inside"
     profile_axis: Optional[int] = None
@@ -533,7 +534,7 @@ def roi_profile_request(
         raise ValueError("an ROI profile needs a 2-D parent plane")
     if not isinstance(profile_axis, int):
         profile_axis = plot_axis_to_storage_axis(
-            parent.view.to_cube_view_spec(), profile_axis
+            parent.view, profile_axis
         )
     if (
         span_full
@@ -547,7 +548,7 @@ def roi_profile_request(
             storage_axis_to_plot_axis(
                 plane_frame,
                 profile_axis,
-                parent_spec=parent.view.to_cube_view_spec(),
+                parent_spec=parent.view,
             ),
         )
     return replace(

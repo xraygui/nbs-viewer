@@ -5,8 +5,8 @@ How a plot request becomes storage indices, and how those indices become a
 half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
-**Status:** steps 1–4 landed on branch `mesh-transpose-removal`
-(2026-09-08). Steps 5–7 not started.
+**Status:** steps 1–5 landed on branch `mesh-transpose-removal`
+(2026-09-08). Steps 6–7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -205,6 +205,9 @@ coordinate arrays were carrying.
 (down from 8). That is the real cost of the dependency inversion, and it
 cannot be sliced: `view_spec.py:17` imports from `cube_view.py` and converts
 back before the old code runs, so the round trip keeps both alive.
+
+**Step 5 outcome: 19 modules, not 14.** The count above missed modules that
+name `CubeViewSpec` only in a type annotation or a helper's keyword argument.
 
 ### `PlotDataModel` refetches on a transform change
 
@@ -428,22 +431,100 @@ pair. Unreachable today (the scan axis leads), and it is `remaining` being
 built in storage order rather than `axis_order` — a `cube_view.py` problem,
 so step 5.
 
-### Step 5 — Invert the dependency, delete `cube_view.py`
+### Step 5 — Invert the dependency, delete `cube_view.py` ✅ 2026-09-08
 
-**Not started.** Step 4 is done, so this is next. One commit; the round trip
-is what keeps both types alive.
+**Behaviour-preserving.** One commit; the round trip was what kept both types
+alive, so it could not be sliced.
 
-- move `DimRole` / `SLICE_ROLES` so `cube_view.py` imports from `view_spec.py`,
-  never the reverse
-- `ViewSpec` becomes the only spec; rename to `Projection`
-- `materialize_view` takes a `PlotRequest`
+Landed:
 
-Deletes: `CubeViewSpec`, `MaterializeRequest`, `to_cube_view_spec`,
-`from_cube_view_spec`, `view_spec_from_legacy`, `build_plot_request`, and
-`cube_view.py` itself (1286 lines). Carries the `_materialize_roi_profile`
-trailing-axes assumption recorded under step 4.
+- `DimRole`, `ROLE_LABELS`, `SLICE_ROLES`, `SpatialReduce` and `PlotAxisName`
+  now live in `view_spec.py`. Nothing imports upward any more.
+- `CubeViewSpec` merged into `ViewSpec`, which was already a strict superset
+  of it (same five fields plus `crop`). `ViewSpec` gained `swap_rows`;
+  `to_load_slice_info` was already there as `base_slice`.
+- `ViewSpec` renamed to **`Projection`**, the name the pipeline diagram uses.
+- `materialize_view` takes `(spec, *, region, mask_mode)` rather than a
+  request object.
 
-Cost: 14 test modules to retarget. Price it in the PR description.
+Deleted: `cube_view.py` (1212 lines) in full, and with it `CubeViewSpec`,
+`MaterializeRequest`, `apply_cube_view` (no production caller),
+`_resolved_roles_tuple` (a byte-identical duplicate of `view_spec._resolved_roles`),
+`resolve_roles` and its three call sites, `ViewSpec.to_cube_view_spec`,
+`ViewSpec.from_cube_view_spec`, and `plot_bundle._materialize_request`.
+
+Measured across `models/plot/`: **5093 → 4960 code lines** (−133, excluding
+docstrings and comments); 10354 → 10043 raw; 20 → 19 files. Suite 350 → 344 —
+the six removed tests each covered a symbol that no longer exists.
+
+#### The decision the plan had not made: where the contents go
+
+The step said "delete `cube_view.py`" and listed the *types* to remove, but
+named no destination for the fifteen live functions that were not on that
+list. They split cleanly in two, and the import graph decides which way:
+
+- **Spec construction and queries** (754 lines) → `view_spec.py`. Consumed by
+  `plot_session.py` and `views/plot/roi/window.py`, neither of which imports
+  `plot_bundle`.
+- **Materialize machinery** (382 lines) → `plot_bundle.py`, which was
+  `materialize_view`'s only consumer and already owns `reduce_to_plot_plane`.
+
+`view_spec.py` is now 1100 lines and `plot_bundle.py` 833. A third module for
+the profile-axis cluster would have balanced them, but a step whose content
+includes a new module is not a step in this plan (invariant 10). Step 6 takes
+most of the spec constructors into `ViewIntent.project`, which is where the
+relief comes from.
+
+#### Deviations from the step as written
+
+- **`materialize_view` takes a `Projection`, not a `PlotRequest`.** The
+  cached-plane path builds a synthetic 2-D plane spec that is not any
+  request's view, so a `PlotRequest` parameter would have forced it to
+  fabricate a fake request — a bridge object, which is the thing invariant 10
+  forbids. `(spec, region, mask_mode)` is the honest signature.
+- **`build_plot_request` and `view_spec_from_legacy` were renamed, not
+  deleted.** The plan listed both as deletions, but what dies with
+  `CubeViewSpec` is the *conversion*; the *choice* — which projection fits an
+  array of this rank, given session state — is still needed until step 6 moves
+  it to `ViewIntent.project`. `view_spec_from_legacy` is now
+  `projection_for_shape`, and its `cube_view_spec=` argument is `projection=`.
+  Recorded as a rename so the deletion count stays honest.
+
+#### Findings
+
+**The two specs had already converged.** `ViewSpec` carried every field and
+method of `CubeViewSpec` except `swap_rows`, and `_resolved_roles_tuple` was a
+character-for-character copy of `view_spec._resolved_roles`. The inversion was
+holding two copies of one type in place, not two designs.
+
+**`resolve_roles` was already dead weight.** `ViewSpec.__post_init__` resolves
+roles on construction, so `resolve_roles(spec)` could only ever return an
+equal object. Its three call sites in `DimensionControl` and `swap_rows` were
+no-ops. Deleting it is why `swap_rows` shrank.
+
+**The `_materialize_roi_profile` trailing-axes assumption did not move on.**
+Step 4 sent it here as "a `cube_view.py` problem". `cube_view.py` is gone and
+the code is unchanged in `plot_bundle.py`: `remaining` is still built in
+storage order rather than `axis_order`, so a parent whose plane is axes (0, 1)
+with the profile on axis 2 would reduce the wrong pair. Still unreachable —
+the scan axis leads in every layout the tree produces — and it is a question
+about the order of the reduce, so it belongs with **step 7**, which moves the
+reduce stage. Moved there rather than fixed blind.
+
+#### Tests
+
+19 test modules retargeted — the plan priced 14. `test_cube_view.py` was
+merged into `test_view_spec.py` rather than retargeted: both then tested the
+same type, so keeping two files would have split the projection tests by an
+accident of history. Its three `apply_cube_view` tests went with the function;
+its two `resolve_roles` tests became assertions that the constructor resolves.
+
+`DimensionControl` is the widget most exposed by this step — it lost its
+`resolve_roles` calls and had a `Projection` constructor rewritten by hand —
+and the suite cannot build it. Driven from a scratch script under a real
+`QApplication` instead: 1-D selection, the switch to 2-D through
+`spec_for_plot_ndim`, `swap_rows` re-resolving roles with no helper, and an
+image bundle out the far end.
 
 ### Step 6 — Adopt `ViewIntent`, or delete it
 
@@ -481,6 +562,16 @@ Carries two things from step 4, both about where the transform runs:
   plane before the reduce, rather than to the finished output, makes the two
   paths agree.
 
+And one from step 5:
+
+- **The `_materialize_roi_profile` trailing-axes assumption.** `remaining` is
+  built in storage order rather than `axis_order`, so a parent whose plane is
+  axes (0, 1) with the profile on axis 2 reduces the wrong pair. Unreachable
+  today because the scan axis leads. Step 4 sent it to step 5 as "a
+  `cube_view.py` problem"; `cube_view.py` is gone and the code moved to
+  `plot_bundle.py` unchanged, so it lands here — this is the step that
+  reorders the reduce.
+
 ---
 
 ## Interlock with the other sub-plan
@@ -502,3 +593,4 @@ plan, not here.
 | 2026-09-08 | Step 3 landed. Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
 | 2026-09-08 | Step 4 landed. `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
 | 2026-09-08 | Fixed `storage_axis_to_plot_axis` reading the plot-axis mapping off the frame instead of the spec, which made "span full profile axis" widen the reduction axis. Recorded under step 4. |
+| 2026-09-08 | Step 5 landed. `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |

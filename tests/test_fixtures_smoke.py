@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.view_spec import (
+    DimRole,
+    Projection,
+)
 
 from tests.fixtures.catalog_recipes import build_runs
 from tests.fixtures.session import HeadlessSession
@@ -35,7 +38,7 @@ def test_image_scan_get_plot_bundle_without_injected_bundle(app_model):
     session.load_catalog(recipe="image_scan", runs=1)
     run_model = session.select_run(0)
 
-    spec = CubeViewSpec(
+    spec = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
