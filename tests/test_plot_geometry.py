@@ -6,11 +6,39 @@ import pytest
 from nbs_viewer.models.plot.plot_geometry import (
     PlotBundle,
     classify_render_mode,
+    display_flips,
     get_render_mode_hint,
     is_uniform_1d,
+    orient_for_display,
     prepare_2d_bundle,
     prepare_1d_bundle,
 )
+
+
+def _packed_for_display(y, row_axis, col_axis, axis_names, render_mode):
+    """
+    Orient a storage plane and pack it, the way the fetch path does.
+
+    ``prepare_2d_bundle`` no longer reorders anything; orientation is a
+    separate step that runs immediately after the load.
+    """
+    row_reversed, col_reversed = display_flips(row_axis, col_axis, render_mode)
+    reversed_axes = [
+        axis
+        for axis, flip in enumerate((row_reversed, col_reversed))
+        if flip
+    ]
+    y, (row_axis, col_axis) = orient_for_display(
+        y, [row_axis, col_axis], reversed_axes, {0: 0, 1: 1}
+    )
+    return prepare_2d_bundle(
+        y,
+        [row_axis, col_axis],
+        axis_names,
+        render_mode_hint=render_mode,
+        row_reversed=row_reversed,
+        col_reversed=col_reversed,
+    )
 
 
 def test_is_uniform_1d_uniform():
@@ -181,11 +209,11 @@ def test_image_and_mesh_agree_on_axis_placement():
     y = np.zeros((4, 6))
     y[2, 4] = 1.0
 
-    image = prepare_2d_bundle(
-        y, [row_axis, col_axis], ["axis0", "axis1"], render_mode_hint="image"
+    image = _packed_for_display(
+        y, row_axis, col_axis, ["axis0", "axis1"], "image"
     )
-    mesh = prepare_2d_bundle(
-        y, [row_axis, col_axis], ["axis0", "axis1"], render_mode_hint="mesh"
+    mesh = _packed_for_display(
+        y, row_axis, col_axis, ["axis0", "axis1"], "mesh"
     )
 
     assert image.y.shape == mesh.y.shape == y.shape

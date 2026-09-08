@@ -868,24 +868,11 @@ class PlotModel(QObject):
             raise ValueError("Select a single 2D dataset")
 
         full_frame = self._resolve_full_view_frame_for_crop(plot_data)
-        slice_info = parent_spec.to_load_slice_info()
-        xlist, _names, _extra = plot_data._run.load_axes(
-            plot_data._ykey,
-            [plot_data._xkey],
-            slice_info,
-        )
-        plot_y_axis, plot_x_axis = _fetch_plot_plane_storage_axes(
-            parent_spec,
-            full_frame,
-            parent_spec,
-        )
         crop = view_crop_from_region(
             region,
             full_frame,
             parent_spec,
             plot_data._key,
-            xlist[plot_y_axis],
-            xlist[plot_x_axis],
         )
         self.set_view_crop(crop)
         return crop

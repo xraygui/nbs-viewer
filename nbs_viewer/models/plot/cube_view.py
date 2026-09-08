@@ -12,7 +12,7 @@ from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
+from .plot_view_frame import PlotViewFrame
 from .region import RegionDefinition, compile_with_mask_mode
 
 SliceItem = Union[int, slice]
@@ -62,99 +62,6 @@ class MaterializeRequest:
     region: Optional[RegionDefinition] = None
     mask_mode: MaskMode = "inside"
 
-    def to_fetch_slice_info(
-        self,
-        *,
-        region_frame: PlotViewFrame,
-        parent_spec: Optional[CubeViewSpec] = None,
-    ) -> Tuple[SliceItem, ...]:
-        """
-        Build ``slice_info`` for ``getData`` with ROI bbox limits applied.
-
-        Parameters
-        ----------
-        region_frame : PlotViewFrame
-            Parent 2D view frame used to compile the ROI.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view for plot-plane storage axis lookup on profile
-            requests.
-
-        Returns
-        -------
-        tuple
-            Per-storage-axis slice or index tuple for chunked loading.
-        """
-        slice_info, _frame = self.fetch_context(
-            region_frame=region_frame,
-            parent_spec=parent_spec,
-        )
-        return slice_info
-
-    def fetch_context(
-        self,
-        *,
-        region_frame: PlotViewFrame,
-        parent_spec: Optional[CubeViewSpec] = None,
-        base_slice_info: Optional[Tuple[SliceItem, ...]] = None,
-    ) -> Tuple[Tuple[SliceItem, ...], PlotViewFrame]:
-        """
-        Return fetch slices and the region frame matching a narrowed load.
-
-        When ``region`` is set, spatial plot-plane axes in ``slice_info`` are
-        limited to the compiled ROI bounding box. The returned view frame is
-        cropped to that box so ``materialize_view`` sees matching plane shape.
-
-        Parameters
-        ----------
-        region_frame : PlotViewFrame
-            Full parent 2D view frame used to compile the ROI.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view for plot-plane storage axis lookup.
-
-        base_slice_info : tuple, optional
-            Pre-narrowed load slices, for example after a persistent view crop.
-            Defaults to :meth:`CubeViewSpec.to_load_slice_info` for ``spec``.
-
-        Returns
-        -------
-        tuple
-            ``(slice_info, region_frame)`` for ``getData`` and materialization.
-        """
-        if self.region is None:
-            if base_slice_info is not None:
-                return base_slice_info, region_frame
-            return self.spec.to_load_slice_info(), region_frame
-
-        compiled = compile_with_mask_mode(
-            region_frame,
-            self.region,
-            self.mask_mode,
-        )
-        if compiled.pixel_count == 0:
-            raise ValueError("ROI does not cover any cells")
-
-        r0, r1, c0, c1 = compiled.bbox
-        if r1 <= r0 or c1 <= c0:
-            raise ValueError("ROI bounding box is empty")
-
-        plot_y_axis, plot_x_axis = _fetch_plot_plane_storage_axes(
-            self.spec,
-            region_frame,
-            parent_spec,
-        )
-        if base_slice_info is not None:
-            items = list(base_slice_info)
-        else:
-            items = list(self.spec.to_load_slice_info())
-        items[plot_y_axis] = _narrow_fetch_slice(
-            items[plot_y_axis], r0, r1, region_frame.n_plot_y
-        )
-        items[plot_x_axis] = _narrow_fetch_slice(
-            items[plot_x_axis], c0, c1, region_frame.n_plot_x
-        )
-        cropped_frame = region_frame_for_bbox(region_frame, compiled.bbox)
-        return tuple(items), cropped_frame
-
 
 def _fetch_plot_plane_storage_axes(
     spec: CubeViewSpec,
@@ -175,28 +82,6 @@ def _fetch_plot_plane_storage_axes(
     if spec.ndim == 2:
         return region_frame.plot_y_dim, region_frame.plot_x_dim
     raise ValueError("cannot resolve plot-plane storage axes for ROI fetch")
-
-
-def _narrow_fetch_slice(
-    item: SliceItem,
-    start: int,
-    stop: int,
-    dim_size: int,
-) -> slice:
-    """
-    Intersect a load slice with half-open ``[start, stop)`` fetch bounds.
-    """
-    if isinstance(item, int):
-        raise ValueError("cannot apply ROI fetch bounds to an indexed axis")
-    if not isinstance(item, slice):
-        return slice(start, stop)
-    current_start = 0 if item.start is None else int(item.start)
-    current_stop = dim_size if item.stop is None else int(item.stop)
-    new_start = max(current_start, start)
-    new_stop = min(current_stop, stop)
-    if new_start >= new_stop:
-        raise ValueError("ROI fetch bounds do not intersect the requested slice")
-    return slice(new_start, new_stop)
 
 
 @dataclass(frozen=True)

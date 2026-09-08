@@ -123,7 +123,7 @@ class PlotDataModel(QObject):
 
     @property
     def _indices(self):
-        return self._request.view.load_slice()
+        return self._request.view.base_slice()
 
     @property
     def _cube_view_spec(self):

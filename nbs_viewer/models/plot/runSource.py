@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
 
@@ -6,8 +7,8 @@ import numpy as np
 import time as ttime
 
 from ..data.base import CatalogRun
-from .cube_view import CubeViewSpec, MaterializeRequest
-from .view_crop import ViewCrop, fetch_context_with_view_crop
+from .cube_view import CubeViewSpec
+from .view_crop import ViewCrop
 from .derived_fetch import plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
 from .key_info import AxisLayout, KeyInfo, RunIdentity
@@ -19,8 +20,13 @@ from .plot_bundle import (
     reduce_to_plot_plane,
     slice_info_for_key,
 )
-from .plot_geometry import PlotBundle, get_render_mode_hint
-from .plot_request import PlotRequest
+from .plot_geometry import (
+    PlotBundle,
+    classify_render_mode,
+    get_render_mode_hint,
+    orient_for_display,
+)
+from .plot_request import FetchPlan, PlotRequest, plan_fetch, slim_crop_from_legacy
 from nbs_viewer.utils import print_debug
 
 
@@ -561,58 +567,126 @@ class RunSource(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    def _load_slice_for_request(
+    def _plan_fetch(
         self,
         request: PlotRequest,
         *,
         region_frame=None,
         parent_spec: Optional[CubeViewSpec] = None,
         view_crop: Optional[ViewCrop] = None,
-    ) -> Tuple[tuple, object]:
+    ) -> FetchPlan:
         """
-        Resolve the storage load slice and ROI materialize frame.
-
-        Crop on a 2-D view is already folded into ``request.view.load_slice``.
-        A 1-D ROI profile cannot carry that crop on the view, so ``view_crop``
-        remains an extra argument for N-D ROI loads.
+        Resolve the storage load slice and the frames the load lands in.
 
         Parameters
         ----------
         request : PlotRequest
             Frozen plot description.
         region_frame : PlotViewFrame, optional
-            Parent 2D view frame required when ``request.region`` is set.
+            Full parent 2-D view frame. Required when ``request.region`` is
+            set, and used for the storage-to-display reversal when it is not.
         parent_spec : CubeViewSpec, optional
             Parent cube view for plot-plane storage axis lookup.
         view_crop : ViewCrop, optional
-            Parent-plane crop applied only on the ROI load path.
+            Parent-plane crop for an ROI load, whose 1-D profile view cannot
+            be the thing that carries it. Folded onto the request here, so
+            :func:`plan_fetch` still sees exactly one crop.
 
         Returns
         -------
-        tuple
-            ``(slice_info, materialize_frame)``. ``materialize_frame`` is
-            None when there is no region.
+        FetchPlan
+            Load slices plus the plane and region frames.
         """
-        if request.region is None:
-            return request.view.load_slice(), None
-        if region_frame is None:
-            raise ValueError(
-                "region_frame is required when request.region is set"
+        if view_crop is not None and request.view.crop is None:
+            request = replace(
+                request,
+                view=replace(
+                    request.view, crop=slim_crop_from_legacy(view_crop)
+                ),
             )
-        materialize_request = MaterializeRequest(
-            spec=request.view.to_cube_view_spec(),
-            region=request.region,
-            mask_mode=request.mask_mode,
+        return plan_fetch(
+            request,
+            plane_frame=region_frame,
+            plane_axes=plot_plane_storage_axes(parent_spec),
         )
-        if view_crop is not None:
-            return fetch_context_with_view_crop(
-                materialize_request,
-                view_crop,
-                parent_spec,
+
+    def _storage_to_tensor(self, slice_info: Sequence) -> Dict[int, int]:
+        """
+        Map storage axis to tensor axis for an array loaded with a slice.
+
+        Integer items index a dimension away, so the loaded array is missing
+        those axes while coordinate arrays and roles remain storage-indexed.
+
+        Parameters
+        ----------
+        slice_info : sequence
+            Per-storage-axis slice or index used for the load.
+
+        Returns
+        -------
+        dict
+            Tensor axis of the loaded array, per surviving storage axis.
+        """
+        return {
+            storage_axis: tensor_axis
+            for tensor_axis, storage_axis in enumerate(
+                axis
+                for axis, item in enumerate(slice_info)
+                if not isinstance(item, int)
             )
-        return materialize_request.fetch_context(
-            region_frame=region_frame,
-            parent_spec=parent_spec,
+        }
+
+    def _plane_render_mode(
+        self,
+        ykey: str,
+        y: np.ndarray,
+        axis_arrays: Sequence[np.ndarray],
+        plane_axes: Optional[Tuple[int, int]],
+        tensor_axes: Mapping[int, int],
+    ) -> Optional[str]:
+        """
+        Classify the render mode of the loaded plot plane.
+
+        Classified here, before any reduction, because the orientation
+        decision depends on it and orientation happens immediately after the
+        load. The answer is passed on as an explicit hint so the packing step
+        does not classify a second time.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key, for the plot-hint lookup.
+        y : np.ndarray
+            Loaded array.
+        axis_arrays : sequence of np.ndarray
+            Coordinate array per storage axis.
+        plane_axes : tuple of int, optional
+            Storage axes of the plot plane.
+        tensor_axes : mapping
+            Storage-to-tensor axis map for ``y``.
+
+        Returns
+        -------
+        str or None
+            ``image`` or ``mesh``, or None when there is no 2-D plane.
+        """
+        info = self.key_table().get(ykey)
+        hint = info.render_hint if info is not None else None
+        if hint is None and self._frozen_entry(ykey) is None:
+            hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+        if plane_axes is None:
+            return hint
+        row_axis, col_axis = plane_axes
+        if row_axis not in tensor_axes or col_axis not in tensor_axes:
+            return hint
+        plane_shape = (
+            y.shape[tensor_axes[row_axis]],
+            y.shape[tensor_axes[col_axis]],
+        )
+        return classify_render_mode(
+            plane_shape,
+            [axis_arrays[row_axis], axis_arrays[col_axis]],
+            render_mode_hint=hint,
         )
 
     def _normalized_y(
@@ -622,6 +696,7 @@ class RunSource(QObject):
         request: PlotRequest,
         slice_info: tuple,
         y_storage_names: Sequence[str],
+        reversed_names: Sequence[str] = (),
     ) -> np.ndarray:
         """
         Load and reduce each norm key, then divide into ``y``.
@@ -629,7 +704,7 @@ class RunSource(QObject):
         Parameters
         ----------
         y : np.ndarray
-            Plot-plane y array.
+            Plot-plane y array, in display order.
         y_plot_names : sequence of str
             Names of the plot-plane axes of ``y``.
         request : PlotRequest
@@ -638,6 +713,10 @@ class RunSource(QObject):
             Load slice used for the y key.
         y_storage_names : sequence of str
             Full storage names of the y key.
+        reversed_names : sequence of str
+            Names of the storage axes reversed to reach display order. A norm
+            key sharing one of them must be reversed the same way, or it would
+            be divided into ``y`` upside down.
 
         Returns
         -------
@@ -648,18 +727,30 @@ class RunSource(QObject):
             return y
         xkeys = list(request.xkeys)
         roles = request.view.roles
+        reversed_names = set(reversed_names)
         reduced = []
         for norm_key in request.norm_keys:
             layout = self.describe_axes(norm_key, xkeys)
             norm_names = list(layout.names)
-            if self._frozen_entry(norm_key) is not None:
-                arr = self.read(norm_key, slice_info)
-                reduced.append((arr, list(norm_names)))
-                continue
-            key_slice = slice_info_for_key(
-                slice_info, y_storage_names, norm_names
+            key_slice = (
+                slice_info
+                if self._frozen_entry(norm_key) is not None
+                else slice_info_for_key(slice_info, y_storage_names, norm_names)
             )
             arr = self.read(norm_key, key_slice)
+            arr, _ = orient_for_display(
+                arr,
+                (),
+                [
+                    axis
+                    for axis, name in enumerate(norm_names)
+                    if name in reversed_names
+                ],
+                self._storage_to_tensor(key_slice),
+            )
+            if self._frozen_entry(norm_key) is not None:
+                reduced.append((arr, list(norm_names)))
+                continue
             reduced.append(
                 reduce_loaded_array(
                     arr, list(norm_names), y_storage_names, roles
@@ -677,14 +768,20 @@ class RunSource(QObject):
         view_crop: Optional[ViewCrop] = None,
     ) -> PlotBundle:
         """
-        Load, reduce, normalize, transform, and pack one plot request.
+        Load, orient, reduce, normalize, transform, and pack one plot request.
+
+        Storage-to-display reorientation happens immediately after the load,
+        so every later step -- ROI masking above all -- sees display-ordered
+        data and the renderer never reorders anything again.
 
         Parameters
         ----------
         request : PlotRequest
             Frozen plot description.
         region_frame : PlotViewFrame, optional
-            Parent 2D view frame required when ``request.region`` is set.
+            Full parent 2D view frame. Required when ``request.region`` is
+            set: the region is in data coordinates, and the frame is also
+            what records how the parent plane was oriented.
         parent_spec : CubeViewSpec, optional
             Parent cube view for ROI plot-plane axis lookup.
         label : str
@@ -700,12 +797,13 @@ class RunSource(QObject):
         """
         xkeys = list(request.xkeys)
         ykey = request.ykey
-        slice_info, materialize_frame = self._load_slice_for_request(
+        plan = self._plan_fetch(
             request,
             region_frame=region_frame,
             parent_spec=parent_spec,
             view_crop=view_crop,
         )
+        slice_info = plan.slice_info
 
         t0 = ttime.time()
         storage_axes, storage_names, _extra = self.load_axes(
@@ -714,20 +812,37 @@ class RunSource(QObject):
         y = self.read(ykey, slice_info)
         t_load = ttime.time() - t0
 
+        tensor_axes = self._storage_to_tensor(slice_info)
+        render_hint = self._plane_render_mode(
+            ykey, y, storage_axes, plan.plane_axes, tensor_axes
+        )
+        reversed_axes = plan.reversed_axes_for(storage_axes, render_hint)
+        y, storage_axes = orient_for_display(
+            y, storage_axes, reversed_axes, tensor_axes
+        )
+        reversed_names = [
+            storage_names[axis]
+            for axis in reversed_axes
+            if axis < len(storage_names)
+        ]
+        plane_axes = plan.plane_axes or ()
+        row_reversed = bool(plane_axes and plane_axes[0] in reversed_axes)
+        col_reversed = bool(plane_axes and plane_axes[1] in reversed_axes)
+
         t0 = ttime.time()
         y, coords, names = reduce_to_plot_plane(
             y,
             storage_axes,
             storage_names,
             request,
-            region_frame=materialize_frame,
-            plot_plane_storage_axes=plot_plane_storage_axes(parent_spec),
+            region_frame=plan.region_frame,
+            plot_plane_storage_axes=plan.plane_axes,
         )
         t_materialize = ttime.time() - t0
 
         t0 = ttime.time()
         y = self._normalized_y(
-            y, names, request, slice_info, storage_names
+            y, names, request, slice_info, storage_names, reversed_names
         )
         t_norm = ttime.time() - t0
 
@@ -746,17 +861,15 @@ class RunSource(QObject):
         frozen = self._frozen_entry(ykey)
         if frozen is not None and y.ndim == 1:
             names = [label or frozen.label]
-        info = self.key_table().get(ykey)
-        hint = info.render_hint if info is not None else None
-        if hint is None and frozen is None:
-            hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
         return build_plot_bundle(
             y,
             coords,
             names,
             request,
-            render_mode_hint=hint,
+            render_mode_hint=render_hint,
             label=label,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
         )
 
     @property

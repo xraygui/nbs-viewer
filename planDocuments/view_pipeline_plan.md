@@ -5,8 +5,8 @@ How a plot request becomes storage indices, and how those indices become a
 half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
-**Status:** steps 1 and 2 landed on branch `mesh-transpose-removal`
-(2026-09-08). Steps 3–7 not started.
+**Status:** steps 1–3 landed on branch `mesh-transpose-removal`
+(2026-09-08). Steps 4–7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -250,34 +250,85 @@ reading `plot_x_dim` (a plane position) as a storage axis.
 Added `default_spec_for_selection` and `spec_for_shape_and_selection`; removed
 the last branching from `DimensionControl.create_sliders`.
 
-### Step 3 — Orientation once after load, one planner, one mask
+### Step 3 — Orientation once after load, one planner, one mask ✅ 2026-09-08
 
-**Not started.** The largest step and the only one that cannot be sliced,
-because the fetch narrowing and the mask application currently cancel.
+**Not behaviour-preserving.** Fixes bugs 2 and 3, which cancelled.
 
-Do:
+Landed:
 
-- move storage-to-display reorientation to immediately after the load
-- add `row_reversed` / `col_reversed` to `PlotViewFrame`, set where the flip
-  happens, so the frame is self-sufficient for the mapping
-- add `plan_fetch` and a frozen `FetchPlan`
-- apply the ROI mask to display-ordered data
+- `orient_for_display` runs immediately after the load, on the N-D array,
+  along the plot-plane storage axes. Everything downstream is display-ordered.
+- `prepare_2d_bundle` no longer reorders anything — it packs an already
+  display-ordered plane. `_orient_image_for_imshow_upper` is gone.
+- `PlotBundle` and `PlotViewFrame` carry `row_reversed` / `col_reversed`, set
+  where the flip happens. `PlotViewFrame.storage_bbox` maps a bounding box
+  between display and storage and is its own inverse, so the same method reads
+  the loaded storage bounds back as display.
+- `plan_fetch` and the frozen `FetchPlan` in `plot_request.py`. Crop and ROI
+  narrow through one `narrow` helper and one display-to-storage mapping.
+  `FetchPlan.reversed_axes_for` owns the choice between the parent frame's
+  recorded flip and one derived from the loaded coordinates.
+- `ViewSpec.load_slice` → `base_slice`, which no longer applies the crop:
+  `plan_fetch` is the only place a load is narrowed.
 
-Deletes: `fetch_context_with_view_crop`, `MaterializeRequest.fetch_context`,
-`MaterializeRequest.to_fetch_slice_info`, `apply_view_crop_to_slice_info`,
-`apply_crop_to_slice_info`, `_narrow_slice`, `_narrow_fetch_slice`.
+Deleted: `MaterializeRequest.fetch_context`, `MaterializeRequest.to_fetch_slice_info`,
+`_narrow_fetch_slice`, `fetch_context_with_view_crop`, `apply_view_crop_to_slice_info`,
+`apply_crop_to_slice_info`, `_narrow_slice`, `_orient_image_for_imshow_upper`,
+`storage_bbox_from_display_bbox`, and `ViewCrop.row_axis` / `.col_axis` —
+the two coordinate arrays the fat crop carried only to recover the reversal.
 
-Tests: rewrite the fetch tests to assert against known data rather than against
-`compiled.bbox`. `test_fetch_slice_info.py:44` currently asserts
-`slice_info[2] == slice(r0, r1)` with `r0, r1` straight from the compiled
-display bbox — it pins the bug. Add the descending-axis case, which has no
-coverage.
+Measured across the ten touched files in `models/plot/`: **3605 → 3597 code
+lines** (−8, excluding docstrings and comments); 6952 → 7047 raw. Suite 337 →
+351.
 
-**Not behaviour-preserving.** Say so in the commit.
+Also fixed, en route:
+
+- Committing a crop no longer reads from the database. With the reversal on
+  the frame, `apply_view_crop_from_region` drops its `load_axes` call.
+- The region frame for an ROI under a crop is derived from the narrowed
+  slices, so an ROI reaching past the crop is the intersection rather than a
+  shape-mismatch raise.
+- The `ViewSpec` `crop requires plot_ndim == 2` assertion is relaxed to a
+  bounds check when the view is a profile. That was half of Decision 1's
+  contradiction; the other half goes with step 4.
+
+#### Findings
+
+**Orienting after the load is not free: normalization has to follow.** A norm
+key that shares the plot-plane axes is loaded in storage order and divided
+into a now display-ordered `y`. Reversing `y` alone divides by the wrong rows,
+silently. `_normalized_y` reverses each norm array by axis *name*, so it works
+when the norm key's axis layout differs from the y key's. This was the hidden
+decision point in this step; nothing in the plan predicted it, and no test in
+the tree would have caught it.
+
+**A rectangular ROI cannot detect either bug.** A rectangle fills its own
+bounding box, so its mask is invariant under the row/column reversal, and a
+display-order mask is indistinguishable from a storage-order one. Every ROI
+test in the tree used `RectRegion`. The new tests use a triangular
+`PolygonRegion`; with it, three of the four axis orientations fail before the
+fix and pass after — the fourth, descending rows with ascending columns, is
+already display order and is genuinely a no-op.
+
+**Bug 8 does not belong here.** `needs_fetch` compares whole requests, so a
+transform change refetches. Not refetching requires holding the loaded plane
+across requests, which is step 4's `cached_plane`. Moved to step 4.
+
+#### Tests
+
+`tests/test_fetch_slice_info.py` is rewritten as ground-truth tests: the
+expected profile is computed by masking the oriented stack directly, over all
+four axis orientations, never from `compiled.bbox`. Three end-to-end tests go
+through `RunSource.get_plot_bundle` and `PlotSession.preview_roi_profile`.
+Each of the three was confirmed to fail against the pre-step-3 behaviour.
+
+`tests/fixtures/display_plane.py` builds display-ordered planes the way the
+fetch path does, for the test call sites that used to get orientation for free
+from `prepare_2d_bundle`.
 
 ### Step 4 — One request, no side channels
 
-**Not started.** Depends on step 3.
+**Not started.** Step 3 is done, so this is next.
 
 - `PlotRequest` carries the projection (2-D when a region is present), crop,
   region, mask mode, profile axis and spatial reduce
@@ -351,3 +402,4 @@ plan, not here.
 |------|--------|
 | 2026-09-08 | Written; replaces `view_spec_consolidation_plan.md`, `materialize_view_refactor_plan.md`, `mixed_rank_plot_view_plan.md`. Steps 1 and 2 recorded as landed. |
 | 2026-09-08 | Became a sub-plan of `refactor_plan.md`; shared backlog and cross-plan notes moved there. |
+| 2026-09-08 | Step 3 landed. Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |

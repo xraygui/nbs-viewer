@@ -40,6 +40,14 @@ class PlotViewFrame:
         ``pcolormesh`` X coordinates.
     mesh_y : np.ndarray or None
         ``pcolormesh`` Y coordinates.
+    row_reversed : bool
+        Whether display row order is the reverse of storage order. Recorded
+        by whoever performed the flip, because it cannot be recovered from a
+        finished frame: ``extent`` is normalised so ``bottom < top`` either
+        way. This is what makes the frame self-sufficient for mapping a drawn
+        bounding box back to storage indices.
+    col_reversed : bool
+        Same for display columns.
     """
 
     shape: Tuple[int, int]
@@ -50,6 +58,37 @@ class PlotViewFrame:
     extent: Optional[Tuple[float, float, float, float]] = None
     mesh_x: Optional[np.ndarray] = None
     mesh_y: Optional[np.ndarray] = None
+    row_reversed: bool = False
+    col_reversed: bool = False
+
+    def storage_bbox(
+        self, bbox: Tuple[int, int, int, int]
+    ) -> Tuple[int, int, int, int]:
+        """
+        Map a half-open bounding box between display and storage indices.
+
+        Regions are compiled on the display plane but chunked loads address
+        storage, so a drawn box has to be reflected on whichever axes were
+        reversed to reach display order. The mapping is its own inverse, so
+        the same method also converts a storage box back to display.
+
+        Parameters
+        ----------
+        bbox : tuple of int
+            Half-open ``(row_start, row_stop, col_start, col_stop)``.
+
+        Returns
+        -------
+        tuple of int
+            The box in the other index space.
+        """
+        r0, r1, c0, c1 = bbox
+        n_rows, n_cols = self.shape
+        if self.row_reversed:
+            r0, r1 = n_rows - r1, n_rows - r0
+        if self.col_reversed:
+            c0, c1 = n_cols - c1, n_cols - c0
+        return r0, r1, c0, c1
 
     @property
     def plot_x_name(self) -> str:
@@ -139,6 +178,8 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
             if bundle.render_mode == "mesh"
             else None
         ),
+        row_reversed=bundle.row_reversed,
+        col_reversed=bundle.col_reversed,
     )
 
 
@@ -166,6 +207,8 @@ def view_fingerprint_from_bundle(bundle: PlotBundle) -> tuple:
         frame.plot_x_dim,
         frame.plot_y_dim,
         tuple(frame.axis_names),
+        frame.row_reversed,
+        frame.col_reversed,
     ]
     if frame.extent is not None:
         parts.append(tuple(round(float(v), 4) for v in frame.extent))
@@ -189,14 +232,16 @@ def region_frame_for_bbox(
     bbox: Tuple[int, int, int, int],
 ) -> PlotViewFrame:
     """
-    Crop a view frame to a storage-index bounding box.
+    Crop a view frame to a display-index bounding box.
 
     Parameters
     ----------
     frame : PlotViewFrame
         Full parent 2D view frame.
     bbox : tuple of int
-        Half-open ``(row_start, row_stop, col_start, col_stop)`` indices.
+        Half-open ``(row_start, row_stop, col_start, col_stop)`` on the
+        display plane. Use :meth:`PlotViewFrame.storage_bbox` to convert a
+        storage-index box first.
 
     Returns
     -------
@@ -228,6 +273,8 @@ def region_frame_for_bbox(
             plot_y_dim=frame.plot_y_dim,
             mesh_x=mesh_x,
             mesh_y=mesh_y,
+            row_reversed=frame.row_reversed,
+            col_reversed=frame.col_reversed,
         )
 
     new_extent = None
@@ -245,6 +292,8 @@ def region_frame_for_bbox(
         plot_x_dim=frame.plot_x_dim,
         plot_y_dim=frame.plot_y_dim,
         extent=new_extent,
+        row_reversed=frame.row_reversed,
+        col_reversed=frame.col_reversed,
     )
 
 

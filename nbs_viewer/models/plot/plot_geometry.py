@@ -7,7 +7,7 @@ Pure numpy logic with no Qt or matplotlib dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Sequence, Tuple
+from typing import List, Literal, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -37,6 +37,13 @@ class PlotBundle:
         X coordinates for pcolormesh.
     mesh_y : np.ndarray or None
         Y coordinates for pcolormesh.
+    row_reversed : bool
+        Whether display row order is the reverse of storage order along the
+        plot Y axis. Recorded so a display bounding box can be mapped back to
+        storage indices without re-deriving it from coordinate arrays, which
+        is impossible once ``extent`` has been normalised to ``bottom < top``.
+    col_reversed : bool
+        Same for the plot X axis.
     """
 
     ndim: int
@@ -47,6 +54,8 @@ class PlotBundle:
     extent: Optional[Tuple[float, float, float, float]] = None
     mesh_x: Optional[np.ndarray] = None
     mesh_y: Optional[np.ndarray] = None
+    row_reversed: bool = False
+    col_reversed: bool = False
 
 
 def is_uniform_1d(
@@ -126,84 +135,85 @@ def centers_to_edges(centers: np.ndarray) -> np.ndarray:
     return np.concatenate(([first], mid, [last]))
 
 
-def _orient_image_for_imshow_upper(
-    y: np.ndarray,
+def display_flips(
     row_axis: np.ndarray,
     col_axis: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    render_mode: RenderMode,
+) -> Tuple[bool, bool]:
     """
-    Orient image storage so row 0 sits at the top under ``origin='upper'``.
+    Decide which plot-plane axes reverse between storage and display order.
 
-    ``imshow`` places storage row 0 at the maximum y extent. Reorder rows and
-    columns when axis centers increase with storage index so displayed
-    coordinates still increase bottom-to-top and left-to-right.
+    ``imshow(origin="upper")`` places storage row 0 at the maximum y extent,
+    so a row axis whose centers increase with storage index must be reversed
+    for displayed coordinates to increase bottom-to-top. Columns are reversed
+    in the mirror case. ``pcolormesh`` carries its own coordinate grids and is
+    never reordered.
+
+    Parameters
+    ----------
+    row_axis : np.ndarray
+        Vertical axis center coordinates, one per storage row.
+    col_axis : np.ndarray
+        Horizontal axis center coordinates, one per storage column.
+    render_mode : RenderMode
+        Render mode of the plane.
+
+    Returns
+    -------
+    tuple of bool
+        ``(row_reversed, col_reversed)``.
+    """
+    if render_mode != "image":
+        return False, False
+    row = np.asarray(row_axis, dtype=float).ravel()
+    col = np.asarray(col_axis, dtype=float).ravel()
+    return (
+        bool(row.size >= 2 and row[1] > row[0]),
+        bool(col.size >= 2 and col[1] < col[0]),
+    )
+
+
+def orient_for_display(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    reversed_storage_axes: Sequence[int],
+    storage_to_tensor: Mapping[int, int],
+) -> Tuple[np.ndarray, List[np.ndarray]]:
+    """
+    Reverse loaded axes so the plot plane is in display order.
+
+    Called once, immediately after the load, so that everything downstream --
+    ROI masking above all -- works on display-ordered data. ``axis_arrays`` is
+    indexed by storage axis while ``y`` is indexed by tensor axis, because
+    INDEX axes are dropped by the load; ``storage_to_tensor`` bridges the two.
 
     Parameters
     ----------
     y : np.ndarray
-        2D data array.
-    row_axis : np.ndarray
-        Vertical axis center coordinates for each storage row.
-    col_axis : np.ndarray
-        Horizontal axis center coordinates for each storage column.
+        Loaded array, in storage order.
+    axis_arrays : sequence of np.ndarray
+        Coordinate array per storage axis. May be empty for an array whose
+        coordinates the caller does not track, such as a normalization key.
+    reversed_storage_axes : sequence of int
+        Storage axes whose order must reverse.
+    storage_to_tensor : mapping
+        Tensor axis of ``y`` for each storage axis present in it.
 
     Returns
     -------
-    tuple of np.ndarray
-        Oriented ``y``, ``row_axis``, and ``col_axis``.
+    tuple
+        ``(y, axis_arrays)`` in display order along the reversed axes.
     """
-    y_out = np.asarray(y)
-    row_out = np.asarray(row_axis, dtype=float).ravel()
-    col_out = np.asarray(col_axis, dtype=float).ravel()
-    if row_out.size >= 2 and row_out[1] > row_out[0]:
-        y_out = y_out[::-1, :]
-        row_out = row_out[::-1]
-    if col_out.size >= 2 and col_out[1] < col_out[0]:
-        y_out = y_out[:, ::-1]
-        col_out = col_out[::-1]
-    return y_out, row_out, col_out
-
-
-def storage_bbox_from_display_bbox(
-    bbox: Tuple[int, int, int, int],
-    row_axis: np.ndarray,
-    col_axis: np.ndarray,
-    shape: Tuple[int, int],
-) -> Tuple[int, int, int, int]:
-    """
-    Map a bounding box from oriented display rows/cols to storage indices.
-
-    ROI compilation runs on the oriented :class:`PlotViewFrame` produced by
-    :func:`prepare_2d_bundle`, but chunked loads use storage-axis order before
-    :func:`_orient_image_for_imshow_upper` is applied. This inverts the same
-    row/column flips so narrowed ``slice_info`` matches the drawn region.
-
-    Parameters
-    ----------
-    bbox : tuple of int
-        Half-open ``(row_start, row_stop, col_start, col_stop)`` on the
-        oriented display plane.
-    row_axis : np.ndarray
-        Storage row-center coordinates for the full plane.
-    col_axis : np.ndarray
-        Storage column-center coordinates for the full plane.
-    shape : tuple of int
-        Full plane shape ``(n_rows, n_cols)``.
-
-    Returns
-    -------
-    tuple of int
-        Bounding box in storage index space.
-    """
-    r0, r1, c0, c1 = bbox
-    ny, nx = shape
-    row_axis = np.asarray(row_axis, dtype=float).ravel()
-    col_axis = np.asarray(col_axis, dtype=float).ravel()
-    if row_axis.size >= 2 and row_axis[1] > row_axis[0]:
-        r0, r1 = ny - r1, ny - r0
-    if col_axis.size >= 2 and col_axis[1] < col_axis[0]:
-        c0, c1 = nx - c1, nx - c0
-    return r0, r1, c0, c1
+    out = np.asarray(y)
+    arrays = list(axis_arrays)
+    for storage_axis in reversed_storage_axes:
+        tensor_axis = storage_to_tensor.get(storage_axis)
+        if tensor_axis is None:
+            continue
+        out = np.flip(out, axis=tensor_axis)
+        if storage_axis < len(arrays):
+            arrays[storage_axis] = np.asarray(arrays[storage_axis])[::-1]
+    return out, arrays
 
 
 def _extent_from_uniform_1d(
@@ -429,27 +439,36 @@ def prepare_2d_bundle(
     x_axes: Sequence[np.ndarray],
     axis_names: Sequence[str],
     render_mode_hint: Optional[str] = None,
+    *,
+    row_reversed: bool = False,
+    col_reversed: bool = False,
 ) -> PlotBundle:
     """
-    Build a PlotBundle for 2D data with auto-detected render mode.
+    Pack an already display-ordered 2D plane into a PlotBundle.
 
     Data orientation: row index maps to the vertical axis, column index to
     the horizontal axis (consistent with matplotlib imshow). This holds for
     both render modes. Which storage dimension ends up on which screen axis
-    is decided upstream by the view spec's plot-axis roles, which have
-    already permuted ``y`` before it arrives here; the renderer must not
-    reorder it again.
+    is decided upstream by the view spec's plot-axis roles, and the
+    storage-to-display reversal is applied upstream too, by
+    :func:`orient_for_display` immediately after the load; the renderer must
+    not reorder anything again.
 
     Parameters
     ----------
     y : np.ndarray
-        2D data array from the data layer.
+        2D data array, in display order.
     x_axes : sequence of np.ndarray
-        Axis coordinate arrays for non-sliced dimensions.
+        Axis coordinate arrays for non-sliced dimensions, in display order.
     axis_names : sequence of str
         Names for each axis dimension.
     render_mode_hint : str, optional
         Explicit render mode from plot hints.
+    row_reversed : bool
+        Whether the caller reversed the row axis to reach display order.
+        Recorded on the bundle; it does not change what is packed here.
+    col_reversed : bool
+        Same for the column axis.
 
     Returns
     -------
@@ -470,14 +489,10 @@ def prepare_2d_bundle(
 
     if render_mode == "image":
         ny, nx = y.shape
-        y_image = y
         if len(x_axes) >= 2:
             row_axis = np.asarray(x_axes[-2]).ravel()
             col_axis = np.asarray(x_axes[-1]).ravel()
             if row_axis.size > 1 and col_axis.size > 1:
-                y_image, row_axis, col_axis = _orient_image_for_imshow_upper(
-                    y, row_axis, col_axis
-                )
                 extent = _extent_from_uniform_1d(col_axis, row_axis)
             else:
                 extent = _pixel_extent(ny, nx)
@@ -486,10 +501,12 @@ def prepare_2d_bundle(
 
         return PlotBundle(
             ndim=2,
-            y=y_image,
+            y=y,
             render_mode="image",
             axis_names=names[-2:],
             extent=extent,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
         )
 
     mesh_axes = [np.asarray(axis) for axis in x_axes[-2:]]
@@ -501,6 +518,8 @@ def prepare_2d_bundle(
         axis_names=names[-2:],
         mesh_x=mesh_x,
         mesh_y=mesh_y,
+        row_reversed=row_reversed,
+        col_reversed=col_reversed,
     )
 
 

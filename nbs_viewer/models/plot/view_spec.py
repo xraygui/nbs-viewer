@@ -2,8 +2,9 @@
 Rank-agnostic view intent and concrete view specifications.
 
 ``ViewIntent`` is what a plot session holds and the dimension controls edit.
-``ViewSpec`` is the rank-bound snapshot carried by a ``PlotRequest``. Crop is
-folded in as integer storage bounds on the plot plane.
+``ViewSpec`` is the rank-bound snapshot carried by a ``PlotRequest``. Crop
+rides along as integer storage bounds on the plot plane; it is applied by
+``plot_request.plan_fetch``, never here.
 
 These types sit beside ``CubeViewSpec`` during the migration; they do not yet
 replace it.
@@ -53,72 +54,6 @@ class ViewCrop:
             raise ValueError("plot_y_axis and plot_x_axis must differ")
         if self.plot_y_axis < 0 or self.plot_x_axis < 0:
             raise ValueError("plot axis indices must be non-negative")
-
-
-def _narrow_slice(item: SliceItem, start: int, stop: int) -> slice:
-    """
-    Intersect a load slice with half-open ``[start, stop)``.
-
-    Parameters
-    ----------
-    item : int or slice
-        Current load item for one storage axis.
-    start, stop : int
-        Half-open bounds to intersect with.
-
-    Returns
-    -------
-    slice
-        Narrowed load slice.
-
-    Raises
-    ------
-    ValueError
-        If ``item`` is an integer index or the intersection is empty.
-    """
-    if isinstance(item, int):
-        raise ValueError("cannot apply crop bounds to an indexed axis")
-    if not isinstance(item, slice):
-        return slice(start, stop)
-    current_start = 0 if item.start is None else int(item.start)
-    current_stop = stop if item.stop is None else int(item.stop)
-    new_start = max(current_start, start)
-    new_stop = min(current_stop, stop)
-    if new_start >= new_stop:
-        raise ValueError("crop bounds do not intersect the requested slice")
-    return slice(new_start, new_stop)
-
-
-def apply_crop_to_slice_info(
-    slice_info: Tuple[SliceItem, ...],
-    crop: ViewCrop,
-) -> Tuple[SliceItem, ...]:
-    """
-    Intersect plot-plane load slices with a view crop bounding box.
-
-    Parameters
-    ----------
-    slice_info : tuple
-        Per-storage-axis slice tuple from :meth:`ViewSpec.load_slice` before
-        crop, or an equivalent base load slice.
-    crop : ViewCrop
-        Active crop with storage-index bounds.
-
-    Returns
-    -------
-    tuple
-        Narrowed slice tuple for chunked loading.
-    """
-    r0, r1, c0, c1 = crop.storage_bbox
-    items = list(slice_info)
-    if crop.plot_y_axis >= len(items) or crop.plot_x_axis >= len(items):
-        raise ValueError(
-            f"crop axes ({crop.plot_y_axis}, {crop.plot_x_axis}) out of range "
-            f"for slice of length {len(items)}"
-        )
-    items[crop.plot_y_axis] = _narrow_slice(items[crop.plot_y_axis], r0, r1)
-    items[crop.plot_x_axis] = _narrow_slice(items[crop.plot_x_axis], c0, c1)
-    return tuple(items)
 
 
 def _resolved_roles(
@@ -199,18 +134,29 @@ class ViewSpec:
         if resolved != self.roles:
             object.__setattr__(self, "roles", resolved)
         if self.crop is not None:
-            if self.plot_ndim != 2:
-                raise ValueError("crop requires plot_ndim == 2")
-            plot_axes = self.plot_axis_order()
-            if (
-                self.crop.plot_y_axis != plot_axes[0]
-                or self.crop.plot_x_axis != plot_axes[1]
-            ):
+            # The crop names the storage axes of the *plot plane*. When this
+            # view is that plane they must agree with its plot-axis order;
+            # when the view has been reduced to an ROI profile the plane
+            # survives only in the crop, so there is nothing to agree with.
+            # Requiring plot_ndim == 2 here is what made an ROI on a cropped
+            # plane unrepresentable.
+            if max(self.crop.plot_y_axis, self.crop.plot_x_axis) >= self.ndim:
                 raise ValueError(
-                    "crop plot axes must match ViewSpec plot_axis_order "
-                    f"{plot_axes}, got "
-                    f"({self.crop.plot_y_axis}, {self.crop.plot_x_axis})"
+                    f"crop plot axes ({self.crop.plot_y_axis}, "
+                    f"{self.crop.plot_x_axis}) are out of range for ndim "
+                    f"{self.ndim}"
                 )
+            if self.plot_ndim == 2:
+                plot_axes = self.plot_axis_order()
+                if (
+                    self.crop.plot_y_axis != plot_axes[0]
+                    or self.crop.plot_x_axis != plot_axes[1]
+                ):
+                    raise ValueError(
+                        "crop plot axes must match ViewSpec plot_axis_order "
+                        f"{plot_axes}, got "
+                        f"({self.crop.plot_y_axis}, {self.crop.plot_x_axis})"
+                    )
         self.validate()
 
     def validate(self) -> None:
@@ -245,18 +191,19 @@ class ViewSpec:
         """
         return self.axis_order[self.n_slice_axes :]
 
-    def load_slice(self) -> Tuple[SliceItem, ...]:
+    def base_slice(self) -> Tuple[SliceItem, ...]:
         """
-        Build the storage load slice for this view.
+        Build the un-narrowed storage load slice for this view.
 
-        INDEX axes become integer indices. Every other role requests the full
-        axis (``slice(None)``). When a crop is present it narrows the plot-
-        plane axes.
+        INDEX axes become integer indices; every other role requests the full
+        axis (``slice(None)``). Crop and ROI narrowing are deliberately *not*
+        applied here -- ``plot_request.plan_fetch`` is the only place a load
+        is narrowed, so the display-to-storage mapping has one owner.
 
         Returns
         -------
         tuple
-            Per-storage-axis slice or index for chunked loading.
+            Per-storage-axis slice or index before any spatial narrowing.
         """
         items: List[SliceItem] = []
         for i in range(self.ndim):
@@ -264,10 +211,7 @@ class ViewSpec:
                 items.append(int(self.indices[i]))
             else:
                 items.append(slice(None))
-        result = tuple(items)
-        if self.crop is not None:
-            result = apply_crop_to_slice_info(result, self.crop)
-        return result
+        return tuple(items)
 
     def with_index(self, storage_axis: int, index: int) -> "ViewSpec":
         """

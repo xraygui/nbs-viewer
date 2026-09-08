@@ -19,7 +19,36 @@ from nbs_viewer.models.plot.derived_fetch import (
     plot_plane_storage_axes,
     resolve_profile_region,
 )
-from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle, prepare_2d_bundle
+from nbs_viewer.models.plot.plot_geometry import (
+    orient_for_display,
+    prepare_1d_bundle,
+    prepare_2d_bundle,
+)
+from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
+from nbs_viewer.models.plot.view_spec import ViewSpec
+
+from tests.fixtures.display_plane import display_frame
+
+
+def _profile_request(parent, region, *, profile_storage_axis, reduce):
+    """
+    Build the ROI profile PlotRequest the fetch path would carry.
+    """
+    from nbs_viewer.models.plot.cube_view import profile_view_spec
+
+    spec = profile_view_spec(
+        parent,
+        profile_storage_axis=profile_storage_axis,
+        spatial_reduce=reduce,
+    )
+    return PlotRequest(
+        uid="uid",
+        xkeys=("x",),
+        ykey="y",
+        norm_keys=(),
+        view=ViewSpec.from_cube_view_spec(spec),
+        region=region,
+    )
 from nbs_viewer.models.plot.region import RectRegion
 
 
@@ -263,22 +292,18 @@ def test_stack_profile_fetch_slice_uses_dim0_index():
         ),
         indices=(0, 1, 0, 0),
     )
-    bundle = prepare_2d_bundle(
+    frame = display_frame(
         np.zeros((y_count, x_count)),
-        [np.arange(y_count), np.arange(x_count)],
+        np.arange(y_count, dtype=float),
+        np.arange(x_count, dtype=float),
         ["dim_1", "dim_2"],
-        render_mode_hint="image",
     )
-    frame = frame_from_bundle(bundle)
     region = RectRegion(x0=1.5, x1=4.5, y0=0.5, y1=3.5)
-    request = MaterializeRequest(
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="mean"),
-        region=region,
-    )
-    slice_info = request.to_fetch_slice_info(
-        region_frame=frame,
-        parent_spec=parent,
-    )
+    slice_info = plan_fetch(
+        _profile_request(parent, region, profile_storage_axis=0, reduce="mean"),
+        plane_frame=frame,
+        plane_axes=(2, 3),
+    ).slice_info
     assert slice_info[0] == slice(None)
     assert slice_info[1] == 1
     assert isinstance(slice_info[2], slice)
@@ -310,36 +335,39 @@ def test_roi_profile_along_dim0_matches_plane_means():
         ),
         indices=(en_idx, 0, 0, 0),
     )
-    bundle = prepare_2d_bundle(
+    frame = display_frame(
         y_full[en_idx, 0],
-        [np.arange(y_count), np.arange(x_count)],
+        np.arange(y_count, dtype=float),
+        np.arange(x_count, dtype=float),
         ["dim_1", "dim_2"],
-        render_mode_hint="image",
     )
-    frame = frame_from_bundle(bundle)
     region = RectRegion(x0=1.5, x1=6.5, y0=1.5, y1=5.5)
-    request = MaterializeRequest(
-        profile_view_spec(parent, profile_storage_axis=1, spatial_reduce="mean"),
-        region=region,
+    plot_request = _profile_request(
+        parent, region, profile_storage_axis=1, reduce="mean"
     )
-    fetch_slice, cropped = request.fetch_context(
-        region_frame=frame,
-        parent_spec=parent,
-    )
-    y_roi = y_full[fetch_slice]
+    plan = plan_fetch(plot_request, plane_frame=frame, plane_axes=(2, 3))
+    fetch_slice = plan.slice_info
     axis_arrays = [
         np.arange(e_count, dtype=float),
         np.arange(d0_count, dtype=float),
         np.arange(y_count, dtype=float),
         np.arange(x_count, dtype=float),
     ]
+    y_roi, axis_arrays = orient_for_display(
+        y_full[fetch_slice],
+        axis_arrays,
+        plan.reversed_axes_for(axis_arrays, "image"),
+        {1: 0, 2: 1, 3: 2},
+    )
     profile, _, names = materialize_view(
         y_roi,
         axis_arrays,
         ["en_energy", "dim_0", "dim_1", "dim_2"],
-        request,
-        region_frame=cropped,
-        plot_plane_storage_axes=(2, 3),
+        MaterializeRequest(
+            plot_request.view.to_cube_view_spec(), region, "inside"
+        ),
+        region_frame=plan.region_frame,
+        plot_plane_storage_axes=plan.plane_axes,
     )
     manual = np.array(
         [

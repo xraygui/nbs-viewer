@@ -173,3 +173,52 @@ def test_no_frozen_spectrum_construction_in_views():
             elif isinstance(func, ast.Attribute) and func.attr == "FrozenSpectrum":
                 hits.append(str(path.relative_to(root.parent)))
     assert hits == []
+
+
+def test_nd_roi_preview_masks_the_display_plane(qapp):
+    """
+    An ROI profile along an off-plane axis loads beyond the drawn plane, so it
+    reduces raw storage rather than the cached bundle. That path applied the
+    display-order mask to a storage-order array; three of the four axis
+    orientations came back wrong.
+
+    The ROI is a triangle on purpose: a rectangle fills its own bounding box,
+    so its mask is unchanged by the row reversal and cannot detect this.
+    """
+    from nbs_viewer.models.plot.cube_view import default_spec
+    from nbs_viewer.models.plot.region import PolygonRegion, compile_with_mask_mode
+    from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
+
+    plot_model, _ = make_plot_session()
+    run_model = RunSource(make_vppem_run())
+    plot_model.add_run(run_model)
+
+    parent_spec = default_spec(3, 2).with_index(0, 4)
+    plot_model.set_view_state(dimension=2, cube_view_spec=parent_spec)
+    plot_model.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
+    plot_data = plot_model.ensure_plot_data(
+        run_model, "sampleVoltage_VSource", "PCOEdge_image"
+    )
+    bundle = plot_data.get_plot_bundle()
+    plot_data._visible = True
+    frame = frame_from_bundle(bundle)
+    assert frame.row_reversed
+
+    roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
+    entry_id = plot_model.roi_set.add(
+        roi,
+        operation=RoiOperation(
+            profile_storage_axis=0,
+            spatial_reduce="sum",
+            label="triangle",
+        ),
+    )
+
+    profile = plot_model.preview_roi_profile(entry_id)
+
+    a, b, c = vppem_factors()
+    mask = compile_with_mask_mode(frame, roi, "inside").mask
+    expected = a * float(np.outer(b, c)[::-1, :][mask].sum())
+
+    assert profile.ndim == 1
+    np.testing.assert_allclose(profile.y, expected, rtol=1e-9)

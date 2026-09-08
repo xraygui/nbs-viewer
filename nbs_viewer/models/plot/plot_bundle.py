@@ -40,8 +40,8 @@ def reduce_to_plot_plane(
     Parameters
     ----------
     y : np.ndarray
-        Array loaded with :meth:`ViewSpec.load_slice` (or the ROI-narrowed
-        equivalent).
+        Array loaded with the slices from ``plan_fetch``, already reversed
+        into display order along the plot-plane axes.
     axis_arrays : sequence of np.ndarray
         Per-storage-axis coordinate arrays.
     axis_names : sequence of str
@@ -286,6 +286,8 @@ def build_plot_bundle(
     *,
     render_mode_hint: Optional[str] = None,
     label: str = "",
+    row_reversed: bool = False,
+    col_reversed: bool = False,
 ):
     """
     Pack plot-plane arrays into a :class:`PlotBundle`.
@@ -304,6 +306,10 @@ def build_plot_bundle(
         Explicit ``image`` / ``mesh`` hint for 2-D data.
     label : str, optional
         Display name for a 1-D ROI profile.
+    row_reversed : bool
+        Whether the caller reversed the plot Y axis to reach display order.
+    col_reversed : bool
+        Whether the caller reversed the plot X axis.
 
     Returns
     -------
@@ -327,6 +333,11 @@ def build_plot_bundle(
         return prepare_1d_bundle(y, coords, names)
     if y.ndim == 2:
         return prepare_2d_bundle(
-            y, coords, names, render_mode_hint=render_mode_hint
+            y,
+            coords,
+            names,
+            render_mode_hint=render_mode_hint,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
         )
     raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")
