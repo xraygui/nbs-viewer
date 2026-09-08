@@ -157,7 +157,7 @@ their session attribute `self.plot_model` keep that name; it is not the
 
 ---
 
-## Step B — `Trace` ✅ (`__COMMIT__`)
+## Step B — `Trace` ✅ (`0aaa133`)
 
 **Landed.** Depended on view-pipeline step 4, which had settled the request
 shape.
