@@ -64,8 +64,8 @@ They interleave; the order below is the merged sequence.
 | 2 | Selection-driven default axis order | view pipeline | ✅ `11c7a0d` |
 | 3 | Orientation once after load, one planner, one mask | view pipeline | ✅ `dbe6083` |
 | 4 | One request, no side channels | view pipeline | ✅ `b431c47` |
-| A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ |
-| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ |
+| A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ `5330b81` |
+| 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
 | B | `Trace` | session & traces | unblocked — next |
 | 6 | Adopt `ViewIntent`, or delete it | view pipeline | needs B |
 | C | Consumer sweep — canvas `TraceSet`, `DimensionControl` pushes intent | session & traces | after 6 |
@@ -103,16 +103,16 @@ Recorded regardless of whether the step that fixes them lands.
 | # | Bug | Status |
 |---|-----|--------|
 | 1 | `CombinedRunSource` does not override `get_plot_bundle`; the inherited path reads `self._run`, set to `runs[0].run`. Combining plots the first run. Silent wrong answer. | open — step E |
-| 2 | ROI mask applied in display order to a storage-order array; ND ROI profiles are wrong by an upside-down mask. | ✅ step 3 |
-| 3 | `fetch_context` applies a display bbox directly onto storage slices; three of four axis orientations fetch the wrong block. | ✅ step 3 |
+| 2 | ROI mask applied in display order to a storage-order array; ND ROI profiles are wrong by an upside-down mask. | ✅ step 3 (`dbe6083`) |
+| 3 | `fetch_context` applies a display bbox directly onto storage slices; three of four axis orientations fetch the wrong block. | ✅ step 3 (`dbe6083`) |
 | 4 | "Show All Keys" is a no-op. `RunDisplayWidget._show_all` is written and never read. Intended backing is `CatalogRun.get_hinted_keys`, which has zero callers. | open |
 | 5 | Unlinked mode double-lists synthetic keys — `available_keys` is catalog plus frozen, so a frozen spectrum gets a catalog row with an X checkbox it should not have. | open |
 | 6 | `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)` where `MemoryRun` uses `range(1, ndim)`, so every dimension receives the previous dimension's `axes` hint when `getAxisHints` is non-empty. Masked by name-list truncation. | open |
 | 7 | `BlueskyRun.getRunKeys` ends with `ykeys[1] = all_keys`, so rank-3 camera keys are reported as rank 1 and the two backends disagree about the grouping. | open — own commit |
 | 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
-| 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A |
+| 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A (`5330b81`) |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
-| 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` pops the trace and calls `plot_data.clear()`, so the artist leaves the axes but the trace is gone from `plot_data_map` before `_do_update_plot` iterates it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `_do_update_plot` now rebuilds the legend before painting |
+| 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` pops the trace and calls `plot_data.clear()`, so the artist leaves the axes but the trace is gone from `plot_data_map` before `_do_update_plot` iterates it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
 N-D y key by a lower-rank norm key raised; `visible_runs` and `visible_models`
@@ -205,9 +205,9 @@ them.
 | Date | Change |
 |------|--------|
 | 2026-09-08 | Written. Absorbs the live parts of `model_core_refactor_plan.md`, `plot_session_list_adapter_plan.md`, `model_ownership_headless_plan.md`, `plot_package_reorganization.md` and `layout.md`, all deleted in the same commit and recoverable from `57f6d7b`. |
-| 2026-09-08 | Step 3 landed; bugs 2 and 3 closed, bug 8 moved to step 4. Step 4 is next. |
+| 2026-09-08 | Step 3 landed (`dbe6083`); bugs 2 and 3 closed, bug 8 moved to step 4. Step 4 is next. |
 | 2026-09-08 | Step 4 landed (`b431c47`); `derived_fetch.py` and `view_crop.py` deleted, steps B and D unblocked, step 5 next. Bug 8 not closed and moved on to step 7 with the reason. A profile-axis / reduction-axis inversion was found and fixed en route. |
-| 2026-09-08 | Step A landed, net −77 lines. Compatibility aliases dropped rather than held for a commit, which also empties step F's alias list. The item model moved to `views/` and `RunListView` now constructs it, so `models/` imports no view code. Bugs 9 and 10 added; 9 closed. Step 5 remains next. |
-| 2026-09-08 | Bug 11 fixed: the legend kept labels for deselected keys. One `updateLegend()` before the paint in `_do_update_plot`. Reproduced and verified with a scratch script under a real `QApplication`; `tests/` cannot reach it, since `MplCanvas` is a `QWidget`. |
+| 2026-09-08 | Step A landed (`5330b81`), net −77 lines. Compatibility aliases dropped rather than held for a commit, which also empties step F's alias list. The item model moved to `views/` and `RunListView` now constructs it, so `models/` imports no view code. Bugs 9 and 10 added; 9 closed. Step 5 remains next. |
+| 2026-09-08 | Bug 11 fixed (`6d2b3ef`): the legend kept labels for deselected keys. One `updateLegend()` before the paint in `_do_update_plot`. Reproduced and verified with a scratch script under a real `QApplication`; `tests/` cannot reach it, since `MplCanvas` is a `QWidget`. |
 | 2026-09-08 | Recorded widget-level testing as the work that follows this refactor, under "After this refactor". Three bugs in one step (9, 10, 11) were unreachable from `tests/`; deferred deliberately so the harness is not written against constructors steps B–F will change. |
-| 2026-09-08 | Step 5 landed. `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |
+| 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |

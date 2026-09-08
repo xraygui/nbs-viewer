@@ -1,14 +1,28 @@
 # Headless testing infrastructure plan
 
-Successor to the closed
-`[model_ownership_headless_plan.md](model_ownership_headless_plan.md)`.
+Successor to the closed `model_ownership_headless_plan.md`, deleted
+2026-09-08 and recoverable from `57f6d7b`.
 The ownership refactor delivered an H1 model tree (`AppModel` → catalog /
 presenter / plot). This plan turns that into **shared test infrastructure**
 so unit and integration tests exercise real objects instead of duplicated
 `MagicMock` catalog runs.
 
-Related: `[plot_package_reorganization.md](plot_package_reorganization.md)`
-(mechanical moves; run after Phase 1 fixtures land so imports stay stable).
+~~Related: `plot_package_reorganization.md` (mechanical moves; run after
+Phase 1 fixtures land so imports stay stable).~~ That plan was absorbed into
+[`refactor_plan.md`](refactor_plan.md) and deleted on 2026-09-08
+(recoverable from `57f6d7b`); the folder splits it proposed are cancelled.
+
+
+> **Naming note (2026-09-08).** Refactor step A (`5330b81`) renamed
+> `PlotModel` → `PlotSession`, `RunListModel` → `RunListItemModel` and
+> `RunModel` → `RunSource`, dropped `presenter.plot` in favour of
+> `presenter.session`, and moved the item model to `views/` where
+> `RunListView` constructs it — so `PlotPresenter.run_list` no longer
+> exists. Names below are updated. Row D6 previously described cache
+> status arriving via `PlotPresenter.run_list`; the real path is
+> `PlotSession.cache_status_changed` → `PlotPresenter.status_changed`.
+> `_StubRunModel`, `CombinedRunModel` and `FrozenRunModel` appear in older
+> rows; none of the three exists in the tree and they predate this refactor.
 
 ## Status
 
@@ -88,7 +102,7 @@ Examples: `test_plot_model.py`, `test_plot_model_step3.py`,
 `test_plot_presenter.py`, `test_catalog_`*, `test_source_palette.py`,
 `test_roi_set.py`, `test_frozen_spectrum.py`, `test_run_list_cache_status.py`.
 
-This is the main migration target: many files still build `RunModel(MagicMock())`
+This is the main migration target: many files still build `RunSource(MagicMock())`
 even though `create_runs()` / `MemoryRun` already exist in
 `models/sources/testSource.py`.
 
@@ -147,8 +161,8 @@ QCoreApplication (session-scoped pytest fixture)
           │     └── MemoryCatalog  (via TestSourceModel.load / load_and_register)
           └── DisplayManager
                 └── PlotPresenter ("main")
-                      ├── RunListModel
-                      └── PlotModel
+                      ├── RunListItemModel
+                      └── PlotSession
 ```
 
 Tests that only need a plot session can use a lighter shortcut:
@@ -211,13 +225,13 @@ A small class or pytest fixture bundle that exposes:
 - `app: AppModel`
 - `catalog: MemoryCatalog`
 - `presenter: PlotPresenter`
-- `plot: PlotModel`
-- `run_list: RunListModel`
+- `session: PlotSession`
+- `run_list: RunListItemModel` (built by `RunListView`)
 
 Methods:
 
 - `load_test_catalog(recipe="line_scan", runs=3) -> str` (label)
-- `select_run(index=0) -> RunModel` (via `catalog.select_run` + signal path)
+- `select_run(index=0) -> RunSource` (via `catalog.select_run` + signal path)
 - `select_run_direct(run)` (bypass catalog — for plot-only tests)
 - `fetch_bundle(x_keys, y_keys) -> PlotBundle` (wraps `ensure_plot_data` +
 `get_plot_bundle`)
@@ -323,7 +337,7 @@ files prove the promote workflow)
 
 **Exit criteria**
 
-- [x] `image_scan` recipe → `RunModel.get_plot_bundle` works for 2D without
+- [x] `image_scan` recipe → `RunSource.get_plot_bundle` works for 2D without
   ```
   manual `last_bundle` injection
   ```
@@ -348,7 +362,7 @@ Promote from `oldtests/` using the same copy → pytest → commit workflow.
 | 8     | `test_run_list_combine_freeze.py` | Replace `_mock_catalog_run` → `line_scan`  |
 | 9     | `test_plot_model_step3.py`        | `line_scan` / `image_scan` recipes         |
 | 10    | `test_roi_preview_commit.py`      | `image_scan` + real `get_plot_bundle`      |
-| 11    | `test_frozen_spectrum.py`         | Real `RunModel` where keys matter          |
+| 11    | `test_frozen_spectrum.py`         | Real `RunSource` where keys matter          |
 
 
 **Exit criteria**
@@ -367,8 +381,8 @@ files, 1 fixtures smoke file). `oldtests/` holds H2/deferred scripts only.
 ### What the suite covers today
 
 Tests are organized by **layer**, not by user workflow. Most files exercise one
-model or algorithm in isolation with direct construction (`PlotModel`,
-`RunListModel`, `MemoryCatalog`) rather than the full `AppModel` tree.
+model or algorithm in isolation with direct construction (`PlotSession`,
+`RunListItemModel`, `MemoryCatalog`) rather than the full `AppModel` tree.
 
 
 | Layer / concern | Files | What is proven |
@@ -377,9 +391,9 @@ model or algorithm in isolation with direct construction (`PlotModel`,
 | **H0 — cache / L2** | `test_chunk_cache*`, `test_l2_*`, `test_zarr_l2_cache`, `test_hyperslab_batches` (~65 tests) | Tile assembly, L1/L2 seeding, progress labels, batched hyperslab reads — stub transports / temp zarr |
 | **H1 — catalog registry** | `test_catalog_table_ownership`, `test_catalog_manager_sources`, `test_source_palette` (18 tests) | `MemoryCatalog` table ownership; `CatalogManagerModel` source factories, `load` / `load_and_register`, palette signals — **on `CatalogManagerModel` only**, not wired through `AppModel` |
 | **H1 — presenter shell** | `test_plot_presenter`, `test_run_list_cache_status` (10 tests) | `DisplayManager` / `PlotPresenter` ownership; `add_run_to_display` adds a run — **bypasses catalog `item_selected` → `AppModel` path**; cache status uses `SimpleNamespace` fakes |
-| **H1 — plot session** | `test_plot_model`, `test_plot_model_step3`, `test_roi_set` (23 tests) | `PlotModel` owns `RoiSetModel`; plot-data map lifecycle; visibility / crop invalidation — built with ad-hoc `RunListModel` + `MemoryRun`, not `HeadlessSession` |
-| **H1 — run list factories** | `test_run_list_combine_freeze`, `test_frozen_spectrum` (25 tests) | `combine_runs` / `freeze_runs` validation; synthetic spectrum fetch/transform — `RunListModel` / `RunModel` in isolation |
-| **H1 — ROI APIs** | `test_roi_preview_commit` (5 tests) | `preview_roi_profile` / `commit_roi_profile` on real `image_scan` data — ad-hoc `PlotModel` setup, not catalog-selected runs |
+| **H1 — plot session** | `test_plot_model`, `test_plot_model_step3`, `test_roi_set` (23 tests) | `PlotSession` owns `RoiSetModel`; plot-data map lifecycle; visibility / crop invalidation — built with ad-hoc `RunListItemModel` + `MemoryRun`, not `HeadlessSession` |
+| **H1 — run list factories** | `test_run_list_combine_freeze`, `test_frozen_spectrum` (25 tests) | `combine_runs` / `freeze_runs` validation; synthetic spectrum fetch/transform — `RunListItemModel` / `RunSource` in isolation |
+| **H1 — ROI APIs** | `test_roi_preview_commit` (5 tests) | `preview_roi_profile` / `commit_roi_profile` on real `image_scan` data — ad-hoc `PlotSession` setup, not catalog-selected runs |
 | **Fixtures smoke** | `test_fixtures_smoke` (4 tests) | Recipe shapes; **`HeadlessSession.select_run` → run list**; 1D + 2D `fetch_bundle` through `AppModel` + `register_catalog` |
 
 ### Signal paths exercised (and gaps)
@@ -393,11 +407,11 @@ Intended production path:
               → CatalogManagerModel.run_selected
                   → AppModel._on_run_selected
                       → DisplayManager.add_run_to_display(active_display)
-                          → PlotPresenter.run_list / .plot
+                          → PlotPresenter.session
 
 Shortcut paths used by most H1 unit tests (skip catalog signals):
 
-  create_runs() / image_scan_run() → RunModel → RunListModel.add_run()
+  create_runs() / image_scan_run() → RunSource → RunListItemModel.add_run()
   DisplayManager.add_run_to_display()          (test_plot_presenter only)
 ```
 
@@ -413,7 +427,7 @@ Shortcut paths used by most H1 unit tests (skip catalog signals):
 | `set_active_display` routing | **No** | — |
 | Default key selection on plot after catalog select | **Partial** | `test_plot_model_step3::test_default_selection_on_first_run` uses ad-hoc path; not through `HeadlessSession` |
 | Combine / freeze on catalog-selected runs | **No** | `test_run_list_combine_freeze` uses direct `add_runs` |
-| ROI preview / commit on catalog-selected 2D run | **No** | `test_roi_preview_commit` uses ad-hoc `PlotModel` |
+| ROI preview / commit on catalog-selected 2D run | **No** | `test_roi_preview_commit` uses ad-hoc `PlotSession` |
 | `motor_scan` recipe | **No** | defined in `catalog_recipes.py`, unused |
 
 ### What `test_fixtures_smoke.py` already is
@@ -432,7 +446,7 @@ Phase 3 success is defined by this ledger, not by a monolithic “E2E” file.
 Each row is one **signal edge** (or direct causal link) between subsystems.
 Unit tests prove *behavior inside* a subsystem; wiring tests prove the
 *edge* using `AppModel` + `HeadlessSession` (or equivalent) so shortcuts like
-`RunListModel.add_run()` are not used when the edge under test is
+`RunListItemModel.add_run()` are not used when the edge under test is
 catalog → run list.
 
 **Legend:** ✅ covered · ⚠ partial · ⬜ gap · 🔜 deferred
@@ -459,24 +473,24 @@ catalog → run list.
 | -- | ---------- | ------ | ---------- |
 | D1 | `_on_run_selected` → `DisplayManager.add_run_to_display(active_display)` | ✅ | smoke |
 | D2 | `_on_run_deselected` → `DisplayManager.remove_run_from_display` | ✅ | `test_catalog_wiring::test_deselect_run_removes_run_from_presenter_run_list` |
-| D3 | `add_run_to_display` → `RunListModel` gains `RunModel` for run uid | ✅ | smoke + `test_catalog_wiring::test_source_load_then_select_wires_to_presenter` |
+| D3 | `add_run_to_display` → `RunListItemModel` gains `RunSource` for run uid | ✅ | smoke + `test_catalog_wiring::test_source_load_then_select_wires_to_presenter` |
 | D4 | `remove_run_from_display` → run list loses run | ✅ | `test_catalog_wiring::test_deselect_run_removes_run_from_presenter_run_list` |
 | D5 | `set_active_display` routes selection to non-`main` presenter | 🔜 | deferred (6c / multi-view) |
-| D6 | `PlotPresenter.run_list.cache_status_changed` → `status_changed` | ✅ | `test_run_list_cache_status` — direct emit, not full chain |
+| D6 | `PlotSession.cache_status_changed` → `PlotPresenter.status_changed` | ✅ | `test_run_list_cache_status` — direct emit, not full chain |
 
-#### Run list subsystem (`RunListModel` factories on **wired** runs)
+#### Run list subsystem (`RunListItemModel` factories on **wired** runs)
 
 
 | ID | Connection | Status | Covered by |
 | -- | ---------- | ------ | ---------- |
-| R1 | `RunListModel.run_added` → `PlotModel._on_run_added` (keys/transform) | ⚠ | `test_plot_model_step3::test_default_selection_on_first_run` — ad-hoc `add_run`, not catalog |
-| R2 | `RunListModel.run_removed` → `PlotModel._on_run_removed` (drop plot data) | ⚠ | `test_plot_model_step3::test_remove_run_drops_plot_data` — ad-hoc |
-| R3 | `RunListModel.visible_runs_changed` → plot data ensure | ⚠ | `test_plot_model_step3` — ad-hoc |
-| R4 | `combine_runs` on catalog-selected `RunModel`s | ✅ | `test_run_list_wiring::test_combine_runs_on_catalog_selected_runs` |
-| R5 | `freeze_runs` on catalog-selected `RunModel`s | ✅ | `test_run_list_wiring::test_freeze_runs_on_catalog_selected_runs` |
-| R6 | `RunModel.frozen_spectra_changed` → run list key refresh | ✅ | `test_run_list_wiring::test_frozen_spectra_changed_refreshes_run_list` |
+| R1 | `RunListItemModel.run_added` → `PlotSession._on_run_added` (keys/transform) | ⚠ | `test_plot_model_step3::test_default_selection_on_first_run` — ad-hoc `add_run`, not catalog |
+| R2 | `RunListItemModel.run_removed` → `PlotSession._on_run_removed` (drop plot data) | ⚠ | `test_plot_model_step3::test_remove_run_drops_plot_data` — ad-hoc |
+| R3 | `RunListItemModel.visible_runs_changed` → plot data ensure | ⚠ | `test_plot_model_step3` — ad-hoc |
+| R4 | `combine_runs` on catalog-selected `RunSource`s | ✅ | `test_run_list_wiring::test_combine_runs_on_catalog_selected_runs` |
+| R5 | `freeze_runs` on catalog-selected `RunSource`s | ✅ | `test_run_list_wiring::test_freeze_runs_on_catalog_selected_runs` |
+| R6 | `RunSource.frozen_spectra_changed` → run list key refresh | ✅ | `test_run_list_wiring::test_frozen_spectra_changed_refreshes_run_list` |
 
-#### Plot subsystem (`PlotModel`, `PlotDataModel`, fetch)
+#### Plot subsystem (`PlotSession`, `PlotDataModel`, fetch)
 
 
 | ID | Connection | Status | Covered by |
@@ -487,19 +501,19 @@ catalog → run list.
 | P4 | `ensure_plot_data` created when run becomes visible with keys set | ⚠ | unit only |
 | P5 | Key intersection updates when second catalog run selected | ⬜ | — |
 
-#### ROI subsystem (`PlotModel` ROI APIs on **wired** 2D session)
+#### ROI subsystem (`PlotSession` ROI APIs on **wired** 2D session)
 
 
 | ID | Connection | Status | Covered by |
 | -- | ---------- | ------ | ---------- |
 | I1 | `preview_roi_profile` on catalog-selected `image_scan` run | ✅ | `test_roi_wiring::test_preview_roi_profile_on_catalog_selected_run` |
-| I2 | `commit_roi_profile` → `RunModel.register_frozen_spectrum` | ✅ | `test_roi_wiring::test_commit_roi_profile_registers_frozen_spectrum` |
+| I2 | `commit_roi_profile` → `RunSource.register_frozen_spectrum` | ✅ | `test_roi_wiring::test_commit_roi_profile_registers_frozen_spectrum` |
 | I3 | Committed synthetic key fetchable via `fetch_bundle` after commit | ✅ | `test_roi_wiring::test_committed_synthetic_key_fetchable_via_fetch_bundle` |
 | I4 | ROI stale / local-profile rejection on wired session | ✅ | `test_roi_wiring::test_preview_rejects_stale_roi_on_wired_session`, `test_commit_rejects_local_profile_on_wired_session` |
 
 **Coverage rule:** when implementing a wiring test, enter through the
 subsystem on the **left** of the arrow (e.g. for R4, runs must reach
-`RunListModel` via C6 → C4 → D1 → D3, not `add_run`).
+`RunListItemModel` via C6 → C4 → D1 → D3, not `add_run`).
 
 ### Phase 3 test files (by subsystem)
 
@@ -602,7 +616,7 @@ then ROI). Exit when all non-deferred matrix rows are ✅.
 | ----------------------------------------- | ---------------------------------------------------- |
 | 20-line `MagicMock` per file              | `headless_session.select_run(0)`                     |
 | Inject `plot_data.last_bundle` manually   | `get_plot_bundle()` from real `MemoryRun` data       |
-| Build `RunListModel` + `PlotModel` ad hoc | `presenter.plot` from fixture                        |
+| Build `RunListItemModel` + `PlotSession` ad hoc | `presenter.session` from fixture                        |
 | Test catalog and plot in isolation        | Same session object for both                         |
 | Unclear whether signal wiring works       | Connection matrix + subsystem wiring tests |
 
@@ -641,9 +655,8 @@ Phase 0  git mv tests → oldtests; promote H0/cache files one-by-one
         → Phase 4  H2/scripts cleanup; delete oldtests/
 ```
 
-Plot package reorg (`[plot_package_reorganization.md](plot_package_reorganization.md)`)
-can run in parallel after Phase 0; import updates apply to `tests/` only until
-`oldtests/` is deleted.
+~~Plot package reorg can run in parallel after Phase 0.~~ Cancelled with
+`plot_package_reorganization.md`; see the note at the top of this file.
 
 ## Modification log
 

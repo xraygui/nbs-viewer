@@ -4,7 +4,7 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** step A landed; B–F not started. Everything this plan's
+**Status:** step A landed (`5330b81`); B–F not started. Everything this plan's
 predecessors marked done is verified against the tree below.
 
 **Replaces** `model_core_refactor_plan.md` (steps 4–8) and
@@ -63,7 +63,7 @@ accurate.
 
 ---
 
-## Step A — `PlotSession` / `RunListItemModel` rename and move ✅
+## Step A — `PlotSession` / `RunListItemModel` rename and move ✅ (`5330b81`)
 
 **Landed.** Independent of every other step. Rename, one file move, and one
 ownership correction found while doing it.
@@ -341,5 +341,5 @@ they synthesise data, which is a data-layer job.
 | Date | Change |
 |------|--------|
 | 2026-09-08 | Written from the live parts of `model_core_refactor_plan.md` and `plot_session_list_adapter_plan.md`. Claimed-done items re-verified against the tree; sizes re-measured. |
-| 2026-09-08 | Step A landed. Aliases dropped rather than held for a commit. `RunListView` builds the item model instead of `PlotPresenter`, which removes the `models/` → `views/` import the step as written would have created; the dead-consumer count that justified it is recorded in the step. Bugs 9 and 10 found en route, 9 closed. |
+| 2026-09-08 | Step A landed (`5330b81`). Aliases dropped rather than held for a commit. `RunListView` builds the item model instead of `PlotPresenter`, which removes the `models/` → `views/` import the step as written would have created; the dead-consumer count that justified it is recorded in the step. Bugs 9 and 10 found en route, 9 closed. |
 | 2026-09-08 | Sizes re-measured; `RunSource` (792 → 955) and `Trace` (496 → 483) had drifted. Step D's `PlotSession` figure corrected to 1938. Step A's findings now point at the master plan's "After this refactor" section for the widget-testing gap. |

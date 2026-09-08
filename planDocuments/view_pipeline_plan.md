@@ -6,7 +6,7 @@ half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
 **Status:** steps 1–5 landed on branch `mesh-transpose-removal`
-(2026-09-08). Steps 6–7 not started.
+(2026-09-08), through `e0d2ef1`. Steps 6–7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -253,7 +253,7 @@ reading `plot_x_dim` (a plane position) as a storage axis.
 Added `default_spec_for_selection` and `spec_for_shape_and_selection`; removed
 the last branching from `DimensionControl.create_sliders`.
 
-### Step 3 — Orientation once after load, one planner, one mask ✅ 2026-09-08
+### Step 3 — Orientation once after load, one planner, one mask ✅ 2026-09-08 (`dbe6083`)
 
 **Not behaviour-preserving.** Fixes bugs 2 and 3, which cancelled.
 
@@ -329,7 +329,7 @@ Each of the three was confirmed to fail against the pre-step-3 behaviour.
 fetch path does, for the test call sites that used to get orientation for free
 from `prepare_2d_bundle`.
 
-### Step 4 — One request, no side channels ✅ 2026-09-08
+### Step 4 — One request, no side channels ✅ 2026-09-08 (`b431c47`)
 
 **Not behaviour-preserving where the two ROI paths disagreed.** An in-plane
 ROI preview with no valid cached plane used to raise "No parent 2D bundle
@@ -431,7 +431,7 @@ pair. Unreachable today (the scan axis leads), and it is `remaining` being
 built in storage order rather than `axis_order` — a `cube_view.py` problem,
 so step 5.
 
-### Step 5 — Invert the dependency, delete `cube_view.py` ✅ 2026-09-08
+### Step 5 — Invert the dependency, delete `cube_view.py` ✅ 2026-09-08 (`e0d2ef1`)
 
 **Behaviour-preserving.** One commit; the round trip was what kept both types
 alive, so it could not be sliced.
@@ -590,7 +590,7 @@ plan, not here.
 |------|--------|
 | 2026-09-08 | Written; replaces `view_spec_consolidation_plan.md`, `materialize_view_refactor_plan.md`, `mixed_rank_plot_view_plan.md`. Steps 1 and 2 recorded as landed. |
 | 2026-09-08 | Became a sub-plan of `refactor_plan.md`; shared backlog and cross-plan notes moved there. |
-| 2026-09-08 | Step 3 landed. Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
-| 2026-09-08 | Step 4 landed. `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
+| 2026-09-08 | Step 3 landed (`dbe6083`). Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
+| 2026-09-08 | Step 4 landed (`b431c47`). `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
 | 2026-09-08 | Fixed `storage_axis_to_plot_axis` reading the plot-axis mapping off the frame instead of the spec, which made "span full profile axis" widen the reduction axis. Recorded under step 4. |
-| 2026-09-08 | Step 5 landed. `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |
+| 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |
