@@ -612,6 +612,11 @@ class MplCanvas(FigureCanvasQTAgg):
 
             if self._autoscale:
                 self.autoscale()
+            # Traces dropped from the session are disposed there, so the
+            # removal branch above never sees them and only the add path
+            # would refresh the legend. Rebuild before painting so labels
+            # for gone traces do not survive.
+            self.updateLegend()
             self.draw()
             print_debug(
                 "MplCanvas._do_update_plot",

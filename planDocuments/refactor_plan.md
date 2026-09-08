@@ -105,6 +105,7 @@ Recorded regardless of whether the step that fixes them lands.
 | 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
 | 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
+| 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` pops the trace and calls `plot_data.clear()`, so the artist leaves the axes but the trace is gone from `plot_data_map` before `_do_update_plot` iterates it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `_do_update_plot` now rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
 N-D y key by a lower-rank norm key raised; `visible_runs` and `visible_models`
@@ -136,6 +137,34 @@ buttons.
    catalog creation and selection, which `CatalogSwitcher` reaches around to
    get. Worth resolving when step F touches the presenter.
 
+## After this refactor
+
+One thread is deliberately deferred rather than folded into a step.
+
+**Widget-level testing — the next piece of work once the tree stops moving.**
+Bugs 9, 10 and 11 were all live crashes or visible misbehaviour that `tests/`
+structurally cannot reach: the suite runs on `QCoreApplication`, so
+constructing a `QWidget` aborts the interpreter. Every one of them was found
+by hand or with a throwaway script under a real `QApplication`. Three in one
+step is a pattern, not luck — and bug 9 meant the main run list could not be
+constructed at all, which no amount of model-side coverage would have caught.
+
+Decide the general approach then, and give it a plan of its own. Options worth
+weighing:
+
+- A second pytest process, or an `xdist` group, running under a real
+  `QApplication`, so widget tests and headless model tests coexist without
+  either constraining the other.
+- A construction smoke test that builds every top-level widget once. That
+  alone would have caught bugs 9 and 10.
+- Pushing more view logic model-side so it needs no widget at all — which is
+  what steps B and C already do for the trace set and the canvas, and is why
+  waiting is the cheaper order.
+
+Deliberately not a step above: the ownership tree is still moving, and a
+harness pinned to today's constructors would have to be rewritten by step F.
+`headless_testing_plan.md` phases 3–4 are the natural home for it.
+
 ## Reference documents
 
 Not sub-plans; not on the critical path. Kept because nothing else covers
@@ -154,7 +183,8 @@ them.
   Phases 0–2 done, 3–4 open. Note the hard constraint: the suite runs on
   `QCoreApplication`, so **constructing a `QWidget` in `tests/` aborts the
   interpreter**. Move logic model-side to test it, or drive it from a scratch
-  script under a real `QApplication`.
+  script under a real `QApplication`. Closing this gap properly is the work
+  described under "After this refactor" above.
 - **[`zarr_l2_cache_plan.md`](zarr_l2_cache_plan.md)** — cache internals,
   phase 2+ open.
 - Feature plans, untouched by this refactor and blocked on it:
@@ -171,3 +201,5 @@ them.
 | 2026-09-08 | Step 3 landed; bugs 2 and 3 closed, bug 8 moved to step 4. Step 4 is next. |
 | 2026-09-08 | Step 4 landed (`b431c47`); `derived_fetch.py` and `view_crop.py` deleted, steps B and D unblocked, step 5 next. Bug 8 not closed and moved on to step 7 with the reason. A profile-axis / reduction-axis inversion was found and fixed en route. |
 | 2026-09-08 | Step A landed, net −77 lines. Compatibility aliases dropped rather than held for a commit, which also empties step F's alias list. The item model moved to `views/` and `RunListView` now constructs it, so `models/` imports no view code. Bugs 9 and 10 added; 9 closed. Step 5 remains next. |
+| 2026-09-08 | Bug 11 fixed: the legend kept labels for deselected keys. One `updateLegend()` before the paint in `_do_update_plot`. Reproduced and verified with a scratch script under a real `QApplication`; `tests/` cannot reach it, since `MplCanvas` is a `QWidget`. |
+| 2026-09-08 | Recorded widget-level testing as the work that follows this refactor, under "After this refactor". Three bugs in one step (9, 10, 11) were unreachable from `tests/`; deferred deliberately so the harness is not written against constructors steps B–F will change. |

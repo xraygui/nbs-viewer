@@ -50,12 +50,16 @@ Sizes, current → target:
 
 | Object | Now | Target | Job |
 |---|---:|---:|---|
-| `RunSource` | 792 | ~250 | uniform key access over real and frozen keys, plus `get_plot_bundle` |
+| `RunSource` | 955 | ~250 | uniform key access over real and frozen keys, plus `get_plot_bundle` |
 | `PlotSession` | 1938 | ~500 | selection, visibility, view, transform, traces |
 | `RoiController` | — | ~400 | ROI request building, preview, commit |
-| `Trace` | 496 | ~150 | request identity plus cached bundle |
+| `Trace` | 483 | ~150 | request identity plus cached bundle |
 | `RunListItemModel` | 186 | ~150 | sidebar rows, now in `views/` ✅ |
 | `RunCollection` | 261 | ~150 | ordered membership, combine / freeze factories |
+
+Re-measured 2026-09-08 against the tree. `RunSource` and `Trace` had drifted
+from the figures this plan was written with (792 and 496); the others were
+accurate.
 
 ---
 
@@ -140,8 +144,10 @@ construction. Left alone — `widgets/` is out of scope (invariant 6) — but it
 means the Kafka tab cannot currently be opened.
 
 Both bugs are positional-argument mismatches on widget constructors that no
-test can reach. Worth a cheap guard: `structural_remediation_plan.md` step 2
-(CI) could construct each top-level widget once under a real `QApplication`.
+test can reach, and bug 11 (a stale plot legend, fixed separately) is a third
+of the same kind. Closing that gap is deferred to after this refactor by
+decision, not oversight — see "After this refactor" in
+[`refactor_plan.md`](refactor_plan.md).
 
 ### Non-goals
 
@@ -250,7 +256,7 @@ collapses to 0-D, and `plot_axis_names` decides overlay compatibility.
 **Depends on** view-pipeline step 4, which removes the extra `get_plot_bundle`
 kwargs.
 
-`PlotSession` is 1947 lines with roughly 54 public members and 12 signals. The
+`PlotSession` is 1938 lines with roughly 54 public members and 12 signals. The
 four-method ROI preview/commit pipeline is the largest coherent piece.
 
 ### Do
@@ -336,3 +342,4 @@ they synthesise data, which is a data-layer job.
 |------|--------|
 | 2026-09-08 | Written from the live parts of `model_core_refactor_plan.md` and `plot_session_list_adapter_plan.md`. Claimed-done items re-verified against the tree; sizes re-measured. |
 | 2026-09-08 | Step A landed. Aliases dropped rather than held for a commit. `RunListView` builds the item model instead of `PlotPresenter`, which removes the `models/` → `views/` import the step as written would have created; the dead-consumer count that justified it is recorded in the step. Bugs 9 and 10 found en route, 9 closed. |
+| 2026-09-08 | Sizes re-measured; `RunSource` (792 → 955) and `Trace` (496 → 483) had drifted. Step D's `PlotSession` figure corrected to 1938. Step A's findings now point at the master plan's "After this refactor" section for the widget-testing gap. |
