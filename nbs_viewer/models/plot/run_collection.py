@@ -1,7 +1,7 @@
 """
 Ordered membership container for run sources.
 
-Plain (non-QObject) container owned by :class:`PlotSession` / ``PlotModel``.
+Plain (non-QObject) container owned by :class:`PlotSession` / ``PlotSession``.
 Holds combine / freeze factories; does not own visibility or selection.
 """
 
@@ -244,7 +244,7 @@ class RunCollection:
         Build frozen sources for explicit ``(run, ykey)`` pairs.
 
         Does not add the results to this collection. Callers resolve Y keys
-        from session selection (see :meth:`PlotModel.freeze_runs`).
+        from session selection (see :meth:`PlotSession.freeze_runs`).
 
         Parameters
         ----------

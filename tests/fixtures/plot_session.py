@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from nbs_viewer.models.plot.plotModel import PlotModel
-from nbs_viewer.models.plot.runListModel import RunListModel
+from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 
 
 def make_plot_session(
     *,
     is_main_display: bool = False,
     single_selection_mode: bool = False,
-) -> Tuple[PlotModel, RunListModel]:
+) -> Tuple[PlotSession, RunListItemModel]:
     """
     Build a session and bound run-list in the modern ownership order.
 
@@ -25,12 +25,12 @@ def make_plot_session(
 
     Returns
     -------
-    tuple of (PlotModel, RunListModel)
+    tuple of (PlotSession, RunListItemModel)
         Session first, then the Qt list facade bound to it.
     """
-    session = PlotModel(
+    session = PlotSession(
         is_main_display=is_main_display,
         single_selection_mode=single_selection_mode,
     )
-    run_list = RunListModel(session)
+    run_list = RunListItemModel(session)
     return session, run_list

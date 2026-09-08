@@ -1,4 +1,4 @@
-"""Tests for RunListModel combine / freeze factories."""
+"""Tests for RunListItemModel combine / freeze factories."""
 
 from __future__ import annotations
 
@@ -15,14 +15,14 @@ from nbs_viewer.models.plot.combinedRunSource import (
     CombinedRunSource,
 )
 from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
-from nbs_viewer.models.plot.plotModel import PlotModel
-from nbs_viewer.models.plot.runListModel import RunListModel
+from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
 from tests.fixtures.catalog_recipes import line_scan_run
 from tests.fixtures.plot_session import make_plot_session
 
 
-def _bound_session() -> tuple[PlotModel, RunListModel]:
+def _bound_session() -> tuple[PlotSession, RunListItemModel]:
     return make_plot_session()
 
 

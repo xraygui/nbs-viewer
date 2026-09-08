@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.plotModel import PlotModel
+from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.plot_request import TraceKey
-from nbs_viewer.models.plot.runListModel import RunListModel
+from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
 def _make_session(n_runs: int = 1):
-    plot = PlotModel(is_main_display=True)
-    run_list = RunListModel(plot)
+    plot = PlotSession(is_main_display=True)
+    run_list = RunListItemModel(plot)
     runs = [RunSource(r) for r in create_test_catalog(n_runs).get_runs()]
     return plot, run_list, runs
 
@@ -20,7 +20,7 @@ def test_session_owns_collection_not_list():
     plot, run_list, runs = _make_session(1)
     plot.add_run(runs[0])
     assert runs[0].uid in plot.collection
-    assert plot.run_list_model is run_list
+    assert run_list.session is plot
     assert not hasattr(run_list, "collection")
 
 

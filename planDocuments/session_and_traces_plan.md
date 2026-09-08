@@ -4,8 +4,8 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** steps A–F not started. Everything this plan's predecessors marked
-done is verified against the tree below.
+**Status:** step A landed; B–F not started. Everything this plan's
+predecessors marked done is verified against the tree below.
 
 **Replaces** `model_core_refactor_plan.md` (steps 4–8) and
 `plot_session_list_adapter_plan.md` (P2–P3), both deleted 2026-09-08 and
@@ -15,11 +15,10 @@ recoverable from `57f6d7b`.
 
 Verified in the tree, not taken on trust from the deleted documents:
 
-- `PlotSession = PlotModel` alias exists (`plotModel.py:1947`).
-- `PlotModel` owns `RunCollection`, visibility, `Selection`, transform, the
-  plot-data map and the ROI set.
-- `RunListModel` is a thin Qt facade — 187 lines, no forwarding, no cache
-  aggregation (that moved to the session).
+- `PlotSession` (`plot_session.py`) owns `RunCollection`, visibility,
+  `Selection`, transform, the plot-data map and the ROI set. No aliases.
+- `RunListItemModel` is a thin Qt facade under `views/dataSource/` — 186
+  lines, no forwarding, no cache aggregation (that moved to the session).
 - `RunSource` no longer holds selection, visibility or transform.
 - `KeyInfo` / `RunIdentity` / `AxisLayout` exist; `key_table`, `identity`,
   `read`, `describe_axes`, `load_axes` are the surface.
@@ -52,47 +51,103 @@ Sizes, current → target:
 | Object | Now | Target | Job |
 |---|---:|---:|---|
 | `RunSource` | 792 | ~250 | uniform key access over real and frozen keys, plus `get_plot_bundle` |
-| `PlotSession` | 1947 | ~500 | selection, visibility, view, transform, traces |
+| `PlotSession` | 1938 | ~500 | selection, visibility, view, transform, traces |
 | `RoiController` | — | ~400 | ROI request building, preview, commit |
 | `Trace` | 496 | ~150 | request identity plus cached bundle |
-| `RunListItemModel` | 187 | ~150 | sidebar rows, moved to `views/` |
+| `RunListItemModel` | 186 | ~150 | sidebar rows, now in `views/` ✅ |
 | `RunCollection` | 261 | ~150 | ordered membership, combine / freeze factories |
 
 ---
 
-## Step A — `PlotSession` / `RunListItemModel` rename and move
+## Step A — `PlotSession` / `RunListItemModel` rename and move ✅
 
-**Independent.** Can land any time. Pure rename plus one file move.
+**Landed.** Independent of every other step. Rename, one file move, and one
+ownership correction found while doing it.
 
-### Do
+### Did
 
-- [ ] Rename the class `PlotModel` → `PlotSession`; keep
-  `PlotModel = PlotSession` for one commit, then delete the alias.
-- [ ] Rename the file `plotModel.py` → `plot_session.py`.
-- [ ] Rename `RunListModel` → `RunListItemModel`; move to
+- [x] Renamed the class `PlotModel` → `PlotSession` and the file
+  `plotModel.py` → `plot_session.py`. **No alias kept.** The plan had said to
+  hold `PlotModel = PlotSession` for one commit, but every call site is
+  in-tree — `widgets/kafkaViewerTab.py` included, which needed its import
+  line rewritten either way — so an alias would only have deferred the same
+  edit. Same reasoning for `get_plot_model`, which step F had queued for
+  deletion.
+- [x] Renamed `RunListModel` → `RunListItemModel`; moved to
   `nbs_viewer/views/dataSource/run_list_item_model.py`, next to
-  `runListView.py`.
-- [ ] `PlotPresenter` constructs the session first, then the item model.
-  Drop `PlotSession.bind_run_list` and the `run_list_model` reverse pointer.
-- [ ] `DisplayManager.get_plot_model` → `get_session`; keep `get_plot_model`
-  as an alias for one commit.
-- [ ] Drop `presenter.plot`; `presenter.session` is the only name.
+  `runListView.py`. Its `plot_model` property became `session`.
+- [x] **`RunListView` constructs the item model**, not `PlotPresenter`.
+  See the decision below. Dropped `PlotSession.bind_run_list` and the
+  `run_list_model` reverse pointer.
+- [x] `DisplayManager.get_plot_model` → `get_session`.
+- [x] Dropped `presenter.plot`; `presenter.session` is the only name. The
+  same duplicate pair on the test fixture `HeadlessSession` went with it.
 
-### Deletes
+### The decision the plan got wrong
 
-`bind_run_list`, `run_list_model`, `presenter.plot`, `PlotModel` and
-`RunListModel` as names, `plotModel.py` and `runListModel.py` as paths.
+The plan said "`PlotPresenter` constructs the session first, then the item
+model". Because `PlotPresenter` lives under `models/plot/`, that made
+`models/` import `views/dataSource/` — an inversion invariant 11 warns about,
+and one this plan's own invariant 1 already ruled out ("views may create Qt
+proxies used purely as view adapters").
+
+Counting the consumers settled it. Only `RunListView` ever used the item
+model. `base.py`, `run_display.py`, `dimension.py`, `image_grid_canvas.py`
+and `single_canvas.py` each assigned `presenter.run_list` to an attribute
+**never read**; `mainDisplay.py` assigned it twice and never read it;
+`plotDisplay.py` held it only to pass along; `get_run_list_model` had no
+production caller; and `display_added = Signal(str, object)` emitted a
+payload both handlers silently dropped.
+
+So `RunListView` now takes the presenter and builds
+`RunListItemModel(self.session)` itself, exactly as a view builds a filter
+proxy. `rg "nbs_viewer.views" nbs_viewer/models/` is empty.
+
+### Deleted
+
+`bind_run_list`, the `run_list_model` reverse pointer, `presenter.plot`,
+`PlotPresenter.run_list`, `DisplayManager.get_run_list_model`, the
+`display_added` object payload, seven dead `run_list_model` attributes across
+`views/`, `HeadlessSession.run_list`, the `PlotSession = PlotModel` alias,
+`PlotModel` and `RunListModel` as names, `plotModel.py` and `runListModel.py`
+as paths.
+
+146 insertions, 223 deletions — net −77 lines.
 
 ### Exit criteria
 
-- [ ] `rg "PlotModel|RunListModel" nbs_viewer/ tests/` returns nothing
-- [ ] The item model lives under `views/`, so `models/` no longer holds a
+- [x] `rg "PlotModel|RunListModel" nbs_viewer/ tests/` returns nothing
+- [x] The item model lives under `views/`, so `models/` no longer holds a
   `QStandardItemModel`
-- [ ] `pytest tests/` green
+- [x] `rg "nbs_viewer.views" nbs_viewer/models/` returns nothing
+- [x] `pytest tests/` green at 350
+
+### Findings
+
+**Bug 9 (closed here).** `RunListView` passed its item model into
+`DisplayControlWidget(display_manager, presenter, parent)`, whose first act is
+`self.session = presenter.session`. `RunListModel` had no `session`
+attribute, so constructing any `RunListView` raised `AttributeError`.
+Verified against a worktree at `bfb8a73` before the fix. Passing the real
+presenter closes it. Nothing in `tests/` caught this because the suite runs on
+`QCoreApplication` and cannot construct a `QWidget`; it took a scratch script
+under a real `QApplication`, per the headless testing plan's note.
+
+**Bug 10 (open).** `widgets/kafkaViewerTab.py:68` makes the same class of
+mistake: `PlotWidget(self.run_list_model, self.plot_model)` against a
+`(presenter, panel, ...)` signature. Verified to raise `TypeError` on
+construction. Left alone — `widgets/` is out of scope (invariant 6) — but it
+means the Kafka tab cannot currently be opened.
+
+Both bugs are positional-argument mismatches on widget constructors that no
+test can reach. Worth a cheap guard: `structural_remediation_plan.md` step 2
+(CI) could construct each top-level widget once under a real `QApplication`.
 
 ### Non-goals
 
-Not `Trace`. Not `ViewIntent`. Not the ROI extraction.
+Not `Trace`. Not `ViewIntent`. Not the ROI extraction. The ~12 views that name
+their session attribute `self.plot_model` keep that name; it is not the
+`PlotModel` symbol and renaming it is a much wider diff than this step.
 
 ---
 
@@ -257,7 +312,9 @@ they synthesise data, which is a data-layer job.
 ### Do
 
 - [ ] `runSource.py` → `run_source.py`
-- [ ] Delete remaining aliases: `PlotModel`, `RunModel`, `get_plot_model`
+- [x] ~~Delete remaining aliases: `PlotModel`, `RunModel`, `get_plot_model`~~
+  — done in step A, which kept no aliases. `rg "RunModel" nbs_viewer/` was
+  already empty. Nothing left here.
 - [ ] Delete `RunSource.get_plot_data` (broken, no live callers) and
   `PlotDataModel.get_plot_data`
 - [ ] Delete `cached_parent_bundle_for_preview` (an equality check)
@@ -268,7 +325,7 @@ they synthesise data, which is a data-layer job.
 ### Exit criteria
 
 - [ ] No camelCase filenames under `models/plot/`
-- [ ] No compatibility aliases anywhere
+- [x] No compatibility aliases anywhere (holds as of step A; re-check)
 - [ ] Record final file and line counts against the targets above
 
 ---
@@ -278,3 +335,4 @@ they synthesise data, which is a data-layer job.
 | Date | Change |
 |------|--------|
 | 2026-09-08 | Written from the live parts of `model_core_refactor_plan.md` and `plot_session_list_adapter_plan.md`. Claimed-done items re-verified against the tree; sizes re-measured. |
+| 2026-09-08 | Step A landed. Aliases dropped rather than held for a commit. `RunListView` builds the item model instead of `PlotPresenter`, which removes the `models/` → `views/` import the step as written would have created; the dead-consumer count that justified it is recorded in the step. Bugs 9 and 10 found en route, 9 closed. |

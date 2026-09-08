@@ -14,6 +14,7 @@ from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
 from ...models.plot.combinedRunSource import CombinationMethod, CombineError
 from ...models.plot.runSource import RunSource
+from .run_list_item_model import RunListItemModel
 from ..plot.metadataView import FullMetadataBrowser
 from typing import List
 from nbs_viewer.utils import get_top_level_model
@@ -37,25 +38,25 @@ class RunListView(QWidget):
 
     selectionChanged = Signal(list, str)  # (List[CatalogRun], display_id)
 
-    def __init__(self, run_list_model, display_manager, display_id: str, parent=None):
+    def __init__(self, presenter, display_manager, display_id: str, parent=None):
         """
-            Initialize the RunListView
-        .
+        Initialize the RunListView.
 
-            Parameters
-            ----------
-            run_list_model : RunListModel
-                Model to display and manage runs for
-            display_manager : DisplayManager
-                Model managing available displays
-            display_id : str
-                Identifier for the display this list manages
-            parent : QWidget, optional
-                Parent widget, by default None
+        Parameters
+        ----------
+        presenter : PlotPresenter
+            Presenter owning the session these rows are drawn from.
+        display_manager : DisplayManager
+            Model managing available displays
+        display_id : str
+            Identifier for the display this list manages
+        parent : QWidget, optional
+            Parent widget, by default None
         """
         super().__init__(parent)
-        self.run_list_model = run_list_model
-        self.session = run_list_model.plot_model
+        self.presenter = presenter
+        self.session = presenter.session
+        self.run_list_model = RunListItemModel(self.session)
         self.display_id = display_id
         self._handling_selection = False
         self._metadata_browser_dialog = None
@@ -68,7 +69,7 @@ class RunListView(QWidget):
         self.list_view.setSelectionMode(QListView.ExtendedSelection)
 
         self.display_controls = DisplayControlWidget(
-            display_manager, run_list_model, self
+            display_manager, presenter, self
         )
         button_layout = QHBoxLayout()
         self.remove_button = QPushButton("Remove Selected Runs")

@@ -135,7 +135,6 @@ class MplCanvas(FigureCanvasQTAgg):
         super().__init__(self.fig)
         self.setParent(parent)
         self.presenter = presenter
-        self.run_list_model = presenter.run_list
         self.plot_model = presenter.session
         self._connected_plot_data = set()
         self._worker_generations = {}
@@ -967,7 +966,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def _apply_roi_draw_enabled(self, enabled: bool):
         """
-        Apply ROI draw mode from :class:`PlotModel`.
+        Apply ROI draw mode from :class:`PlotSession`.
         """
         enabled = bool(enabled)
         if enabled and self._crop_draw_enabled:

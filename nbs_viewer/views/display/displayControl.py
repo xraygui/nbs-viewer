@@ -30,7 +30,7 @@ class DisplayControlWidget(QWidget):
         ----------
         display_manager : DisplayManager
             Model managing available displays
-        run_list_model : RunListModel
+        run_list_model : RunListItemModel
             Model managing plot data
         parent : QWidget, optional
             Parent widget, by default None

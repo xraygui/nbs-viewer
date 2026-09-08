@@ -50,7 +50,6 @@ class RunDisplayWidget(QWidget):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.presenter = presenter
-        self.run_list_model = presenter.run_list
         self.plot_model = presenter.session
         self._show_all = False
         self._linked_mode = True

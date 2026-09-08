@@ -39,7 +39,6 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         super().__init__(self.figure)
         self.setParent(parent)
         self.presenter = presenter
-        self.run_list_model = presenter.run_list
         self.plot_model = presenter.session
 
         self.plotArtists = {}

@@ -1,37 +1,36 @@
-"""Qt run-list adapter over a :class:`PlotModel` session."""
+"""Qt run-list adapter over a :class:`PlotSession`."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 
-from .runSource import RunSource
+from ...models.plot.runSource import RunSource
 
 if TYPE_CHECKING:
-    from .plotModel import PlotModel
+    from ...models.plot.plot_session import PlotSession
 
 
-class RunListModel(QStandardItemModel):
+class RunListItemModel(QStandardItemModel):
     """
     Sidebar rows for one plot session.
 
     Membership, visibility, keys, combine/freeze, and cache-status
-    aggregation live on :class:`PlotModel`. This model only keeps
+    aggregation live on :class:`PlotSession`. This model only keeps
     ``QStandardItem`` rows in sync and exposes index helpers for the list
     view.
 
     Parameters
     ----------
-    plot_model : PlotModel
+    session : PlotSession
         Session that owns the run collection and visibility set.
     """
 
-    def __init__(self, plot_model: "PlotModel"):
+    def __init__(self, session: "PlotSession"):
         super().__init__()
-        self._plot = plot_model
-        self._plot.bind_run_list(self)
+        self._plot = session
 
         self._plot.run_added.connect(self._on_session_run_added)
         self._plot.run_removed.connect(self._on_session_run_removed)
@@ -42,9 +41,9 @@ class RunListModel(QStandardItemModel):
             self._add_run_item(run)
 
     @property
-    def plot_model(self) -> "PlotModel":
+    def session(self) -> "PlotSession":
         """
-        Return the bound plot session.
+        Return the observed plot session.
         """
         return self._plot
 

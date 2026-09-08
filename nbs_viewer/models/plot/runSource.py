@@ -35,7 +35,7 @@ class RunSource(QObject):
 
     The RunSource surface is ``key_table``, ``identity``, ``read``,
     ``describe_axes``, ``load_axes``, and ``get_plot_bundle``. Selection,
-    visibility, and transform live on :class:`PlotModel`.
+    visibility, and transform live on :class:`PlotSession`.
 
     Parameters
     ----------

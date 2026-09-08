@@ -3,7 +3,7 @@ Plot session: membership, visibility, selection, view, and plot-data map.
 
 Owns a :class:`RunCollection`, the visible-uid set, selected keys, transform,
 cube/slice/crop view state, the ``PlotDataModel`` map, and the ROI set.
-:class:`RunListModel` is a Qt facade that observes this session.
+:class:`RunListItemModel` (in ``views/``) is a Qt facade that observes it.
 
 ``rebuild()`` is the sole mutator of plot-data *membership*. Retention is
 membership × selection; visibility only filters drawing.
@@ -58,10 +58,9 @@ if TYPE_CHECKING:
     from .cube_view import CubeViewSpec
     from .frozen_spectrum import FrozenSpectrum
     from .plot_geometry import PlotBundle
-    from .runListModel import RunListModel
 
 
-class PlotModel(QObject):
+class PlotSession(QObject):
     """
     One plot session (membership + plot state).
 
@@ -101,7 +100,6 @@ class PlotModel(QObject):
         parent: Optional[QObject] = None,
     ):
         super().__init__(parent)
-        self._run_list_model: Optional["RunListModel"] = None
         self._collection = RunCollection()
         self._is_main_display = is_main_display
         self._single_selection_mode = single_selection_mode
@@ -135,24 +133,6 @@ class PlotModel(QObject):
         self.run_added.connect(self._refresh_cache_progress_connections)
         self.run_removed.connect(self._refresh_cache_progress_connections)
         self._refresh_cache_progress_connections()
-
-    def bind_run_list(self, run_list_model: "RunListModel") -> None:
-        """
-        Attach the Qt run-list facade for this session.
-
-        Parameters
-        ----------
-        run_list_model : RunListModel
-            Sidebar item model that observes this session.
-        """
-        self._run_list_model = run_list_model
-
-    @property
-    def run_list_model(self) -> Optional["RunListModel"]:
-        """
-        Return the bound run list facade, if any.
-        """
-        return self._run_list_model
 
     @property
     def collection(self) -> RunCollection:
@@ -265,7 +245,7 @@ class PlotModel(QObject):
 
         first_run = runs[0]
         print_debug(
-            "PlotModel.update_available_keys",
+            "PlotSession.update_available_keys",
             f"available_keys from first_run.uid {first_run.uid}: "
             f"{first_run.available_keys}",
             "run",
@@ -334,7 +314,7 @@ class PlotModel(QObject):
         run_list : list of CatalogRun or RunSource
             Runs to add.
         """
-        print_debug("PlotModel.add_runs", f"Adding {len(run_list)} runs", "run")
+        print_debug("PlotSession.add_runs", f"Adding {len(run_list)} runs", "run")
         run_list = sorted(run_list, key=lambda x: x.scan_id)
         uid_list = []
         for run in run_list:
@@ -342,7 +322,7 @@ class PlotModel(QObject):
             uid_list.append(uid)
             if uid in self._collection:
                 print_debug(
-                    "PlotModel.add_runs", f"Run {uid} already in model", "run"
+                    "PlotSession.add_runs", f"Run {uid} already in model", "run"
                 )
                 continue
 
@@ -448,7 +428,7 @@ class PlotModel(QObject):
             UIDs to remove.
         """
         print_debug(
-            "PlotModel.remove_uids",
+            "PlotSession.remove_uids",
             f"Removing uids {uid_list}",
             category="runlist",
         )
@@ -491,7 +471,7 @@ class PlotModel(QObject):
         display_id : str, optional
             Unused; kept for API compatibility.
         """
-        print_debug("PlotModel.set_runs", f"Setting runs {len(run_list)}", "run")
+        print_debug("PlotSession.set_runs", f"Setting runs {len(run_list)}", "run")
         current_uids = {run.uid for run in run_list}
         existing_uids = set(self._collection.uids())
         self.remove_uids(list(existing_uids - current_uids))
@@ -510,7 +490,7 @@ class PlotModel(QObject):
             New visibility state.
         """
         print_debug(
-            "PlotModel.set_uids_visible",
+            "PlotSession.set_uids_visible",
             f"Setting uids {uids} to {is_visible}",
             category="runlist",
         )
@@ -537,7 +517,7 @@ class PlotModel(QObject):
         self.rebuild()
         self.request_plot_update.emit()
         print_debug(
-            "PlotModel.set_uids_visible",
+            "PlotSession.set_uids_visible",
             f"visible_runs_changed uids={uids} visible={is_visible}",
             category="plots",
         )
@@ -617,7 +597,7 @@ class PlotModel(QObject):
         self._refresh_held_requests()
         self.request_plot_update.emit()
         print_debug(
-            "PlotModel.set_transform",
+            "PlotSession.set_transform",
             "applied (request refresh via transform_changed)",
             category="plots",
         )
@@ -736,7 +716,7 @@ class PlotModel(QObject):
         x, y, n = self._selection.default.as_lists()
         self.selected_keys_changed.emit(x, y, n)
         print_debug(
-            "PlotModel.set_selected_keys",
+            "PlotSession.set_selected_keys",
             f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
             category="plots",
         )
@@ -1153,7 +1133,7 @@ class PlotModel(QObject):
             self._plot_data[key] = plot_data
             self.plot_data_added.emit(plot_data)
             print_debug(
-                "PlotModel.ensure_plot_data",
+                "PlotSession.ensure_plot_data",
                 f"create {xkey}/{ykey}",
                 category="plots",
             )
@@ -1856,7 +1836,7 @@ class PlotModel(QObject):
                 self._plot_data[key] = plot_data
                 self.plot_data_added.emit(plot_data)
                 print_debug(
-                    "PlotModel.rebuild",
+                    "PlotSession.rebuild",
                     f"create {key.xkey}/{key.ykey} uid={key.uid}",
                     category="plots",
                 )
@@ -1956,6 +1936,3 @@ class PlotModel(QObject):
     def _emit_aggregated_cache_status(self) -> None:
         text = aggregate_tiled_fetch_label(self._cache_statuses.values())
         self.cache_status_changed.emit(text)
-
-
-PlotSession = PlotModel

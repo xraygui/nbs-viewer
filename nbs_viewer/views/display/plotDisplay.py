@@ -57,10 +57,9 @@ class PlotDisplay(QWidget):
     def setup_models(self):
         """Resolve presenter-owned models for this display."""
         self.presenter = self.display_manager.get_presenter(self.display_id)
-        self.run_list_model = self.presenter.run_list
         self.plot_model = self.presenter.session
         self.data_source = RunListView(
-            self.run_list_model, self.display_manager, self.display_id
+            self.presenter, self.display_manager, self.display_id
         )
 
         # Create plot widget based on display widget type
@@ -127,7 +126,7 @@ class PlotDisplay(QWidget):
 
         Parameters
         ----------
-        run_list_model : RunListModel
+        presenter : PlotPresenter
             The plot model for this display
         display_manager : DisplayManager
             The display manager

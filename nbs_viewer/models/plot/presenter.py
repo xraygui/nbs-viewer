@@ -1,8 +1,7 @@
 from typing import List, Optional, Union
 from qtpy.QtCore import QObject, Signal
-from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
-from ...models.plot.plotModel import PlotModel
+from ...models.plot.plot_session import PlotSession
 from ...models.plot.runSource import RunSource
 
 
@@ -10,8 +9,9 @@ class PlotPresenter(QObject):
     """
     Coordinates one plot session (N=1).
 
-    Owns a :class:`PlotModel` (session root) and a :class:`RunListModel`
-    Qt facade. Multi-view stays deferred.
+    Owns a :class:`PlotSession` (session root). The sidebar item model is
+    a view adapter and is built by :class:`RunListView`. Multi-view stays
+    deferred.
     """
     roi_region_changed = Signal(object)
     crop_region_changed = Signal(object)
@@ -39,12 +39,11 @@ class PlotPresenter(QObject):
         """
         super().__init__(parent)
         self._id = presenter_id
-        self._plot = PlotModel(
+        self._plot = PlotSession(
             is_main_display=is_main_display,
             single_selection_mode=single_selection_mode,
             parent=self,
         )
-        self._run_list = RunListModel(self._plot)
         self._plot.cache_status_changed.connect(self.status_changed.emit)
 
     @property
@@ -57,24 +56,8 @@ class PlotPresenter(QObject):
         self._id = value
 
     @property
-    def run_list(self) -> RunListModel:
-        """Qt run-list item model for this session."""
-        return self._run_list
-
-    @property
-    def session(self) -> PlotModel:
-        """
-        Session root (alias of :attr:`plot`).
-
-        Prefer this name in new code; ``plot`` remains for compatibility.
-        """
-        return self._plot
-
-    @property
-    def plot(self) -> PlotModel:
-        """
-        Session root, legacy name. Prefer :attr:`session` in new code.
-        """
+    def session(self) -> PlotSession:
+        """Session root for this presenter."""
         return self._plot
 
     def add_run(self, run: Union[CatalogRun, RunSource]) -> None:

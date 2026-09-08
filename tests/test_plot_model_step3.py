@@ -1,4 +1,4 @@
-"""Tests for PlotModel plot-data map, keys, and run-list protocol."""
+"""Tests for PlotSession plot-data map, keys, and run-list protocol."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, default_spec
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
-from nbs_viewer.models.plot.plotModel import PlotModel
+from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
@@ -114,7 +114,7 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
 
 
 def test_cube_view_and_crop_without_canvas(qapp):
-    plot_model = PlotModel()
+    plot_model = PlotSession()
     spec = default_spec(3, 2)
     plot_model.set_view_state(
         indices=spec.to_load_slice_info(),

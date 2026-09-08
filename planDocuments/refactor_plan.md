@@ -64,7 +64,7 @@ They interleave; the order below is the merged sequence.
 | 2 | Selection-driven default axis order | view pipeline | ✅ `11c7a0d` |
 | 3 | Orientation once after load, one planner, one mask | view pipeline | ✅ `dbe6083` |
 | 4 | One request, no side channels | view pipeline | ✅ `b431c47` |
-| A | `PlotSession` / `RunListItemModel` rename and move | session & traces | independent, any time |
+| A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ |
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | next |
 | B | `Trace` | session & traces | unblocked |
 | 6 | Adopt `ViewIntent`, or delete it | view pipeline | after 5, needs B |
@@ -82,6 +82,11 @@ including the one decision point the plan had not predicted.
 Step 4 shipped its own content in full but **did not close bug 8**, which
 step 3 had moved into it on a wrong premise; see the bug table.
 
+Step A was a rename, but the plan's mechanics for it contradicted invariant 1:
+having `PlotPresenter` construct the item model would have made `models/`
+import `views/`. `RunListView` builds it instead. Counting consumers is what
+settled it, and the count also found bugs 9 and 10; see the sub-plan.
+
 ## Shared backlog
 
 ### Bugs found during analysis
@@ -98,6 +103,8 @@ Recorded regardless of whether the step that fixes them lands.
 | 6 | `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)` where `MemoryRun` uses `range(1, ndim)`, so every dimension receives the previous dimension's `axes` hint when `getAxisHints` is non-empty. Masked by name-list truncation. | open |
 | 7 | `BlueskyRun.getRunKeys` ends with `ykeys[1] = all_keys`, so rank-3 camera keys are reported as rank 1 and the two backends disagree about the grouping. | open — own commit |
 | 8 | `PlotDataModel.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
+| 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A |
+| 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
 N-D y key by a lower-rank norm key raised; `visible_runs` and `visible_models`
@@ -163,3 +170,4 @@ them.
 | 2026-09-08 | Written. Absorbs the live parts of `model_core_refactor_plan.md`, `plot_session_list_adapter_plan.md`, `model_ownership_headless_plan.md`, `plot_package_reorganization.md` and `layout.md`, all deleted in the same commit and recoverable from `57f6d7b`. |
 | 2026-09-08 | Step 3 landed; bugs 2 and 3 closed, bug 8 moved to step 4. Step 4 is next. |
 | 2026-09-08 | Step 4 landed (`b431c47`); `derived_fetch.py` and `view_crop.py` deleted, steps B and D unblocked, step 5 next. Bug 8 not closed and moved on to step 7 with the reason. A profile-axis / reduction-axis inversion was found and fixed en route. |
+| 2026-09-08 | Step A landed, net −77 lines. Compatibility aliases dropped rather than held for a commit, which also empties step F's alias list. The item model moved to `views/` and `RunListView` now constructs it, so `models/` imports no view code. Bugs 9 and 10 added; 9 closed. Step 5 remains next. |

@@ -234,7 +234,6 @@ class DimensionControl(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
         self.presenter = presenter
-        self.run_list_model = presenter.run_list
         self.plot_model = presenter.session
         self.canvas = canvas
         self._slice_rows = []

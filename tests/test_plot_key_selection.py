@@ -7,16 +7,16 @@ from nbs_viewer.models.plot.cube_view import (
     resolve_roles,
     spec_for_plot_ndim,
 )
-from nbs_viewer.models.plot.plotModel import PlotModel
-from nbs_viewer.models.plot.runListModel import RunListModel
+from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
 def _test_session():
     run = RunSource(create_test_catalog(1).get_runs()[0])
-    plot = PlotModel()
-    run_list = RunListModel(plot)
+    plot = PlotSession()
+    run_list = RunListItemModel(plot)
     plot.add_run(run)
     x_keys, y_keys, norm_keys = run.run.get_default_selection()
     return run, plot, x_keys, y_keys, norm_keys

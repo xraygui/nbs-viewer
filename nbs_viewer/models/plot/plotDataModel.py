@@ -262,7 +262,7 @@ class PlotDataModel(QObject):
         Build a :class:`FrozenSpectrum` from a committed ROI profile bundle.
 
         Does not register the spectrum on the run; callers (typically
-        :class:`PlotModel`) perform registration.
+        :class:`PlotSession`) perform registration.
 
         Parameters
         ----------

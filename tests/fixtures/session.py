@@ -8,9 +8,8 @@ from nbs_viewer.models.app_model import AppModel
 from nbs_viewer.models.catalog.memory import MemoryCatalog
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_geometry import PlotBundle
-from nbs_viewer.models.plot.plotModel import PlotModel
+from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.presenter import PlotPresenter
-from nbs_viewer.models.plot.runListModel import RunListModel
 from nbs_viewer.models.plot.runSource import RunSource
 
 from .catalog_recipes import build_catalog
@@ -40,19 +39,9 @@ class HeadlessSession:
         return self.app.display_manager.get_presenter(self.display_id)
 
     @property
-    def plot(self) -> PlotModel:
+    def session(self) -> PlotSession:
         """Plot session model for the bound presenter."""
         return self.presenter.session
-
-    @property
-    def session(self) -> PlotModel:
-        """Alias of :attr:`plot` (session root)."""
-        return self.presenter.session
-
-    @property
-    def run_list(self) -> RunListModel:
-        """Qt run-list item model for the bound presenter."""
-        return self.presenter.run_list
 
     @property
     def catalog(self) -> MemoryCatalog:
@@ -192,8 +181,8 @@ class HeadlessSession:
         x_list = list(x_keys)
         y_list = list(y_keys)
         norm_list = list(norm_keys or [])
-        self.plot.set_selected_keys(x_list, y_list, norm_list)
-        plot_data = self.plot.ensure_plot_data(
+        self.session.set_selected_keys(x_list, y_list, norm_list)
+        plot_data = self.session.ensure_plot_data(
             run_model,
             x_list[0] if x_list else "",
             y_list[0],
@@ -202,13 +191,13 @@ class HeadlessSession:
         return plot_data.get_plot_bundle()
 
     def _first_run_model(self) -> RunSource:
-        models = self.plot.available_models
+        models = self.session.available_models
         if not models:
             raise RuntimeError("run list has no runs; select or add a run first")
         return models[0]
 
     def _run_model_for_uid(self, uid: str) -> RunSource:
-        for model in self.plot.available_models:
+        for model in self.session.available_models:
             if model.uid == uid:
                 return model
         raise RuntimeError(f"run {uid!r} was not added to the presenter run list")

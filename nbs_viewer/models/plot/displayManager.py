@@ -1,8 +1,7 @@
 from typing import Dict, List, Optional, Union
 from qtpy.QtCore import QObject, Signal
-from ...models.plot.runListModel import RunListModel
 from ...models.data.base import CatalogRun
-from ...models.plot.plotModel import PlotModel
+from ...models.plot.plot_session import PlotSession
 from ...models.plot.runSource import RunSource
 from ...utils import print_debug
 from .presenter import PlotPresenter
@@ -19,7 +18,7 @@ class DisplayManager(QObject):
     Signals
     -------
     display_added : Signal
-        Emitted when a new presenter is created (display_id, run_list_model)
+        Emitted when a new presenter is created (display_id)
     display_removed : Signal
         Emitted when a presenter is removed (display_id)
     display_type_changed : Signal
@@ -28,7 +27,7 @@ class DisplayManager(QObject):
         Emitted when a presenter is renamed (old_id, new_id)
     """
 
-    display_added = Signal(str, object)  # display_id, run_list_model
+    display_added = Signal(str)  # display_id
     display_removed = Signal(str)  # display_id
     display_type_changed = Signal(str, str)  # display_id, display_type
     display_renamed = Signal(str, str)  # display_id, new_name
@@ -56,23 +55,7 @@ class DisplayManager(QObject):
         """
         return self._presenters[display_id]
 
-    def get_run_list_model(self, display_id: str) -> RunListModel:
-        """
-        Return the run list model for a display.
-
-        Parameters
-        ----------
-        display_id : str
-            Identifier for the display
-
-        Returns
-        -------
-        RunListModel
-            Run list for the display.
-        """
-        return self._presenters[display_id].run_list
-
-    def get_plot_model(self, display_id: str) -> PlotModel:
+    def get_session(self, display_id: str) -> PlotSession:
         """
         Return the plot session model for a display.
 
@@ -83,10 +66,10 @@ class DisplayManager(QObject):
 
         Returns
         -------
-        PlotModel
+        PlotSession
             Plot session bound to the display's run list.
         """
-        return self._presenters[display_id].plot
+        return self._presenters[display_id].session
 
     def get_display_ids(self) -> List[str]:
         """
@@ -183,7 +166,7 @@ class DisplayManager(QObject):
             parent=self,
         )
         self._presenters[display_id] = presenter
-        self.display_added.emit(display_id, presenter.run_list)
+        self.display_added.emit(display_id)
         return display_id
 
     def create_display_with_runs(
