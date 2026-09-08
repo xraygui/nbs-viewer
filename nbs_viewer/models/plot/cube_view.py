@@ -445,6 +445,124 @@ def default_spec(ndim: int, plot_ndim: int = 1) -> CubeViewSpec:
     )
 
 
+def default_spec_for_selection(
+    ndim: int,
+    plot_ndim: int = 1,
+    dim_names: Optional[Sequence[str]] = None,
+    xkey: Optional[str] = None,
+) -> CubeViewSpec:
+    """
+    Trailing-axis default, with the selected X key placed on Plot X.
+
+    Orientation is a view decision, so it is expressed here rather than by a
+    renderer. The rule is that a key the user picked as X is plotted
+    horizontally, with one guard: when the X key names a slice axis rather
+    than one of the axes the plot plane already shows -- an image stack
+    scrubbed by voltage or time -- the plane keeps its own orientation and
+    the selection drives nothing. Forcing the stack axis onto the plane
+    would replace the camera frame with a voltage-versus-column view.
+
+    For 1-D plots there is only one plot axis, so the selected X always
+    takes it. That is the larger correction: a trailing-axis default plots a
+    rank-3 detector against its own column index.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of storage dimensions.
+    plot_ndim : int
+        1 for line plots, 2 for image plots.
+    dim_names : sequence of str, optional
+        Dimension name per storage axis, as returned by
+        ``RunSource.describe_axes``. When omitted the plain trailing-axis
+        default is used.
+    xkey : str, optional
+        Selected X key. When it does not name a dimension the plain
+        trailing-axis default is used.
+
+    Returns
+    -------
+    CubeViewSpec
+        Default view for this shape and selection.
+    """
+    spec = default_spec(ndim, plot_ndim)
+    if not xkey or not dim_names:
+        return spec
+    names = list(dim_names)
+    if xkey not in names:
+        return spec
+    x_axis = names.index(xkey)
+    if x_axis >= ndim:
+        return spec
+
+    plane = list(spec.plot_axis_order())
+    if x_axis == plane[-1]:
+        return spec
+
+    if plot_ndim == 1:
+        order = [a for a in spec.axis_order if a != x_axis] + [x_axis]
+        return replace(spec, axis_order=tuple(order))
+
+    if x_axis not in plane:
+        return spec
+
+    other = next(a for a in plane if a != x_axis)
+    order = [a for a in spec.axis_order if a not in plane] + [other, x_axis]
+    return replace(spec, axis_order=tuple(order))
+
+
+def spec_for_shape_and_selection(
+    current: Optional[CubeViewSpec],
+    *,
+    ndim: int,
+    plot_ndim: int,
+    dim_names: Optional[Sequence[str]] = None,
+    xkey: Optional[str] = None,
+    derived_from_xkey: Optional[str] = None,
+    shape: Optional[Sequence[int]] = None,
+) -> Tuple[CubeViewSpec, Optional[str]]:
+    """
+    Choose the view spec for a shape and X selection, and say what it follows.
+
+    Re-derives the default when there is no spec yet, when the rank changed,
+    or when the user picked a different X key. Otherwise the existing order
+    is kept and only adapted to ``plot_ndim``.
+
+    Reordering rows and picking an X key are both explicit statements about
+    which dimension is horizontal, so the later one wins: a manual order
+    survives every rebuild until the X selection actually changes.
+
+    Parameters
+    ----------
+    current : CubeViewSpec or None
+        Spec in use, if any.
+    ndim : int
+        Storage rank of the Y key.
+    plot_ndim : int
+        1 for line plots, 2 for image plots.
+    dim_names : sequence of str, optional
+        Dimension name per storage axis.
+    xkey : str, optional
+        Currently selected X key.
+    derived_from_xkey : str, optional
+        X key the current order was derived from, as returned by a previous
+        call. Pass None the first time.
+    shape : sequence of int, optional
+        Per-axis sizes, used to clamp indices when adapting ``plot_ndim``.
+
+    Returns
+    -------
+    tuple
+        ``(spec, derived_from_xkey)`` to store for the next call.
+    """
+    if current is None or current.ndim != ndim or xkey != derived_from_xkey:
+        return (
+            default_spec_for_selection(ndim, plot_ndim, dim_names, xkey),
+            xkey,
+        )
+    return spec_for_plot_ndim(current, plot_ndim, shape), derived_from_xkey
+
+
 def spec_from_slice_info(
     slice_info: Tuple[SliceItem, ...], plot_ndim: int
 ) -> CubeViewSpec:

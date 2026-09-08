@@ -18,9 +18,9 @@ from nbs_viewer.models.plot.cube_view import (
     DimRole,
     ROLE_LABELS,
     SLICE_ROLES,
-    default_spec,
     resolve_roles,
     spec_for_plot_ndim,
+    spec_for_shape_and_selection,
 )
 from nbs_viewer.utils import print_debug
 from nbs_viewer.views.common.panel import CollapsiblePanel
@@ -244,6 +244,11 @@ class DimensionControl(QWidget):
         self._axis_arrays = None
         self._associated_data = None
         self._cube_view_spec = None
+        # X key the current default axis order was derived from. A manual
+        # reorder leaves it as-is, so the order survives until the user makes
+        # the other explicit choice about the horizontal axis -- picking a
+        # different X. Moves onto ViewIntent when the session owns the spec.
+        self._default_xkey = None
         self._updating_ui = False
 
         self.plot_model.run_added.connect(self.on_run_added)
@@ -334,12 +339,15 @@ class DimensionControl(QWidget):
         plot_ndim = self.dimension_spinbox.value()
         ndim = len(y_shape)
 
-        if self._cube_view_spec is None or self._cube_view_spec.ndim != ndim:
-            self._cube_view_spec = default_spec(ndim, plot_ndim)
-        else:
-            self._cube_view_spec = spec_for_plot_ndim(
-                self._cube_view_spec, plot_ndim, y_shape
-            )
+        self._cube_view_spec, self._default_xkey = spec_for_shape_and_selection(
+            self._cube_view_spec,
+            ndim=ndim,
+            plot_ndim=plot_ndim,
+            dim_names=dim_names,
+            xkey=self._primary_xkey(),
+            derived_from_xkey=self._default_xkey,
+            shape=y_shape,
+        )
         self._cube_view_spec = resolve_roles(self._cube_view_spec)
 
         order = self._cube_view_spec.axis_order
@@ -610,6 +618,26 @@ class DimensionControl(QWidget):
             else:
                 aligned.append(placeholders[i])
         return aligned, associated_data
+
+    def _primary_xkey(self):
+        """
+        Return the X key the default axis order should follow.
+
+        The first X key of the first visible run, matching how
+        :meth:`get_shape_info` reads the selection.
+
+        Returns
+        -------
+        str or None
+            Selected X key, or None when nothing is selected.
+        """
+        if not self.plot_model:
+            return None
+        for run_model in self.plot_model.visible_models:
+            selection = self.plot_model.selection_for(run_model.uid)
+            if selection.x:
+                return selection.x[0]
+        return None
 
     def get_shape_info(self):
         """
