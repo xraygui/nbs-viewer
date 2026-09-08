@@ -8,13 +8,16 @@ from nbs_viewer.models.plot.combinedRunSource import (
     CombinationMethod,
     CombinedRunSource,
 )
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, MaterializeRequest
+from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
 from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
 )
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
+from nbs_viewer.models.plot.plot_request import PlotRequest
+from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.view_spec import ViewSpec
 
 from tests.fixtures.session import HeadlessSession
 
@@ -54,13 +57,20 @@ def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectr
         kind="stack_spectrum",
         source_ykey="detector_image",
         committed_xkey="en_energy",
-        request=MaterializeRequest(
-            CubeViewSpec(
+        request=PlotRequest(
+            uid=run_model.uid,
+            xkeys=("en_energy",),
+            ykey="detector_image",
+            norm_keys=(),
+            view=ViewSpec(
                 ndim=2,
-                plot_ndim=1,
-                roles=(DimRole.PLOT_X, DimRole.MEAN),
+                plot_ndim=2,
+                roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
-            )
+            ),
+            region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
+            profile_axis=1,
+            spatial_reduce="mean",
         ),
         source_key=("en_energy", "detector_image", run_model.uid),
     )

@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, default_spec
-from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plotDataModel import PlotDataModel
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_crop import ViewCrop
-from tests.fixtures.catalog_recipes import line_scan_run
+from nbs_viewer.models.plot.view_spec import ViewCrop
+from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
+from tests.fixtures.display_plane import display_bundle
 from tests.fixtures.plot_session import make_plot_session
 
 
@@ -125,18 +124,21 @@ def test_cube_view_and_crop_without_canvas(qapp):
     assert plot_model.dimension == 2
     assert plot_model.cube_view_spec == spec
 
-    crop = MagicMock(spec=ViewCrop)
-    plot_model.set_view_crop(crop)
+    crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
+    plot_model.set_view_crop(crop, ("x", "y", "uid"))
     assert plot_model.view_crop is crop
     plot_model.clear_view_crop()
     assert plot_model.view_crop is None
 
 
-def test_apply_view_crop_from_region(qapp):
+def _image_session(qapp):
+    """
+    Return ``(plot_model, run_model, plot_data)`` showing a 2-D image plane.
+    """
     plot_model, _ = make_plot_session()
-    run_model = _make_run_model(_custom_run(1, ("x", "y")))
+    run_model = _make_run_model(image_scan_run(1, n_y=5, n_x=6))
     plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["x"], ["y"])
+    plot_model.set_selected_keys(["pixel"], ["detector_image"])
 
     parent = CubeViewSpec(
         ndim=2,
@@ -149,62 +151,31 @@ def test_apply_view_crop_from_region(qapp):
         dimension=2,
         cube_view_spec=parent,
     )
-
-    plot_data = plot_model.ensure_plot_data(run_model, "x", "y")
-    plot_data.last_bundle = prepare_2d_bundle(
+    plot_data = plot_model.ensure_plot_data(
+        run_model, "pixel", "detector_image"
+    )
+    plot_data.last_bundle = display_bundle(
         np.zeros((5, 6)),
-        [np.arange(5), np.arange(6)],
-        ["y", "x"],
-        render_mode_hint="image",
+        np.arange(5, dtype=float),
+        np.arange(6, dtype=float),
+        ["row", "pixel"],
     )
-    run_model.load_axes = MagicMock(
-        return_value=(
-            [np.arange(5), np.arange(6)],
-            ["y", "x"],
-            None,
-        )
-    )
+    return plot_model, run_model, plot_data
+
+
+def test_apply_view_crop_from_region(qapp):
+    plot_model, run_model, plot_data = _image_session(qapp)
 
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
     crop = plot_model.apply_view_crop_from_region(region)
 
     assert plot_model.view_crop is crop
-    assert crop.display_bbox == (2, 4, 2, 4)
-    assert crop.source_key == ("x", "y", run_model.uid)
+    assert crop.storage_bbox == (1, 3, 2, 4)
+    assert plot_model.crop_applies_to(plot_data.trace_key)
 
 
 def test_apply_view_crop_from_region_rejects_second_crop(qapp):
-    plot_model, _ = make_plot_session()
-    run_model = _make_run_model(_custom_run(1, ("x", "y")))
-    plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["x"], ["y"])
-
-    parent = CubeViewSpec(
-        ndim=2,
-        plot_ndim=2,
-        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
-    plot_model.set_view_state(
-        indices=parent.to_load_slice_info(),
-        dimension=2,
-        cube_view_spec=parent,
-    )
-
-    plot_data = plot_model.ensure_plot_data(run_model, "x", "y")
-    plot_data.last_bundle = prepare_2d_bundle(
-        np.zeros((5, 6)),
-        [np.arange(5), np.arange(6)],
-        ["y", "x"],
-        render_mode_hint="image",
-    )
-    run_model.load_axes = MagicMock(
-        return_value=(
-            [np.arange(5), np.arange(6)],
-            ["y", "x"],
-            None,
-        )
-    )
+    plot_model, _run_model, _plot_data = _image_session(qapp)
 
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
     plot_model.apply_view_crop_from_region(region)

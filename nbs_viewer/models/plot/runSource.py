@@ -1,4 +1,3 @@
-from dataclasses import replace
 from types import MappingProxyType
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
 
@@ -7,15 +6,13 @@ import numpy as np
 import time as ttime
 
 from ..data.base import CatalogRun
-from .cube_view import CubeViewSpec
-from .view_crop import ViewCrop
-from .derived_fetch import plot_plane_storage_axes
 from .frozen_spectrum import FrozenSpectrum
 from .key_info import AxisLayout, KeyInfo, RunIdentity
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
     build_plot_bundle,
+    reduce_cached_plane,
     reduce_loaded_array,
     reduce_to_plot_plane,
     slice_info_for_key,
@@ -23,10 +20,12 @@ from .plot_bundle import (
 from .plot_geometry import (
     PlotBundle,
     classify_render_mode,
+    display_flips,
     get_render_mode_hint,
     orient_for_display,
 )
-from .plot_request import FetchPlan, PlotRequest, plan_fetch, slim_crop_from_legacy
+from .plot_request import PlotRequest, plan_fetch
+from .plot_view_frame import PlotViewFrame, frame_for_plane
 from nbs_viewer.utils import print_debug
 
 
@@ -567,47 +566,55 @@ class RunSource(QObject):
         self._update_available_keys()
         self.data_changed.emit()
 
-    def _plan_fetch(
-        self,
-        request: PlotRequest,
-        *,
-        region_frame=None,
-        parent_spec: Optional[CubeViewSpec] = None,
-        view_crop: Optional[ViewCrop] = None,
-    ) -> FetchPlan:
+    def _plane_frame(
+        self, request: PlotRequest
+    ) -> Optional[PlotViewFrame]:
         """
-        Resolve the storage load slice and the frames the load lands in.
+        Derive the display frame of the request's full plot plane.
+
+        An ROI is geometry in data coordinates, so something has to say which
+        cell each coordinate falls in. That is a pure function of the plane's
+        shape, its two coordinate arrays and the render mode, all of which are
+        1-D and cheap to read, so the frame is derived here rather than passed
+        in from whichever bundle the canvas happened to have drawn.
 
         Parameters
         ----------
         request : PlotRequest
-            Frozen plot description.
-        region_frame : PlotViewFrame, optional
-            Full parent 2-D view frame. Required when ``request.region`` is
-            set, and used for the storage-to-display reversal when it is not.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view for plot-plane storage axis lookup.
-        view_crop : ViewCrop, optional
-            Parent-plane crop for an ROI load, whose 1-D profile view cannot
-            be the thing that carries it. Folded onto the request here, so
-            :func:`plan_fetch` still sees exactly one crop.
+            Request whose ``view`` describes the plane.
 
         Returns
         -------
-        FetchPlan
-            Load slices plus the plane and region frames.
+        PlotViewFrame or None
+            Frame of the uncropped plane, or None when there is no region to
+            compile against it.
         """
-        if view_crop is not None and request.view.crop is None:
-            request = replace(
-                request,
-                view=replace(
-                    request.view, crop=slim_crop_from_legacy(view_crop)
-                ),
-            )
-        return plan_fetch(
-            request,
-            plane_frame=region_frame,
-            plane_axes=plot_plane_storage_axes(parent_spec),
+        if request.region is None:
+            return None
+        plane_axes = request.plane_axes
+        if plane_axes is None:
+            raise ValueError("cannot resolve the plot plane for an ROI fetch")
+        row_axis, col_axis = plane_axes
+        axes, names, _extra = self.load_axes(
+            request.ykey, list(request.xkeys), request.view.base_slice()
+        )
+        rows = np.atleast_1d(np.asarray(axes[row_axis]))
+        cols = np.atleast_1d(np.asarray(axes[col_axis]))
+        plane_shape = (int(rows.size), int(cols.size))
+        render_mode = classify_render_mode(
+            plane_shape,
+            [rows, cols],
+            render_mode_hint=self._render_hint(request.ykey),
+        )
+        row_reversed, col_reversed = display_flips(rows, cols, render_mode)
+        return frame_for_plane(
+            plane_shape,
+            rows[::-1] if row_reversed else rows,
+            cols[::-1] if col_reversed else cols,
+            [names[row_axis], names[col_axis]],
+            render_mode_hint=render_mode,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
         )
 
     def _storage_to_tensor(self, slice_info: Sequence) -> Dict[int, int]:
@@ -636,53 +643,61 @@ class RunSource(QObject):
             )
         }
 
-    def _plane_render_mode(
-        self,
-        ykey: str,
-        y: np.ndarray,
-        axis_arrays: Sequence[np.ndarray],
-        plane_axes: Optional[Tuple[int, int]],
-        tensor_axes: Mapping[int, int],
-    ) -> Optional[str]:
+    def _render_hint(self, ykey: str) -> Optional[str]:
         """
-        Classify the render mode of the loaded plot plane.
-
-        Classified here, before any reduction, because the orientation
-        decision depends on it and orientation happens immediately after the
-        load. The answer is passed on as an explicit hint so the packing step
-        does not classify a second time.
+        Return the declared render mode for a key, if any.
 
         Parameters
         ----------
         ykey : str
-            Y data key, for the plot-hint lookup.
-        y : np.ndarray
-            Loaded array.
-        axis_arrays : sequence of np.ndarray
-            Coordinate array per storage axis.
-        plane_axes : tuple of int, optional
-            Storage axes of the plot plane.
-        tensor_axes : mapping
-            Storage-to-tensor axis map for ``y``.
+            Y data key.
 
         Returns
         -------
         str or None
-            ``image`` or ``mesh``, or None when there is no 2-D plane.
+            ``image`` or ``mesh`` from the key table or plot hints.
         """
         info = self.key_table().get(ykey)
         hint = info.render_hint if info is not None else None
         if hint is None and self._frozen_entry(ykey) is None:
             hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
-        if plane_axes is None:
+        return hint
+
+    def _plane_render_mode(
+        self,
+        ykey: str,
+        axis_arrays: Sequence[np.ndarray],
+        plane_axes: Optional[Tuple[int, int]],
+        plane_shape: Optional[Tuple[int, int]],
+    ) -> Optional[str]:
+        """
+        Classify the render mode of the loaded plot plane.
+
+        Classified before any reduction, because the orientation decision
+        depends on it and orientation happens immediately after the load. The
+        answer is passed on as an explicit hint so the packing step does not
+        classify a second time.
+
+        Parameters
+        ----------
+        ykey : str
+            Y data key, for the plot-hint lookup.
+        axis_arrays : sequence of np.ndarray
+            Coordinate array per storage axis.
+        plane_axes : tuple of int, optional
+            Storage axes of the plot plane.
+        plane_shape : tuple of int, optional
+            Shape of the loaded plane, when it is present in the array.
+
+        Returns
+        -------
+        str or None
+            ``image`` or ``mesh``, or the bare hint when there is no plane.
+        """
+        hint = self._render_hint(ykey)
+        if plane_axes is None or plane_shape is None:
             return hint
         row_axis, col_axis = plane_axes
-        if row_axis not in tensor_axes or col_axis not in tensor_axes:
-            return hint
-        plane_shape = (
-            y.shape[tensor_axes[row_axis]],
-            y.shape[tensor_axes[col_axis]],
-        )
         return classify_render_mode(
             plane_shape,
             [axis_arrays[row_axis], axis_arrays[col_axis]],
@@ -762,13 +777,16 @@ class RunSource(QObject):
         self,
         request: PlotRequest,
         *,
-        region_frame=None,
-        parent_spec: Optional[CubeViewSpec] = None,
+        cached_plane: Optional[PlotBundle] = None,
         label: str = "",
-        view_crop: Optional[ViewCrop] = None,
     ) -> PlotBundle:
         """
         Load, orient, reduce, normalize, transform, and pack one plot request.
+
+        The request is the whole description: the projection, the crop, and
+        for an ROI the region, the profile axis and the spatial reduce. What
+        the plot plane's coordinate frame is, and which storage indices to
+        read, are both derived from it here.
 
         Storage-to-display reorientation happens immediately after the load,
         so every later step -- ROI masking above all -- sees display-ordered
@@ -778,17 +796,12 @@ class RunSource(QObject):
         ----------
         request : PlotRequest
             Frozen plot description.
-        region_frame : PlotViewFrame, optional
-            Full parent 2D view frame. Required when ``request.region`` is
-            set: the region is in data coordinates, and the frame is also
-            what records how the parent plane was oriented.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view for ROI plot-plane axis lookup.
+        cached_plane : PlotBundle, optional
+            Plot plane already in memory for ``request.view``. Used only to
+            skip the database read for an ROI profile that runs along an axis
+            the plane already shows; ignored otherwise.
         label : str
             Optional display label for 1D ROI output.
-        view_crop : ViewCrop, optional
-            Parent-plane crop for N-D ROI loads. Ordinary 2-D crops belong on
-            ``request.view``.
 
         Returns
         -------
@@ -797,12 +810,16 @@ class RunSource(QObject):
         """
         xkeys = list(request.xkeys)
         ykey = request.ykey
-        plan = self._plan_fetch(
-            request,
-            region_frame=region_frame,
-            parent_spec=parent_spec,
-            view_crop=view_crop,
-        )
+
+        if (
+            cached_plane is not None
+            and request.region is not None
+            and cached_plane.ndim == 2
+            and request.profile_axis in (request.plane_axes or ())
+        ):
+            return reduce_cached_plane(cached_plane, request, label=label)
+
+        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
         slice_info = plan.slice_info
 
         t0 = ttime.time()
@@ -814,7 +831,10 @@ class RunSource(QObject):
 
         tensor_axes = self._storage_to_tensor(slice_info)
         render_hint = self._plane_render_mode(
-            ykey, y, storage_axes, plan.plane_axes, tensor_axes
+            ykey,
+            storage_axes,
+            plan.plane_axes,
+            self._loaded_plane_shape(y, plan.plane_axes, tensor_axes),
         )
         reversed_axes = plan.reversed_axes_for(storage_axes, render_hint)
         y, storage_axes = orient_for_display(
@@ -871,6 +891,36 @@ class RunSource(QObject):
             row_reversed=row_reversed,
             col_reversed=col_reversed,
         )
+
+    @staticmethod
+    def _loaded_plane_shape(
+        y: np.ndarray,
+        plane_axes: Optional[Tuple[int, int]],
+        tensor_axes: Mapping[int, int],
+    ) -> Optional[Tuple[int, int]]:
+        """
+        Return the shape of the plot plane inside a loaded array.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Loaded array.
+        plane_axes : tuple of int, optional
+            Storage axes of the plot plane.
+        tensor_axes : mapping
+            Storage-to-tensor axis map for ``y``.
+
+        Returns
+        -------
+        tuple of int or None
+            ``(rows, columns)``, or None when the plane is not in ``y``.
+        """
+        if plane_axes is None:
+            return None
+        row_axis, col_axis = plane_axes
+        if row_axis not in tensor_axes or col_axis not in tensor_axes:
+            return None
+        return (y.shape[tensor_axes[row_axis]], y.shape[tensor_axes[col_axis]])
 
     @property
     def dynamic_update(self) -> bool:

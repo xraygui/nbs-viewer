@@ -1,10 +1,8 @@
 """Tests for PlotModel ownership of RoiSetModel."""
 
-from unittest.mock import MagicMock
-
 from nbs_viewer.models.plot.plotModel import PlotModel
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_crop import ViewCrop
+from nbs_viewer.models.plot.view_spec import ViewCrop
 from tests.fixtures.plot_session import make_plot_session
 
 
@@ -45,8 +43,8 @@ def test_invalidate_all_region_state_clears_crop_and_marks_rois_stale(qapp):
     plot_model = PlotModel()
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     entry_id = plot_model.roi_set.add(region, view_fingerprint=("a",))
-    crop = MagicMock(spec=ViewCrop)
-    plot_model.set_view_crop(crop)
+    crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
+    plot_model.set_view_crop(crop, ("x", "y", "uid"))
 
     invalidated = []
     statuses = []

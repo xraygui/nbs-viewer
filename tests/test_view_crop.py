@@ -1,21 +1,18 @@
-"""Tests for persistent view crop on the main display fetch path."""
+"""Tests for the persistent view crop on the main display fetch path."""
 
 import numpy as np
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
-    DimRole,
-    MaterializeRequest,
-    materialize_view,
-    profile_view_spec,
-)
+from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.plot_bundle import reduce_to_plot_plane
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
-from nbs_viewer.models.plot.derived_fetch import region_frame_for_roi_preview
-from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
-from nbs_viewer.models.plot.plot_view_frame import region_frame_for_bbox
-from nbs_viewer.models.plot.region import RectRegion, compile_covering_rect
-from nbs_viewer.models.plot.view_crop import view_crop_from_region
-from nbs_viewer.models.plot.view_spec import ViewCrop as SlimViewCrop, ViewSpec
+from nbs_viewer.models.plot.plot_request import (
+    PlotRequest,
+    crop_from_region,
+    plan_fetch,
+    roi_profile_request,
+)
+from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.view_spec import ViewCrop, ViewSpec
 
 from tests.fixtures.display_plane import display_bundle, display_frame
 
@@ -29,20 +26,13 @@ def _make_full_frame(y_count=5, x_count=6):
     )
 
 
-def _profile_request(parent, region, crop=None, profile_storage_axis=0):
-    """
-    Build the ROI profile request the fetch path would carry.
-    """
-    spec = profile_view_spec(
-        parent, profile_storage_axis=profile_storage_axis, spatial_reduce="sum"
-    )
+def _plane_request(parent, crop=None):
     return PlotRequest(
         uid="uid",
         xkeys=("x",),
         ykey="y",
         norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(spec, crop=crop),
-        region=region,
+        view=ViewSpec.from_cube_view_spec(parent, crop=crop),
     )
 
 
@@ -53,16 +43,9 @@ def test_plan_fetch_narrows_plot_plane_axes_with_a_crop():
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(1, 0, 0, 0),
     )
-    crop = SlimViewCrop(storage_bbox=(1, 3, 2, 5), plot_y_axis=2, plot_x_axis=3)
-    request = PlotRequest(
-        uid="uid",
-        xkeys=("x",),
-        ykey="y",
-        norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(parent, crop=crop),
-    )
+    crop = ViewCrop(storage_bbox=(1, 3, 2, 5), plot_y_axis=2, plot_x_axis=3)
 
-    narrowed = plan_fetch(request).slice_info
+    narrowed = plan_fetch(_plane_request(parent, crop)).slice_info
 
     assert narrowed[0] == 1
     assert narrowed[1] == slice(None)
@@ -70,32 +53,16 @@ def test_plan_fetch_narrows_plot_plane_axes_with_a_crop():
     assert narrowed[3] == slice(2, 5)
 
 
-def test_view_crop_from_region_matches_compile_bbox():
+def test_crop_from_region_maps_the_drawn_box_back_to_storage():
     full_frame = _make_full_frame(y_count=5, x_count=6)
-    parent = CubeViewSpec(
-        ndim=2,
-        plot_ndim=2,
-        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
-    source_key = ("x", "y", "uid")
-    row_axis = np.arange(5, dtype=float)
-    col_axis = np.arange(6, dtype=float)
 
-    crop = view_crop_from_region(
-        region,
-        full_frame,
-        parent,
-        source_key,
-    )
+    crop = crop_from_region(region, full_frame, (0, 1))
 
-    assert crop.display_bbox == (2, 4, 2, 4)
+    assert full_frame.row_reversed
     assert crop.storage_bbox == (1, 3, 2, 4)
     assert crop.plot_y_axis == 0
     assert crop.plot_x_axis == 1
-    assert crop.source_key == source_key
-    assert crop.full_frame == full_frame
 
 
 def test_storage_bbox_inverts_row_flip_for_bottom_roi():
@@ -105,20 +72,9 @@ def test_storage_bbox_inverts_row_flip_for_bottom_roi():
     y = np.zeros((ny, nx))
     frame = display_frame(y, row_axis, col_axis)
     region = RectRegion(x0=581.93, y0=156.16, x1=1478.57, y1=899.24)
-    parent = CubeViewSpec(
-        ndim=2,
-        plot_ndim=2,
-        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
-    crop = view_crop_from_region(
-        region,
-        frame,
-        parent,
-        ("x", "y", "uid"),
-    )
 
-    assert crop.display_bbox == (1300, 2044, 582, 1480)
+    crop = crop_from_region(region, frame, (0, 1))
+
     assert crop.storage_bbox == (156, 900, 582, 1480)
 
     sr0, sr1, sc0, sc1 = crop.storage_bbox
@@ -151,28 +107,9 @@ def test_cropped_fetch_matches_full_plane_slice():
     col_axis = np.arange(x_count, dtype=float)
     full_frame = display_frame(y_step, row_axis, col_axis, ["y", "x"])
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
-    crop = view_crop_from_region(
-        region,
-        full_frame,
-        parent,
-        ("x", "y", "uid"),
-    )
+    crop = crop_from_region(region, full_frame, (2, 3))
 
-    request = PlotRequest(
-        uid="uid",
-        xkeys=("x",),
-        ykey="y",
-        norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(
-            parent,
-            crop=SlimViewCrop(
-                storage_bbox=crop.storage_bbox,
-                plot_y_axis=crop.plot_y_axis,
-                plot_x_axis=crop.plot_x_axis,
-            ),
-        ),
-    )
-    cropped_slice = plan_fetch(request).slice_info
+    cropped_slice = plan_fetch(_plane_request(parent, crop)).slice_info
 
     sr0, sr1, sc0, sc1 = crop.storage_bbox
     assert y[1].sum(axis=0)[sr0:sr1, sc0:sc1].shape == (
@@ -181,75 +118,6 @@ def test_cropped_fetch_matches_full_plane_slice():
     )
     assert cropped_slice[2] == slice(sr0, sr1)
     assert cropped_slice[3] == slice(sc0, sc1)
-
-
-def test_region_frame_for_roi_preview_uses_full_frame_on_nd_load():
-    y_count, x_count = 5, 6
-    full_frame = _make_full_frame(y_count, x_count)
-    region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
-    compiled = compile_covering_rect(full_frame, region)
-    cropped_frame = region_frame_for_bbox(full_frame, compiled.bbox)
-    cropped_bundle = display_bundle(
-        np.zeros(cropped_frame.shape),
-        np.arange(cropped_frame.shape[0], dtype=float),
-        np.arange(cropped_frame.shape[1], dtype=float),
-        ["y", "x"],
-    )
-
-    parent = CubeViewSpec(
-        ndim=4,
-        plot_ndim=2,
-        roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(1, 0, 0, 0),
-    )
-    crop = view_crop_from_region(
-        region,
-        full_frame,
-        parent,
-        ("x", "y", "uid"),
-    )
-    request = MaterializeRequest(
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
-        region=region,
-    )
-
-    nd_frame = region_frame_for_roi_preview(
-        request,
-        parent,
-        cropped_bundle,
-        crop,
-    )
-    plane_frame = region_frame_for_roi_preview(
-        request,
-        parent,
-        cropped_bundle,
-        None,
-    )
-
-    assert nd_frame.shape == full_frame.shape
-    assert plane_frame.shape == cropped_frame.shape
-
-
-def test_crop_status_text_uses_data_coordinates():
-    full_frame = _make_full_frame(y_count=20, x_count=30)
-    parent = CubeViewSpec(
-        ndim=2,
-        plot_ndim=2,
-        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
-    region = RectRegion(x0=4.5, x1=14.5, y0=3.5, y1=12.5)
-    crop = view_crop_from_region(
-        region,
-        full_frame,
-        parent,
-        ("x", "y", "uid"),
-    )
-    from nbs_viewer.models.plot.view_crop import crop_status_text
-
-    text = crop_status_text(crop)
-    assert "913" not in text
-    assert "4.50" in text or "4.5" in text
 
 
 def test_storage_bbox_is_identity_when_nothing_was_reversed():
@@ -267,7 +135,8 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
     """
     Crop and ROI narrow the same load. The region frame must describe the
     block that is actually read -- the ROI box intersected with the crop --
-    not the ROI box on its own.
+    not the ROI box on its own. The profile axis is off the plane, so it has
+    to be widened back to the full axis even though the projection indexes it.
     """
     e_count, s_count, ny, nx = 10, 5, 2200, 2600
     y = np.random.default_rng(0).random((e_count, s_count, ny, nx))
@@ -280,24 +149,18 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
     row_axis = np.arange(ny, dtype=float)
     col_axis = np.arange(nx, dtype=float)
     full_frame = display_frame(y[3].sum(axis=0), row_axis, col_axis)
-    crop = view_crop_from_region(
+    crop = crop_from_region(
         RectRegion(x0=581.93, y0=156.16, x1=1478.57, y1=899.24),
         full_frame,
-        parent,
-        ("x", "y", "uid"),
+        (2, 3),
     )
     roi = RectRegion(x0=700, y0=200, x1=1200, y1=700)
-    request = _profile_request(
-        parent,
-        roi,
-        crop=SlimViewCrop(
-            storage_bbox=crop.storage_bbox,
-            plot_y_axis=crop.plot_y_axis,
-            plot_x_axis=crop.plot_x_axis,
-        ),
+    request = roi_profile_request(
+        _plane_request(parent, crop), roi, profile_axis=0
     )
 
-    plan = plan_fetch(request, plane_frame=full_frame, plane_axes=(2, 3))
+    plan = plan_fetch(request, plane_frame=full_frame)
+    assert plan.slice_info[0] == slice(None)
     y_load = y[tuple(plan.slice_info)]
     assert y_load.shape[-2:] == plan.region_frame.shape
 
@@ -317,13 +180,11 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
         plan.reversed_axes_for(axes, "image"),
         {0: 0, 1: 1, 2: 2, 3: 3},
     )
-    out, _, _ = materialize_view(
+    out, _, _ = reduce_to_plot_plane(
         y_load,
         axes,
         ["e", "s", "dim_0", "dim_1"],
-        MaterializeRequest(
-            request.view.to_cube_view_spec(), request.region, request.mask_mode
-        ),
+        request,
         region_frame=plan.region_frame,
         plot_plane_storage_axes=plan.plane_axes,
     )

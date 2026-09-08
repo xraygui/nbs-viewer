@@ -25,7 +25,7 @@ from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle, view_fingerprint_from_bundle
 from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiSetModel
-from nbs_viewer.models.plot.view_crop import ViewCrop
+from nbs_viewer.models.plot.view_spec import ViewCrop
 from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker
@@ -381,7 +381,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.view_crop_changed.emit(crop)
         model = self.get_single_visible_2d_model()
         if model is not None and (
-            crop is None or crop.source_key == model._key
+            crop is None or self.plot_model.crop_applies_to(model.trace_key)
         ):
             self.plot_data(model)
         else:
@@ -924,14 +924,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
-
-    def _view_crop_for_model(self, plot_data: PlotDataModel) -> Optional[ViewCrop]:
-        crop = self._view_crop
-        if crop is None:
-            return None
-        if crop.source_key != plot_data._key:
-            return None
-        return crop
 
     def current_view_fingerprint(self):
         """

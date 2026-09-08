@@ -12,14 +12,54 @@ from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 from asteval import Interpreter
 
-from .cube_view import DimRole, MaterializeRequest, materialize_view
+from .cube_view import (
+    CubeViewSpec,
+    DimRole,
+    MaterializeRequest,
+    materialize_view,
+    profile_view_spec,
+)
 from .plot_geometry import (
+    PlotBundle,
     prepare_1d_bundle,
     prepare_2d_bundle,
 )
 from .plot_request import PlotRequest
+from .plot_view_frame import frame_from_bundle
 
 SliceItem = Union[int, slice]
+
+
+def _materialize_request(request: PlotRequest) -> MaterializeRequest:
+    """
+    Build the reduce spec for a request.
+
+    Without a region the view *is* the output. With one, the view is the
+    parent plane and the output is the profile it reduces to, so the profile
+    axis and the spatial reduce are folded into a 1-D spec here -- at the
+    reduce, not in the request, which keeps the plane's identity intact for
+    the fetch and the mask.
+
+    Parameters
+    ----------
+    request : PlotRequest
+        View, optional region, profile axis, and spatial reduce.
+
+    Returns
+    -------
+    MaterializeRequest
+        Spec plus ROI parameters for :func:`materialize_view`.
+    """
+    spec = request.view.to_cube_view_spec()
+    if request.region is not None:
+        spec = profile_view_spec(
+            spec, request.profile_axis, request.spatial_reduce
+        )
+    return MaterializeRequest(
+        spec=spec,
+        region=request.region,
+        mask_mode=request.mask_mode,
+    )
 
 
 def reduce_to_plot_plane(
@@ -47,30 +87,133 @@ def reduce_to_plot_plane(
     axis_names : sequence of str
         Name per storage axis.
     request : PlotRequest
-        View, optional region, and mask mode.
+        View, optional region, mask mode, profile axis, and spatial reduce.
     region_frame : PlotViewFrame, optional
-        Parent 2-D frame required when ``request.region`` is set.
+        Frame of the loaded block, required when ``request.region`` is set.
     plot_plane_storage_axes : tuple of int, optional
-        Parent plot Y and plot X storage indices for ROI profiles.
+        Plot Y and plot X storage indices of the parent plane.
 
     Returns
     -------
     tuple
         ``(y, axis_arrays, axis_names)`` on the plot plane.
     """
-    materialize_request = MaterializeRequest(
-        spec=request.view.to_cube_view_spec(),
-        region=request.region,
-        mask_mode=request.mask_mode,
-    )
     return materialize_view(
         y,
         axis_arrays,
         axis_names,
-        materialize_request,
+        _materialize_request(request),
         region_frame=region_frame,
         plot_plane_storage_axes=plot_plane_storage_axes,
     )
+
+
+def _plane_axis_arrays(
+    plane: PlotBundle, frame
+) -> Tuple[List[np.ndarray], List[str]]:
+    """
+    Build per-axis coordinate arrays for an already-displayed 2-D plane.
+
+    Parameters
+    ----------
+    plane : PlotBundle
+        Displayed 2-D bundle.
+    frame : PlotViewFrame
+        Its view frame.
+
+    Returns
+    -------
+    tuple
+        ``(axis_arrays, axis_names)`` indexed by the frame's plot dims.
+    """
+    names = list(plane.axis_names)
+    while len(names) < 2:
+        names.append(f"dim_{len(names)}")
+    ny, nx = frame.shape
+    row_axis = np.arange(ny, dtype=float)
+    col_axis = np.arange(nx, dtype=float)
+    if frame.render_mode == "mesh" and plane.mesh_x is not None:
+        mesh_x = np.asarray(plane.mesh_x, dtype=float)
+        mesh_y = np.asarray(plane.mesh_y, dtype=float)
+        if mesh_x.shape == (ny, nx):
+            row_axis = np.nanmean(mesh_y, axis=1)
+            col_axis = np.nanmean(mesh_x, axis=0)
+    axis_arrays = [None, None]
+    axis_arrays[frame.plot_y_dim] = row_axis
+    axis_arrays[frame.plot_x_dim] = col_axis
+    axis_names = [None, None]
+    axis_names[frame.plot_y_dim] = names[0]
+    axis_names[frame.plot_x_dim] = names[1]
+    return axis_arrays, axis_names
+
+
+def reduce_cached_plane(
+    plane: PlotBundle,
+    request: PlotRequest,
+    *,
+    label: str = "",
+) -> PlotBundle:
+    """
+    Reduce an already-loaded display plane to an ROI profile.
+
+    The one genuine optimisation in the fetch path: when the profile runs
+    along an axis the plane already shows, the answer is in memory and no
+    database read is needed. The plane is display-ordered, so the mask
+    compiled on its frame applies directly.
+
+    Parameters
+    ----------
+    plane : PlotBundle
+        Cached 2-D bundle for ``request.view``'s plot plane.
+    request : PlotRequest
+        Profile request whose ``profile_axis`` lies on that plane.
+    label : str
+        Optional display label for the profile.
+
+    Returns
+    -------
+    PlotBundle
+        1-D profile payload.
+
+    Raises
+    ------
+    ValueError
+        If the plane is not 2-D, the profile axis is off it, or the ROI
+        reduces to nothing.
+    """
+    if plane.ndim != 2:
+        raise ValueError("cached_plane must be a 2-D bundle")
+    plane_axes = request.plane_axes
+    if plane_axes is None or request.profile_axis not in plane_axes:
+        raise ValueError("cached_plane cannot serve an off-plane profile")
+
+    frame = frame_from_bundle(plane)
+    bundle_profile_axis = 0 if request.profile_axis == plane_axes[0] else 1
+    plane_view = CubeViewSpec(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0),
+    )
+    materialize_request = MaterializeRequest(
+        spec=profile_view_spec(
+            plane_view, bundle_profile_axis, request.spatial_reduce
+        ),
+        region=request.region,
+        mask_mode=request.mask_mode,
+    )
+    axis_arrays, axis_names = _plane_axis_arrays(plane, frame)
+    y, coords, names = materialize_view(
+        plane.y,
+        axis_arrays,
+        axis_names,
+        materialize_request,
+        region_frame=frame,
+        plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
+    )
+    if not np.isfinite(y).any():
+        raise ValueError("ROI profile is empty after reduction")
+    return prepare_1d_bundle(y, coords, [label or names[0]])
 
 
 def slice_info_for_key(

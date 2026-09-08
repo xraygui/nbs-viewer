@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
-from .cube_view import MaterializeRequest
 from .plot_geometry import PlotBundle
+from .plot_request import PlotRequest
 
 SYNTHETIC_KEY_PREFIX = "__roi__/"
 
@@ -166,7 +166,7 @@ class FrozenSpectrum:
         Parent detector catalog key.
     committed_xkey : str
         X key selected at save time.
-    request : MaterializeRequest
+    request : PlotRequest
         Provenance for export; not used for re-fetch.
     source_key : tuple
         ``(xkey, ykey, run_uid)`` of the parent 2D trace.
@@ -180,7 +180,7 @@ class FrozenSpectrum:
     kind: Literal["stack_spectrum", "local_profile"]
     source_ykey: str
     committed_xkey: str
-    request: MaterializeRequest
+    request: PlotRequest
     source_key: Tuple[Any, ...]
     cube_fingerprint: Optional[Tuple[Any, ...]] = None
 

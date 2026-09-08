@@ -28,16 +28,20 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
 )
 from .combinedRunSource import CombinationMethod, CombinedRunSource
 from .cube_view import (
-    _fetch_plot_plane_storage_axes,
     classify_profile_kind,
     default_profile_label,
     is_plot_plane_storage_axis,
     scan_profile_storage_axis,
 )
-from .derived_fetch import _profile_uses_nd_load, build_roi_profile_request_from_operation
 from .frozenRunSource import FrozenRunSource
 from .plotDataModel import PlotDataModel
-from .plot_request import TraceKey, build_plot_request
+from .plot_request import (
+    PlotRequest,
+    TraceKey,
+    build_plot_request,
+    crop_from_region,
+    roi_profile_request,
+)
 from .plot_view_frame import (
     PlotViewFrame,
     frame_from_bundle,
@@ -48,10 +52,10 @@ from .roi_set import RoiEntry, RoiSetModel
 from .run_collection import RunCollection
 from .runSource import RunSource
 from .selection import KeySelection, Selection
-from .view_crop import ViewCrop, view_crop_from_region
+from .view_spec import ViewCrop
 
 if TYPE_CHECKING:
-    from .cube_view import CubeViewSpec, MaterializeRequest
+    from .cube_view import CubeViewSpec
     from .frozen_spectrum import FrozenSpectrum
     from .plot_geometry import PlotBundle
     from .runListModel import RunListModel
@@ -114,6 +118,7 @@ class PlotModel(QObject):
         self._slice = None
         self._cube_view_spec = None
         self._view_crop: Optional[ViewCrop] = None
+        self._view_crop_key: Optional[tuple] = None
         self._roi_draw_enabled = False
         self._ellipse_circle_locked = False
 
@@ -801,7 +806,11 @@ class PlotModel(QObject):
         """
         return self._view_crop
 
-    def set_view_crop(self, crop: Optional[ViewCrop]) -> None:
+    def set_view_crop(
+        self,
+        crop: Optional[ViewCrop],
+        source_key: Optional[tuple] = None,
+    ) -> None:
         """
         Set or clear the persistent view crop.
 
@@ -809,8 +818,13 @@ class PlotModel(QObject):
         ----------
         crop : ViewCrop or None
             Crop to apply, or ``None`` to clear.
+        source_key : tuple, optional
+            ``(xkey, ykey, uid)`` of the trace the crop was drawn on. The
+            crop itself is storage indices on that trace's plot plane and
+            means nothing on another one.
         """
         self._view_crop = crop
+        self._view_crop_key = source_key if crop is not None else None
         self.view_crop_changed.emit(crop)
         self._refresh_held_requests()
         self.request_plot_update.emit()
@@ -822,6 +836,58 @@ class PlotModel(QObject):
         if self._view_crop is None:
             return
         self.set_view_crop(None)
+
+    def crop_applies_to(self, trace_key: TraceKey) -> bool:
+        """
+        Return whether the active crop was drawn on this trace.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace identity to test.
+
+        Returns
+        -------
+        bool
+            True when a crop is active and names this trace.
+        """
+        return (
+            self._view_crop is not None
+            and self._view_crop_key == trace_key.as_tuple()
+        )
+
+    def crop_status_text(self) -> str:
+        """
+        Return a short status line describing the active crop.
+
+        Data coordinates are read off the displayed plane once it has been
+        refetched at the cropped size; until then the storage bounds are all
+        that is known, so those are reported instead of stale coordinates.
+
+        Returns
+        -------
+        str
+            Human-readable crop bounds, or the empty string when no crop is
+            active.
+        """
+        crop = self._view_crop
+        if crop is None:
+            return ""
+        r0, r1, c0, c1 = crop.storage_bbox
+        plot_data = self.resolve_single_visible_2d_plot_data()
+        bundle = plot_data.last_bundle if plot_data is not None else None
+        if (
+            bundle is not None
+            and bundle.ndim == 2
+            and bundle.extent is not None
+            and tuple(bundle.y.shape) == (r1 - r0, c1 - c0)
+        ):
+            left, right, bottom, top = bundle.extent
+            return (
+                f"Crop active: ({left:.2f}, {bottom:.2f}) — "
+                f"({right:.2f}, {top:.2f})"
+            )
+        return f"Crop active: rows {r0}–{r1}, cols {c0}–{c1}"
 
     def apply_view_crop_from_region(
         self,
@@ -863,18 +929,15 @@ class PlotModel(QObject):
         plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
         if plot_data is None:
             raise ValueError("Select a single 2D dataset")
-        parent_spec = self._cube_view_spec
-        if parent_spec is None:
+        plane_axes = plot_data.request.plane_axes
+        if plane_axes is None:
             raise ValueError("Select a single 2D dataset")
 
-        full_frame = self._resolve_full_view_frame_for_crop(plot_data)
-        crop = view_crop_from_region(
-            region,
-            full_frame,
-            parent_spec,
-            plot_data._key,
-        )
-        self.set_view_crop(crop)
+        bundle = plot_data.last_bundle
+        if bundle is None or bundle.ndim != 2:
+            raise ValueError("Select a single 2D dataset")
+        crop = crop_from_region(region, frame_from_bundle(bundle), plane_axes)
+        self.set_view_crop(crop, plot_data._key)
         return crop
 
     def invalidate_view_crop_if_invalid(self) -> Optional[str]:
@@ -890,25 +953,17 @@ class PlotModel(QObject):
         if crop is None:
             return None
         plot_data = self.resolve_single_visible_2d_plot_data()
-        if plot_data is None or plot_data._key != crop.source_key:
+        if plot_data is None or plot_data._key != self._view_crop_key:
             self.clear_view_crop()
             return "dataset changed"
         parent_spec = self._cube_view_spec
-        if parent_spec is None:
+        if parent_spec is None or parent_spec.plot_ndim != 2:
             self.clear_view_crop()
             return "view no longer available"
-        try:
-            plot_y_axis, plot_x_axis = _fetch_plot_plane_storage_axes(
-                parent_spec,
-                crop.full_frame,
-                parent_spec,
-            )
-        except ValueError:
-            self.clear_view_crop()
-            return "plot axes changed"
-        if (
-            plot_y_axis != crop.plot_y_axis
-            or plot_x_axis != crop.plot_x_axis
+        plot_order = parent_spec.plot_axis_order()
+        if (plot_order[-2], plot_order[-1]) != (
+            crop.plot_y_axis,
+            crop.plot_x_axis,
         ):
             self.clear_view_crop()
             return "plot axes changed"
@@ -981,35 +1036,6 @@ class PlotModel(QObject):
     ) -> None:
         self.invalidate_all_region_state("field selection changed")
 
-    def _resolve_full_view_frame_for_crop(
-        self,
-        plot_data: PlotDataModel,
-    ) -> PlotViewFrame:
-        """
-        Return the full oriented plot-plane frame used to commit a view crop.
-
-        Parameters
-        ----------
-        plot_data : PlotDataModel
-            Parent 2D plot-data model for the crop.
-
-        Returns
-        -------
-        PlotViewFrame
-            Full plane before crop is applied.
-
-        Raises
-        ------
-        ValueError
-            If no suitable 2D bundle is available.
-        """
-        if self._view_crop is not None:
-            return self._view_crop.full_frame
-        bundle = plot_data.last_bundle
-        if bundle is None or bundle.ndim != 2:
-            raise ValueError("Select a single 2D dataset")
-        return frame_from_bundle(bundle)
-
     def _effective_transform_text(self, run_model: "RunSource" = None) -> str:
         """
         Return the session effective transform expression.
@@ -1035,19 +1061,16 @@ class PlotModel(QObject):
         Parameters
         ----------
         trace_key : TraceKey
-            Trace to match against crop ``source_key``.
+            Trace to match against the crop's source trace.
 
         Returns
         -------
         ViewCrop or None
             Active crop when it names this trace, otherwise None.
         """
-        crop = self._view_crop
-        if crop is None:
+        if not self.crop_applies_to(trace_key):
             return None
-        if crop.source_key != trace_key.as_tuple():
-            return None
-        return crop
+        return self._view_crop
 
     def _build_plot_request(
         self,
@@ -1264,23 +1287,24 @@ class PlotModel(QObject):
     def cached_parent_bundle_for_preview(
         self,
         plot_data: PlotDataModel,
-        request: Optional["MaterializeRequest"] = None,
     ) -> Optional["PlotBundle"]:
         """
-        Return a cached parent bundle when it still matches the plot session.
+        Return the loaded plot plane when it still matches the session view.
 
         Parameters
         ----------
         plot_data : PlotDataModel
             Parent plot-data model.
-        request : MaterializeRequest, optional
-            Preview request. ND loads skip the parent-bundle cache.
 
         Returns
         -------
         PlotBundle or None
+            Plane to hand to the fetch as ``cached_plane``. Whether it can
+            actually serve a given profile is the fetch's decision, not this
+            one; this only answers whether it is still the right plane.
         """
-        if plot_data.last_bundle is None:
+        bundle = plot_data.last_bundle
+        if bundle is None or bundle.ndim != 2:
             return None
         session_request = self._build_plot_request(
             plot_data._run,
@@ -1290,9 +1314,7 @@ class PlotModel(QObject):
         )
         if plot_data.request.view != session_request.view:
             return None
-        if request is not None and _profile_uses_nd_load(request, self._cube_view_spec):
-            return None
-        return plot_data.last_bundle
+        return bundle
 
     def apply_roi_region_to_selected(self, region: RegionDefinition) -> None:
         """
@@ -1385,42 +1407,65 @@ class PlotModel(QObject):
         self,
         entry: RoiEntry,
         *,
-        parent_spec: Optional["CubeViewSpec"] = None,
+        plot_data: Optional[PlotDataModel] = None,
         parent_frame=None,
         span_full_override: Optional[bool] = None,
         default_profile_axis=None,
-    ) -> "MaterializeRequest":
+    ) -> PlotRequest:
         """
-        Build a profile materialize request for an ROI entry.
+        Build the profile request for an ROI entry.
+
+        The parent trace's own request supplies the run, the keys, the
+        projection and the crop; the entry supplies the region and the four
+        reduction parameters. Nothing else travels alongside.
 
         Parameters
         ----------
         entry : RoiEntry
             ROI geometry and operation.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view. Defaults to this plot's cube view.
+        plot_data : PlotDataModel, optional
+            Parent 2D plot-data model. Defaults to the sole visible one.
         parent_frame : PlotViewFrame, optional
             Parent view frame for span-full expansion.
         span_full_override : bool, optional
-            Override the entry span-full flag.
+            Override ``entry.operation.span_full_profile_axis``.
         default_profile_axis : str or int, optional
-            Profile axis when the entry does not set one.
+            Profile axis used when the entry does not name one.
 
         Returns
         -------
-        MaterializeRequest
+        PlotRequest
             Request for preview or commit.
+
+        Raises
+        ------
+        ValueError
+            If no parent plane or no profile axis can be resolved.
         """
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
-        if spec is None:
+        plot_data = plot_data or self.resolve_single_visible_2d_plot_data()
+        if plot_data is None:
+            raise ValueError("Select a single 2D dataset")
+        parent = plot_data.request
+        if parent.plane_axes is None:
             raise ValueError("Parent cube view is unavailable")
-        return build_roi_profile_request_from_operation(
-            spec,
+        profile_axis = entry.operation.profile_storage_axis
+        if profile_axis is None:
+            profile_axis = default_profile_axis
+        if profile_axis is None:
+            raise ValueError("Profile axis is unavailable")
+        span_full = (
+            entry.operation.span_full_profile_axis
+            if span_full_override is None
+            else span_full_override
+        )
+        return roi_profile_request(
+            parent,
             entry.region,
-            entry.operation,
-            parent_frame=parent_frame,
-            span_full_override=span_full_override,
-            default_profile_axis=default_profile_axis,
+            profile_axis=profile_axis,
+            spatial_reduce=entry.operation.spatial_reduce,
+            mask_mode=entry.operation.mask_mode,
+            plane_frame=parent_frame,
+            span_full=span_full,
         )
 
     def _commit_span_full(
@@ -1439,22 +1484,22 @@ class PlotModel(QObject):
         self,
         entry: RoiEntry,
         *,
-        parent_spec: Optional["CubeViewSpec"] = None,
+        plot_data: Optional[PlotDataModel] = None,
         parent_frame=None,
         axis_names=None,
         default_profile_axis=None,
-    ) -> Tuple[bool, "MaterializeRequest"]:
+    ) -> Tuple[bool, PlotRequest]:
         """
-        Validate an ROI commit and build its materialize request.
+        Validate an ROI commit and build its profile request.
 
         Parameters
         ----------
         entry : RoiEntry
             ROI entry to commit.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view. Defaults to this plot's cube view.
+        plot_data : PlotDataModel, optional
+            Parent 2D plot-data model.
         parent_frame : PlotViewFrame, optional
-            Parent frame for request construction.
+            Parent frame for span-full expansion.
         axis_names : sequence of str, optional
             Axis names used in local-profile error hints.
         default_profile_axis : str or int, optional
@@ -1470,7 +1515,7 @@ class PlotModel(QObject):
         ValueError
             If the ROI cannot be committed (missing view, local profile, etc.).
         """
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
+        spec = self._cube_view_spec
         if spec is None:
             raise ValueError("Parent cube view is unavailable")
 
@@ -1498,7 +1543,7 @@ class PlotModel(QObject):
         )
         request = self.build_roi_profile_request(
             entry,
-            parent_spec=spec,
+            plot_data=plot_data,
             parent_frame=parent_frame,
             span_full_override=span_full,
             default_profile_axis=default_profile_axis,
@@ -1511,13 +1556,11 @@ class PlotModel(QObject):
         *,
         entry: Optional[RoiEntry] = None,
         parent_plot_data: Optional[PlotDataModel] = None,
-        parent_spec: Optional["CubeViewSpec"] = None,
         parent_frame=None,
-        parent_bundle: Optional["PlotBundle"] = None,
-        view_crop: Optional[ViewCrop] = None,
+        cached_plane: Optional["PlotBundle"] = None,
         span_full_override: Optional[bool] = None,
         default_profile_axis=None,
-        request: Optional["MaterializeRequest"] = None,
+        request: Optional[PlotRequest] = None,
     ) -> "PlotBundle":
         """
         Preview an ROI profile for an entry on the parent plot-data model.
@@ -1530,19 +1573,16 @@ class PlotModel(QObject):
             ROI entry. Defaults to resolving ``entry_id`` / selection.
         parent_plot_data : PlotDataModel, optional
             Parent 2D plot-data model. Defaults to the sole visible 2D model.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view. Defaults to this plot's cube view.
         parent_frame : PlotViewFrame, optional
             Parent frame used when building the request.
-        parent_bundle : PlotBundle, optional
-            Cached parent 2D bundle.
-        view_crop : ViewCrop, optional
-            Active crop. Defaults to this plot's view crop.
+        cached_plane : PlotBundle, optional
+            Plot plane already in memory. Defaults to the parent model's
+            bundle when it still matches the session view.
         span_full_override : bool, optional
             Override span-full when building the request.
         default_profile_axis : str or int, optional
             Fallback profile axis.
-        request : MaterializeRequest, optional
+        request : PlotRequest, optional
             Prebuilt request. When omitted, one is built from the entry.
 
         Returns
@@ -1550,36 +1590,32 @@ class PlotModel(QObject):
         PlotBundle
             1D ROI profile preview.
         """
-        if entry is None:
+        if entry is None and request is None:
             entry = self.resolve_roi_entry(entry_id)
         plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
         if plot_data is None:
             raise ValueError("Select a single 2D dataset")
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
         if request is None:
             request = self.build_roi_profile_request(
                 entry,
-                parent_spec=spec,
+                plot_data=plot_data,
                 parent_frame=parent_frame,
                 span_full_override=span_full_override,
                 default_profile_axis=default_profile_axis,
             )
-        crop = self._view_crop if view_crop is None else view_crop
+        if cached_plane is None:
+            cached_plane = self.cached_parent_bundle_for_preview(plot_data)
         return plot_data.preview_roi_profile(
-            request,
-            parent_spec=spec,
-            parent_bundle=parent_bundle,
-            view_crop=crop,
+            request, cached_plane=cached_plane
         )
 
     def finalize_roi_commit(
         self,
         entry: RoiEntry,
         bundle: "PlotBundle",
-        request: "MaterializeRequest",
+        request: PlotRequest,
         *,
         parent_plot_data: Optional[PlotDataModel] = None,
-        parent_spec: Optional["CubeViewSpec"] = None,
         axis_names=None,
         cube_fingerprint=None,
         committed_xkey: Optional[str] = None,
@@ -1593,12 +1629,10 @@ class PlotModel(QObject):
             ROI entry used for labeling.
         bundle : PlotBundle
             Fetched 1D profile bundle.
-        request : MaterializeRequest
+        request : PlotRequest
             Request used for the fetch.
         parent_plot_data : PlotDataModel, optional
             Parent plot-data model. Defaults to the sole visible 2D model.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view for labeling and kind classification.
         axis_names : sequence of str, optional
             Storage axis names for default labels.
         cube_fingerprint : tuple, optional
@@ -1614,12 +1648,16 @@ class PlotModel(QObject):
         plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
         if plot_data is None:
             raise ValueError("Select a single 2D dataset")
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
         names = tuple(axis_names or ())
         label = (
             entry.operation.label
             or entry.display_label
-            or default_profile_label(request, names, parent_spec=spec)
+            or default_profile_label(
+                request.mask_mode,
+                request.spatial_reduce,
+                request.profile_axis,
+                names,
+            )
         )
         if committed_xkey is None:
             default_x = self._selection.default.x
@@ -1633,7 +1671,7 @@ class PlotModel(QObject):
             bundle,
             request,
             label=label,
-            parent_spec=spec,
+            parent_spec=self._cube_view_spec,
             cube_fingerprint=cube_fingerprint,
             committed_xkey=committed_xkey,
         )
@@ -1646,10 +1684,8 @@ class PlotModel(QObject):
         *,
         entry: Optional[RoiEntry] = None,
         parent_plot_data: Optional[PlotDataModel] = None,
-        parent_spec: Optional["CubeViewSpec"] = None,
         parent_frame=None,
-        parent_bundle: Optional["PlotBundle"] = None,
-        view_crop: Optional[ViewCrop] = None,
+        cached_plane: Optional["PlotBundle"] = None,
         axis_names=None,
         default_profile_axis=None,
         cube_fingerprint=None,
@@ -1666,14 +1702,10 @@ class PlotModel(QObject):
             ROI entry. Defaults to resolving ``entry_id`` / selection.
         parent_plot_data : PlotDataModel, optional
             Parent 2D plot-data model.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view.
         parent_frame : PlotViewFrame, optional
             Parent frame for request construction.
-        parent_bundle : PlotBundle, optional
-            Cached parent 2D bundle.
-        view_crop : ViewCrop, optional
-            Active crop.
+        cached_plane : PlotBundle, optional
+            Plot plane already in memory.
         axis_names : sequence of str, optional
             Axis names for default labels.
         default_profile_axis : str or int, optional
@@ -1698,21 +1730,17 @@ class PlotModel(QObject):
         plot_data = parent_plot_data or self.resolve_single_visible_2d_plot_data()
         if plot_data is None:
             raise ValueError("Select a single 2D dataset")
-        spec = parent_spec if parent_spec is not None else self._cube_view_spec
-        span_full, request = self.prepare_roi_commit(
+        _span_full, request = self.prepare_roi_commit(
             entry,
-            parent_spec=spec,
+            plot_data=plot_data,
             parent_frame=parent_frame,
             axis_names=axis_names,
             default_profile_axis=default_profile_axis,
         )
-        del span_full
         bundle = self.preview_roi_profile(
             entry=entry,
             parent_plot_data=plot_data,
-            parent_spec=spec,
-            parent_bundle=parent_bundle,
-            view_crop=view_crop,
+            cached_plane=cached_plane,
             request=request,
         )
         return self.finalize_roi_commit(
@@ -1720,7 +1748,6 @@ class PlotModel(QObject):
             bundle,
             request,
             parent_plot_data=plot_data,
-            parent_spec=spec,
             axis_names=axis_names,
             cube_fingerprint=cube_fingerprint,
             committed_xkey=committed_xkey,

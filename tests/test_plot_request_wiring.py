@@ -3,24 +3,18 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import (
-    DimRole,
-    default_spec,
-    profile_view_spec,
-)
+from nbs_viewer.models.plot.cube_view import DimRole, default_spec
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import PolygonRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.plot_request import (
     build_plot_request,
     plan_fetch,
-    slim_crop_from_legacy,
+    roi_profile_request,
     view_spec_from_legacy,
 )
 from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_crop import ViewCrop as LegacyViewCrop
 from nbs_viewer.models.plot.view_spec import ViewCrop
-from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
     VPPEM_UID,
@@ -29,32 +23,6 @@ from nbs_viewer.models.sources.fixtures import (
     make_vppem_run,
     vppem_factors,
 )
-
-
-def test_slim_crop_from_legacy():
-    frame = PlotViewFrame(
-        shape=(24, 32),
-        render_mode="image",
-        plot_y_dim=0,
-        plot_x_dim=1,
-        axis_names=["dim_1", "dim_2"],
-        extent=(-0.5, 31.5, -0.5, 23.5),
-    )
-    legacy = LegacyViewCrop(
-        display_bbox=(2, 10, 4, 20),
-        storage_bbox=(2, 10, 4, 20),
-        plot_y_axis=1,
-        plot_x_axis=2,
-        source_key=("x", "y", "uid"),
-        spatial_fingerprint=(frame.shape, 1, 0, ("dim_1", "dim_2")),
-        full_frame=frame,
-    )
-    slim = slim_crop_from_legacy(legacy)
-    assert slim == ViewCrop(
-        storage_bbox=(2, 10, 4, 20),
-        plot_y_axis=1,
-        plot_x_axis=2,
-    )
 
 
 def test_view_spec_from_legacy_prefers_matching_cube_spec():
@@ -304,20 +272,8 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     frame = _vppem_frame(model, parent_req)
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
-    profile_req = build_plot_request(
-        uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
-        ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=1,
-        cube_view_spec=profile_view_spec(
-            parent_spec, profile_storage_axis=0, spatial_reduce="sum"
-        ),
-        region=roi,
-    )
-    bundle = model.get_plot_bundle(
-        profile_req, region_frame=frame, parent_spec=parent_spec
-    )
+    profile_req = roi_profile_request(parent_req, roi, profile_axis=0)
+    bundle = model.get_plot_bundle(profile_req)
 
     mask = compile_with_mask_mode(frame, roi, "inside").mask
     plane = np.outer(b, c)[::-1, :]

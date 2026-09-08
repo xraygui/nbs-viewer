@@ -8,13 +8,7 @@ import numpy as np
 from nbs_viewer.utils import print_debug
 from matplotlib.image import AxesImage
 
-from .cube_view import (
-    CubeViewSpec,
-    MaterializeRequest,
-    classify_profile_kind,
-    profile_storage_axis,
-)
-from .derived_fetch import fetch_roi_preview
+from .cube_view import CubeViewSpec, classify_profile_kind
 from .frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -22,7 +16,6 @@ from .frozen_spectrum import (
 )
 from .plot_geometry import PlotBundle, RenderMode
 from .plot_request import PlotRequest, TraceKey, build_plot_request
-from .view_crop import ViewCrop
 
 
 class PlotDataModel(QObject):
@@ -222,45 +215,43 @@ class PlotDataModel(QObject):
 
     def preview_roi_profile(
         self,
-        request: MaterializeRequest,
+        request: PlotRequest,
         *,
-        parent_spec: Optional[CubeViewSpec] = None,
-        parent_bundle: Optional[PlotBundle] = None,
-        view_crop: Optional[ViewCrop] = None,
+        cached_plane: Optional[PlotBundle] = None,
+        label: str = "",
     ) -> PlotBundle:
         """
-        Fetch an ROI profile preview bundle for this parent plot-data model.
+        Fetch an ROI profile bundle without disturbing this trace's state.
+
+        A preview is a different request against the same run, so it must not
+        overwrite ``last_bundle`` or the fetched-request fingerprint the way
+        :meth:`get_plot_bundle` does.
 
         Parameters
         ----------
-        request : MaterializeRequest
-            Profile materialize request including ROI geometry.
-        parent_spec : CubeViewSpec, optional
-            Parent cube view. Defaults to this model's cube view.
-        parent_bundle : PlotBundle, optional
-            Cached parent 2D bundle. Defaults to ``last_bundle``.
-        view_crop : ViewCrop, optional
-            Active main-display crop for ND loads.
+        request : PlotRequest
+            Profile request: the parent plane plus region, profile axis, and
+            spatial reduce.
+        cached_plane : PlotBundle, optional
+            Parent plane already in memory. The session decides whether the
+            cached plane still matches the request; passing None always reads
+            from the database.
+        label : str
+            Optional display label for the profile.
 
         Returns
         -------
         PlotBundle
-            1D ROI profile preview payload.
+            1D ROI profile payload.
         """
-        return fetch_roi_preview(
-            self,
-            request,
-            parent_spec=(
-                parent_spec if parent_spec is not None else self._cube_view_spec
-            ),
-            parent_bundle=parent_bundle,
-            view_crop=view_crop,
+        return self._run.get_plot_bundle(
+            request, cached_plane=cached_plane, label=label
         )
 
     def build_roi_frozen_spectrum(
         self,
         bundle: PlotBundle,
-        request: MaterializeRequest,
+        request: PlotRequest,
         *,
         label: str,
         parent_spec: Optional[CubeViewSpec] = None,
@@ -277,7 +268,7 @@ class PlotDataModel(QObject):
         ----------
         bundle : PlotBundle
             1D line profile bundle to freeze.
-        request : MaterializeRequest
+        request : PlotRequest
             Provenance request used for the profile.
         label : str
             Display label for Run Display.
@@ -302,12 +293,8 @@ class PlotDataModel(QObject):
             raise ValueError("Saved ROI profiles must be 1D line profiles")
         spec = parent_spec if parent_spec is not None else self._cube_view_spec
         kind = "stack_spectrum"
-        try:
-            profile_axis = profile_storage_axis(request.spec)
-        except Exception:
-            profile_axis = None
-        if spec is not None and profile_axis is not None:
-            kind = classify_profile_kind(spec, profile_axis)
+        if spec is not None and request.profile_axis is not None:
+            kind = classify_profile_kind(spec, request.profile_axis)
         if committed_xkey is None:
             committed_xkey = self._xkey
         return FrozenSpectrum(

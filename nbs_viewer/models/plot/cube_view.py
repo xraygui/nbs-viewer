@@ -63,27 +63,6 @@ class MaterializeRequest:
     mask_mode: MaskMode = "inside"
 
 
-def _fetch_plot_plane_storage_axes(
-    spec: CubeViewSpec,
-    region_frame: PlotViewFrame,
-    parent_spec: Optional[CubeViewSpec],
-) -> Tuple[int, int]:
-    """
-    Resolve storage axis indices for plot Y and plot X used in ROI fetch.
-    """
-    if parent_spec is not None and parent_spec.plot_ndim == 2:
-        plot_order = parent_spec.plot_axis_order()
-        if len(plot_order) >= 2:
-            return plot_order[-2], plot_order[-1]
-    if spec.plot_ndim == 2:
-        plot_order = spec.plot_axis_order()
-        if len(plot_order) >= 2:
-            return plot_order[-2], plot_order[-1]
-    if spec.ndim == 2:
-        return region_frame.plot_y_dim, region_frame.plot_x_dim
-    raise ValueError("cannot resolve plot-plane storage axes for ROI fetch")
-
-
 @dataclass(frozen=True)
 class CubeViewSpec:
     """
@@ -585,65 +564,43 @@ def eligible_profile_axes(spec: CubeViewSpec) -> List[int]:
 
 
 def default_profile_label(
-    request: MaterializeRequest,
+    mask_mode: MaskMode,
+    spatial_reduce: SpatialReduce,
+    profile_axis: int,
     axis_names: Sequence[str],
-    *,
-    parent_spec: Optional[CubeViewSpec] = None,
 ) -> str:
     """
-    Return a short default legend label from a profile materialize request.
+    Return a short default legend label for an ROI profile.
 
     Parameters
     ----------
-    request : MaterializeRequest
-        Frozen profile view request.
+    mask_mode : str
+        ``inside`` or ``outside`` the ROI.
+    spatial_reduce : str
+        ``sum`` or ``mean`` within the ROI.
+    profile_axis : int
+        Storage axis the profile runs along.
     axis_names : sequence of str
         Names per parent storage axis.
-    parent_spec : CubeViewSpec, optional
-        Parent cube view for axis naming.
 
     Returns
     -------
     str
         Label summarizing mask mode, reduce op, and profile axis.
     """
-    region = "in" if request.mask_mode == "inside" else "out"
-    if request.spec.plot_ndim != 1:
-        return f"2D ({region} ROI)"
-    profile_axis = profile_storage_axis(request.spec)
-    name_spec = parent_spec if parent_spec is not None else request.spec
-    axis_label = profile_axis_name(name_spec, profile_axis, axis_names)
-    plot_plane = (
-        set(parent_spec.plot_axis_order()) if parent_spec is not None else set()
+    region = "in" if mask_mode == "inside" else "out"
+    return (
+        f"{spatial_reduce} ({region} ROI) · "
+        f"{profile_axis_name(profile_axis, axis_names)}"
     )
-    spatial_roles = [
-        request.spec.roles[storage_axis]
-        for storage_axis in plot_plane
-        if storage_axis in request.spec.roles
-        and request.spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
-    ]
-    if not spatial_roles:
-        spatial_roles = [
-            role
-            for role in request.spec.roles
-            if role in (DimRole.SUM, DimRole.MEAN)
-        ]
-    reduce = "sum" if spatial_roles and spatial_roles[0] == DimRole.SUM else "mean"
-    return f"{reduce} ({region} ROI) · {axis_label}"
 
 
-def profile_axis_name(
-    spec: CubeViewSpec,
-    storage_axis: int,
-    axis_names: Sequence[str],
-) -> str:
+def profile_axis_name(storage_axis: int, axis_names: Sequence[str]) -> str:
     """
     Return a display name for a profile axis dropdown entry.
 
     Parameters
     ----------
-    spec : CubeViewSpec
-        Parent cube view.
     storage_axis : int
         Storage dimension index.
     axis_names : sequence of str
@@ -857,6 +814,14 @@ def storage_axis_to_plot_axis(
     """
     Return the plot axis name for a profile storage dimension.
 
+    The view spec decides which storage axis is horizontal, at every rank
+    including two. The frame cannot: since orientation moved to just after
+    the load, ``frame.plot_y_dim`` and ``frame.plot_x_dim`` are always 0 and
+    1 -- display positions, not storage axes -- so comparing a storage axis
+    against them silently inverts the answer for any view whose plot-axis
+    order is not the identity. That is only used as a last resort, when there
+    is no spec to ask and "storage axis" can only mean "display position".
+
     Parameters
     ----------
     frame : PlotViewFrame
@@ -864,18 +829,18 @@ def storage_axis_to_plot_axis(
     profile_storage_axis : int
         Storage axis index on the parent cube view.
     parent_spec : CubeViewSpec, optional
-        Full parent view used to map N-D storage axes to plot X / plot Y.
+        Full parent view used to map storage axes to plot X / plot Y.
 
     Returns
     -------
     str
         ``plot_x`` or ``plot_y``.
+
+    Raises
+    ------
+    ValueError
+        If the axis is not one of the two plot-plane axes.
     """
-    if parent_spec is not None and parent_spec.ndim == 2 and parent_spec.plot_ndim == 2:
-        if profile_storage_axis == frame.plot_x_dim:
-            return "plot_x"
-        if profile_storage_axis == frame.plot_y_dim:
-            return "plot_y"
     if parent_spec is not None and parent_spec.plot_ndim == 2:
         plot_order = parent_spec.plot_axis_order()
         if len(plot_order) >= 2:
@@ -883,6 +848,10 @@ def storage_axis_to_plot_axis(
                 return "plot_x"
             if profile_storage_axis == plot_order[-2]:
                 return "plot_y"
+            raise ValueError(
+                f"profile storage axis {profile_storage_axis} is not on the "
+                f"plot plane {plot_order[-2:]}"
+            )
     if profile_storage_axis == frame.plot_x_dim:
         return "plot_x"
     if profile_storage_axis == frame.plot_y_dim:
@@ -890,49 +859,6 @@ def storage_axis_to_plot_axis(
     raise ValueError(
         f"profile storage axis {profile_storage_axis} is not on the plot plane"
     )
-
-
-def display_plane_profile_spec(
-    parent_spec: CubeViewSpec,
-    profile_storage_axis: int,
-    spatial_reduce: SpatialReduce,
-) -> CubeViewSpec:
-    """
-    Build a 2D profile output spec for an already-displayed plot plane.
-
-    Parameters
-    ----------
-    parent_spec : CubeViewSpec
-        Parent cube view with ``plot_ndim == 2``.
-    profile_storage_axis : int
-        Profile axis in parent storage-index space.
-    spatial_reduce : str
-        ``sum`` or ``mean`` over the orthogonal plot axis.
-
-    Returns
-    -------
-    CubeViewSpec
-        Two-axis output view for materializing from a 2D bundle.
-    """
-    plot_order = parent_spec.plot_axis_order()
-    if len(plot_order) < 2:
-        raise ValueError("display_plane_profile_spec requires a 2D parent spec")
-    plot_y_storage, plot_x_storage = plot_order[-2], plot_order[-1]
-    if profile_storage_axis == plot_y_storage:
-        bundle_profile_axis = 0
-    elif profile_storage_axis == plot_x_storage:
-        bundle_profile_axis = 1
-    else:
-        raise ValueError(
-            f"profile axis {profile_storage_axis} is not on the plot plane"
-        )
-    plane_parent = CubeViewSpec(
-        ndim=2,
-        plot_ndim=2,
-        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
-    return profile_view_spec(plane_parent, bundle_profile_axis, spatial_reduce)
 
 
 def _profile_coords(

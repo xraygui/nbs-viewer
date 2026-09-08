@@ -8,7 +8,6 @@ from qtpy.QtWidgets import (
     QSizePolicy,
 )
 from nbs_viewer.views.common.panel import CollapsiblePanel
-from nbs_viewer.models.plot.view_crop import crop_status_text
 from ..roi.window import RoiWindow
 
 
@@ -224,7 +223,7 @@ class RegionControlWidget(QWidget):
             self.set_status("Draw a crop region before applying crop")
             return
         try:
-            crop = self.plot_model.apply_view_crop_from_region(region)
+            self.plot_model.apply_view_crop_from_region(region)
         except ValueError as exc:
             self.set_status(str(exc))
             return
@@ -232,7 +231,7 @@ class RegionControlWidget(QWidget):
         self.set_crop_draw_checked(False)
         self.canvas.clear_crop_draft(paint=False)
         self.clear_crop_corners()
-        self.set_status(crop_status_text(crop))
+        self.set_status(self.plot_model.crop_status_text())
         self._update_panel_buttons()
 
     def _on_crop_region_changed(self, region):
@@ -272,10 +271,9 @@ class RegionControlWidget(QWidget):
             region_active and self.plot_model.view_crop is not None
         )
         self.set_roi_window_enabled(region_active)
-        crop = self.plot_model.view_crop
         if (
-            crop is not None
+            self.plot_model.view_crop is not None
             and not self.crop_draw_checkbox.isChecked()
             and not has_crop_draft
         ):
-            self.set_status(crop_status_text(crop))
+            self.set_status(self.plot_model.crop_status_text())

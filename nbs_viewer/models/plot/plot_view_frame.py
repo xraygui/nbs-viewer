@@ -5,11 +5,11 @@ View-frame metadata for 2D plots used by region compilation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .plot_geometry import PlotBundle, RenderMode
+from .plot_geometry import PlotBundle, RenderMode, prepare_2d_bundle
 
 
 @dataclass(frozen=True)
@@ -180,6 +180,56 @@ def frame_from_bundle(bundle: PlotBundle) -> PlotViewFrame:
         ),
         row_reversed=bundle.row_reversed,
         col_reversed=bundle.col_reversed,
+    )
+
+
+def frame_for_plane(
+    plane_shape: Tuple[int, int],
+    row_axis: np.ndarray,
+    col_axis: np.ndarray,
+    axis_names: Sequence[str],
+    *,
+    render_mode_hint: Optional[str] = None,
+    row_reversed: bool = False,
+    col_reversed: bool = False,
+) -> PlotViewFrame:
+    """
+    Build the frame of a plot plane from its coordinates, without its data.
+
+    A frame is a pure function of the plane's shape, its two coordinate
+    arrays, their names and the render hint, so a caller that has to compile
+    a region *before* reading the big array can derive one rather than being
+    handed a cached frame from whatever happened to be drawn last. It packs
+    through :func:`prepare_2d_bundle` so the extent and mesh grids cannot
+    drift from the ones the renderer will see.
+
+    Parameters
+    ----------
+    plane_shape : tuple of int
+        ``(rows, columns)`` of the plane.
+    row_axis, col_axis : np.ndarray
+        Coordinate arrays in display order, one per row and column.
+    axis_names : sequence of str
+        Row name then column name.
+    render_mode_hint : str, optional
+        Explicit ``image`` / ``mesh`` hint.
+    row_reversed, col_reversed : bool
+        Whether display order reverses storage order on each axis.
+
+    Returns
+    -------
+    PlotViewFrame
+        Frame of the plane described by these coordinates.
+    """
+    return frame_from_bundle(
+        prepare_2d_bundle(
+            np.broadcast_to(np.float64(0.0), plane_shape),
+            [row_axis, col_axis],
+            list(axis_names),
+            render_mode_hint=render_mode_hint,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
+        )
     )
 
 

@@ -61,20 +61,17 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     if stale:
         plot_model.roi_set.set_stale(entry_id, True)
 
-    return plot_model, plot_data, parent_spec, entry_id, frame, region
+    return plot_model, plot_data, entry_id, frame, region
 
 
 def test_preview_roi_profile_returns_1d_bundle(qapp):
-    plot_model, plot_data, parent_spec, entry_id, frame, _region = (
-        _setup_plot_with_roi()
-    )
+    plot_model, plot_data, entry_id, frame, _region = _setup_plot_with_roi()
 
     bundle = plot_model.preview_roi_profile(
         entry_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
     )
 
     assert bundle.ndim == 1
@@ -83,17 +80,14 @@ def test_preview_roi_profile_returns_1d_bundle(qapp):
 
 
 def test_commit_roi_profile_registers_synthetic_keys(qapp):
-    plot_model, plot_data, parent_spec, entry_id, frame, region = (
-        _setup_plot_with_roi()
-    )
+    plot_model, plot_data, entry_id, frame, region = _setup_plot_with_roi()
     run_model = plot_data._run
 
     first = plot_model.commit_roi_profile(
         entry_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
     )
     second_id = plot_model.roi_set.add(
@@ -113,9 +107,8 @@ def test_commit_roi_profile_registers_synthetic_keys(qapp):
     second = plot_model.commit_roi_profile(
         second_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
     )
 
@@ -129,32 +122,30 @@ def test_commit_roi_profile_registers_synthetic_keys(qapp):
 
 
 def test_preview_rejects_stale_roi(qapp):
-    plot_model, plot_data, parent_spec, entry_id, frame, _region = (
-        _setup_plot_with_roi(stale=True)
+    plot_model, plot_data, entry_id, frame, _region = _setup_plot_with_roi(
+        stale=True
     )
 
     with pytest.raises(ValueError, match="stale"):
         plot_model.preview_roi_profile(
             entry_id,
             parent_plot_data=plot_data,
-            parent_spec=parent_spec,
             parent_frame=frame,
-            parent_bundle=plot_data.last_bundle,
+            cached_plane=plot_data.last_bundle,
         )
 
 
 def test_commit_rejects_local_profile(qapp):
-    plot_model, plot_data, parent_spec, entry_id, frame, _region = (
-        _setup_plot_with_roi(profile_storage_axis=1)
+    plot_model, plot_data, entry_id, frame, _region = _setup_plot_with_roi(
+        profile_storage_axis=1
     )
 
     with pytest.raises(ValueError, match="Select a profile along"):
         plot_model.commit_roi_profile(
             entry_id,
             parent_plot_data=plot_data,
-            parent_spec=parent_spec,
             parent_frame=frame,
-            parent_bundle=plot_data.last_bundle,
+            cached_plane=plot_data.last_bundle,
             axis_names=("en_energy", "pixel"),
         )
 

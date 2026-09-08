@@ -10,7 +10,6 @@ import pytest
 from nbs_viewer.models.plot.cube_view import (
     CubeViewSpec,
     DimRole,
-    MaterializeRequest,
     classify_profile_kind,
     default_spec,
     scan_profile_storage_axis,
@@ -22,7 +21,9 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     is_synthetic_key,
 )
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, prepare_1d_bundle
-from nbs_viewer.models.plot.plot_request import build_plot_request
+from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
+from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.view_spec import ViewSpec
 from nbs_viewer.models.plot.runSource import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
 
@@ -50,13 +51,20 @@ def _frozen_entry(model, key_suffix="abc", y=None):
         kind="stack_spectrum",
         source_ykey="detector_image",
         committed_xkey="en_energy",
-        request=MaterializeRequest(
-            CubeViewSpec(
+        request=PlotRequest(
+            uid=model.uid,
+            xkeys=("en_energy",),
+            ykey="detector_image",
+            norm_keys=(),
+            view=ViewSpec(
                 ndim=2,
-                plot_ndim=1,
-                roles=(DimRole.PLOT_X, DimRole.MEAN),
+                plot_ndim=2,
+                roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
-            )
+            ),
+            region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
+            profile_axis=1,
+            spatial_reduce="mean",
         ),
         source_key=("en_energy", "detector_image", model.uid),
     )
@@ -227,13 +235,20 @@ def test_local_profile_keeps_frozen_x(qapp):
         kind="local_profile",
         source_ykey="detector_image",
         committed_xkey="dim_2",
-        request=MaterializeRequest(
-            CubeViewSpec(
+        request=PlotRequest(
+            uid=model.uid,
+            xkeys=("en_energy",),
+            ykey="detector_image",
+            norm_keys=(),
+            view=ViewSpec(
                 ndim=2,
-                plot_ndim=1,
-                roles=(DimRole.PLOT_X, DimRole.MEAN),
+                plot_ndim=2,
+                roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
-            )
+            ),
+            region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
+            profile_axis=1,
+            spatial_reduce="mean",
         ),
         source_key=("en_energy", "detector_image", model.uid),
     )

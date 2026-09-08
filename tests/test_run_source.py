@@ -7,14 +7,16 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole, MaterializeRequest
+from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
 )
 from nbs_viewer.models.plot.key_info import KeyInfo
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
-from nbs_viewer.models.plot.plot_request import build_plot_request
+from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
+from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.view_spec import ViewSpec
 from nbs_viewer.models.plot.runSource import RunSource, RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_UID,
@@ -39,13 +41,20 @@ def _frozen_entry(model, key_suffix="abc", y=None, label=None):
         kind="stack_spectrum",
         source_ykey="PCOEdge_image",
         committed_xkey="sampleVoltage_VSource",
-        request=MaterializeRequest(
-            CubeViewSpec(
+        request=PlotRequest(
+            uid=model.uid,
+            xkeys=("sampleVoltage_VSource",),
+            ykey="PCOEdge_image",
+            norm_keys=(),
+            view=ViewSpec(
                 ndim=2,
-                plot_ndim=1,
-                roles=(DimRole.PLOT_X, DimRole.MEAN),
+                plot_ndim=2,
+                roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
-            )
+            ),
+            region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
+            profile_axis=1,
+            spatial_reduce="mean",
         ),
         source_key=("sampleVoltage_VSource", "PCOEdge_image", model.uid),
     )

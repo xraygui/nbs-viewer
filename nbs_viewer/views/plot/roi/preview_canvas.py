@@ -14,9 +14,8 @@ from matplotlib.figure import Figure
 from qtpy.QtWidgets import QSizePolicy
 from qtpy.QtCore import QThread, Signal
 
-from nbs_viewer.models.plot.cube_view import CubeViewSpec, MaterializeRequest
 from nbs_viewer.models.plot.plot_geometry import PlotBundle
-from nbs_viewer.models.plot.view_crop import ViewCrop
+from nbs_viewer.models.plot.plot_request import PlotRequest
 from ..mplCanvas.renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 
 from nbs_viewer.utils import print_debug
@@ -40,20 +39,16 @@ class RoiPreviewWorker(QThread):
     def __init__(
         self,
         plot_data,
-        request: MaterializeRequest,
+        request: PlotRequest,
         generation: int,
         parent=None,
         *,
-        parent_spec: CubeViewSpec | None = None,
-        parent_bundle: PlotBundle | None = None,
-        view_crop: ViewCrop | None = None,
+        cached_plane: PlotBundle | None = None,
     ):
         super().__init__(parent)
         self.plot_data = plot_data
         self.request = request
-        self.parent_spec = parent_spec
-        self.parent_bundle = parent_bundle
-        self.view_crop = view_crop
+        self.cached_plane = cached_plane
         self.generation = generation
 
     def run(self):
@@ -64,20 +59,16 @@ class RoiPreviewWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t0 = time.perf_counter()
-            parent_bundle = self.parent_bundle
-            cached = parent_bundle is not None
             bundle = self.plot_data.preview_roi_profile(
                 self.request,
-                parent_spec=self.parent_spec,
-                parent_bundle=parent_bundle,
-                view_crop=self.view_crop,
+                cached_plane=self.cached_plane,
             )
             elapsed = time.perf_counter() - t0
             print_debug(
                 "RoiPreviewWorker",
                 f"preview ready in {elapsed:.3f}s "
-                f"(cached_parent={cached}, "
-                f"plot_ndim={self.request.spec.plot_ndim}, "
+                f"(cached_plane={self.cached_plane is not None}, "
+                f"profile_axis={self.request.profile_axis}, "
                 f"shape={getattr(bundle.y, 'shape', None)})",
                 category="plots",
             )

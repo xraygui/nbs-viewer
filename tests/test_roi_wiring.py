@@ -89,9 +89,8 @@ def test_preview_roi_profile_on_catalog_selected_run(qapp, app_model):
     bundle = session.plot.preview_roi_profile(
         entry_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
     )
 
     assert bundle.ndim == 1
@@ -107,9 +106,8 @@ def test_commit_roi_profile_registers_frozen_spectrum(qapp, app_model):
     frozen = session.plot.commit_roi_profile(
         entry_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
     )
 
@@ -126,9 +124,8 @@ def test_committed_synthetic_key_fetchable_via_fetch_bundle(qapp, app_model):
     frozen = session.plot.commit_roi_profile(
         entry_id,
         parent_plot_data=plot_data,
-        parent_spec=parent_spec,
         parent_frame=frame,
-        parent_bundle=plot_data.last_bundle,
+        cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
     )
 
@@ -148,9 +145,8 @@ def test_preview_rejects_stale_roi_on_wired_session(qapp, app_model):
         session.plot.preview_roi_profile(
             entry_id,
             parent_plot_data=plot_data,
-            parent_spec=parent_spec,
-            parent_frame=frame,
-            parent_bundle=plot_data.last_bundle,
+                parent_frame=frame,
+            cached_plane=plot_data.last_bundle,
         )
 
 
@@ -163,8 +159,7 @@ def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
         session.plot.commit_roi_profile(
             entry_id,
             parent_plot_data=plot_data,
-            parent_spec=parent_spec,
-            parent_frame=frame,
-            parent_bundle=plot_data.last_bundle,
+                parent_frame=frame,
+            cached_plane=plot_data.last_bundle,
             axis_names=("en_energy", "pixel"),
         )

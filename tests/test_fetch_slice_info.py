@@ -11,15 +11,14 @@ onto storage slices.
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.cube_view import (
-    CubeViewSpec,
-    DimRole,
-    MaterializeRequest,
-    materialize_view,
-    profile_view_spec,
-)
+from nbs_viewer.models.plot.cube_view import CubeViewSpec, DimRole
+from nbs_viewer.models.plot.plot_bundle import reduce_to_plot_plane
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
-from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
+from nbs_viewer.models.plot.plot_request import (
+    PlotRequest,
+    plan_fetch,
+    roi_profile_request,
+)
 from nbs_viewer.models.plot.plot_view_frame import region_frame_for_bbox
 from nbs_viewer.models.plot.region import (
     PolygonRegion,
@@ -73,19 +72,25 @@ def _axes(row_descending, col_descending):
     return row, col
 
 
-def _profile_request(profile_storage_axis=0, spatial_reduce="sum"):
-    spec = profile_view_spec(
-        PARENT,
-        profile_storage_axis=profile_storage_axis,
-        spatial_reduce=spatial_reduce,
-    )
+def _plane_request(parent=PARENT):
+    """
+    The request that draws the parent plane, with no ROI on it yet.
+    """
     return PlotRequest(
         uid="uid",
         xkeys=("x",),
         ykey="y",
         norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(spec),
-        region=ROI,
+        view=ViewSpec.from_cube_view_spec(parent),
+    )
+
+
+def _profile_request(profile_axis=0, spatial_reduce="sum", region=ROI):
+    return roi_profile_request(
+        _plane_request(),
+        region,
+        profile_axis=profile_axis,
+        spatial_reduce=spatial_reduce,
     )
 
 
@@ -129,7 +134,7 @@ def test_roi_profile_matches_ground_truth_in_every_orientation(
     expected = _ground_truth_profile(stack, row_axis, col_axis, frame)
 
     request = _profile_request()
-    plan = plan_fetch(request, plane_frame=frame, plane_axes=(2, 3))
+    plan = plan_fetch(request, plane_frame=frame)
 
     loaded = stack[plan.slice_info]
     axis_arrays = [
@@ -141,11 +146,11 @@ def test_roi_profile_matches_ground_truth_in_every_orientation(
     loaded, axis_arrays = orient_for_display(
         loaded, axis_arrays, plan.reversed_axes_for(axis_arrays, "image"), {0: 0, 1: 1, 2: 2, 3: 3}
     )
-    profile, _, _ = materialize_view(
+    profile, _, _ = reduce_to_plot_plane(
         loaded,
         axis_arrays,
         ["en_energy", "scan", "y", "x"],
-        MaterializeRequest(request.view.to_cube_view_spec(), ROI, "inside"),
+        request,
         region_frame=plan.region_frame,
         plot_plane_storage_axes=plan.plane_axes,
     )
@@ -168,9 +173,7 @@ def test_narrowed_fetch_reads_the_cells_the_roi_covers(
     frame = display_frame(stack[1].sum(axis=0), row_axis, col_axis, ["y", "x"])
     compiled = compile_with_mask_mode(frame, ROI, "inside")
 
-    plan = plan_fetch(
-        _profile_request(), plane_frame=frame, plane_axes=(2, 3)
-    )
+    plan = plan_fetch(_profile_request(), plane_frame=frame)
     rows, cols = plan.slice_info[2], plan.slice_info[3]
     covered = np.zeros(frame.shape, dtype=bool)
     covered_storage = np.zeros(frame.shape, dtype=bool)
@@ -186,16 +189,14 @@ def test_narrowed_fetch_reads_the_cells_the_roi_covers(
 
 def test_profile_along_an_off_plane_axis_reads_that_axis_in_full():
     """
-    A profile along energy holds energy at a single INDEX on the parent view,
-    so the profile spec has to promote it or the fetch returns one point.
+    A profile along energy holds energy at a single INDEX on the parent
+    projection, so the planner has to widen it or the fetch returns one point.
     """
     stack = _stack()
     row_axis, col_axis = _axes(False, False)
     frame = display_frame(stack[1].sum(axis=0), row_axis, col_axis, ["y", "x"])
 
-    plan = plan_fetch(
-        _profile_request(), plane_frame=frame, plane_axes=(2, 3)
-    )
+    plan = plan_fetch(_profile_request(), plane_frame=frame)
 
     assert plan.slice_info[0] == slice(None)
     assert stack[plan.slice_info].shape[0] == E_COUNT
@@ -206,18 +207,11 @@ def test_plan_fetch_rejects_an_roi_that_covers_no_cells():
     frame = display_frame(
         np.zeros((NY, NX)), row_axis, col_axis, ["y", "x"]
     )
-    request = PlotRequest(
-        uid="uid",
-        xkeys=("x",),
-        ykey="y",
-        norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(
-            profile_view_spec(PARENT, profile_storage_axis=0, spatial_reduce="sum")
-        ),
-        region=RectRegion(x0=100.0, x1=101.0, y0=100.0, y1=101.0),
+    request = _profile_request(
+        region=RectRegion(x0=100.0, x1=101.0, y0=100.0, y1=101.0)
     )
     with pytest.raises(ValueError, match="does not cover any cells"):
-        plan_fetch(request, plane_frame=frame, plane_axes=(2, 3))
+        plan_fetch(request, plane_frame=frame)
 
 
 def test_region_frame_for_bbox_matches_crop_shape():
@@ -263,18 +257,11 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
     col_axis = np.arange(x_count, dtype=float)
     frame = display_frame(stack[10, 0], row_axis, col_axis, ["dim_1", "dim_2"])
     region = RectRegion(x0=34.77, x1=94.99, y0=40.36, y1=57.37)
-    request = PlotRequest(
-        uid="uid",
-        xkeys=("x",),
-        ykey="y",
-        norm_keys=(),
-        view=ViewSpec.from_cube_view_spec(
-            profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum")
-        ),
-        region=region,
+    request = roi_profile_request(
+        _plane_request(parent), region, profile_axis=0
     )
 
-    plan = plan_fetch(request, plane_frame=frame, plane_axes=(2, 3))
+    plan = plan_fetch(request, plane_frame=frame)
     loaded = stack[plan.slice_info]
     axis_arrays = [
         np.arange(e_count, dtype=float),
@@ -285,11 +272,11 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
     loaded, axis_arrays = orient_for_display(
         loaded, axis_arrays, plan.reversed_axes_for(axis_arrays, "image"), {0: 0, 2: 1, 3: 2}
     )
-    profile, _, _ = materialize_view(
+    profile, _, _ = reduce_to_plot_plane(
         loaded,
         axis_arrays,
         ["en_energy", "dim_0", "dim_1", "dim_2"],
-        MaterializeRequest(request.view.to_cube_view_spec(), region, "inside"),
+        request,
         region_frame=plan.region_frame,
         plot_plane_storage_axes=plan.plane_axes,
     )

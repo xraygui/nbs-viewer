@@ -313,37 +313,86 @@ def test_plot_request_empty_transform_means_off():
     assert off.transform == ""
 
 
-def test_plot_request_roi_requires_1d_view():
-    view_2d = default_view_spec(2, 2)
-    with pytest.raises(ValueError, match="plot_ndim == 1"):
-        PlotRequest(
-            uid=VPPEM_UID,
-            xkeys=("x",),
-            ykey="image",
-            norm_keys=(),
-            view=view_2d,
-            region=RectRegion(0.0, 1.0, 0.0, 1.0),
-        )
-
-
-def test_plot_request_roi_profile_ok():
+def test_plot_request_roi_requires_the_parent_plane():
+    """
+    A profile request carries the plane the ROI was drawn on, not the profile
+    it reduces to. A 1-D view has no plane for the region to mean anything on.
+    """
     view_1d = ViewSpec(
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.MEAN, DimRole.PLOT_X),
         indices=(0, 0),
     )
+    with pytest.raises(ValueError, match="plot_ndim == 2"):
+        PlotRequest(
+            uid=VPPEM_UID,
+            xkeys=("x",),
+            ykey="image",
+            norm_keys=(),
+            view=view_1d,
+            region=RectRegion(0.0, 1.0, 0.0, 1.0),
+            profile_axis=1,
+        )
+
+
+def test_plot_request_roi_requires_a_profile_axis():
+    with pytest.raises(ValueError, match="require a profile_axis"):
+        PlotRequest(
+            uid=VPPEM_UID,
+            xkeys=("x",),
+            ykey="image",
+            norm_keys=(),
+            view=default_view_spec(2, 2),
+            region=RectRegion(0.0, 1.0, 0.0, 1.0),
+        )
+
+
+def test_plot_request_roi_rejects_a_reduced_profile_axis():
+    """
+    A profile axis has to be on the plane or held at an index. A summed axis
+    is already gone by the time the profile is taken.
+    """
+    view = ViewSpec(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0, 0),
+    )
+    with pytest.raises(ValueError, match="plot-plane axis or an indexed axis"):
+        PlotRequest(
+            uid=VPPEM_UID,
+            xkeys=("x",),
+            ykey="image",
+            norm_keys=(),
+            view=view,
+            region=RectRegion(0.0, 1.0, 0.0, 1.0),
+            profile_axis=0,
+        )
+
+
+def test_plot_request_roi_profile_ok():
+    view = ViewSpec(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0, 0),
+    )
     req = PlotRequest(
         uid=VPPEM_UID,
         xkeys=("x",),
         ykey="image",
         norm_keys=(),
-        view=view_1d,
+        view=view,
         region=RectRegion(0.0, 1.0, 0.0, 1.0),
         mask_mode="outside",
+        profile_axis=0,
+        spatial_reduce="mean",
     )
     assert req.region is not None
     assert req.mask_mode == "outside"
+    assert req.plane_axes == (1, 2)
+    assert req.output_ndim == 1
 
 
 def test_view_crop_rejects_empty_bbox():

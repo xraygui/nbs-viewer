@@ -5,8 +5,8 @@ How a plot request becomes storage indices, and how those indices become a
 half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
-**Status:** steps 1–3 landed on branch `mesh-transpose-removal`
-(2026-09-08). Steps 4–7 not started.
+**Status:** steps 1–4 landed on branch `mesh-transpose-removal`
+(2026-09-08). Steps 5–7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -200,11 +200,11 @@ coordinate arrays were carrying.
 
 ### Deleting `CubeViewSpec` costs 14 test modules
 
-14 test modules import `CubeViewSpec` against 2 that import `ViewSpec`, and 8
-import `MaterializeRequest`. That is the real cost of the dependency
-inversion, and it cannot be sliced: `view_spec.py:17` imports from
-`cube_view.py` and converts back before the old code runs, so the round trip
-keeps both alive.
+14 test modules import `CubeViewSpec` against 11 that import from
+`view_spec.py`, and — after step 4 — 2 still import `MaterializeRequest`
+(down from 8). That is the real cost of the dependency inversion, and it
+cannot be sliced: `view_spec.py:17` imports from `cube_view.py` and converts
+back before the old code runs, so the round trip keeps both alive.
 
 ### `PlotDataModel` refetches on a transform change
 
@@ -326,27 +326,100 @@ Each of the three was confirmed to fail against the pre-step-3 behaviour.
 fetch path does, for the test call sites that used to get orientation for free
 from `prepare_2d_bundle`.
 
-### Step 4 — One request, no side channels
+### Step 4 — One request, no side channels ✅ 2026-09-08
 
-**Not started.** Step 3 is done, so this is next.
+**Not behaviour-preserving where the two ROI paths disagreed.** An in-plane
+ROI preview with no valid cached plane used to raise "No parent 2D bundle
+available"; it now loads.
 
-- `PlotRequest` carries the projection (2-D when a region is present), crop,
-  region, mask mode, profile axis and spatial reduce
-- `get_plot_bundle(request, *, cached_plane=None, label="")`
+Landed:
 
-Deletes: the `region_frame`, `parent_spec` and `view_crop` arguments; the fat
-`view_crop.ViewCrop` and so `view_crop.py`; `_profile_uses_nd_load`;
-`region_frame_for_roi_preview`'s branch; `fetch_materialized_bundle`'s
-eleven-parameter signature and the two-branch `fetch_roi_preview`, and so
-`derived_fetch.py`.
+- `PlotRequest` carries the parent projection (`plot_ndim == 2` when a region
+  is present), the crop, the region, the mask mode, `profile_axis` and
+  `spatial_reduce`. Decision 1's other half: the assertion that a region
+  requires `plot_ndim == 1` is now `== 2`.
+- `RunSource.get_plot_bundle(request, *, cached_plane=None, label="")`. The
+  frame the region compiles against is derived inside `RunSource` from the
+  plane's own coordinate arrays (`_plane_frame` → `frame_for_plane`), so no
+  caller hands one in.
+- `plan_fetch(request, *, plane_frame=None)` — `plane_axes` comes off the
+  request. It also widens a profile axis the projection holds at a single
+  index back to the full axis (Decision 3); that used to be a side effect of
+  `profile_view_spec` rewriting roles, which is now built at the reduce
+  instead (`plot_bundle._materialize_request`).
+- `PlotModel.build_roi_profile_request` derives the profile request from the
+  parent trace's own request, so run, keys, projection and crop are inherited
+  rather than reassembled.
+- `reduce_cached_plane` is the `cached_plane` path: the one genuine
+  optimisation, reducing the plane already in memory. Whether it can serve a
+  given profile is now the fetch's decision, not the caller's.
 
-`cached_plane` is the honest name for the one thing that really is an
-optimisation — reduce the plane already in memory rather than reload.
+Deleted: `derived_fetch.py` (481 lines) and `view_crop.py` (155 lines) in
+full — with them `fetch_materialized_bundle`, `fetch_roi_preview`,
+`fetch_derivative_preview`, `region_frame_for_roi_preview`,
+`_profile_uses_nd_load`, `_request_for_display_plane`,
+`_spatial_reduce_from_profile_spec`, `plot_plane_storage_axes(_for_frame)`,
+`materialize_request_for_profile`, `build_roi_profile_request_from_operation`,
+`resolve_profile_region`, the fat `ViewCrop`, `view_crop_from_region`,
+`crop_status_text` and `spatial_fingerprint_from_frame`. Also
+`slim_crop_from_legacy`, `_fetch_plot_plane_storage_axes`,
+`display_plane_profile_spec`, `RunSource._plan_fetch`,
+`single_canvas._view_crop_for_model` (already dead), and the `region_frame` /
+`parent_spec` / `view_crop` / `parent_bundle` arguments wherever they
+appeared.
+
+Measured across `models/plot/`: **5419 → 5206 code lines** (−213, excluding
+docstrings and comments); 10915 → 10586 raw; 23 → 21 files. Suite 351 → 350.
+
+#### Findings
+
+**The fat crop's remaining fields were three different things.** `full_frame`
+was the region-compilation frame, which is derivable; `display_bbox` was a
+status string; `source_key` was session state saying which trace the crop
+belongs to; `spatial_fingerprint` was never read. Only the last-but-one
+survives, as `PlotModel._view_crop_key` — one field, and step 6's `ViewIntent`
+absorbs it.
+
+**Transform and ROI still disagree across the two paths.** `reduce_cached_plane`
+reduces a plane the transform has already been applied to; the load path
+carries `transform=""` on profile requests, as the old ND path did. Making
+them agree means applying the transform to the 2-D plane before the reduce
+rather than to the finished output, which reorders `get_plot_bundle`. Not done
+here. In practice the paths do not cross today — a live 2-D display always has
+a valid cached plane — but the asymmetry is real and belongs to step 7.
+
+**Fixed en route: "span full profile axis" spanned the reduction axis.**
+`storage_axis_to_plot_axis` preferred the *frame* over the spec for a rank-2
+parent, a leftover from when `frame_from_bundle` read the plot dims off the
+storage layout. Since step 3 every frame it builds has `plot_y_dim == 0` and
+`plot_x_dim == 1` -- display positions, not storage axes -- so comparing a
+storage axis against them inverts the answer for any view whose plot-axis
+order is not the identity. That is the *normal* case after step 2: selecting
+X = `x` on a `(100, 32)` image gives `axis_order == (1, 0)`, so a profile
+along `x` was reported as `plot_y`, the drawn band was widened on the wrong
+axis, and the profile came back covering only the drawn slice of its own
+axis. It also inverted which of "Set ROI: full height" / "full width" the ROI
+window enabled. The spec now decides at every rank; the frame is the last
+resort for a caller that has no spec, where "storage axis" can only mean
+"display position".
+
+The test that pinned the old behaviour, `test_storage_axis_to_plot_axis_
+prefers_frame_on_2d_mesh_parent`, was asserting the mesh transpose step 1
+deleted -- it hand-built a frame with `plot_x_dim=0` that `frame_from_bundle`
+can no longer produce. Replaced by two tests that fail against the old
+mapping.
+
+**`_materialize_roi_profile` still assumes the plot plane is the trailing two
+tensor axes.** With the profile axis widened rather than reordered, a parent
+whose plane is axes (0, 1) with the profile on axis 2 would reduce the wrong
+pair. Unreachable today (the scan axis leads), and it is `remaining` being
+built in storage order rather than `axis_order` — a `cube_view.py` problem,
+so step 5.
 
 ### Step 5 — Invert the dependency, delete `cube_view.py`
 
-**Not started.** Depends on step 4. One commit; the round trip is what keeps
-both types alive.
+**Not started.** Step 4 is done, so this is next. One commit; the round trip
+is what keeps both types alive.
 
 - move `DimRole` / `SLICE_ROLES` so `cube_view.py` imports from `view_spec.py`,
   never the reverse
@@ -354,8 +427,9 @@ both types alive.
 - `materialize_view` takes a `PlotRequest`
 
 Deletes: `CubeViewSpec`, `MaterializeRequest`, `to_cube_view_spec`,
-`from_cube_view_spec`, `view_spec_from_legacy`, `slim_crop_from_legacy`,
-`build_plot_request`, and `cube_view.py` itself (1401 lines).
+`from_cube_view_spec`, `view_spec_from_legacy`, `build_plot_request`, and
+`cube_view.py` itself (1286 lines). Carries the `_materialize_roi_profile`
+trailing-axes assumption recorded under step 4.
 
 Cost: 14 test modules to retarget. Price it in the PR description.
 
@@ -403,3 +477,5 @@ plan, not here.
 | 2026-09-08 | Written; replaces `view_spec_consolidation_plan.md`, `materialize_view_refactor_plan.md`, `mixed_rank_plot_view_plan.md`. Steps 1 and 2 recorded as landed. |
 | 2026-09-08 | Became a sub-plan of `refactor_plan.md`; shared backlog and cross-plan notes moved there. |
 | 2026-09-08 | Step 3 landed. Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
+| 2026-09-08 | Step 4 landed. `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
+| 2026-09-08 | Fixed `storage_axis_to_plot_axis` reading the plot-axis mapping off the frame instead of the spec, which made "span full profile axis" widen the reduction axis. Recorded under step 4. |

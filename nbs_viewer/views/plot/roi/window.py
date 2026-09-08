@@ -439,10 +439,9 @@ class RoiWindow(QDialog):
         if plot_data is None:
             raise ValueError("Select a single 2D dataset")
 
-        parent_spec = self.plot_model.cube_view_spec
         request = self.plot_model.build_roi_profile_request(
             entry,
-            parent_spec=parent_spec,
+            plot_data=plot_data,
             parent_frame=self.plot_model.resolve_parent_frame(plot_data),
             span_full_override=span_full_override,
             default_profile_axis=self.get_profile_storage_axis(),
@@ -453,12 +452,9 @@ class RoiWindow(QDialog):
             request,
             generation,
             self,
-            parent_spec=parent_spec,
-            parent_bundle=self.plot_model.cached_parent_bundle_for_preview(
-                plot_data,
-                request,
+            cached_plane=self.plot_model.cached_parent_bundle_for_preview(
+                plot_data
             ),
-            view_crop=self.plot_model.view_crop,
         )
 
     def _run_preview(self):
@@ -582,12 +578,11 @@ class RoiWindow(QDialog):
             self.set_status("Select a single 2D dataset")
             return
 
-        parent_spec = self.plot_model.cube_view_spec
         default_axis = self.get_profile_storage_axis()
         try:
             span_full, request = self.plot_model.prepare_roi_commit(
                 entry,
-                parent_spec=parent_spec,
+                plot_data=plot_data,
                 parent_frame=self.plot_model.resolve_parent_frame(plot_data),
                 axis_names=self._dimension_axis_names(),
                 default_profile_axis=default_axis,
@@ -1094,7 +1089,7 @@ class RoiWindow(QDialog):
 
             self.profile_axis_combo.clear()
             for storage_axis in eligible:
-                name = profile_axis_name(parent_spec, storage_axis, self._axis_names)
+                name = profile_axis_name(storage_axis, self._axis_names)
                 self.profile_axis_combo.addItem(f"Along {name}", storage_axis)
 
             selected_idx = -1
