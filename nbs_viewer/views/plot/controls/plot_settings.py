@@ -74,15 +74,15 @@ class PlotSettingsWidget(QWidget):
         self.auto_add_checkbox = _add_checkbox_row(
             form,
             "Auto Add",
-            plot_model.auto_add,
-            plot_model.set_auto_add,
+            plot_model.collection.auto_add,
+            plot_model.collection.set_auto_add,
         )
 
         self.dynamic_update_checkbox = _add_checkbox_row(
             form,
             "Dynamic Update",
-            plot_model.dynamic_update,
-            plot_model.set_dynamic_update,
+            plot_model.collection.dynamic_update,
+            plot_model.collection.set_dynamic_update,
         )
 
         self.lock_aspect_checkbox = None
@@ -101,8 +101,8 @@ class PlotSettingsWidget(QWidget):
         self.retain_selection_checkbox = _add_checkbox_row(
             form,
             "Retain Selection",
-            plot_model.retain_selection,
-            plot_model.set_retain_selection,
+            plot_model.selection.retain_selection,
+            plot_model.selection.set_retain_selection,
             tooltip="Keep current plot selections when runs change",
         )
 

@@ -23,9 +23,9 @@ from nbs_viewer.models.sources.testSource import create_test_catalog
 def _session_with_run():
     plot = PlotSession(is_main_display=True)
     run = RunSource(create_test_catalog(1).get_runs()[0])
-    plot.add_run(run)
+    plot.collection.add_runs([run])
     x_keys, y_keys, _norm = run.run.get_default_selection()
-    plot.set_selected_keys(x_keys[:1], y_keys[:1], [])
+    plot.selection.set_selected_keys(x_keys[:1], y_keys[:1], [])
     return plot, run, x_keys[0], y_keys[0]
 
 
@@ -113,7 +113,7 @@ def test_dropping_a_trace_announces_its_key():
 
     removed = []
     plot.traces.trace_removed.connect(removed.append)
-    plot.remove_run(run)
+    plot.collection.remove_uids([run.uid])
 
     assert removed == [key]
     assert key not in plot.traces
@@ -136,7 +136,7 @@ def test_dropping_a_trace_drops_its_outgoing_connections():
     trace.set_visible(not trace.visible)
     assert len(seen) == 1
 
-    plot.remove_run(run)
+    plot.collection.remove_uids([run.uid])
 
     trace.set_visible(not trace.visible)
     assert len(seen) == 1

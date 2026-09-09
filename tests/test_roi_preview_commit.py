@@ -26,7 +26,7 @@ from tests.fixtures.plot_session import make_plot_session
 def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     plot_model, _ = make_plot_session()
     run_model = RunSource(image_scan_run(1))
-    plot_model.add_run(run_model)
+    plot_model.collection.add_runs([run_model])
 
     parent_spec = Projection(
         ndim=2,
@@ -35,7 +35,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
         indices=(0, 0),
     )
     apply_projection(plot_model.view_intent, parent_spec)
-    plot_model.set_selected_keys(["en_energy"], ["detector_image"])
+    plot_model.selection.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = plot_model.ensure_trace(
         run_model, "en_energy", "detector_image"
@@ -185,11 +185,11 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
 
     plot_model, _ = make_plot_session()
     run_model = RunSource(make_vppem_run())
-    plot_model.add_run(run_model)
+    plot_model.collection.add_runs([run_model])
 
     parent_spec = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     apply_projection(plot_model.view_intent, parent_spec)
-    plot_model.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
+    plot_model.selection.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
     plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )

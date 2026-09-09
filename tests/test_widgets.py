@@ -65,9 +65,9 @@ def plot_widgets(qapp):
     session = presenter.session
     canvas = MplCanvas(presenter)
     run = RunSource(image_scan_run(1, n_y=6, n_x=8, n_z=3))
-    session.add_run(run)
-    session.set_uids_visible({run.uid}, True)
-    session.set_selected_keys(["en_energy"], ["detector_image"], [])
+    session.collection.add_runs([run])
+    session.collection.set_uids_visible({run.uid}, True)
+    session.selection.set_selected_keys(["en_energy"], ["detector_image"], [])
     _pump()
     yield presenter, session, canvas
     canvas.deleteLater()
@@ -118,17 +118,17 @@ def test_hide_then_show_keeps_the_artist_and_does_not_refetch(plot_widgets):
     the artist is the thing being reused.
     """
     _presenter, session, canvas = plot_widgets
-    run_uid = next(iter(session.visible_uids))
+    run_uid = next(iter(session.collection.visible_uids))
     key = next(iter(session.traces))
     artist_before = canvas.artist_for(key)
     fetched_before = session.traces.get(key).last_fetched_request
 
-    session.set_uids_visible({run_uid}, False)
+    session.collection.set_uids_visible({run_uid}, False)
     _pump()
     assert canvas.artist_for(key) is artist_before
     assert not canvas.artist_for(key).get_visible()
 
-    session.set_uids_visible({run_uid}, True)
+    session.collection.set_uids_visible({run_uid}, True)
     _pump()
 
     assert canvas.artist_for(key) is artist_before
@@ -149,7 +149,7 @@ def test_the_roi_window_opens_and_offers_profile_axes(
     populated from the parent projection.
     """
     presenter, session, _canvas = plot_widgets
-    session.set_selected_keys(["en_energy"], ["detector_cube"], [])
+    session.selection.set_selected_keys(["en_energy"], ["detector_cube"], [])
     session.view_intent.set_plot_ndim(2)
     _pump()
 

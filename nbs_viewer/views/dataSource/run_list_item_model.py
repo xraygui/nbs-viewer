@@ -1,4 +1,4 @@
-"""Qt run-list adapter over a :class:`PlotSession`."""
+"""Qt run-list adapter over a :class:`RunCollection`."""
 
 from __future__ import annotations
 
@@ -10,27 +10,27 @@ from qtpy.QtGui import QStandardItem, QStandardItemModel
 from ...models.plot.runSource import RunSource
 
 if TYPE_CHECKING:
-    from ...models.plot.plot_session import PlotSession
+    from ...models.plot.run_collection import RunCollection
 
 
 class RunListItemModel(QStandardItemModel):
     """
-    Sidebar rows for one plot session.
+    Sidebar rows for one run collection.
 
-    Membership, visibility, keys, combine/freeze, and cache-status
-    aggregation live on :class:`PlotSession`. This model only keeps
-    ``QStandardItem`` rows in sync and exposes index helpers for the list
-    view.
+    Membership, visibility, keys and combine/freeze all live on
+    :class:`RunCollection`, which is the only thing this adapter needs to
+    see. It keeps ``QStandardItem`` rows in sync and exposes index helpers
+    for the list view.
 
     Parameters
     ----------
-    session : PlotSession
-        Session that owns the run collection and visibility set.
+    collection : RunCollection
+        Membership and visibility this sidebar mirrors.
     """
 
-    def __init__(self, session: "PlotSession"):
+    def __init__(self, collection: "RunCollection"):
         super().__init__()
-        self._plot = session
+        self._plot = collection
 
         self._plot.run_added.connect(self._on_session_run_added)
         self._plot.run_removed.connect(self._on_session_run_removed)
@@ -41,9 +41,9 @@ class RunListItemModel(QStandardItemModel):
             self._add_run_item(run)
 
     @property
-    def session(self) -> "PlotSession":
+    def collection(self) -> "RunCollection":
         """
-        Return the observed plot session.
+        Return the observed run collection.
         """
         return self._plot
 

@@ -56,7 +56,8 @@ class RunListView(QWidget):
         super().__init__(parent)
         self.presenter = presenter
         self.session = presenter.session
-        self.run_list_model = RunListItemModel(self.session)
+        self.collection = self.session.collection
+        self.run_list_model = RunListItemModel(self.collection)
         self.display_id = display_id
         self._handling_selection = False
         self._metadata_browser_dialog = None
@@ -111,7 +112,7 @@ class RunListView(QWidget):
         uids_to_remove = [run.uid for run in selected_runs]
 
         # Remove from plot model
-        self.session.remove_uids(uids_to_remove)
+        self.collection.remove_uids(uids_to_remove)
 
     def get_selected_runs(self) -> List[RunSource]:
         """Get the currently selected runs."""
@@ -146,7 +147,7 @@ class RunListView(QWidget):
             self._addSinglePlotItem(plotItem)
 
     def _addSinglePlotItem(self, plotItem):
-        self.session.add_run(plotItem)
+        self.collection.add_runs([plotItem])
 
     def removePlotItem(self, plotItem):
         """
@@ -158,13 +159,13 @@ class RunListView(QWidget):
             The plot item to be removed from the list widget.
         """
         plotItem.clear()
-        self.session.remove_run(plotItem)
+        self.collection.remove_uids([plotItem.uid])
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
         selected_runs = self.get_selected_runs()
         try:
-            self.session.validate_combine(selected_runs)
+            self.collection.validate_combine(selected_runs)
         except CombineError as e:
             QMessageBox.warning(self, "Cannot Combine", str(e))
             return
@@ -186,7 +187,7 @@ class RunListView(QWidget):
             expression = None
 
         try:
-            self.session.combine_runs(
+            self.collection.combine(
                 selected_runs, method=method, expression=expression
             )
         except CombineError as e:
@@ -202,12 +203,12 @@ class RunListView(QWidget):
     def uncheck_selected_runs(self):
         """Uncheck all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.session.set_uids_visible(uids, False)
+        self.collection.set_uids_visible(uids, False)
 
     def check_selected_runs(self):
         """Check all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.session.set_uids_visible(uids, True)
+        self.collection.set_uids_visible(uids, True)
 
     def move_selected_runs_to_new_display(self, display_type: str):
         runs = self.get_selected_runs()
@@ -361,7 +362,7 @@ class RunListView(QWidget):
         menu.exec_(self.list_view.mapToGlobal(pos))
 
     def _browse_metadata_for_run(self, run):
-        runs = self.session.available_models
+        runs = self.collection.available_models
         if not runs:
             return
         self._metadata_browser_dialog = FullMetadataBrowser(

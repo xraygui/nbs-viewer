@@ -11,4 +11,4 @@ def test_session_dynamic_update_returns_bool_with_one_run(qapp, app_model):
     session.load_catalog(recipe="line_scan", runs=1)
     session.select_run(0)
 
-    assert isinstance(session.session.dynamic_update, bool)
+    assert isinstance(session.session.collection.dynamic_update, bool)

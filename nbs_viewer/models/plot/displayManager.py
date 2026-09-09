@@ -211,7 +211,7 @@ class DisplayManager(QObject):
             Target display identifier
         """
         if display_id in self._presenters:
-            self._presenters[display_id].add_runs(run_list)
+            self._presenters[display_id].session.collection.add_runs(run_list)
 
     def add_run_to_display(
         self, run: Union[CatalogRun, RunSource], display_id: str
@@ -232,7 +232,7 @@ class DisplayManager(QObject):
             category="display",
         )
         if display_id in self._presenters:
-            self._presenters[display_id].add_run(run)
+            self._presenters[display_id].session.collection.add_runs([run])
 
     def remove_run_from_display(self, run: CatalogRun, display_id: str) -> None:
         """
@@ -251,4 +251,4 @@ class DisplayManager(QObject):
             category="display",
         )
         if display_id in self._presenters:
-            self._presenters[display_id].remove_run(run)
+            self._presenters[display_id].session.collection.remove_uids([run.uid])

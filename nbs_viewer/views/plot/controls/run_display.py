@@ -51,6 +51,8 @@ class RunDisplayWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.presenter = presenter
         self.plot_model = presenter.session
+        self.collection = self.plot_model.collection
+        self.selection = self.plot_model.selection
         self._show_all = False
         self._linked_mode = True
         self._current_run = None
@@ -59,10 +61,10 @@ class RunDisplayWidget(QWidget):
         self._setup_ui()
 
         # Connect signals
-        self.plot_model.available_keys_changed.connect(self._update_display)
+        self.collection.available_keys_changed.connect(self._update_display)
         self.plot_model.frozen_spectra_changed.connect(self._update_display)
-        self.plot_model.visible_runs_changed.connect(self._build_header)
-        self.plot_model.selected_keys_changed.connect(self._update_checkboxes)
+        self.collection.visible_runs_changed.connect(self._build_header)
+        self.selection.selected_keys_changed.connect(self._update_checkboxes)
 
         # Initial update
         self._update_display()
@@ -146,7 +148,7 @@ class RunDisplayWidget(QWidget):
 
     def _build_header(self) -> None:
         """Update the header label and run selector."""
-        run_models = self.plot_model.visible_models
+        run_models = self.collection.visible_models
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
         for run in run_models:
@@ -163,7 +165,7 @@ class RunDisplayWidget(QWidget):
         str
             Header text for the run display.
         """
-        models = self.plot_model.visible_models
+        models = self.collection.visible_models
         if len(models) == 0:
             return "No Runs Selected"
         if len(models) == 1:
@@ -185,13 +187,13 @@ class RunDisplayWidget(QWidget):
         self._clear_grid()
         # Get keys based on mode
         if self._linked_mode:
-            available_keys = self.plot_model.available_keys
+            available_keys = self.collection.available_keys
             selected_x, selected_y, selected_norm = (
-                self.plot_model.get_selected_keys()
+                self.selection.get_selected_keys()
             )
         elif self._current_run:
             available_keys = self._current_run.available_keys
-            sel = self.plot_model.selection_for(self._current_run.uid)
+            sel = self.selection.selection_for(self._current_run.uid)
             selected_x, selected_y, selected_norm = sel.as_lists()
         else:
             available_keys = []
@@ -347,7 +349,7 @@ class RunDisplayWidget(QWidget):
             ``(run_model, key, label)`` entries.
         """
         if self._linked_mode:
-            return self.plot_model.synthetic_display_entries()
+            return self.collection.synthetic_display_entries()
         if self._current_run:
             return [
                 (self._current_run, entry.key, entry.label)
@@ -415,11 +417,9 @@ class RunDisplayWidget(QWidget):
         ]
 
         if self._linked_mode:
-            self.plot_model.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=False
-            )
+            self.selection.set_selected_keys(x_keys, y_keys, norm_keys)
         elif self._current_run:
-            self.plot_model.set_selection_for(
+            self.selection.set_selection_for(
                 self._current_run.uid, x_keys, y_keys, norm_keys
             )
 
@@ -443,11 +443,11 @@ class RunDisplayWidget(QWidget):
             if button.isChecked()
         ]
 
-        # Force update the plot with current selection
+        # "Update" means repaint even when the selection is unchanged, so
+        # ask for the repaint directly: the selection guards on real change.
         if self.plot_model is not None:
-            self.plot_model.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=True
-            )
+            self.selection.set_selected_keys(x_keys, y_keys, norm_keys)
+            self.plot_model.request_plot_update.emit()
         else:
             self.selection_changed.emit(x_keys, y_keys, norm_keys)
 
@@ -457,7 +457,7 @@ class RunDisplayWidget(QWidget):
         self._run_selector.setEnabled(not self._linked_mode)
 
         if self._linked_mode:
-            self.plot_model.clear_selection_overrides()
+            self.selection.clear_overrides()
             self._update_display()
             self._update_header()
         else:
@@ -476,7 +476,7 @@ class RunDisplayWidget(QWidget):
 
     def _synchronize_selections(self) -> None:
         """Clear per-run overrides when re-linking (Link Runs)."""
-        self.plot_model.clear_selection_overrides()
+        self.selection.clear_overrides()
 
     def _update_checkboxes(self, x_keys, y_keys, norm_keys):
         """Update checkbox states from model."""

@@ -177,7 +177,7 @@ def test_ensure_trace_assembles_request(qapp):
     run = make_vppem_run()
     run_model = RunSource(run)
     plot_model, _ = make_plot_session()
-    plot_model.add_run(run_model)
+    plot_model.collection.add_runs([run_model])
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     apply_projection(plot_model.view_intent, cube)
     first = plot_model.ensure_trace(

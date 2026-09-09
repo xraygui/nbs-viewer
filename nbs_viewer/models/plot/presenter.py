@@ -1,8 +1,6 @@
-from typing import List, Optional, Union
+from typing import Optional
 from qtpy.QtCore import QObject, Signal
-from ...models.data.base import CatalogRun
 from ...models.plot.plot_session import PlotSession
-from ...models.plot.runSource import RunSource
 
 
 class PlotPresenter(QObject):
@@ -59,15 +57,3 @@ class PlotPresenter(QObject):
     def session(self) -> PlotSession:
         """Session root for this presenter."""
         return self._plot
-
-    def add_run(self, run: Union[CatalogRun, RunSource]) -> None:
-        """Add a run to this presenter's session."""
-        self.session.add_run(run)
-
-    def add_runs(self, runs: List[CatalogRun]) -> None:
-        """Add multiple runs to this presenter's session."""
-        self.session.add_runs(runs)
-
-    def remove_run(self, run: CatalogRun) -> None:
-        """Remove a run from this presenter's session."""
-        self.session.remove_run(run)

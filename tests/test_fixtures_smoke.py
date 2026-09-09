@@ -24,7 +24,7 @@ def test_catalog_recipes_line_scan_shapes():
 def test_headless_session_catalog_signal_path(headless_session):
     run_model = headless_session.select_run(0)
     assert run_model.uid == headless_session.catalog.get_runs()[0].uid
-    assert len(headless_session.session.available_models) == 1
+    assert len(headless_session.session.collection.available_models) == 1
 
 
 def test_headless_session_line_scan_fetch(headless_session):

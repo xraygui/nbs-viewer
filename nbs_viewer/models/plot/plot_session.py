@@ -1,24 +1,27 @@
 """
-Plot session: membership, visibility, selection, view, and the trace set.
+Plot session: the coordinator that joins membership, selection and view.
 
-Owns a :class:`RunCollection`, the visible-uid set, selected keys, transform,
-view state, the :class:`TraceSet`, and the region child.
-:class:`RunListItemModel` (in ``views/``) is a Qt facade that observes it.
+Owns four children and connects them: a :class:`RunCollection` (membership
+and visibility), a :class:`Selection` (default and per-run keys), a
+:class:`ViewIntent` (rank, axis order and reduce policy), and a
+:class:`RegionController` (crop and ROI). What it keeps for itself is the
+work no single child can do — building a :class:`PlotRequest` out of all
+four, and holding the :class:`TraceSet` that results.
+
+Views take the child they need. The session does not re-export them: a
+method earns a place here only if it joins two children, announces on a
+child's behalf, or enforces an invariant neither child can.
 
 ``rebuild()`` is the sole mutator of trace *membership*. Retention is
-membership × selection; visibility only filters drawing.
-
-Key selection is a session :class:`Selection` (default + per-uid overrides).
-Freeze and unlinked display read :meth:`selection_for`.
+membership x selection; visibility only filters drawing.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set
 
 from qtpy.QtCore import QObject, Signal
 
-from nbs_viewer.models.catalog.base import CatalogRun
 from nbs_viewer.utils import print_debug
 
 from nbs_viewer.models.cache.chunk_cache_progress import (
@@ -26,7 +29,6 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     TiledFetchStatus,
     aggregate_tiled_fetch_label,
 )
-from .combinedRunSource import CombinationMethod, CombinedRunSource
 
 from .frozenRunSource import FrozenRunSource
 from .plot_request import (
@@ -36,7 +38,7 @@ from .plot_request import (
 from .region_controller import RegionController
 from .run_collection import RunCollection
 from .runSource import RunSource
-from .selection import KeySelection, Selection
+from .selection import Selection
 from .trace import Trace
 from .trace_set import TraceSet
 from .view_intent import ViewIntent
@@ -59,15 +61,9 @@ class PlotSession(QObject):
         Qt parent.
     """
 
-    selected_keys_changed = Signal(list, list, list)
     transform_changed = Signal(dict)
     request_plot_update = Signal()
-    available_keys_changed = Signal()
     frozen_spectra_changed = Signal()
-    run_added = Signal(object)
-    run_removed = Signal(object)
-    available_runs_changed = Signal(list)
-    visible_runs_changed = Signal(set)
     cache_status_changed = Signal(str)
 
     def __init__(
@@ -77,314 +73,129 @@ class PlotSession(QObject):
         parent: Optional[QObject] = None,
     ):
         super().__init__(parent)
-        self._collection = RunCollection()
-        self._is_main_display = is_main_display
-        self._single_selection_mode = single_selection_mode
-        self._available_keys: List[str] = []
-        self._auto_add = True
-        self._visible_uids: Set[str] = set()
-        self._region = RegionController(self, parent=self)
-
-        self._selection = Selection()
-        self._retain_selection = False
-        self._transform = {"enabled": False, "text": ""}
-
+        self._collection = RunCollection(
+            is_main_display=is_main_display,
+            single_selection_mode=single_selection_mode,
+            parent=self,
+        )
+        # Constructed before anything else subscribes, so the selection
+        # settles against new membership before the session rebuilds on it.
+        self._selection = Selection(self._collection, parent=self)
         self._intent = ViewIntent(plot_ndim=1, parent=self)
-
+        self._region = RegionController(self, parent=self)
         self._traces = TraceSet(parent=self)
-        self._connected_run_uids = set()
 
+        self._transform = {"enabled": False, "text": ""}
+        self._connected_run_uids = set()
         self._progress_sources: Dict[int, ChunkCacheProgress] = {}
         self._cache_statuses: Dict[int, TiledFetchStatus] = {}
 
-
-        self.available_keys_changed.connect(self._on_available_keys_changed)
+        # Membership and selection each change what traces should exist;
+        # visibility only changes what is drawn.
+        self._collection.run_added.connect(self._on_run_added)
+        self._collection.run_removed.connect(self._on_run_removed)
+        self._collection.available_runs_changed.connect(self._on_membership_changed)
+        self._collection.visible_runs_changed.connect(self._on_visibility_changed)
+        self._selection.selected_keys_changed.connect(self._on_selection_changed)
+        self._selection.selected_keys_changed.connect(
+            self._region.on_selected_keys_changed
+        )
         # The intent is a child that announces its own changes. Requests
         # must be rewritten before the refetch is scheduled, so the order
         # of these two connections is load-bearing.
         self._intent.changed.connect(self._refresh_held_requests)
         self._intent.changed.connect(self.request_plot_update.emit)
-        # The region child reacts to the view directly. Both of these used
-        # to be the session subscribing to its own signals, because there
-        # was no second object to talk to.
+        # The region child reacts to the view directly.
         self._intent.orientation_changed.connect(
             self._region.sync_region_state_with_view
         )
         self._intent.plot_ndim_changed.connect(self._region.on_plot_ndim_changed)
-        self.selected_keys_changed.connect(
-            self._region.on_selected_keys_changed
-        )
         # The crop rides on every request, so a crop change rewrites held
         # requests and repaints -- the half of `set_view_crop` the controller
         # cannot do, because it needs the trace set.
         self._region.view_crop_changed.connect(self._on_view_crop_changed)
-        self.run_added.connect(self._refresh_cache_progress_connections)
-        self.run_removed.connect(self._refresh_cache_progress_connections)
-        self._refresh_cache_progress_connections()
 
     @property
     def collection(self) -> RunCollection:
         """
-        Return the owned run collection.
+        Membership, visibility, and the available-key universe.
+
+        Handed out rather than forwarded: views that manage runs talk to
+        ``session.collection`` directly.
         """
         return self._collection
 
     @property
-    def visible_uids(self) -> Set[str]:
+    def selection(self) -> Selection:
         """
-        Return visible run uids.
-        """
-        return set(self._visible_uids)
+        The default and per-run key selection.
 
-    @property
-    def available_keys(self) -> List[str]:
+        Handed out rather than forwarded, as :attr:`collection` is.
         """
-        Return the available-key universe (visible catalog-key intersection).
-        """
-        return list(self._available_keys)
+        return self._selection
 
-    @property
-    def available_models(self) -> List[RunSource]:
+    def _on_run_added(self, run_model: RunSource) -> None:
         """
-        Return all member run models.
-        """
-        return self._collection.sources()
+        Subscribe to one new member's session-level signals.
 
-    @property
-    def available_runs(self) -> List[CatalogRun]:
+        The collection owns the run's *key* signals, because it owns the
+        key universe. What is left is the two things only the session can
+        answer: a repaint, and the frozen-spectra rebuild.
         """
-        Return underlying CatalogRun objects for all members.
-        """
-        return [model._run for model in self._collection.sources()]
-
-    @property
-    def available_uids(self) -> List[str]:
-        """
-        Return member uids in order.
-        """
-        return self._collection.uids()
-
-    @property
-    def visible_models(self) -> List[RunSource]:
-        """
-        Return visible run models.
-        """
-        return [
-            model
-            for model in self._collection.sources()
-            if model.uid in self._visible_uids
-        ]
-
-    @property
-    def visible_runs(self) -> Set[str]:
-        """
-        Return visible run uids (alias of :attr:`visible_uids`).
-        """
-        return set(self._visible_uids)
-
-    @property
-    def auto_add(self) -> bool:
-        """
-        Whether newly added runs become visible automatically.
-        """
-        return self._auto_add
-
-    def set_auto_add(self, enabled: bool) -> None:
-        """
-        Set whether newly added runs become visible automatically.
-
-        Parameters
-        ----------
-        enabled : bool
-            When True, new runs are checked/visible on add.
-        """
-        self._auto_add = enabled
-
-    def set_dynamic_update(self, enabled: bool) -> None:
-        """
-        Set dynamic update state on every member source.
-
-        Parameters
-        ----------
-        enabled : bool
-            Whether to enable dynamic updates.
-        """
-        for model in self._collection.sources():
-            model.set_dynamic(enabled)
-
-    @property
-    def dynamic_update(self) -> bool:
-        """
-        Whether dynamic update is enabled on all members.
-        """
-        models = self._collection.sources()
-        return all(model.dynamic_update for model in models) if models else True
-
-    def update_available_keys(self) -> None:
-        """
-        Update the intersection of catalog keys among visible runs.
-        """
-        runs = self.visible_models
-        if not runs:
-            if self._available_keys:
-                self._available_keys = []
-                self.available_keys_changed.emit()
-            return
-
-        first_run = runs[0]
-        print_debug(
-            "PlotSession.update_available_keys",
-            f"available_keys from first_run.uid {first_run.uid}: "
-            f"{first_run.available_keys}",
-            "run",
-        )
-        available_keys = list(first_run.catalog_keys)
-        for run in runs[1:]:
-            available_keys = [
-                key for key in available_keys if key in run.catalog_keys
-            ]
-
-        if available_keys != self._available_keys:
-            self._available_keys = available_keys
-            self.available_keys_changed.emit()
-
-    def synthetic_display_entries(self):
-        """
-        Return frozen stack spectra for visible runs.
-
-        Returns
-        -------
-        list of tuple
-            ``(run_model, key, display_label)`` entries for Run Display.
-        """
-        entries = []
-        runs = self.visible_models
-        multi = len(runs) > 1
-        for run_model in runs:
-            for entry in run_model.frozen_spectra():
-                if entry.kind != "stack_spectrum":
-                    continue
-                label = entry.label
-                if multi:
-                    label = f"{run_model.scan_id} · {label}"
-                entries.append((run_model, entry.key, label))
-        return entries
-
-    def _connect_run_keys(self, run_model: RunSource) -> None:
-        run_model.available_keys_changed.connect(self.update_available_keys)
+        self._attach_run_model(run_model)
         run_model.frozen_spectra_changed.connect(self._on_frozen_spectra_changed)
+        self._refresh_cache_progress_connections()
 
-    def _disconnect_run_keys(self, run_model: RunSource) -> None:
-        try:
-            run_model.available_keys_changed.disconnect(self.update_available_keys)
-        except (TypeError, RuntimeError):
-            pass
+    def _on_run_removed(self, run_model: RunSource) -> None:
+        self._detach_run_model(run_model)
         try:
             run_model.frozen_spectra_changed.disconnect(
                 self._on_frozen_spectra_changed
             )
         except (TypeError, RuntimeError):
             pass
+        self._refresh_cache_progress_connections()
+
+    def _on_membership_changed(self) -> None:
+        """
+        Sync the trace set after runs joined or left.
+        """
+        self.rebuild()
+        self.request_plot_update.emit()
+
+    def _on_visibility_changed(self, _visible_uids: Set[str]) -> None:
+        """
+        Repaint after a visibility change.
+
+        Visibility is not membership: the traces of a hidden run stay, with
+        their bundles, so there is nothing to rebuild here.
+        """
+        self.request_plot_update.emit()
+
+    def _on_selection_changed(self, x_keys, y_keys, norm_keys) -> None:
+        """
+        Sync the trace set after the selected keys changed.
+        """
+        self.rebuild()
+        print_debug(
+            "PlotSession._on_selection_changed",
+            f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
+            category="plots",
+        )
+        self.request_plot_update.emit()
 
     def _on_frozen_spectra_changed(self) -> None:
         self.frozen_spectra_changed.emit()
         self.rebuild()
         self.request_plot_update.emit()
 
-    def add_runs(
-        self, run_list: Union[List[CatalogRun], List[RunSource]]
-    ) -> None:
-        """
-        Add CatalogRun or RunSource instances to the session.
-
-        Parameters
-        ----------
-        run_list : list of CatalogRun or RunSource
-            Runs to add.
-        """
-        print_debug("PlotSession.add_runs", f"Adding {len(run_list)} runs", "run")
-        run_list = sorted(run_list, key=lambda x: x.scan_id)
-        uid_list = []
-        for run in run_list:
-            uid = run.uid
-            uid_list.append(uid)
-            if uid in self._collection:
-                print_debug(
-                    "PlotSession.add_runs", f"Run {uid} already in model", "run"
-                )
-                continue
-
-            run_model = self._collection.wrap(run)
-            self._connect_run_keys(run_model)
-            self._collection.add(run_model)
-            self._attach_run_model(run_model)
-            self.run_added.emit(run_model)
-
-        self.update_available_keys()
-
-        if self._is_main_display or self._auto_add:
-            self.set_uids_visible(uid_list, True)
-        else:
-            self._maybe_apply_default_selection()
-            self.rebuild()
-            self.request_plot_update.emit()
-
-        self.available_runs_changed.emit(self.available_runs)
-
-    def add_run(self, run: Union[CatalogRun, RunSource]) -> None:
-        """
-        Add a single run to the session.
-
-        Parameters
-        ----------
-        run : CatalogRun or RunSource
-            Run to add.
-        """
-        self.add_runs([run])
-
-    def validate_combine(self, runs: List[RunSource]) -> None:
-        """
-        Check whether runs can be combined.
-
-        Parameters
-        ----------
-        runs : list of RunSource
-            Candidate source runs.
-        """
-        self._collection.validate_combine(runs)
-
-    def combine_runs(
-        self,
-        runs: List[RunSource],
-        method: CombinationMethod = CombinationMethod.AVERAGE,
-        expression: Optional[str] = None,
-    ) -> CombinedRunSource:
-        """
-        Build a combined run via the collection and add it.
-
-        Parameters
-        ----------
-        runs : list of RunSource
-            Source runs to combine.
-        method : CombinationMethod, optional
-            Combination method, by default AVERAGE.
-        expression : str, optional
-            Expression used when method is EXPRESSION.
-
-        Returns
-        -------
-        CombinedRunSource
-            The combined run that was added.
-        """
-        combined = self._collection.make_combined(
-            runs, method=method, expression=expression
-        )
-        self.add_run(combined)
-        return combined
 
     def freeze_runs(self, runs: List[RunSource]) -> List[FrozenRunSource]:
         """
-        Freeze selected Y keys via the collection and add the results.
+        Freeze the selected Y keys of each run and add the results.
+
+        A join: the frozen sources come from the collection's factory,
+        but which Y keys to freeze is the selection's answer.
 
         Parameters
         ----------
@@ -398,165 +209,13 @@ class PlotSession(QObject):
         """
         to_freeze = []
         for model in runs:
-            sel = self.selection_for(model.uid)
+            sel = self._selection.selection_for(model.uid)
             for key in sel.y:
                 to_freeze.append((model, key))
         frozen_runs = self._collection.make_frozen(to_freeze)
         if frozen_runs:
-            self.add_runs(frozen_runs)
+            self._collection.add_runs(frozen_runs)
         return frozen_runs
-
-    def remove_uids(self, uid_list) -> None:
-        """
-        Remove runs from the session by uid.
-
-        Parameters
-        ----------
-        uid_list : list of str
-            UIDs to remove.
-        """
-        print_debug(
-            "PlotSession.remove_uids",
-            f"Removing uids {uid_list}",
-            category="runlist",
-        )
-        for uid in uid_list:
-            run_model = self._collection.remove(uid)
-            if run_model is None:
-                continue
-            self._disconnect_run_keys(run_model)
-            self._detach_run_model(run_model)
-            run_model.cleanup()
-            self._visible_uids.discard(uid)
-            self._selection.drop_uid(uid)
-            self.run_removed.emit(run_model)
-
-        self.update_available_keys()
-        self.visible_runs_changed.emit(self.visible_runs)
-        self.available_runs_changed.emit(self.available_runs)
-        self.rebuild()
-        self.request_plot_update.emit()
-
-    def remove_run(self, run: Union[CatalogRun, RunSource]) -> None:
-        """
-        Remove a single run by uid.
-
-        Parameters
-        ----------
-        run : CatalogRun or RunSource
-            Run to remove.
-        """
-        self.remove_uids([run.uid])
-
-    def set_runs(self, run_list, display_id="main") -> None:
-        """
-        Replace membership with ``run_list``.
-
-        Parameters
-        ----------
-        run_list : list
-            CatalogRun objects that should remain.
-        display_id : str, optional
-            Unused; kept for API compatibility.
-        """
-        print_debug("PlotSession.set_runs", f"Setting runs {len(run_list)}", "run")
-        current_uids = {run.uid for run in run_list}
-        existing_uids = set(self._collection.uids())
-        self.remove_uids(list(existing_uids - current_uids))
-        self.add_runs(run_list)
-        self.cleanup_state()
-
-    def set_uids_visible(self, uids, is_visible: bool) -> None:
-        """
-        Set visibility for specific run uids.
-
-        Parameters
-        ----------
-        uids : list of str
-            UIDs to update.
-        is_visible : bool
-            New visibility state.
-        """
-        print_debug(
-            "PlotSession.set_uids_visible",
-            f"Setting uids {uids} to {is_visible}",
-            category="runlist",
-        )
-        if self._single_selection_mode and is_visible and uids:
-            all_uids = list(self._collection.uids())
-            for uid in all_uids:
-                self._visible_uids.discard(uid)
-
-            first_uid = uids[0]
-            if first_uid in self._collection:
-                self._visible_uids.add(first_uid)
-        else:
-            for uid in uids:
-                if uid not in self._collection:
-                    continue
-                if is_visible:
-                    self._visible_uids.add(uid)
-                else:
-                    self._visible_uids.discard(uid)
-
-        self.update_available_keys()
-        self.visible_runs_changed.emit(self.visible_runs)
-        self._maybe_apply_default_selection()
-        self.rebuild()
-        self.request_plot_update.emit()
-        print_debug(
-            "PlotSession.set_uids_visible",
-            f"visible_runs_changed uids={uids} visible={is_visible}",
-            category="plots",
-        )
-
-    def set_run_visible(
-        self, run: Union[CatalogRun, RunSource], is_visible: bool
-    ) -> None:
-        """
-        Update visibility for one run.
-
-        Parameters
-        ----------
-        run : CatalogRun or RunSource
-            Run to update.
-        is_visible : bool
-            New visibility state.
-        """
-        self.set_uids_visible([run.uid], is_visible)
-
-    def cleanup_state(self) -> None:
-        """
-        Drop visible uids that are no longer members.
-        """
-        valid_uids = set(self._collection.uids())
-        self._visible_uids.intersection_update(valid_uids)
-
-
-    @property
-    def traces(self) -> TraceSet:
-        """
-        Return the live :class:`TraceSet`, keyed by :class:`TraceKey`.
-        """
-        return self._traces
-
-    @property
-    def retain_selection(self) -> bool:
-        """
-        Whether to keep selected keys when the available-key universe empties.
-        """
-        return self._retain_selection
-
-    def set_retain_selection(self, enabled: bool) -> None:
-        """
-        Set whether to retain key selection when available keys clear.
-
-        Parameters
-        ----------
-        enabled : bool
-            Retain selection when True.
-        """
-        self._retain_selection = enabled
 
     @property
     def transform(self) -> dict:
@@ -585,131 +244,11 @@ class PlotSession(QObject):
         )
 
     @property
-    def selected_keys(self) -> tuple:
+    def traces(self) -> TraceSet:
         """
-        Return session-default ``(x_keys, y_keys, norm_keys)`` copies.
+        Return the live :class:`TraceSet`, keyed by :class:`TraceKey`.
         """
-        return self._selection.default.as_lists()
-
-    def get_selected_keys(self):
-        """
-        Return session-default selected x, y, and norm keys.
-        """
-        return self._selection.default.as_lists()
-
-    def selection_for(self, uid: str) -> KeySelection:
-        """
-        Resolve selection for ``uid`` (override or default, filtered).
-
-        Parameters
-        ----------
-        uid : str
-            Run uid.
-
-        Returns
-        -------
-        KeySelection
-            Filtered selection for that run.
-        """
-        source = self._collection.get(uid)
-        available = None
-        if source is not None:
-            available = source.available_keys
-        return self._selection.selection_for(uid, available)
-
-    def set_selection_for(
-        self,
-        uid: str,
-        x_keys: List[str],
-        y_keys: List[str],
-        norm_keys: Optional[List[str]] = None,
-    ) -> None:
-        """
-        Set a per-run selection override and rebuild.
-
-        Parameters
-        ----------
-        uid : str
-            Run uid.
-        x_keys, y_keys : list of str
-            Axis keys.
-        norm_keys : list of str, optional
-            Normalization keys.
-        """
-        self._selection.set_override(uid, x_keys, y_keys, norm_keys)
-        self.rebuild()
-        sel = self.selection_for(uid)
-        self.selected_keys_changed.emit(list(sel.x), list(sel.y), list(sel.norm))
-        self.request_plot_update.emit()
-
-    def clear_selection_overrides(self) -> None:
-        """
-        Clear per-run overrides (Link Runs) and rebuild from the default.
-        """
-        self._selection.clear_overrides()
-        self.rebuild()
-        x, y, n = self._selection.default.as_lists()
-        self.selected_keys_changed.emit(x, y, n)
-        self.request_plot_update.emit()
-
-    def is_key_selected(self, key: str, axis: str) -> bool:
-        """
-        Return whether a key is selected on the session default.
-
-        Parameters
-        ----------
-        key : str
-            Data key.
-        axis : str
-            One of ``'x'``, ``'y'``, or ``'norm'``.
-        """
-        default = self._selection.default
-        if axis == "x":
-            return key in default.x
-        if axis == "y":
-            return key in default.y
-        if axis == "norm":
-            return key in default.norm
-        return False
-
-    def set_selected_keys(
-        self,
-        x_keys: List[str],
-        y_keys: List[str],
-        norm_keys: Optional[List[str]] = None,
-        force_update: bool = False,
-    ) -> None:
-        """
-        Set the session-default key selection.
-
-        Parameters
-        ----------
-        x_keys : list of str
-            X-axis keys.
-        y_keys : list of str
-            Y-axis keys.
-        norm_keys : list of str, optional
-            Normalization keys.
-        force_update : bool, optional
-            Accepted for API compatibility; plot refresh is always requested.
-        """
-        self._selection.set_default(x_keys, y_keys, norm_keys)
-        self.rebuild()
-        x, y, n = self._selection.default.as_lists()
-        self.selected_keys_changed.emit(x, y, n)
-        print_debug(
-            "PlotSession.set_selected_keys",
-            f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
-            category="plots",
-        )
-        self.request_plot_update.emit()
-
-    @property
-    def dimension(self) -> int:
-        """
-        Plot dimensionality (1 or 2).
-        """
-        return self._intent.plot_ndim
+        return self._traces
 
     @property
     def view_intent(self) -> ViewIntent:
@@ -744,8 +283,8 @@ class PlotSession(QObject):
         -------
         str or None
         """
-        for run_model in self.visible_models:
-            selection = self.selection_for(run_model.uid)
+        for run_model in self._collection.visible_models:
+            selection = self._selection.selection_for(run_model.uid)
             if selection.x:
                 return selection.x[0]
         return None
@@ -766,8 +305,8 @@ class PlotSession(QObject):
             has more than one dimension.
         """
         best = None
-        for run_model in self.visible_models:
-            sel = self.selection_for(run_model.uid)
+        for run_model in self._collection.visible_models:
+            sel = self._selection.selection_for(run_model.uid)
             x_keys = list(sel.x)
             for ykey in sel.y:
                 if run_model.is_synthetic_key(ykey):
@@ -803,9 +342,7 @@ class PlotSession(QObject):
         if driving is None:
             return None
         _run_model, _ykey, layout = driving
-        return self._intent.project(
-            len(layout.shape), layout.shape, layout.names
-        )
+        return self._intent.project(len(layout.shape), layout.shape, layout.names)
 
     def move_view_axis(self, row_index: int, direction: int) -> None:
         """
@@ -846,27 +383,6 @@ class PlotSession(QObject):
             )
         self._intent.set_reduce_from(edited)
 
-    def set_plot_ndim(self, plot_ndim: int) -> None:
-        """
-        Set plot dimensionality.
-
-        Parameters
-        ----------
-        plot_ndim : int
-            1 for line plots, 2 for image plots.
-        """
-        self._intent.set_plot_ndim(plot_ndim)
-
-
-
-
-
-
-
-
-
-
-
     @property
     def region(self) -> RegionController:
         """
@@ -887,7 +403,6 @@ class PlotSession(QObject):
         self._refresh_held_requests()
         self.request_plot_update.emit()
 
-
     def _effective_transform_text(self, run_model: "RunSource" = None) -> str:
         """
         Return the session effective transform expression.
@@ -905,7 +420,6 @@ class PlotSession(QObject):
         if self._transform.get("enabled"):
             return self._transform.get("text", "") or ""
         return ""
-
 
     def _build_plot_request(
         self,
@@ -944,9 +458,7 @@ class PlotSession(QObject):
         # is the mixed-rank case, not an error. Projecting at an overridden
         # rank avoids manufacturing a throwaway intent, which a mutable
         # model cannot supply.
-        plot_ndim = (
-            len(shape) if 0 < len(shape) < intent.plot_ndim else None
-        )
+        plot_ndim = len(shape) if 0 < len(shape) < intent.plot_ndim else None
         return build_plot_request(
             uid=run_model.uid,
             xkeys=[xkey] if xkey else (),
@@ -1002,23 +514,11 @@ class PlotSession(QObject):
             )
         return trace
 
-    def drop_traces_for_uid(self, uid: str) -> None:
-        """
-        Remove and clean up all traces for a run uid.
-
-        Parameters
-        ----------
-        uid : str
-            Run uid whose traces should be dropped.
-        """
-        for key in self._traces.keys_for_uid(uid):
-            self._dispose_trace(key)
-
     def iter_visible_traces(self):
         """
         Yield traces whose run uid is currently visible.
         """
-        visible = self.visible_uids
+        visible = self._collection.visible_uids
         for key, trace in self._traces.items():
             if key.uid in visible:
                 yield trace
@@ -1056,22 +556,6 @@ class PlotSession(QObject):
             return matches[0]
         return None
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def _retained_trace_keys(self) -> Set[TraceKey]:
         """
         Return TraceKeys that should exist (membership × selection).
@@ -1082,8 +566,8 @@ class PlotSession(QObject):
             Desired trace identities. Visibility is not applied here.
         """
         keys: Set[TraceKey] = set()
-        for source in self.collection.sources():
-            sel = self.selection_for(source.uid)
+        for source in self._collection.sources():
+            sel = self._selection.selection_for(source.uid)
             if not (sel.x and sel.y):
                 continue
             for xkey in sel.x:
@@ -1106,7 +590,7 @@ class PlotSession(QObject):
         -------
             Request assembled from session view state.
         """
-        sel = self.selection_for(source.uid)
+        sel = self._selection.selection_for(source.uid)
         return self._build_plot_request(
             source,
             key.xkey,
@@ -1135,7 +619,7 @@ class PlotSession(QObject):
         request. Membership pruning stays in :meth:`rebuild`.
         """
         for key, trace in list(self._traces.items()):
-            source = self.collection.get(key.uid)
+            source = self._collection.get(key.uid)
             if source is None:
                 self._dispose_trace(key)
                 continue
@@ -1153,7 +637,7 @@ class PlotSession(QObject):
         for key in set(self._traces) - desired:
             self._dispose_trace(key)
         for key in desired:
-            source = self.collection.get(key.uid)
+            source = self._collection.get(key.uid)
             if source is None:
                 continue
             _trace, created = self._traces.ensure(
@@ -1181,39 +665,9 @@ class PlotSession(QObject):
             pass
         self._connected_run_uids.discard(run_model.uid)
 
-    def _on_available_keys_changed(self) -> None:
-        available_keys = self.available_keys
-        if not available_keys:
-            if not self._retain_selection and len(self.collection) == 0:
-                self.set_selected_keys([], [], [])
-            return
-
-        default = self._selection.default
-        valid_x = [k for k in default.x if k in available_keys]
-        valid_y = [k for k in default.y if k in available_keys]
-        valid_norm = [k for k in default.norm if k in available_keys]
-        if (
-            tuple(valid_x) != default.x
-            or tuple(valid_y) != default.y
-            or tuple(valid_norm) != default.norm
-        ):
-            self.set_selected_keys(valid_x, valid_y, valid_norm)
-
-    def _maybe_apply_default_selection(self) -> None:
-        if self._retain_selection:
-            return
-        default = self._selection.default
-        if default.x or default.y or default.norm:
-            return
-        models = self.available_models
-        if len(models) != 1:
-            return
-        x_keys, y_keys, norm_keys = models[0].run.get_default_selection()
-        self.set_selected_keys(x_keys, y_keys, norm_keys)
-
     def _discover_cache_progress_sources(self) -> Dict[int, ChunkCacheProgress]:
         sources: Dict[int, ChunkCacheProgress] = {}
-        for model in self.available_models:
+        for model in self._collection.available_models:
             run = getattr(model, "_run", None)
             if run is None:
                 continue

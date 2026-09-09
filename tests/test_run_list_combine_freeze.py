@@ -52,26 +52,26 @@ def test_combine_runs_adds_one_combined_entry(qapp):
     session, run_list = _bound_session()
     first = _make_run_model(line_scan_run(1))
     second = _make_run_model(line_scan_run(2))
-    session.add_runs([first, second])
-    before = len(session.available_models)
+    session.collection.add_runs([first, second])
+    before = len(session.collection.available_models)
 
-    combined = session.combine_runs(
+    combined = session.collection.combine(
         [first, second], method=CombinationMethod.SUM
     )
 
     assert isinstance(combined, CombinedRunSource)
-    assert combined in session.available_models
-    assert len(session.available_models) == before + 1
+    assert combined in session.collection.available_models
+    assert len(session.collection.available_models) == before + 1
     assert combined.combination_method == CombinationMethod.SUM
     assert set(combined.source_runs) == {first, second}
-    assert run_list.rowCount() == len(session.available_models)
+    assert run_list.rowCount() == len(session.collection.available_models)
 
 
 def test_validate_combine_rejects_single_run(qapp):
     session, _ = _bound_session()
     first = _make_run_model(line_scan_run(1))
     with pytest.raises(CombineError, match="at least 2"):
-        session.validate_combine([first])
+        session.collection.validate_combine([first])
 
 
 def test_validate_combine_rejects_no_common_keys(qapp):
@@ -79,7 +79,7 @@ def test_validate_combine_rejects_no_common_keys(qapp):
     first = _run_model_with_keys(line_scan_run(1), ("time", "det_a"))
     second = _run_model_with_keys(line_scan_run(2), ("energy", "det_b"))
     with pytest.raises(CombineError, match="no common data keys"):
-        session.validate_combine([first, second])
+        session.collection.validate_combine([first, second])
 
 
 def test_validate_combine_rejects_shape_mismatch(qapp):
@@ -87,33 +87,33 @@ def test_validate_combine_rejects_shape_mismatch(qapp):
     first = _make_run_model(_custom_run(1, ("time", "det"), length=100))
     second = _make_run_model(_custom_run(2, ("time", "det"), length=50))
     with pytest.raises(CombineError, match="different data shapes"):
-        session.validate_combine([first, second])
+        session.collection.validate_combine([first, second])
 
 
 def test_combine_runs_rejects_incompatible(qapp):
     session, _ = _bound_session()
     first = _run_model_with_keys(line_scan_run(1), ("time", "det_a"))
     second = _run_model_with_keys(line_scan_run(2), ("energy", "det_b"))
-    before = len(session.available_models)
+    before = len(session.collection.available_models)
     with pytest.raises(CombineError):
-        session.combine_runs([first, second])
-    assert len(session.available_models) == before
+        session.collection.combine([first, second])
+    assert len(session.collection.available_models) == before
 
 
 def test_freeze_runs_adds_frozen_entries_for_selected_y(qapp):
     session, _ = _bound_session()
     first = _make_run_model(_custom_run(1, ("time", "det", "i0")))
     second = _make_run_model(_custom_run(2, ("time", "det", "i0")))
-    session.add_runs([first, second])
-    session.set_selection_for(first.uid, ["time"], ["det", "i0"])
-    session.set_selection_for(second.uid, ["time"], ["det"])
-    before = len(session.available_models)
+    session.collection.add_runs([first, second])
+    session.selection.set_selection_for(first.uid, ["time"], ["det", "i0"])
+    session.selection.set_selection_for(second.uid, ["time"], ["det"])
+    before = len(session.collection.available_models)
 
     frozen = session.freeze_runs([first, second])
 
     assert len(frozen) == 3
     assert all(isinstance(item, FrozenRunSource) for item in frozen)
-    assert len(session.available_models) == before + 3
+    assert len(session.collection.available_models) == before + 3
     assert {item.display_name for item in frozen} == {
         "det of 1",
         "i0 of 1",
@@ -124,12 +124,12 @@ def test_freeze_runs_adds_frozen_entries_for_selected_y(qapp):
 def test_freeze_runs_noop_without_selected_y(qapp):
     session, _ = _bound_session()
     first = _make_run_model(line_scan_run(1))
-    session.add_run(first)
-    session.set_selection_for(first.uid, ["time"], [])
-    before = len(session.available_models)
+    session.collection.add_runs([first])
+    session.selection.set_selection_for(first.uid, ["time"], [])
+    before = len(session.collection.available_models)
     frozen = session.freeze_runs([first])
     assert frozen == []
-    assert len(session.available_models) == before
+    assert len(session.collection.available_models) == before
 
 
 def test_views_do_not_construct_combined_or_frozen_run_models():

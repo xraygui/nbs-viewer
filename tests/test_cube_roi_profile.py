@@ -45,9 +45,9 @@ def _session(ykey, *, depth_on_slider=False):
     """
     session, _ = make_plot_session()
     run = RunSource(image_scan_run(1, n_y=N_Y, n_x=N_X, n_z=N_Z))
-    session.add_run(run)
-    session.set_uids_visible({run.uid}, True)
-    session.set_selected_keys(["en_energy"], [ykey])
+    session.collection.add_runs([run])
+    session.collection.set_uids_visible({run.uid}, True)
+    session.selection.set_selected_keys(["en_energy"], [ykey])
     session.view_intent.set_plot_ndim(2)
     if depth_on_slider:
         session.view_intent.set_axis_order(

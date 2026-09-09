@@ -240,9 +240,11 @@ class DimensionControl(QWidget):
         self._projection = None
         self._updating_ui = False
 
-        self.plot_model.run_added.connect(self.on_run_added)
-        self.plot_model.run_removed.connect(self.on_run_removed)
-        self.plot_model.selected_keys_changed.connect(self.on_selection_changed)
+        self.plot_model.collection.run_added.connect(self.on_run_added)
+        self.plot_model.collection.run_removed.connect(self.on_run_removed)
+        self.plot_model.selection.selected_keys_changed.connect(
+            self.on_selection_changed
+        )
         self.canvas.plot_view_updated.connect(self.refresh_axis_coordinates)
         self.canvas.plot_view_updated.connect(self.refresh_plot_axis_labels)
 
@@ -561,7 +563,7 @@ class DimensionControl(QWidget):
         if not self.plot_model:
             return None
 
-        run_models = self.plot_model.visible_models
+        run_models = self.plot_model.collection.visible_models
         if not run_models:
             return None
 
@@ -572,7 +574,7 @@ class DimensionControl(QWidget):
 
         for run_model in run_models:
             try:
-                sel = self.plot_model.selection_for(run_model.uid)
+                sel = self.plot_model.selection.selection_for(run_model.uid)
                 x_keys, y_keys = list(sel.x), list(sel.y)
                 if not y_keys:
                     continue
@@ -626,7 +628,7 @@ class DimensionControl(QWidget):
         case only the spinbox is rolled back -- the session was never told,
         so there is no view state to undo.
         """
-        old_dim = self.plot_model.dimension
+        old_dim = self.plot_model.view_intent.plot_ndim
         new_dim = self.dimension_spinbox.value()
         if new_dim == old_dim:
             return
@@ -637,7 +639,7 @@ class DimensionControl(QWidget):
             self._updating_ui = False
             return
 
-        self.plot_model.set_plot_ndim(new_dim)
+        self.plot_model.view_intent.set_plot_ndim(new_dim)
         self._updating_ui = True
         self.create_sliders()
         self._updating_ui = False

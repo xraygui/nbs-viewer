@@ -860,7 +860,7 @@ class RegionController(QObject):
             )
         )
         if committed_xkey is None:
-            default_x = self._session.get_selected_keys()[0]
+            default_x = self._session.selection.get_selected_keys()[0]
             committed_xkey = default_x[0] if default_x else ""
         parent_spec = trace.request.view
         if cube_fingerprint is None:

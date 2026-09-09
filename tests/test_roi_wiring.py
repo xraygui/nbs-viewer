@@ -56,7 +56,7 @@ def _wired_image_scan_with_roi(
         indices=(0, 0),
     )
     apply_projection(session.session.view_intent, parent_spec)
-    session.session.set_selected_keys(["en_energy"], ["detector_image"])
+    session.session.selection.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = session.session.ensure_trace(
         run_model, "en_energy", "detector_image"

@@ -98,8 +98,8 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         self._update_grid()
 
     def _connect_signals(self):
-        self.plot_model.selected_keys_changed.connect(self._on_selection_changed)
-        self.plot_model.visible_runs_changed.connect(self._on_visible_runs_changed)
+        self.plot_model.selection.selected_keys_changed.connect(self._on_selection_changed)
+        self.plot_model.collection.visible_runs_changed.connect(self._on_visible_runs_changed)
         self.plot_model.request_plot_update.connect(self._update_grid)
 
     def draw(self):
@@ -133,13 +133,13 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             ``(shape, dim_names, axis_arrays, associated_data)`` or None.
         """
         print_debug("ImageGridCanvas", "Getting shape info", category="plots")
-        visible_models = self.plot_model.visible_models
+        visible_models = self.plot_model.collection.visible_models
         if not visible_models:
             print_debug("ImageGridCanvas", "No visible models", category="plots")
             return None
 
         run_model = visible_models[0]
-        sel = self.plot_model.selection_for(run_model.uid)
+        sel = self.plot_model.selection.selection_for(run_model.uid)
         x_keys, y_keys, norm_keys = sel.as_lists()
 
         print_debug(
@@ -342,7 +342,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             f"Displaying images {start_idx} to {end_idx-1}",
             category="plots",
         )
-        visible_models = self.plot_model.visible_models
+        visible_models = self.plot_model.collection.visible_models
         if not visible_models:
             return
 
@@ -350,7 +350,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         print_debug(
             "ImageGridCanvas", f"Run model: {run_model.uid}", category="plots"
         )
-        x_keys, y_keys, norm_keys = self.plot_model.selection_for(
+        x_keys, y_keys, norm_keys = self.plot_model.selection.selection_for(
             run_model.uid
         ).as_lists()
 
@@ -419,7 +419,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
 
     def _create_image_trace(self, run_model, slice_info, image_idx):
         key = (run_model.uid, image_idx)
-        sel = self.plot_model.selection_for(run_model.uid)
+        sel = self.plot_model.selection.selection_for(run_model.uid)
         x_keys, y_keys, norm_keys = sel.as_lists()
         y_key = y_keys[0]
         if key not in self._traces:

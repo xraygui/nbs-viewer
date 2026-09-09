@@ -32,5 +32,5 @@ def make_plot_session(
         is_main_display=is_main_display,
         single_selection_mode=single_selection_mode,
     )
-    run_list = RunListItemModel(session)
+    run_list = RunListItemModel(session.collection)
     return session, run_list

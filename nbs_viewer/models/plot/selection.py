@@ -1,9 +1,29 @@
-"""Session key selection: default plus per-run overrides."""
+"""
+Session key selection: a default plus full per-run overrides.
+
+A ``QObject``: the selected keys are state the whole display reacts to, so
+this is where ``selected_keys_changed`` lives. It used to live on
+:class:`PlotSession`, which then had to subscribe to its own signal to
+revalidate the selection when the available-key universe moved — the shape
+that says the announcement is in the wrong object.
+
+Selection is resolved *against* membership, so this object is constructed
+with the :class:`RunCollection` and borrows two things from it: the
+per-run key list that filters a resolved selection, and the notifications
+that a run left or that the key universe changed. That is a real dependency,
+not a convenience: a selection of keys means nothing without the runs the
+keys belong to.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, TYPE_CHECKING
+
+from qtpy.QtCore import QObject, Signal
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .run_collection import RunCollection
 
 
 @dataclass(frozen=True)
@@ -84,27 +104,72 @@ class KeySelection:
         )
 
 
-@dataclass
-class Selection:
+
+class Selection(QObject):
     """
     Session default key selection plus full per-uid overrides.
 
-    ``selection_for(uid, available)`` returns the override if present,
-    otherwise the default, then filters against ``available``.
-    ``clear_overrides()`` implements "Link Runs".
+    :meth:`selection_for` returns the override if present, otherwise the
+    default, filtered against the keys that run actually has.
+    :meth:`clear_overrides` implements "Link Runs".
+
+    Parameters
+    ----------
+    collection : RunCollection
+        Membership this selection resolves against.
+    parent : QObject, optional
+        Qt parent.
     """
 
-    default: KeySelection = field(default_factory=KeySelection)
-    overrides: Dict[str, KeySelection] = field(default_factory=dict)
+    selected_keys_changed = Signal(list, list, list)
 
-    def set_default(
+    def __init__(
+        self,
+        collection: "RunCollection",
+        parent: Optional[QObject] = None,
+    ):
+        super().__init__(parent)
+        self._collection = collection
+        self._default = KeySelection()
+        self._overrides: Dict[str, KeySelection] = {}
+        self._retain = False
+
+        collection.run_removed.connect(self._on_run_removed)
+        collection.available_keys_changed.connect(self._revalidate_default)
+        collection.available_runs_changed.connect(self._maybe_apply_run_default)
+        collection.visible_runs_changed.connect(self._maybe_apply_run_default)
+
+    @property
+    def default(self) -> KeySelection:
+        """
+        Return the session-default selection.
+        """
+        return self._default
+
+    @property
+    def selected_keys(self) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Return session-default ``(x_keys, y_keys, norm_keys)`` copies.
+        """
+        return self._default.as_lists()
+
+    def get_selected_keys(self) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Return session-default selected x, y, and norm keys.
+        """
+        return self._default.as_lists()
+
+    def set_selected_keys(
         self,
         x_keys: Sequence[str],
         y_keys: Sequence[str],
         norm_keys: Optional[Sequence[str]] = None,
-    ) -> None:
+    ) -> bool:
         """
-        Replace the session default selection.
+        Replace the session-default selection.
+
+        Guards on real change, as the view intent's mutators do, so a
+        redundant set does not restart the fetch of every trace.
 
         Parameters
         ----------
@@ -112,16 +177,26 @@ class Selection:
             Default axis keys.
         norm_keys : sequence of str, optional
             Default norm keys.
-        """
-        self.default = KeySelection.from_lists(x_keys, y_keys, norm_keys)
 
-    def set_override(
+        Returns
+        -------
+        bool
+            True if the selection changed and was announced.
+        """
+        wanted = KeySelection.from_lists(x_keys, y_keys, norm_keys)
+        if wanted == self._default:
+            return False
+        self._default = wanted
+        self._announce(self._default)
+        return True
+
+    def set_selection_for(
         self,
         uid: str,
         x_keys: Sequence[str],
         y_keys: Sequence[str],
         norm_keys: Optional[Sequence[str]] = None,
-    ) -> None:
+    ) -> bool:
         """
         Store a full per-run override.
 
@@ -133,58 +208,107 @@ class Selection:
             Override axis keys.
         norm_keys : sequence of str, optional
             Override norm keys.
-        """
-        self.overrides[uid] = KeySelection.from_lists(x_keys, y_keys, norm_keys)
 
-    def clear_override(self, uid: str) -> None:
+        Returns
+        -------
+        bool
+            True if the override changed and was announced.
         """
-        Remove the override for one uid, if any.
+        wanted = KeySelection.from_lists(x_keys, y_keys, norm_keys)
+        if self._overrides.get(uid) == wanted:
+            return False
+        self._overrides[uid] = wanted
+        self._announce(self.selection_for(uid))
+        return True
 
-        Parameters
-        ----------
-        uid : str
-            Run uid.
-        """
-        self.overrides.pop(uid, None)
-
-    def clear_overrides(self) -> None:
+    def clear_overrides(self) -> bool:
         """
         Clear all per-run overrides (Link Runs).
-        """
-        self.overrides.clear()
 
-    def drop_uid(self, uid: str) -> None:
+        Returns
+        -------
+        bool
+            True if there were overrides to clear.
         """
-        Drop override state when a run leaves membership.
+        if not self._overrides:
+            return False
+        self._overrides.clear()
+        self._announce(self._default)
+        return True
 
-        Parameters
-        ----------
-        uid : str
-            Removed run uid.
+    def selection_for(self, uid: str) -> KeySelection:
         """
-        self.overrides.pop(uid, None)
-
-    def selection_for(
-        self,
-        uid: str,
-        available: Optional[Iterable[str]] = None,
-    ) -> KeySelection:
-        """
-        Resolve selection for ``uid``.
+        Resolve the selection for ``uid``.
 
         Parameters
         ----------
         uid : str
             Run uid.
-        available : iterable of str, optional
-            If given, filter the resolved selection to these keys.
 
         Returns
         -------
         KeySelection
-            Override or default, optionally filtered.
+            Override or default, filtered to the keys that run has.
         """
-        sel = self.overrides.get(uid, self.default)
-        if available is None:
+        sel = self._overrides.get(uid, self._default)
+        source = self._collection.get(uid)
+        if source is None:
             return sel
-        return sel.filtered(available)
+        return sel.filtered(source.available_keys)
+
+    @property
+    def retain_selection(self) -> bool:
+        """
+        Whether to keep selected keys when the available-key universe empties.
+        """
+        return self._retain
+
+    def set_retain_selection(self, enabled: bool) -> None:
+        """
+        Set whether to retain key selection when available keys clear.
+
+        Parameters
+        ----------
+        enabled : bool
+            Retain selection when True.
+        """
+        self._retain = enabled
+
+    def _announce(self, selection: KeySelection) -> None:
+        x, y, norm = selection.as_lists()
+        self.selected_keys_changed.emit(x, y, norm)
+
+    def _on_run_removed(self, run_model) -> None:
+        self._overrides.pop(run_model.uid, None)
+
+    def _revalidate_default(self) -> None:
+        """
+        Drop default keys the available-key universe no longer offers.
+        """
+        available_keys = self._collection.available_keys
+        if not available_keys:
+            if not self._retain and len(self._collection) == 0:
+                self.set_selected_keys([], [], [])
+            return
+
+        default = self._default
+        self.set_selected_keys(
+            [k for k in default.x if k in available_keys],
+            [k for k in default.y if k in available_keys],
+            [k for k in default.norm if k in available_keys],
+        )
+
+    def _maybe_apply_run_default(self, *_args) -> None:
+        """
+        Adopt the sole member run's own default selection, if nothing is set.
+        """
+        if self._retain:
+            return
+        default = self._default
+        if default.x or default.y or default.norm:
+            return
+        models = self._collection.available_models
+        if len(models) != 1:
+            return
+        x_keys, y_keys, norm_keys = models[0].run.get_default_selection()
+        self.set_selected_keys(x_keys, y_keys, norm_keys)

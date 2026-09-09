@@ -174,7 +174,7 @@ class MplCanvas(FigureCanvasQTAgg):
         intent = self.plot_model.view_intent
         intent.plot_ndim_changed.connect(self._on_plot_ndim_changed)
         intent.orientation_changed.connect(self._on_orientation_changed)
-        self.plot_model.run_removed.connect(self._on_run_removed)
+        self.plot_model.collection.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.region.view_crop_changed.connect(
             self._on_plot_view_crop_changed
@@ -707,7 +707,7 @@ class MplCanvas(FigureCanvasQTAgg):
             # run x selection pair already, so the canvas reads that set
             # rather than recomputing the product and calling ensure_trace
             # a second time. Visibility is the only thing decided here.
-            visible_uids = self.plot_model.visible_uids
+            visible_uids = self.plot_model.collection.visible_uids
             visible_keys = set()
             for key, trace in self.traces.items():
                 if key.uid not in visible_uids:

@@ -21,16 +21,16 @@ def _session(ykey="image", xkey="x", include_nd=False):
     runs = [RunSource(r) for r in catalog.get_runs()]
     run = next(r for r in runs if ykey in r.available_keys)
     session = PlotSession(is_main_display=True)
-    session.add_run(run)
-    session.set_uids_visible([run.uid], True)
-    session.set_selected_keys([xkey], [ykey], [])
+    session.collection.add_runs([run])
+    session.collection.set_uids_visible([run.uid], True)
+    session.selection.set_selected_keys([xkey], [ykey], [])
     session.follow_x_selection()
     return session, run
 
 
 def test_driving_axes_picks_the_highest_rank_visible_key():
     session, run = _session()
-    session.set_selected_keys(["x"], ["y", "image"], [])
+    session.selection.set_selected_keys(["x"], ["y", "image"], [])
     driving = session.driving_axes()
     assert driving is not None
     _run_model, ykey, layout = driving
@@ -46,8 +46,8 @@ def test_driving_axes_is_none_without_a_multidimensional_key():
 
 def test_set_plot_ndim_reaches_every_trace():
     session, run = _session()
-    session.set_plot_ndim(2)
-    assert session.dimension == 2
+    session.view_intent.set_plot_ndim(2)
+    assert session.view_intent.plot_ndim == 2
     trace = session.traces.get(next(iter(session.traces)))
     assert trace.request.view.plot_ndim == 2
 
@@ -135,7 +135,7 @@ def test_a_new_x_selection_supersedes_a_manual_order():
     session.move_view_axis(0, direction=1)
     assert session.view_intent.dim_order != ()
 
-    session.set_selected_keys(["time"], ["image"], [])
+    session.selection.set_selected_keys(["time"], ["image"], [])
     session.follow_x_selection()
 
     assert session.view_intent.dim_order == ()
@@ -147,8 +147,8 @@ def test_the_reduce_policy_survives_a_plot_ndim_change():
     slice_axis = session.driving_projection().slice_axis_order()[0]
     session.set_axis_reduce({slice_axis: (DimRole.INDEX, 5)})
 
-    session.set_plot_ndim(2)
-    session.set_plot_ndim(1)
+    session.view_intent.set_plot_ndim(2)
+    session.view_intent.set_plot_ndim(1)
 
     assert 5 in session.view_intent.reduce_indices
     trace = session.traces.get(next(iter(session.traces)))
@@ -159,7 +159,7 @@ def test_gestures_reach_a_rank_three_key():
     session, run = _session(
         ykey="PCOEdge_image", xkey="sampleVoltage_VSource", include_nd=True
     )
-    session.set_plot_ndim(2)
+    session.view_intent.set_plot_ndim(2)
     projection = session.driving_projection()
     assert projection.ndim == 3
 
@@ -179,7 +179,7 @@ def test_the_session_wires_the_intent_to_requests_then_a_refetch():
     refetch is scheduled, or the refetch reads the old projection.
     """
     session, run = _session()
-    session.set_selected_keys(["time"], ["image"], [])
+    session.selection.set_selected_keys(["time"], ["image"], [])
     trace = next(iter(session.traces.values()))
 
     seen = []
@@ -198,7 +198,7 @@ def test_leaving_two_d_invalidates_region_state():
     Entering it does not: there is no stale geometry to clear.
     """
     session, run = _session()
-    session.set_selected_keys(["time"], ["image"], [])
+    session.selection.set_selected_keys(["time"], ["image"], [])
     reasons = []
     session.region.region_invalidation_requested.connect(reasons.append)
 

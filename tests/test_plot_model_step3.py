@@ -45,7 +45,7 @@ def _custom_run(scan_id: int, keys: tuple[str, ...], *, length: int = 100) -> Me
 def test_ensure_trace_same_keys_same_instance(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    plot_model.add_run(run_model)
+    plot_model.collection.add_runs([run_model])
 
     first = plot_model.ensure_trace(run_model, "time", "det")
     second = plot_model.ensure_trace(run_model, "time", "det")
@@ -56,7 +56,7 @@ def test_ensure_trace_same_keys_same_instance(qapp):
 def test_ensure_trace_different_keys_different_instances(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det", "i0")))
-    plot_model.add_run(run_model)
+    plot_model.collection.add_runs([run_model])
 
     first = plot_model.ensure_trace(run_model, "time", "det")
     second = plot_model.ensure_trace(run_model, "time", "i0")
@@ -66,38 +66,48 @@ def test_ensure_trace_different_keys_different_instances(qapp):
 def test_remove_run_drops_plot_data(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["time"], ["det"])
+    plot_model.collection.add_runs([run_model])
+    plot_model.selection.set_selected_keys(["time"], ["det"])
     assert any(key.uid == run_model.uid for key in plot_model.traces)
 
-    plot_model.remove_run(run_model)
+    plot_model.collection.remove_uids([run_model.uid])
     assert all(key.uid != run_model.uid for key in plot_model.traces)
 
 
 def test_uncheck_keeps_plot_data_in_map(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["time"], ["det"])
+    plot_model.collection.add_runs([run_model])
+    plot_model.selection.set_selected_keys(["time"], ["det"])
     assert len(plot_model.traces) >= 1
 
-    plot_model.set_uids_visible([run_model.uid], False)
+    plot_model.collection.set_uids_visible([run_model.uid], False)
     assert any(key.uid == run_model.uid for key in plot_model.traces)
     assert list(plot_model.iter_visible_traces()) == []
 
 
-def test_visibility_ensures_plot_data_when_keys_selected(qapp):
-    plot_model, _ = make_plot_session(is_main_display=False)
-    plot_model.set_auto_add(False)
-    run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["time"], ["det"])
-    plot_model.set_uids_visible([run_model.uid], False)
-    plot_model.drop_traces_for_uid(run_model.uid)
-    assert run_model.uid not in {key.uid for key in plot_model.traces}
+def test_visibility_does_not_rebuild_the_trace_set(qapp):
+    """
+    Showing a run reuses its traces rather than recreating them.
 
-    plot_model.set_uids_visible([run_model.uid], True)
-    assert TraceKey(run_model.uid, "time", "det") in plot_model.traces
+    Retention is membership x selection, so a visibility change has nothing
+    to rebuild -- and rebuilding would hand the canvas a new ``Trace`` for
+    an artist it has already filed under the same key.
+    """
+    plot_model, _ = make_plot_session(is_main_display=False)
+    plot_model.collection.set_auto_add(False)
+    run_model = _make_run_model(_custom_run(1, ("time", "det")))
+    plot_model.collection.add_runs([run_model])
+    plot_model.selection.set_selected_keys(["time"], ["det"])
+
+    key = TraceKey(run_model.uid, "time", "det")
+    trace = plot_model.traces.get(key)
+    assert trace is not None
+
+    plot_model.collection.set_uids_visible([run_model.uid], False)
+    plot_model.collection.set_uids_visible([run_model.uid], True)
+
+    assert plot_model.traces.get(key) is trace
 
 
 def test_two_plot_models_independent_keys_and_maps(qapp):
@@ -105,14 +115,14 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
     second, _ = make_plot_session()
     run_a = _make_run_model(_custom_run(1, ("time", "det", "i0")))
     run_b = _make_run_model(_custom_run(2, ("time", "det", "i0")))
-    first.add_run(run_a)
-    second.add_run(run_b)
+    first.collection.add_runs([run_a])
+    second.collection.add_runs([run_b])
 
-    first.set_selected_keys(["time"], ["det"])
-    second.set_selected_keys(["time"], ["i0"])
+    first.selection.set_selected_keys(["time"], ["det"])
+    second.selection.set_selected_keys(["time"], ["i0"])
 
-    assert first.get_selected_keys()[1] == ["det"]
-    assert second.get_selected_keys()[1] == ["i0"]
+    assert first.selection.get_selected_keys()[1] == ["det"]
+    assert second.selection.get_selected_keys()[1] == ["i0"]
     assert TraceKey(run_a.uid, "time", "det") in first.traces
     assert TraceKey(run_b.uid, "time", "i0") in second.traces
     assert TraceKey(run_a.uid, "time", "i0") not in first.traces
@@ -121,7 +131,7 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
 def test_cube_view_and_crop_without_canvas(qapp):
     plot_model = PlotSession()
     plot_model.view_intent.set_plot_ndim(2)
-    assert plot_model.dimension == 2
+    assert plot_model.view_intent.plot_ndim == 2
 
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
     plot_model.region.set_view_crop(crop, ("x", "y", "uid"))
@@ -136,8 +146,8 @@ def _image_session(qapp):
     """
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(image_scan_run(1, n_y=5, n_x=6))
-    plot_model.add_run(run_model)
-    plot_model.set_selected_keys(["pixel"], ["detector_image"])
+    plot_model.collection.add_runs([run_model])
+    plot_model.selection.set_selected_keys(["pixel"], ["detector_image"])
 
     parent = Projection(
         ndim=2,
@@ -182,8 +192,8 @@ def test_apply_view_crop_from_region_rejects_second_crop(qapp):
 def test_default_selection_on_first_run(qapp):
     plot_model, _ = make_plot_session()
     run_model = _make_run_model(_custom_run(1, ("time", "det")))
-    plot_model.add_run(run_model)
-    x_keys, y_keys, _ = plot_model.get_selected_keys()
+    plot_model.collection.add_runs([run_model])
+    x_keys, y_keys, _ = plot_model.selection.get_selected_keys()
     assert x_keys == ["time"]
     assert y_keys == ["det"]
 

@@ -77,9 +77,9 @@ def test_a_crop_change_rewrites_held_requests_before_the_repaint(qapp):
     """
     session, _ = make_plot_session()
     run = RunSource(image_scan_run(1, n_y=6, n_x=8, n_z=3))
-    session.add_run(run)
-    session.set_uids_visible({run.uid}, True)
-    session.set_selected_keys(["en_energy"], ["detector_image"])
+    session.collection.add_runs([run])
+    session.collection.set_uids_visible({run.uid}, True)
+    session.selection.set_selected_keys(["en_energy"], ["detector_image"])
     session.view_intent.set_plot_ndim(2)
     trace = next(iter(session.traces.values()))
     key = trace.trace_key.as_tuple()
@@ -116,12 +116,12 @@ def test_a_selection_change_invalidates_region_state(qapp):
     """
     session, _ = make_plot_session()
     run = RunSource(image_scan_run(1, n_y=6, n_x=8, n_z=3))
-    session.add_run(run)
-    session.set_selected_keys(["en_energy"], ["detector_image"])
+    session.collection.add_runs([run])
+    session.selection.set_selected_keys(["en_energy"], ["detector_image"])
 
     reasons = []
     session.region.region_invalidation_requested.connect(reasons.append)
-    session.set_selected_keys(["en_energy"], ["detector_cube"])
+    session.selection.set_selected_keys(["en_energy"], ["detector_cube"])
 
     assert reasons == ["field selection changed"]
 

@@ -13,8 +13,8 @@ from nbs_viewer.models.sources.testSource import create_test_catalog
 def _test_session():
     run = RunSource(create_test_catalog(1).get_runs()[0])
     plot = PlotSession()
-    run_list = RunListItemModel(plot)
-    plot.add_run(run)
+    run_list = RunListItemModel(plot.collection)
+    plot.collection.add_runs([run])
     x_keys, y_keys, norm_keys = run.run.get_default_selection()
     return run, plot, x_keys, y_keys, norm_keys
 
@@ -29,9 +29,9 @@ def test_a_stale_two_dimensional_view_cannot_poison_a_one_dimensional_key():
     run, plot, x_keys, _, norm_keys = _test_session()
     plot.view_intent.set_plot_ndim(2)
     plot.view_intent.set_reduce((DimRole.INDEX,), (7,))
-    assert plot.dimension == 2
+    assert plot.view_intent.plot_ndim == 2
 
-    plot.set_selected_keys(x_keys, ["y"], norm_keys)
+    plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
     bundle = plot.ensure_trace(run, x_keys[0], "y", norm_keys).get_plot_bundle()
     assert bundle.render_mode == "line"
     assert bundle.y.shape == (100,)
@@ -47,18 +47,18 @@ def test_y_image_y_selection_sequence():
     run, plot, x_keys, _, norm_keys = _test_session()
     xkey = x_keys[0]
 
-    plot.set_selected_keys(x_keys, ["y"], norm_keys)
+    plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
     bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y.render_mode == "line"
 
-    plot.set_selected_keys(x_keys, ["image"], norm_keys)
+    plot.selection.set_selected_keys(x_keys, ["image"], norm_keys)
     plot.view_intent.set_plot_ndim(2)
     bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
     ).get_plot_bundle()
     assert bundle_image.render_mode == "image"
 
-    plot.set_selected_keys(x_keys, ["y"], norm_keys)
+    plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
     plot.view_intent.set_plot_ndim(1)
     bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y_again.render_mode == "line"
@@ -75,7 +75,7 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     run, plot, x_keys, _, norm_keys = _test_session()
     xkey = x_keys[0]
 
-    plot.set_selected_keys(x_keys, ["y", "image"], norm_keys)
+    plot.selection.set_selected_keys(x_keys, ["y", "image"], norm_keys)
     plot.view_intent.set_plot_ndim(2)
 
     bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
