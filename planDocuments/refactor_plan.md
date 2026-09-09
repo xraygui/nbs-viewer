@@ -72,8 +72,8 @@ They interleave; the order below is the merged sequence.
 | G | `ViewIntent` becomes a model | session & traces | ✅ `63a73f0` |
 | D | `RegionController` — crop and ROI are one child | session & traces | ✅ `aba26a3` |
 | H | `RunCollection` / `Selection` become models | session & traces | ✅ `85e653b` |
-| E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | next |
-| 7 | `plot_bundle.py` | view pipeline | independent |
+| E | `FrozenRun` / `CombinedRun` become data sources | session & traces | ✅ `766f983` |
+| 7 | `plot_bundle.py` | view pipeline | next |
 | F | Final deletions and renames | session & traces | last |
 
 Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong

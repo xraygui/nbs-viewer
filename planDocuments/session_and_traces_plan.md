@@ -4,7 +4,7 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** steps A, B, C, G, D and H landed; **E, F** remain. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
+**Status:** steps A, B, C, G, D, H and E landed; **F** remains. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
 from the original step order; the target ownership tree below was rewritten in
 the same pass. Everything marked done is verified against the tree.
 
@@ -896,9 +896,9 @@ remove; all four earlier scripts still pass.
 
 ---
 
-## Step E — `FrozenRun` and `CombinedRun` become data sources
+## Step E — `FrozenRun` and `CombinedRun` become data sources ✅ (`766f983`)
 
-**Next.** Step H stabilised the collection's factory API (`make_combined`,
+**Landed.** Step H stabilised the collection's factory API (`make_combined`,
 `make_frozen`, `combine`).
 
 **Rewritten 2026-09-09** after the maintainer supplied the intent the original
@@ -994,47 +994,76 @@ its six abstract methods come from code the ROI commit path already tests.
 Immutability becomes structural: today's class captures nothing, holds a live
 parent reference, and reconnects `data_changed`.
 
-### Do
+### Did
 
-- [ ] `FrozenRun(CatalogRun)` in `models/data/`, built on `FrozenSpectrum`:
-  captures the array and its axes at freeze time and declares **only** the key
-  it holds. `getData` / `getShape` / `getAxis` delegate to the entry.
-  `MemoryRun` is the template for the rest, including `super().__init__(None, uid, ...)`
-  — the base constructor already accepts a synthetic run with no backing object.
-- [ ] `CombinedRun(CatalogRun)` in `models/data/`, holding an ordered list of
-  `(source, binding)` where a binding is either *the requested key* or a
-  literal key:
+- [x] `FrozenRun` in `models/data/frozen.py` — **a `MemoryRun`, not a wrapper
+  over `FrozenSpectrum`.** See the decisions below. It captures the pinned Y
+  key plus the axes needed to plot it, declares those keys and nothing else,
+  and refuses a run that is still acquiring.
+- [x] `CombinedRun(CatalogRun)` in `models/data/combined.py`, with per-source
+  key bindings, `REQUESTED` for the ordinary case.
+- [x] `validate_combine(runs, method)` — shared key and matching shapes only
+  for AVERAGE and SUM.
+- [x] Truncation to the common extent of the shared axes, trailing axes left
+  alone.
+- [x] `scanFinished` promoted to `CatalogRun` with a default of True;
+  `RunCollection.freeze` gated on it.
+- [x] Bug 1 closed as a consequence: there is no inherited `get_plot_bundle`
+  reading one backing run.
+- [x] Duplicate `data_changed` connect removed — each source is connected
+  exactly once.
+- [x] `get_plot_data` gone from the tree, along with `combinedRunSource.py`
+  and `frozenRunSource.py`.
 
-  ```python
-  CombinedRun(
-      sources=[(run_a, REQUESTED), (frozen_i0, "i0")],
-      method=EXPRESSION,
-      expression="runlist[0] / runlist[1]",
-  )
-  ```
+### The decisions the plan had not predicted
 
-  `available_keys` is the intersection over the REQUESTED-bound sources, so
-  the combined run stays selectable. The substitution is now part of the
-  combination's definition rather than hidden in a source's read path.
-- [ ] `validate_combine(runs, method)` requires a shared key only for AVERAGE
-  and SUM; EXPRESSION checks shape compatibility alone.
-- [ ] **Truncate to the shorter** when a snapshot meets a still-growing
-  dynamic run — which will be the dynamic run, since the frozen side is
-  complete by the rule below. Not broadcast, and not a refusal: a partial
-  scan should keep plotting against its reference as it fills.
-- [ ] **Refuse to freeze an unfinished run.** This needs a predicate that does
-  not exist yet: `scanFinished` is defined on `BlueskyRun` (`bool(metadata["stop"])`)
-  and `KafkaRun` (stop document, or every buffer reaching `num_points`), on
-  neither `CatalogRun` nor `MemoryRun`, and has **zero callers**. Promote it to
-  `CatalogRun` with a default of True for static sources, and gate
-  `make_frozen` on it.
-- [ ] **Fixes bug 1** as a consequence rather than as a patch: with the
-  combination at the data layer there is no inherited `get_plot_bundle`
-  reading a single `self._run`.
-- [ ] Remove the duplicate `data_changed` connect in `CombinedRunSource`
-  (`:69-70` plus `RunSource._connect_run` connects the same signal twice, so
-  every combined run fires its handler twice).
-- [ ] Port, then delete, `RunSource.get_plot_data` and both overrides.
+**`FrozenRun` is a `MemoryRun`, not a wrapper over `FrozenSpectrum`.** The step
+said to build it on `FrozenSpectrum` because that class already captures. It
+does, but it is an *ROI* entry: its fields are `kind`
+(`stack_spectrum` / `local_profile`), `source_ykey`, `committed_xkey`,
+`request`, `cube_fingerprint`, and its keys carry the `__roi__/` prefix.
+Freezing a whole run has none of that vocabulary, so building on it would have
+meant inventing plausible values for six fields that mean nothing here. A
+frozen run *is* what `MemoryRun` already is — copied arrays in a dictionary
+with metadata, static by construction — and subclassing it is the one place in
+this step where inheritance is not a fiction. It brings `getRunKeys`,
+`get_dims`, `_resolve_dims`, `getData`, `getShape`, `getAxis`, `to_row`,
+`to_header` and `num_points` with it; `FrozenRun` adds a constructor, a
+display name, and the two refusals. `FrozenSpectrum` is untouched.
+
+`CombinedRun` deliberately does *not* subclass `MemoryRun`, for the same
+reason: it is derived and live, not static, and reusing `MemoryRun` for its
+dimension handling would repeat exactly the mistake this step is undoing.
+It delegates structure — `getRunKeys`, `get_dims`, `getPlotHints`, `start`,
+`getAxis` — to its primary source, which is correct rather than convenient: a
+combination of like runs has the dimension structure of the runs being
+combined.
+
+**Axis keys are read from the primary source, never combined.** This was not
+in the step and it is load-bearing. `CatalogRun.get_dimension_axes` fetches
+coordinates through `getData`, so without a branch the combination would apply
+to axes too — an averaged motor position, and for EXPRESSION a coordinate
+divided by a reference, which is meaningless. The old implementation did the
+same thing in its own words ("use x data from first run"); the difference is
+that the rule is now stated where `getData` can be read.
+
+**A pinned source is validated at construction.** If it does not offer the key
+it is bound to, `getShape` would report `(0,)` for it and truncation would
+silently clip every array to empty. `CombinedRun.__init__` refuses instead.
+It also refuses a combination with no `REQUESTED` source, which would have no
+keys to offer and so could never be selected.
+
+### The step's premise was slightly wrong, in our favour
+
+The step said `get_plot_data` "has no caller but itself". It is worse than
+that: **`RunSource.get_plot_data` does not exist** — it was deleted in an
+earlier step of this refactor — so `FrozenRunSource.get_plot_data`'s
+`super().get_plot_data(...)` and `CombinedRunSource`'s `self.transform_data(...)`
+would both have raised `AttributeError`. The composition survived as a
+*design* — the pinned-key substitution and the `runlist` feed — but not as
+working code, so this step reconstructed it rather than porting it. What was
+portable was the algorithm in `_combine_data`, which is now
+`CombinedRun.getData`.
 
 ### The behaviour change this makes, deliberately
 
@@ -1046,28 +1075,57 @@ new order is the wanted one, and since the current path is dead no existing
 expression depends on the old one. It is a semantic change, not a port, and
 should be recorded as such rather than discovered later.
 
-### Open question to settle while writing it
+### The open question, settled
 
-`FrozenRun` needs `to_header` / `to_row` for the run list, and a display name.
-Today it is `f"{y_key} of {scan_id}"`, which is right; the run-list columns are
-the part with no precedent for a synthetic run. `MemoryRun` is the closest
-template.
+The run-list columns had no precedent for a synthetic run. `FrozenRun` gets
+them from `MemoryRun` unchanged, keeping its parent's `scan_id` with
+`plan_name` set to `"Frozen"`; the display name stays `f"{y_key} of {scan_id}"`.
+`CombinedRun` defines its own `METADATA_KEYS` / `DISPLAY_KEYS` and reports
+`exit_status` as `"combined"`.
+
+### Tests
+
+Suite 403 → 421. `tests/test_combined_and_frozen_runs.py` (18) is the **first
+coverage either feature has ever had**. The tests that existed asserted
+`bundle.y.shape == (100,)` and finiteness, which is why they passed for as
+long as combining plotted its first source; these assert against known
+arrays.
+
+All eight mutations were checked, and **two of the new tests did not bite on
+the first pass** — worth recording, because both failures were the same
+mistake in different clothes: the fixture made the mutation invisible. The
+axis-coordinate test gave its two sources *the same* motor array, so averaging
+them was indistinguishable from taking the primary's; the capture test
+rebound the parent's dict entry instead of mutating the array in place, so a
+capture that merely referenced the parent survived it. Fixed in `9069414`.
+
+The other six failed exactly the intended test: returning the first source,
+dropping the freeze gate, validating expressions like averages, removing
+truncation, exposing the parent's whole key space, and connecting
+`data_changed` twice.
+
+A real-`QApplication` script drives combine, freeze and
+normalize-by-reference through `PlotDisplay` and the run-list view.
 
 ### Exit criteria
 
-- [ ] A combined run plots the combination, asserted against known arrays
-- [ ] A frozen run does **not** follow the session selection, and its data
+- [x] A combined run plots the combination, asserted against known arrays
+- [x] A frozen run does **not** follow the session selection, and its data
   does not change when its parent's does
-- [ ] One run normalizes a set of others through an expression, asserted
+- [x] One run normalizes a set of others through an expression, asserted
   against known arrays — the motivating case, headless
-- [ ] An AVERAGE combination still refuses runs with no common key; an
-  EXPRESSION combination does not
-- [ ] Freezing an unfinished run is refused
-- [ ] A frozen snapshot combined with a shorter dynamic run truncates to the
+- [x] An AVERAGE combination still refuses incompatible runs; an EXPRESSION
+  combination does not. Asserted on **mismatched shapes** rather than
+  disjoint keys: `MemoryRun.getRunKeys` lists `time` as an x key whether or
+  not the data has it, so two runs always share at least that. The existing
+  no-common-keys test reaches the case by setting `RunSource._catalog_keys`
+  directly; a differing length is a pair a user can actually produce
+- [x] Freezing an unfinished run is refused
+- [x] A frozen snapshot combined with a shorter dynamic run truncates to the
   dynamic run's length
-- [ ] A source `data_changed` fires its handler exactly once
-- [ ] `models/plot/` holds no `CatalogRun` subclasses
-- [ ] `rg "get_plot_data" nbs_viewer/` returns nothing
+- [x] A source `data_changed` fires its handler exactly once
+- [x] `models/plot/` holds no `CatalogRun` subclasses
+- [x] `rg "get_plot_data" nbs_viewer/` returns nothing
 
 ---
 
