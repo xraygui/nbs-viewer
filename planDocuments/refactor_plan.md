@@ -156,7 +156,7 @@ Recorded regardless of whether the step that fixes them lands.
 
 | # | Bug | Status |
 |---|-----|--------|
-| 1 | `CombinedRunSource` does not override `get_plot_bundle`; the inherited path reads `self._run`, set to `runs[0].run`. Combining plots the first run. Silent wrong answer. | open — step E |
+| 1 | `CombinedRunSource` does not override `get_plot_bundle`; the inherited path reads `self._run`, set to `runs[0].run`. Combining plots the first run. Silent wrong answer. | ✅ `766f983` — closed in step E. Combining moved to the data layer, so there is no inherited fetch path. The same defect held for freeze, which was never listed: a frozen run followed the session selection. Both now assert against known arrays |
 | 2 | ROI mask applied in display order to a storage-order array; ND ROI profiles are wrong by an upside-down mask. | ✅ step 3 (`dbe6083`) |
 | 3 | `fetch_context` applies a display bbox directly onto storage slices; three of four axis orientations fetch the wrong block. | ✅ step 3 (`dbe6083`) |
 | 4 | "Show All Keys" is a no-op. `RunDisplayWidget._show_all` is written and never read. Intended backing is `CatalogRun.get_hinted_keys`, which has zero callers. | open |
