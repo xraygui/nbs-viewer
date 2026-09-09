@@ -1,0 +1,181 @@
+"""
+ROI profiles taken along a rank-3 cube.
+
+Both test catalogs now carry a 2-D detector key and a 3-D one whose leading
+axes mean the same thing, so these paths can be exercised headlessly at all:
+until the cube existed, every ROI test ran against a rank-2 plane and the
+rank-3 branches of the profile pipeline had no coverage.
+
+The cases below are the ones a user reaches from the UI: the trailing-axis
+default plane, and the plane you get after moving the short axis onto a
+slider. Every eligible profile axis is exercised in each.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.region_mesh import (
+    _cell_x_bounds_mesh,
+    _cell_y_bounds_mesh,
+)
+from nbs_viewer.models.plot.roi_set import RoiOperation
+from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.view_spec import eligible_profile_axes
+from tests.fixtures.catalog_recipes import image_scan_run
+from tests.fixtures.plot_session import make_plot_session
+
+N_Y, N_X, N_Z = 12, 16, 3
+
+
+def _session(ykey, *, depth_on_slider=False):
+    """
+    Return ``(session, run, trace)`` showing ``ykey`` as a 2-D plane.
+
+    Parameters
+    ----------
+    ykey : str
+        ``detector_image`` (rank 2) or ``detector_cube`` (rank 3).
+    depth_on_slider : bool, optional
+        For the cube, put ``dim_2`` on a slider so the plane is
+        ``(row, pixel)`` rather than the trailing-axis default.
+    """
+    session, _ = make_plot_session()
+    run = RunSource(image_scan_run(1, n_y=N_Y, n_x=N_X, n_z=N_Z))
+    session.add_run(run)
+    session.set_uids_visible({run.uid}, True)
+    session.set_selected_keys(["en_energy"], [ykey])
+    session.view_intent.set_plot_ndim(2)
+    if depth_on_slider:
+        session.view_intent.set_axis_order(
+            (2, 0, 1), ["row", "pixel", "dim_2"]
+        )
+    trace = session.ensure_trace(run, "en_energy", ykey)
+    trace.get_plot_bundle()
+    return session, run, trace
+
+
+def _add_roi(session, trace, profile_storage_axis):
+    """
+    Add an ROI covering the interior of the current plane.
+    """
+    frame = frame_from_bundle(trace.last_bundle)
+    n_rows, n_cols = trace.last_bundle.y.shape
+    x0, _ = _cell_x_bounds_mesh(frame, 1, 0)
+    _, x1 = _cell_x_bounds_mesh(frame, n_cols - 2, 0)
+    y0, _ = _cell_y_bounds_mesh(frame, 1, 0)
+    _, y1 = _cell_y_bounds_mesh(frame, n_rows - 2, 0)
+    entry_id = session.roi_set.add(
+        RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
+        operation=RoiOperation(
+            profile_storage_axis=profile_storage_axis,
+            spatial_reduce="sum",
+            span_full_profile_axis=True,
+            label="roi",
+        ),
+        view_fingerprint=session.resolve_current_view_fingerprint(),
+    )
+    return entry_id, frame
+
+
+def test_the_cube_and_the_image_are_both_selectable():
+    """
+    The mixed-rank paths need a rank-2 and a rank-3 key on one run.
+    """
+    run = RunSource(image_scan_run(1, n_y=N_Y, n_x=N_X, n_z=N_Z))
+
+    assert run.get_shape("detector_image") == (N_Y, N_X)
+    assert run.get_shape("detector_cube") == (N_Y, N_X, N_Z)
+    names = run.describe_axes("detector_cube", ["en_energy"]).names
+    assert names == ("row", "pixel", "dim_2")
+
+
+def test_the_cube_leading_plane_matches_the_image(qapp):
+    """
+    The cube's first slab is the image, so the two keys are comparable.
+
+    A test that fetches a cube plane has to know what it should contain, or
+    a wrong axis choice reads as merely surprising rather than wrong.
+    """
+    _s, _r, image = _session("detector_image")
+    _s2, _r2, cube = _session("detector_cube", depth_on_slider=True)
+
+    assert image.last_bundle.y.shape == (N_Y, N_X)
+    assert cube.last_bundle.y.shape == (N_Y, N_X)
+    np.testing.assert_allclose(cube.last_bundle.y, image.last_bundle.y)
+
+
+@pytest.mark.parametrize("depth_on_slider", [False, True])
+def test_every_eligible_profile_axis_previews_on_a_cube(
+    qapp, depth_on_slider
+):
+    """
+    Each axis the UI offers must actually produce a profile.
+
+    The profile-axis dropdown is populated from ``eligible_profile_axes``, so
+    anything it lists is reachable by one click and must not raise.
+    """
+    session, _run, trace = _session(
+        "detector_cube", depth_on_slider=depth_on_slider
+    )
+    eligible = eligible_profile_axes(trace.request.view)
+    assert eligible, "no profile axis offered for a rank-3 key"
+
+    sizes = {0: N_Y, 1: N_X, 2: N_Z}
+    for storage_axis in eligible:
+        entry_id, frame = _add_roi(session, trace, storage_axis)
+        bundle = session.preview_roi_profile(
+            entry_id,
+            parent_trace=trace,
+            parent_frame=frame,
+            cached_plane=trace.last_bundle,
+        )
+        assert bundle.y.ndim == 1
+        assert bundle.y.shape == (sizes[storage_axis],)
+        session.roi_set.remove(entry_id)
+
+
+def test_a_cube_profile_along_the_slider_axis_reads_every_slab(qapp):
+    """
+    Profiling along the reduce axis is the stack-spectrum case.
+
+    It is the one profile that leaves the drawn plane, so it is also the one
+    that silently returns a single slab if the axis is mishandled. The
+    fixture scales each slab by a distinct factor, which makes that visible.
+    """
+    session, _run, trace = _session("detector_cube", depth_on_slider=True)
+    entry_id, frame = _add_roi(session, trace, 2)
+
+    bundle = session.preview_roi_profile(
+        entry_id,
+        parent_trace=trace,
+        parent_frame=frame,
+        cached_plane=trace.last_bundle,
+    )
+
+    assert bundle.y.shape == (N_Z,)
+    # Slabs differ by a strictly increasing factor, so a sum over the same
+    # ROI must increase with depth. Equal values would mean one slab was
+    # read N_Z times.
+    assert len(set(np.round(bundle.y, 9))) == N_Z
+    assert np.all(np.diff(bundle.y) > 0)
+
+
+def test_the_runtime_test_catalog_offers_a_cube():
+    """
+    The catalog the application loads must carry the 3-D key too.
+
+    The headless fixture and the demo catalog are separate builders, and a
+    3-D path that only exists in one of them cannot be reproduced by hand.
+    """
+    from nbs_viewer.models.sources.testSource import create_runs
+
+    run = RunSource(create_runs(2)[1])
+
+    assert "image" in run.available_keys
+    assert "image_cube" in run.available_keys
+    assert len(run.get_shape("image")) == 2
+    assert len(run.get_shape("image_cube")) == 3

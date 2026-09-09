@@ -20,6 +20,7 @@ def _base_metadata(
     plan_name: str = "test",
     motors: List[str] | None = None,
     dimensions=None,
+    dims=None,
 ) -> dict:
     base_datetime = datetime.strptime("2026-08-01", "%Y-%m-%d")
     metadata = {
@@ -31,6 +32,8 @@ def _base_metadata(
         "motors": motors or [],
         "hints": {"dimensions": dimensions or [(["time"], "primary")]},
     }
+    if dims:
+        metadata["dims"] = dims
     return metadata
 
 
@@ -87,23 +90,39 @@ def motor_scan_run(scan_id: int = 0) -> MemoryRun:
     return MemoryRun(metadata, data)
 
 
-def image_scan_run(scan_id: int = 0, *, n_y: int = 30, n_x: int = 40) -> MemoryRun:
+def image_scan_run(
+    scan_id: int = 0, *, n_y: int = 30, n_x: int = 40, n_z: int = 3
+) -> MemoryRun:
     """
-    Build a 2D image scan for ROI and cube-view tests.
+    Build an image scan carrying both a 2D and a 3D detector key.
+
+    ``detector_image`` is ``(row, pixel)`` and ``detector_cube`` is
+    ``(row, pixel, dim_2)`` -- the same plane with a short third axis added,
+    so a test can compare a rank-2 key against a rank-3 one whose leading
+    axes mean the same thing. Both live on one run deliberately: the
+    mixed-rank paths only exist when a 2D and a 3D key are selectable
+    together.
+
+    ``dim_2`` is short on purpose. It is a reduce axis in every 2D view, so
+    its only job is to be indexable and to make a wrong axis choice show up
+    as a shape mismatch rather than a plausible-looking plane.
 
     Parameters
     ----------
     scan_id : int, optional
-        Scan index added to image values.
+        Scan index added to detector values.
     n_y : int, optional
-        Row count for ``detector_image``.
+        Row count for both detector keys.
     n_x : int, optional
-        Column count for ``detector_image``.
+        Column count for both detector keys.
+    n_z : int, optional
+        Length of the third axis on ``detector_cube``.
 
     Returns
     -------
     MemoryRun
-        Synthetic run with ``en_energy``, ``pixel``, and ``detector_image``.
+        Run with ``en_energy``, ``pixel``, ``row``, ``dim_2``,
+        ``detector_image`` and ``detector_cube``.
     """
     en_energy = np.linspace(200.0, 1000.0, n_x)
     pixel = np.cumsum(np.linspace(0.1, 0.3, n_x))
@@ -111,11 +130,20 @@ def image_scan_run(scan_id: int = 0, *, n_y: int = 30, n_x: int = 40) -> MemoryR
         np.arange(n_y * n_x, dtype=float).reshape(n_y, n_x) + float(scan_id)
     )
     row_axis = np.linspace(0.0, 1.0, n_y)
+    dim_2_axis = np.linspace(0.0, 1.0, n_z)
+    # Each slab differs by a multiple of the plane's own range, so indexing
+    # the wrong axis produces values no other slab could hold.
+    detector_cube = (
+        detector_image[:, :, None]
+        + np.arange(n_z, dtype=float)[None, None, :] * float(n_y * n_x)
+    )
     data = {
         "en_energy": en_energy,
         "pixel": pixel,
         "row": row_axis,
+        "dim_2": dim_2_axis,
         "detector_image": detector_image,
+        "detector_cube": detector_cube,
     }
     metadata = _base_metadata(
         scan_id,
@@ -125,6 +153,11 @@ def image_scan_run(scan_id: int = 0, *, n_y: int = 30, n_x: int = 40) -> MemoryR
             (["row"], "primary"),
             (["pixel"], "primary"),
         ],
+        # Declared for the cube only. Naming ``detector_image``'s axes would
+        # resolve them to the real (non-uniform) ``pixel`` coordinates and
+        # flip it from an image to a mesh, changing a fixture every existing
+        # ROI test depends on. The 2-D key stays exactly as it was.
+        dims={"detector_cube": ("row", "pixel", "dim_2")},
     )
     return MemoryRun(metadata, data)
 

@@ -702,9 +702,31 @@ def _materialize_roi_profile(
         raise ValueError(
             f"expected at least 2D plot plane before ROI reduction, got {y.shape}"
         )
-    if y.shape[-2:] != region_frame.shape:
+
+    # The ROI plane is wherever its two storage axes landed, which is not
+    # always the trailing pair: profiling along a slider axis of a cube
+    # leaves the plane at the *leading* axes, because ``remaining`` is in
+    # ascending storage order and the slider axis can outrank both plane
+    # axes. Locate the plane instead of assuming it.
+    plane_storage = (
+        plot_plane_storage_axes
+        if plot_plane_storage_axes is not None
+        else (region_frame.plot_y_dim, region_frame.plot_x_dim)
+    )
+    try:
+        plane_tensor = tuple(
+            _reduce_axis_index(remaining, storage_axis)
+            for storage_axis in plane_storage
+        )
+    except ValueError:
         raise ValueError(
-            f"plot plane shape {y.shape[-2:]} does not match region frame "
+            f"plot plane axes {plane_storage} are not present in the "
+            f"fetched array for spec {spec}"
+        ) from None
+    plane_shape = tuple(y.shape[axis] for axis in plane_tensor)
+    if plane_shape != region_frame.shape:
+        raise ValueError(
+            f"plot plane shape {plane_shape} does not match region frame "
             f"{region_frame.shape}"
         )
 
@@ -717,11 +739,20 @@ def _materialize_roi_profile(
         raise ValueError("ROI does not cover any cells")
 
     y = np.asarray(y, dtype=float)
-    lead_shape = y.shape[:-2]
-    if lead_shape:
-        mask = compiled.mask.reshape((1,) * len(lead_shape) + compiled.mask.shape)
+    # ``plane_tensor`` is (display row, display column). When storage order
+    # disagrees with display order the mask is transposed to match rather
+    # than reshaped blindly -- the axes it broadcasts over are named, never
+    # inferred from position.
+    plane_mask = compiled.mask
+    if plane_tensor[0] > plane_tensor[1]:
+        plane_mask = plane_mask.T
+        mask_axes = (plane_tensor[1], plane_tensor[0])
     else:
-        mask = compiled.mask
+        mask_axes = plane_tensor
+    mask_shape = [1] * y.ndim
+    mask_shape[mask_axes[0]] = plane_mask.shape[0]
+    mask_shape[mask_axes[1]] = plane_mask.shape[1]
+    mask = plane_mask.reshape(mask_shape)
     y = np.where(mask, y, np.nan)
 
     spatial_tensor_axes = tuple(

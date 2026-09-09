@@ -21,18 +21,51 @@ def create_metadata(date='2026-08-01', runs=10):
         for i in range(runs)
     ]
 
-def create_data(runs=10):
+def create_data(runs=10, n_depth=4):
+    """
+    Build the demo data keys for the test catalog.
+
+    ``image`` stays a 2-D key and ``image_cube`` is the same plane with a
+    short third axis added, so the catalog offers a rank-2 and a rank-3
+    detector whose leading axes mean the same thing. The 3-D key is what
+    exercises reduce sliders, ROI profiles along a cube, and the mixed-rank
+    paths that only exist when a 2-D and a 3-D key can be selected together.
+
+    ``n_depth`` is small on purpose: the third axis is a reduce axis in every
+    2-D view, so it only has to be indexable, and a short one makes a wrong
+    axis choice show up as a shape mismatch rather than a plausible plane.
+
+    Parameters
+    ----------
+    runs : int, optional
+        Number of runs to generate.
+    n_depth : int, optional
+        Length of ``image_cube``'s third axis.
+
+    Returns
+    -------
+    list of dict
+        One data dictionary per run.
+    """
     t = np.linspace(0, 1, 100)
     x = np.linspace(0, 1, 32)
-    return [
-        {
-            "time": t,
-            "x": np.pi * t,
-            "y": np.sin(i * t * np.pi),
-            "image": np.outer(np.sin(i * t * np.pi), np.cos(x * np.pi)),
-        }
-        for i in range(runs)
-    ]
+    depth = np.linspace(0.5, 1.5, n_depth)
+    data = []
+    for i in range(runs):
+        image = np.outer(np.sin(i * t * np.pi), np.cos(x * np.pi))
+        data.append(
+            {
+                "time": t,
+                "x": np.pi * t,
+                "y": np.sin(i * t * np.pi),
+                "image": image,
+                # Each slab is the plane scaled by a distinct factor, so a
+                # slice taken along the wrong axis cannot look like a right
+                # one.
+                "image_cube": image[:, :, None] * depth[None, None, :],
+            }
+        )
+    return data
 
 def create_runs(runs=10, include_nd=False):
     """
