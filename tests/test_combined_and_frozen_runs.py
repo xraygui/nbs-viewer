@@ -38,7 +38,13 @@ from tests.fixtures.catalog_recipes import line_scan_run, motor_scan_run
 from tests.fixtures.plot_session import make_plot_session
 
 
-def _norm_run(scan_id: int, *, length: int = 64, i0: float = 1.0) -> MemoryRun:
+def _norm_run(
+    scan_id: int,
+    *,
+    length: int = 64,
+    i0: float = 1.0,
+    motor_stop: float = 10.0,
+) -> MemoryRun:
     """
     Build a motor scan carrying both a detector and a reference channel.
 
@@ -50,8 +56,11 @@ def _norm_run(scan_id: int, *, length: int = 64, i0: float = 1.0) -> MemoryRun:
         Number of points.
     i0 : float, optional
         Constant value of the ``i0`` reference channel.
+    motor_stop : float, optional
+        End of the motor axis. Pass different values to two sources when a
+        test needs to tell a combined axis from a single-sourced one.
     """
-    motor = np.linspace(0, 10, length)
+    motor = np.linspace(0, motor_stop, length)
     data = {
         "time": np.linspace(0, 1, length),
         "motor": motor,
@@ -109,15 +118,23 @@ def test_axis_coordinates_come_from_the_primary_source(qapp):
     An averaged motor position is not a coordinate anyone asked for.
     """
     session, _ = make_plot_session(is_main_display=True)
-    first = RunSource(_norm_run(0))
-    second = RunSource(_norm_run(3))
+    first = RunSource(_norm_run(0, motor_stop=10.0))
+    second = RunSource(_norm_run(3, motor_stop=20.0))
     session.collection.add_runs([first, second])
     session.selection.set_selected_keys(["motor"], ["det"])
 
     combined = session.collection.combine([first, second])
 
+    motor = combined.run.getData("motor")
+    assert np.allclose(motor, first.run.getData("motor"))
+    # The midpoint of the two axes is what averaging them would give.
+    midpoint = (first.run.getData("motor") + second.run.getData("motor")) / 2
+    assert not np.allclose(motor, midpoint)
+    # The drawn x axis follows, since axes reach the bundle through getData.
+    key = next(k for k in session.traces if k.uid == combined.uid)
     assert np.allclose(
-        combined.run.getData("motor"), first.run.getData("motor")
+        session.traces.get(key).get_plot_bundle().x_line,
+        first.run.getData("motor"),
     )
 
 
@@ -258,7 +275,9 @@ def test_a_frozen_run_does_not_change_when_its_parent_does(qapp):
     frozen = FrozenRun(parent_run, "det")
     before = np.array(frozen.getData("det"), copy=True)
 
-    parent_run._data["det"] = parent_run._data["det"] * 100.0
+    # In place, so a capture that merely referenced the parent's array would
+    # change with it. Rebinding the dict entry would not prove anything.
+    parent_run._data["det"] *= 100.0
     parent_run.data_changed.emit()
 
     assert np.allclose(frozen.getData("det"), before)
