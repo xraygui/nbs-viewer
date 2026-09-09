@@ -50,7 +50,7 @@ def app_model(qapp):
 
     Parameters
     ----------
-    qapp : QCoreApplication
+    qapp : QApplication
         Ensures Qt is initialized before model construction.
 
     Returns

@@ -5,7 +5,7 @@ Both halves of the rule live in ``resolve_axis_order`` and are reached
 through ``ViewIntent.project``: the default orientation, and when a manual
 arrangement is kept or re-derived. That is the decision the dimension
 controls used to make on every rebuild; on the model side it can be tested
-without a QWidget (the suite runs on QCoreApplication only).
+without a QWidget, which is the cheaper tier to test it in.
 """
 
 import pytest

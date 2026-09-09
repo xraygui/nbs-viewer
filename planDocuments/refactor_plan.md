@@ -215,20 +215,37 @@ One thread is deliberately deferred rather than folded into a step.
 
 **Widget-level testing — the next piece of work once the tree stops moving.**
 Bugs 9, 10 and 11 were all live crashes or visible misbehaviour that `tests/`
-structurally cannot reach: the suite runs on `QCoreApplication`, so
-constructing a `QWidget` aborts the interpreter. Every one of them was found
+could not reach at the time: the suite ran on `QCoreApplication`, so
+constructing a `QWidget` aborted the interpreter. Every one of them was found
 by hand or with a throwaway script under a real `QApplication`. Three in one
 step is a pattern, not luck — and bug 9 meant the main run list could not be
 constructed at all, which no amount of model-side coverage would have caught.
 
-Decide the general approach then, and give it a plan of its own. Options worth
-weighing:
+**Partly unblocked 2026-09-09 (`9a567db`).** The obstacle was not structural.
+`conftest.py` created a `QCoreApplication`, and a `QWidget` under one makes Qt
+call `abort()` — SIGABRT, not a catchable exception, so one widget test would
+kill the run. Swapping the fixture to a real `QApplication` on the offscreen
+platform (a subclass, so no model test is affected) removes it, with
+`QT_QPA_PLATFORM` set in `conftest` before qtpy imports Qt. Nothing outside
+pytest is required. The fixture is `autouse` because a widget test that forgets
+it aborts the run exactly as before.
 
-- A second pytest process, or an `xdist` group, running under a real
-  `QApplication`, so widget tests and headless model tests coexist without
-  either constraining the other.
+Three tests landed with it, each pinning a contract previously verified only by
+an uncommitted script, and each mutation-checked: the canvas draws traces the
+session created (step C), hide/show keeps the artist and does not refetch
+(step B), and the ROI window constructs and populates itself (bugs 9 and 10's
+class). Suite 389 → 392.
+
+What remains deferred is the *harness*, not the enabler: a broad widget suite
+pinned to today's constructors would still be rewritten by step F. Decide the
+general approach then, and give it a plan of its own. Options worth weighing:
+
+- ~~A second pytest process, or an `xdist` group, running under a real
+  `QApplication`~~ — **not needed.** One `QApplication` serves both; the two
+  tiers coexist in one process without either constraining the other.
 - A construction smoke test that builds every top-level widget once. That
-  alone would have caught bugs 9 and 10.
+  alone would have caught bugs 9 and 10; `test_widgets.py` now does it for
+  `RoiWindow` and `MplCanvas`, and extending it to the rest is cheap.
 - Pushing more view logic model-side so it needs no widget at all — which is
   what steps B and C already do for the trace set and the canvas, and is why
   waiting is the cheaper order.
@@ -256,11 +273,13 @@ them.
   ownership guard, the data-layer contract, the `ChunkCache` split, the
   logging sweep, repo hygiene. They can run in parallel with everything here.
 - **[`headless_testing_plan.md`](headless_testing_plan.md)** — test tiers.
-  Phases 0–2 done, 3–4 open. Note the hard constraint: the suite runs on
-  `QCoreApplication`, so **constructing a `QWidget` in `tests/` aborts the
-  interpreter**. Move logic model-side to test it, or drive it from a scratch
-  script under a real `QApplication`. Closing this gap properly is the work
-  described under "After this refactor" above.
+  Phases 0–2 done, 3–4 open. **The constraint it records is lifted**
+  (`9a567db`): the suite ran on `QCoreApplication`, where constructing a
+  `QWidget` aborts the interpreter, and now runs on an offscreen
+  `QApplication`. Widget tests belong in `tests/test_widgets.py`; a model-side
+  test is still preferable whenever the behaviour can be reached without a
+  widget. What remains open there is the shape of a broad widget suite, per
+  "After this refactor" above.
 - **[`zarr_l2_cache_plan.md`](zarr_l2_cache_plan.md)** — cache internals,
   phase 2+ open.
 - Feature plans, untouched by this refactor and blocked on it:
@@ -285,3 +304,4 @@ them.
 | 2026-09-09 | Remaining sequence re-derived before starting step D, and the target ownership tree rewritten. Step D as written mandated delegating wrappers, which is the forwarding layer the refactor exists to avoid; asking why surfaced the object-boundary question behind it. Outcome: crop joins the ROI controller (one lifecycle, one fingerprint), `RoiSetModel` stays a sibling (22 of 23 members have external consumers), `ViewIntent` / `RunCollection` / `Selection` become emitting models, and cache aggregation is neither a child nor in scope. New order G, D, H, E, 7, F. Bug 12 found and confirmed while designing G's signals. |
 | 2026-09-09 | Step G landed (`63a73f0`). `ViewIntent` is a `QObject` with three signals derived from consumers, not fields; `cube_view_changed` and `MplCanvas._last_2d_intent` are gone. Bug 12 closed and verified both ways under a real `QApplication`. `Projection` and `PlotRequest` stay frozen. One decision the plan had not predicted: `project()` needed a `plot_ndim` override, because the mixed-rank path built a throwaway intent that a mutable model cannot supply. Suite 362 → 374; `view_spec.py` 1018 → 777 with 445 new lines in `view_intent.py`. |
 | 2026-09-09 | Step D landed (`aba26a3`). Crop and ROI are one child, `RegionController`, handed out as `session.region` with no delegating methods — 110 references retargeted instead. Two things the plan had not predicted: `cached_parent_bundle_for_preview` was deleted rather than moved, because `_refresh_held_requests` is now wired to every view-change signal and its equality check can no longer fail; and the three-way crop collapse turned out to be one method, since guarding `set_view_crop` on real change is what makes `clear_view_crop` redundant. `MplCanvas.current_view_fingerprint` and `_last_2d_view_crop` deleted. `plot_session.py` 2045 → 1263. Suite 380 → 389. |
+| 2026-09-09 | Widget testing partly unblocked (`9a567db`). The `QCoreApplication` fixture, not pytest, was what made `QWidget` construction impossible — a widget under one aborts the process rather than failing a test. `qapp` is now an autouse `QApplication` on the offscreen platform; 389 existing tests unaffected. Three mutation-checked widget tests landed. `headless_testing_plan.md` phases 3–4 keep the harness question; the enabler is done. |

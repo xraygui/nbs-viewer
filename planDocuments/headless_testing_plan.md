@@ -155,7 +155,7 @@ Ownership AST checks are also duplicated:
 ### Headless session (conceptual)
 
 ```text
-QCoreApplication (session-scoped pytest fixture)
+QApplication, offscreen (session-scoped autouse pytest fixture)
     └── AppModel
           ├── CatalogManagerModel
           │     └── MemoryCatalog  (via TestSourceModel.load / load_and_register)
@@ -325,7 +325,9 @@ files prove the promote workflow)
 
 **Do**
 
-- [x] Add `tests/conftest.py` with session-scoped `qapp` (`QCoreApplication`)
+- [x] Add `tests/conftest.py` with session-scoped `qapp` — now an autouse
+  `QApplication` on the offscreen platform (`9a567db`), which is what makes
+  phases 3–4 reachable at all
 - [x] Add `app_model` fixture (fresh `AppModel` per test)
 - [x] Add `headless_session` fixture (loads default test catalog, returns helper)
 - [x] Add `tests/fixtures/catalog_recipes.py` with `line_scan`, `image_scan`, etc.

@@ -2,9 +2,9 @@
 The session's view-intent gestures, headless.
 
 These four methods are what ``DimensionControl`` calls instead of owning a
-spec. Moving them onto the session is what makes them testable at all -- the
-suite runs on ``QCoreApplication`` and cannot build the widget -- so they are
-tested here rather than only reached through a scratch script.
+spec. Moving them onto the session is what makes them testable without
+building the widget, which is the cheaper tier, so they are tested here rather
+than in ``test_widgets.py``.
 """
 
 from __future__ import annotations
