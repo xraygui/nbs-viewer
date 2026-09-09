@@ -4,7 +4,7 @@ Immutable description of one plottable trace, and the plan that fetches it.
 The two fixed layers of the view pipeline live here. A :class:`PlotRequest`
 is frozen and hashable so it can serve as the fingerprint of a fetch;
 :func:`plan_fetch` is the one pure function that turns it into the array
-indices to read, returning a :class:`FetchPlan`. Long-lived plot-data models
+indices to read, returning a :class:`FetchPlan`. Long-lived traces
 are identified by :class:`TraceKey`, a subset of the request, so view / crop
 / transform changes reuse the artist.
 """
@@ -150,7 +150,7 @@ def build_plot_request(
 @dataclass(frozen=True)
 class TraceKey:
     """
-    Object identity for a plot-data model / artist.
+    Object identity for a :class:`Trace` and its artist.
 
     A :class:`PlotRequest` is the fingerprint of *what is plotted*. This key
     is the subset that names a long-lived object so crop, transform, and
@@ -317,7 +317,7 @@ class PlotRequest:
         Returns
         -------
         TraceKey
-            Key for the long-lived plot-data model.
+            Key for the long-lived trace.
         """
         xkey = self.xkeys[0] if self.xkeys else ""
         return TraceKey(

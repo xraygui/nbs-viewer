@@ -1,5 +1,5 @@
 """
-Plot session: membership, visibility, selection, view, and plot-data map.
+Plot session: membership, visibility, selection, view, and the trace set.
 
 Owns a :class:`RunCollection`, the visible-uid set, selected keys, transform,
 cube/slice/crop view state, the :class:`TraceSet`, and the ROI set.
@@ -554,7 +554,7 @@ class PlotSession(QObject):
     @property
     def traces(self) -> TraceSet:
         """
-        Return the live map of plot-data models keyed by :class:`TraceKey`.
+        Return the live :class:`TraceSet`, keyed by :class:`TraceKey`.
         """
         return self._traces
 
@@ -884,7 +884,7 @@ class PlotSession(QObject):
             Crop rectangle in matplotlib data coordinates on the oriented plot
             plane. Only :class:`RectRegion` is supported.
         trace : Trace, optional
-            Parent 2D plot-data model. Defaults to the sole visible 2D model.
+            Parent 2D trace. Defaults to the sole visible 2D trace.
 
         Returns
         -------
@@ -1100,7 +1100,7 @@ class PlotSession(QObject):
         norm_keys: Optional[List[str]] = None,
     ) -> Trace:
         """
-        Return the plot-data model for ``(xkey, ykey, run uid)``, creating it.
+        Return the trace for ``(xkey, ykey, run uid)``, creating it.
 
         Assembles a :class:`PlotRequest` from session slice / cube / crop and
         stores it on the model. Existing models keep their artist.
@@ -1119,7 +1119,7 @@ class PlotSession(QObject):
         Returns
         -------
         Trace
-            Existing or newly created plot-data model.
+            Existing or newly created trace.
         """
         key = TraceKey(run_model.uid, xkey, ykey)
         request = self._build_plot_request(run_model, xkey, ykey, norm_keys)
@@ -1134,19 +1134,19 @@ class PlotSession(QObject):
 
     def drop_traces_for_uid(self, uid: str) -> None:
         """
-        Remove and clean up all plot-data entries for a run uid.
+        Remove and clean up all traces for a run uid.
 
         Parameters
         ----------
         uid : str
-            Run uid whose plot-data entries should be dropped.
+            Run uid whose traces should be dropped.
         """
         for key in self._traces.keys_for_uid(uid):
             self._dispose_trace(key)
 
     def iter_visible_traces(self):
         """
-        Yield plot-data models whose run uid is currently visible.
+        Yield traces whose run uid is currently visible.
         """
         visible = self.visible_uids
         for key, trace in self._traces.items():
@@ -1155,7 +1155,7 @@ class PlotSession(QObject):
 
     def resolve_single_visible_2d_trace(self) -> Optional[Trace]:
         """
-        Return the sole visible 2D plot-data model, if exactly one exists.
+        Return the sole visible 2D trace, if exactly one exists.
 
         Uses cached render mode or ``last_bundle`` dimensionality. When neither
         is available, falls back to ``dimension == 2``.
@@ -1239,7 +1239,7 @@ class PlotSession(QObject):
         trace: Optional[Trace] = None,
     ) -> Optional[PlotViewFrame]:
         """
-        Return the view frame for the visible 2D plot-data model.
+        Return the view frame for the visible 2D trace.
 
         Parameters
         ----------
@@ -1268,7 +1268,7 @@ class PlotSession(QObject):
         Parameters
         ----------
         trace : Trace
-            Parent plot-data model.
+            Parent trace.
 
         Returns
         -------
@@ -1398,7 +1398,7 @@ class PlotSession(QObject):
         entry : RoiEntry
             ROI geometry and operation.
         trace : Trace, optional
-            Parent 2D plot-data model. Defaults to the sole visible one.
+            Parent 2D trace. Defaults to the sole visible one.
         parent_frame : PlotViewFrame, optional
             Parent view frame for span-full expansion.
         span_full_override : bool, optional
@@ -1471,7 +1471,7 @@ class PlotSession(QObject):
         entry : RoiEntry
             ROI entry to commit.
         trace : Trace, optional
-            Parent 2D plot-data model.
+            Parent 2D trace.
         parent_frame : PlotViewFrame, optional
             Parent frame for span-full expansion.
         axis_names : sequence of str, optional
@@ -1537,7 +1537,7 @@ class PlotSession(QObject):
         request: Optional[PlotRequest] = None,
     ) -> "PlotBundle":
         """
-        Preview an ROI profile for an entry on the parent plot-data model.
+        Preview an ROI profile for an entry on the parent trace.
 
         Parameters
         ----------
@@ -1546,7 +1546,7 @@ class PlotSession(QObject):
         entry : RoiEntry, optional
             ROI entry. Defaults to resolving ``entry_id`` / selection.
         parent_trace : Trace, optional
-            Parent 2D plot-data model. Defaults to the sole visible 2D model.
+            Parent 2D trace. Defaults to the sole visible 2D trace.
         parent_frame : PlotViewFrame, optional
             Parent frame used when building the request.
         cached_plane : PlotBundle, optional
@@ -1606,7 +1606,7 @@ class PlotSession(QObject):
         request : PlotRequest
             Request used for the fetch.
         parent_trace : Trace, optional
-            Parent plot-data model. Defaults to the sole visible 2D model.
+            Parent trace. Defaults to the sole visible 2D trace.
         axis_names : sequence of str, optional
             Storage axis names for default labels.
         cube_fingerprint : tuple, optional
@@ -1675,7 +1675,7 @@ class PlotSession(QObject):
         entry : RoiEntry, optional
             ROI entry. Defaults to resolving ``entry_id`` / selection.
         parent_trace : Trace, optional
-            Parent 2D plot-data model.
+            Parent 2D trace.
         parent_frame : PlotViewFrame, optional
             Parent frame for request construction.
         cached_plane : PlotBundle, optional
@@ -1734,7 +1734,7 @@ class PlotSession(QObject):
         Returns
         -------
         set of TraceKey
-            Desired plot-data identities. Visibility is not applied here.
+            Desired trace identities. Visibility is not applied here.
         """
         keys: Set[TraceKey] = set()
         for source in self.collection.sources():
@@ -1772,7 +1772,7 @@ class PlotSession(QObject):
 
     def _dispose_trace(self, key: TraceKey) -> None:
         """
-        Remove and clean up one plot-data entry.
+        Remove and clean up one trace.
 
         Parameters
         ----------
@@ -1783,11 +1783,12 @@ class PlotSession(QObject):
 
     def _refresh_held_requests(self) -> None:
         """
-        Rewrite requests on every held plot-data model from session view state.
+        Rewrite requests on every held trace from session view state.
 
         Used for view / crop / transform changes so ``ensure_trace``
-        orphans (e.g. canvas-created keys) keep their artists and pick up
-        the new request. Membership pruning stays in :meth:`rebuild`.
+        orphans (e.g. canvas-created keys) keep their identity — and with it
+        the canvas artist filed under the same key — and pick up the new
+        request. Membership pruning stays in :meth:`rebuild`.
         """
         for key, trace in list(self._traces.items()):
             source = self.collection.get(key.uid)
