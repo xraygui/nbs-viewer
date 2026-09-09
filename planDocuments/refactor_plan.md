@@ -67,7 +67,7 @@ They interleave; the order below is the merged sequence.
 | A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ `5330b81` |
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
 | B | `Trace` | session & traces | ✅ `0aaa133` |
-| 6 | Adopt `ViewIntent` | view pipeline | ✅ `__COMMIT__` |
+| 6 | Adopt `ViewIntent` | view pipeline | ✅ `505240d` |
 | C | Consumer sweep — canvas `TraceSet`, `ImageGridCanvas` bypass | session & traces | unblocked — next |
 | D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |

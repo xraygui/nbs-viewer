@@ -528,7 +528,7 @@ and the suite cannot build it. Driven from a scratch script under a real
 `spec_for_plot_ndim`, `swap_rows` re-resolving roles with no helper, and an
 image bundle out the far end.
 
-### Step 6 — Adopt `ViewIntent` ✅ 2026-09-09 (`__COMMIT__`)
+### Step 6 — Adopt `ViewIntent` ✅ 2026-09-09 (`505240d`)
 
 **Not behaviour-preserving.** Fixes the orientation split below.
 
