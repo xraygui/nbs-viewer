@@ -672,8 +672,36 @@ cannot build it. Driven from a scratch script under a real `QApplication`:
 rows build from the session projection, the widget holds no spec, the spinbox
 reaches `set_plot_ndim`, a reorder lands on the intent **as names**, a new X
 selection clears it, and a slider edit reaches `reduce_indices`. That script
-caught a break no test could: `MplCanvas._handle_plot_data` and
-`roi/window.py` were still reading `session.cube_view_spec`.
+caught two of the three breaks nothing else could:
+`MplCanvas._handle_plot_data` and `roi/window.py` were still reading
+`session.cube_view_spec`. It missed the third -- see below.
+
+#### Follow-up (`a7a32f2`): the gestures had no tests at all
+
+`set_axis_reduce` constructed a `Projection` by name in a module that imports
+it only for annotations, so **moving any dimension slider raised
+`NameError`**. Two process failures let it ship:
+
+- The lint diff showed `plot_session.py` F821 going from 2 to 3, and that was
+  read as pre-existing noise. A count *increase* on an existing code is a new
+  instance. The two already there are parameter annotations, harmless under
+  `from __future__ import annotations`; the new one was a runtime call.
+- The scratch script's slider check was `if control._slice_rows: ... else:
+  True`. At `plot_ndim=2` on a rank-2 key there are no slice rows, so it
+  reported PASS for not running. A smoke check with a vacuous fallback is
+  worse than no check: it reports success for skipping.
+
+The deeper miss: these are *model* methods now. Moving them off the widget so
+they can be tested without a `QWidget` is the whole argument for the step, and
+none of them were tested. `tests/test_view_intent_session.py` (11) covers
+`driving_axes`, `driving_projection`, `set_plot_ndim`, `set_axis_reduce`
+(index, role, clamping), `move_view_axis` including its no-op ends, and
+`follow_x_selection`. Four fail against `505240d` with the `NameError`,
+confirmed by running them against that tree.
+
+`set_axis_reduce` now edits through `Projection.with_slice_role` /
+`with_index`, which already existed, so it constructs nothing; `Projection` is
+imported for real, so the category cannot recur silently. Suite 350 → 361.
 
 ### Step 7 — `plot_bundle.py`
 
@@ -723,5 +751,6 @@ plan, not here.
 | 2026-09-08 | Step 3 landed (`dbe6083`). Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
 | 2026-09-08 | Step 4 landed (`b431c47`). `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
 | 2026-09-08 | Fixed `storage_axis_to_plot_axis` reading the plot-axis mapping off the frame instead of the spec, which made "span full profile axis" widen the reduction axis. Recorded under step 4. |
+| 2026-09-09 | Step 6 follow-up (`a7a32f2`): moving a dimension slider raised `NameError` — `set_axis_reduce` named `Projection` in a module that imports it only for annotations. The lint diff had shown the F821 count rise and it was dismissed; the scratch script's slider check had a vacuous `else: True` that reported PASS for not running. The session gestures now have headless tests, which is what moving them off the widget was for. |
 | 2026-09-09 | Step 6 landed. Adopted rather than deleted, but not on the plan's justification: mixed-rank bugs 2 and 3 were already closed by steps 3–4, and the live defect was that the orientation policy had two implementations, one of them in a widget. `ViewIntent.axis_order` reshaped from a rank-bound permutation to dimension names plus `xkey`, which was the decision the step had omitted; `ViewIntent.crop` dropped because a crop is trace state. `DimensionControl` no longer owns a spec. |
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |
