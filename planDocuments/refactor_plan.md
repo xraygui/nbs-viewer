@@ -68,8 +68,8 @@ They interleave; the order below is the merged sequence.
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
 | B | `Trace` | session & traces | ✅ `0aaa133` |
 | 6 | Adopt `ViewIntent` | view pipeline | ✅ `505240d` |
-| C | Consumer sweep — canvas renders the `TraceSet` | session & traces | ✅ narrowed |
-| D | Extract the ROI pipeline off the session | session & traces | unblocked |
+| C | Consumer sweep — canvas renders the `TraceSet` | session & traces | ✅ `940d45c` |
+| D | Extract the ROI pipeline off the session | session & traces | unblocked — next |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
 | 7 | `plot_bundle.py` | view pipeline | unblocked |
 | F | Final deletions and renames | session & traces | last |
@@ -254,4 +254,4 @@ them.
 | 2026-09-08 | Recorded widget-level testing as the work that follows this refactor, under "After this refactor". Three bugs in one step (9, 10, 11) were unreachable from `tests/`; deferred deliberately so the harness is not written against constructors steps B–F will change. |
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |
 | 2026-09-09 | Step C audited against the tree before starting. Two bullets superseded by step 6 (one closed, one reversed) and its payoff banked by step 3; the sub-plan records which and why. Four live bullets remain: the canvas x × y × run product, the `ImageGridCanvas` `Trace` bypass, `_get_shape_info`, and the `time`-first sort plus `_make_slice_info`. Open question 5 (`ViewIntent.fan_out`) is now on step C's critical path, not optional. |
-| 2026-09-09 | Step C landed, narrowed to `single_canvas`. `MplCanvas._do_update_plot` was recomputing `PlotSession._retained_trace_keys` and calling `ensure_trace` a second time; it now renders the session's `TraceSet` and decides only visibility. `updatePlotData` and `remove_run_data` deleted; `Trace.dispose` gained the outgoing-signal disconnect the latter had owned. The image grid and `RunDisplayWidget` are deferred by decision — the grid to its own rewrite, which also absorbs open question 5 and the last live half of problem-statement item 7. Suite 361 → 362; `single_canvas.py` 1695 → 1667. |
+| 2026-09-09 | Step C landed (`940d45c`), narrowed to `single_canvas`. `MplCanvas._do_update_plot` was recomputing `PlotSession._retained_trace_keys` and calling `ensure_trace` a second time; it now renders the session's `TraceSet` and decides only visibility. `updatePlotData` and `remove_run_data` deleted; `Trace.dispose` gained the outgoing-signal disconnect the latter had owned. The image grid and `RunDisplayWidget` are deferred by decision — the grid to its own rewrite, which also absorbs open question 5 and the last live half of problem-statement item 7. Suite 361 → 362; `single_canvas.py` 1695 → 1667. |

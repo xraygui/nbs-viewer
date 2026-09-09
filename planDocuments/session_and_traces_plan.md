@@ -275,7 +275,7 @@ canvas method meaning "fetch and draw this", not the deleted class.
 
 ---
 
-## Step C — Consumer sweep (narrowed to `single_canvas`)
+## Step C — Consumer sweep (narrowed to `single_canvas`) ✅ (`940d45c`)
 
 **Depends on** step B and view-pipeline step 6.
 
@@ -479,4 +479,4 @@ they synthesise data, which is a data-layer job.
 | 2026-09-08 | Step B landed. `TraceSet` and `Trace` split into two files; the artist map is canvas-side. Two things the plan left open are resolved in the step: the live-data cache rule (invalidate on the run's `data_changed`) and the fact that removal must be *announced* by key rather than performed. The `EXPECTED_VIOLATIONS` exit criterion moved to step C — it names the `ImageGridCanvas` bypass, which step B does not touch. |
 | 2026-09-08 | Sizes re-measured; `RunSource` (792 → 955) and `Trace` (496 → 483) had drifted. Step D's `PlotSession` figure corrected to 1938. Step A's findings now point at the master plan's "After this refactor" section for the widget-testing gap. |
 | 2026-09-09 | Step C re-scoped before starting, against the tree rather than the plan. Its `DimensionControl` bullet was closed by view-pipeline step 6, which had to do it to move the axis-order policy out of a widget. Its `QMessageBox` bullet was *reversed* by the same step: `accepts_plot_ndim` tests visible-artist count, which only the canvas knows, so moving it would re-add the artist state step B deleted. Its "Closes" payoff was banked by step 3. The four live bullets remain, and one of them (`fan_out`) needs master-plan open question 5 answered first. |
-| 2026-09-09 | Step C landed, narrowed to `single_canvas` by the maintainer: the image grid is due for a rewrite once the canvas stabilizes, and `run_display.py`'s key sort is a display concern that belongs in the widget and will grow a dimensionality rule. The canvas stopped recomputing `_retained_trace_keys` and now reads the session's `TraceSet`; `updatePlotData` and `remove_run_data` are gone. `Trace.dispose` grew the outgoing-signal disconnect that `remove_run_data` had owned. The ownership guard stays non-empty by decision and carries to the grid rewrite. |
+| 2026-09-09 | Step C landed (`940d45c`), narrowed to `single_canvas` by the maintainer: the image grid is due for a rewrite once the canvas stabilizes, and `run_display.py`'s key sort is a display concern that belongs in the widget and will grow a dimensionality rule. The canvas stopped recomputing `_retained_trace_keys` and now reads the session's `TraceSet`; `updatePlotData` and `remove_run_data` are gone. `Trace.dispose` grew the outgoing-signal disconnect that `remove_run_data` had owned. The ownership guard stays non-empty by decision and carries to the grid rewrite. |
