@@ -33,12 +33,18 @@ shared fixtures from `conftest.py` once Phase 1 lands.
 
 Shared helpers live under `tests/fixtures/`:
 
-- `catalog_recipes.py` — `line_scan`, `motor_scan`, `image_scan` recipes
+- `catalog_recipes.py` — `line_scan`, `motor_scan`, `image_scan` recipes.
+  `image_scan` carries both `detector_image` (rank 2) and `detector_cube`
+  (rank 3), so mixed-rank and reduce-axis paths are reachable
 - `session.py` — `HeadlessSession` wrapper around `AppModel`
 
 Pytest fixtures in `conftest.py`:
 
-- `qapp` — session-scoped `QCoreApplication`
+- `qapp` — session-scoped, autouse **`QApplication`** on the offscreen
+  platform. It is a `QCoreApplication` subclass, so model tests are
+  unaffected, but it also permits constructing a `QWidget`. Autouse because
+  a `QWidget` built without a `QApplication` makes Qt call `abort()`, which
+  kills the pytest process rather than failing a test
 - `app_model` — fresh `AppModel` per test
 - `headless_session` — `HeadlessSession` with a default line-scan catalog
 
@@ -50,6 +56,14 @@ def test_fetch(headless_session):
     bundle = headless_session.fetch_bundle(["time"], ["y"])
     assert bundle.y.ndim == 1
 ```
+
+## Widget tests
+
+`test_widgets.py` builds real widgets. Prefer a model-side test whenever the
+behaviour can be reached without one: widget tests wait on the Qt event loop
+and are an order of magnitude slower. Reach for that file when the thing under
+test *is* the widget wiring — artist lifetime, constructor coupling, or a
+control populating itself.
 
 
 | Tier | Meaning | Examples |
