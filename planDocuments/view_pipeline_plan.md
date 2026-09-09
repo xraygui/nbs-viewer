@@ -868,19 +868,32 @@ the sizes note in the session sub-plan).
 - [ ] `Projection` gains no reduce method and `view_spec.py` imports no
   `region_mesh`
 
-#### Not in scope, but found while auditing
+#### Found while auditing, and fixed separately
 
-Normalizing a key of `image_scan_run` raises: `detector_image` by `en_energy`
-gives *"operands could not be broadcast together with shapes (6,8) (8,1)"*, and
-`detector_cube` by `en_energy` gives *"cannot broadcast norm axes [] onto plot
-axes ['pixel', 'dim_2']"*. The cause is in the **fixture**, not the pipeline:
-`image_scan_run` is the only recipe with no `time` array, so
-`MemoryRun._resolve_dims` names every 1-D key `dim_0` and a 2-D detector
-`(dim_0, dim_1)` — unrelated axes collide by name and alignment matches the
-wrong one. Same family as the `analyze_dimensions` axis-name ordering issue flagged
-earlier. Worth a fixture fix on its own, and it means **no test normalizes
-anything on the image recipe**; the VPPEM fixture in `test_plot_bundle.py` is
-where the norm coverage actually lives.
+Normalizing anything on `image_scan_run` raised: `detector_image` by
+`en_energy` gave *"operands could not be broadcast together with shapes (6,8)
+(8,1)"*. The cause was the fixture, not the pipeline — it was the only recipe
+with no `time` array, so `MemoryRun._resolve_dims` named every 1-D key `dim_0`
+and the detector `(dim_0, dim_1)`; unrelated axes collided by name and
+alignment matched a length-8 column coordinate onto a 6-long row axis.
+
+Fixed on the maintainer's rule that **every run carries a `time` axis, even a
+one-point one**, since `time` is the event axis and dimension naming is
+derived from its presence. `image_scan_run` now declares dims for every key,
+as the VPPEM fixture already did: `time` names the event axis, `row` shares it
+as a per-event coordinate, and each detector-axis coordinate names its own
+axis. Both detectors still render as images — the older warning that naming
+the real `pixel` coordinates would flip `detector_image` to a mesh no longer
+holds, and was removed after checking.
+
+Two tests pin it (`tests/test_fixtures_smoke.py`): every recipe carries a
+`time` axis whose dims are `("time",)`, and normalization follows the axis a
+key actually names — a per-event key divides down the rows, a per-channel key
+across the columns. Both fail against the pre-fix fixture.
+
+This does **not** discharge step 7's own normalization test. That one is about
+*order* — a norm key varying along a reduced axis — and no fixture change can
+substitute for it.
 
 ---
 

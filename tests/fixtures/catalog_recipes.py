@@ -96,8 +96,8 @@ def image_scan_run(
     """
     Build an image scan carrying both a 2D and a 3D detector key.
 
-    ``detector_image`` is ``(row, pixel)`` and ``detector_cube`` is
-    ``(row, pixel, dim_2)`` -- the same plane with a short third axis added,
+    ``detector_image`` is ``(time, dim_1)`` and ``detector_cube`` is
+    ``(time, pixel, dim_2)`` -- the same plane with a short third axis added,
     so a test can compare a rank-2 key against a rank-3 one whose leading
     axes mean the same thing. Both live on one run deliberately: the
     mixed-rank paths only exist when a 2D and a 3D key are selectable
@@ -121,7 +121,7 @@ def image_scan_run(
     Returns
     -------
     MemoryRun
-        Run with ``en_energy``, ``pixel``, ``row``, ``dim_2``,
+        Run with ``time``, ``en_energy``, ``pixel``, ``row``, ``dim_2``,
         ``detector_image`` and ``detector_cube``.
     """
     en_energy = np.linspace(200.0, 1000.0, n_x)
@@ -138,6 +138,13 @@ def image_scan_run(
         + np.arange(n_z, dtype=float)[None, None, :] * float(n_y * n_x)
     )
     data = {
+        # Every run carries a time axis, even a one-point one: it is the
+        # event axis, and dimension naming is derived from whether it is
+        # present. Without it ``MemoryRun._resolve_dims`` falls back to
+        # ``dim_0`` for every 1-D key, so unrelated axes collide by name and
+        # normalization -- which aligns a norm array to y by axis name --
+        # matches the wrong axis.
+        "time": np.arange(n_y, dtype=float),
         "en_energy": en_energy,
         "pixel": pixel,
         "row": row_axis,
@@ -153,11 +160,26 @@ def image_scan_run(
             (["row"], "primary"),
             (["pixel"], "primary"),
         ],
-        # Declared for the cube only. Naming ``detector_image``'s axes would
-        # resolve them to the real (non-uniform) ``pixel`` coordinates and
-        # flip it from an image to a mesh, changing a fixture every existing
-        # ROI test depends on. The 2-D key stays exactly as it was.
-        dims={"detector_cube": ("row", "pixel", "dim_2")},
+        # Declared for every key, as the VPPEM fixture does, so nothing
+        # depends on inference. ``time`` names the event axis and every
+        # per-event key shares it; each detector-axis coordinate names its
+        # own axis. Both detectors still render as images -- an earlier note
+        # here warned that naming the real (non-uniform) ``pixel``
+        # coordinates would flip ``detector_image`` to a mesh, which is no
+        # longer true and was verified before removing the warning.
+        dims={
+            "time": ("time",),
+            # ``row`` is a coordinate *along* the event axis, the way a motor
+            # position is, so it shares the axis name rather than owning one.
+            # Per-event keys naming the same axis is what lets one of them
+            # normalize a detector: alignment is by axis name.
+            "row": ("time",),
+            "pixel": ("pixel",),
+            "en_energy": ("pixel",),
+            "dim_2": ("dim_2",),
+            "detector_image": ("time", "pixel"),
+            "detector_cube": ("time", "pixel", "dim_2"),
+        },
     )
     return MemoryRun(metadata, data)
 

@@ -41,7 +41,7 @@ def _session(ykey, *, depth_on_slider=False):
         ``detector_image`` (rank 2) or ``detector_cube`` (rank 3).
     depth_on_slider : bool, optional
         For the cube, put ``dim_2`` on a slider so the plane is
-        ``(row, pixel)`` rather than the trailing-axis default.
+        ``(time, pixel)`` rather than the trailing-axis default.
     """
     session, _ = make_plot_session()
     run = RunSource(image_scan_run(1, n_y=N_Y, n_x=N_X, n_z=N_Z))
@@ -51,7 +51,7 @@ def _session(ykey, *, depth_on_slider=False):
     session.view_intent.set_plot_ndim(2)
     if depth_on_slider:
         session.view_intent.set_axis_order(
-            (2, 0, 1), ["row", "pixel", "dim_2"]
+            (2, 0, 1), ["time", "pixel", "dim_2"]
         )
     trace = session.ensure_trace(run, "en_energy", ykey)
     trace.get_plot_bundle()
@@ -90,7 +90,7 @@ def test_the_cube_and_the_image_are_both_selectable():
     assert run.get_shape("detector_image") == (N_Y, N_X)
     assert run.get_shape("detector_cube") == (N_Y, N_X, N_Z)
     names = run.describe_axes("detector_cube", ["en_energy"]).names
-    assert names == ("row", "pixel", "dim_2")
+    assert names == ("time", "pixel", "dim_2")
 
 
 def test_the_cube_leading_plane_matches_the_image(qapp):
