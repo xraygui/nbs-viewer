@@ -8,6 +8,7 @@ full ``ensure_trace`` -> ``get_plot_bundle`` -> ``set_visible`` cycle with no
 matplotlib import.
 """
 
+import warnings
 from dataclasses import replace
 from typing import Optional
 from uuid import uuid4
@@ -411,11 +412,29 @@ class Trace(QObject):
         A trace outlives individual requests but not membership; without the
         disconnect a dropped trace keeps waking on every fetch its old run
         makes.
+
+        Its own signals go too. Removal is announced by key, so a subscriber
+        never gets the trace back and cannot unsubscribe itself; the trace is
+        a child of the set and so survives its own removal in Qt.
         """
         try:
             self._run.data_changed.disconnect(self._on_data_changed)
         except (TypeError, RuntimeError):
             pass
+        # A bare disconnect() warns rather than raises when nothing is
+        # connected, and PySide6's receivers() takes a signature string, not
+        # the signal, so there is no cheap way to ask first.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            for signal in (
+                self.data_changed,
+                self.visibility_changed,
+                self.render_mode_changed,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
 
     def _on_data_changed(self, *args):
         self.invalidate_bundle()

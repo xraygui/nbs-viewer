@@ -68,7 +68,7 @@ They interleave; the order below is the merged sequence.
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
 | B | `Trace` | session & traces | ✅ `0aaa133` |
 | 6 | Adopt `ViewIntent` | view pipeline | ✅ `505240d` |
-| C | Consumer sweep — canvas `TraceSet`, `ImageGridCanvas` bypass | session & traces | unblocked — next |
+| C | Consumer sweep — canvas renders the `TraceSet` | session & traces | ✅ narrowed |
 | D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
 | 7 | `plot_bundle.py` | view pipeline | unblocked |
@@ -104,6 +104,24 @@ the maintainer chose lived in a widget. The step also had an omitted decision:
 another rank silently discarded the user's orientation — the same bug inside
 the type meant to fix it. Axis order is now dimension names plus the X
 selection it follows, resolved by one function.
+
+Step C was re-scoped before starting rather than after, then narrowed again.
+Two of its six bullets were already closed by step 6 — `DimensionControl`'s
+spec ownership, which step 6 had to take to move the axis-order policy out of
+a widget, and the 2-D `QMessageBox`, which step 6 *reversed*:
+`accepts_plot_ndim` tests how many artists are visible, a fact only the canvas
+holds, so relocating it would re-add the artist state step B spent its diff
+deleting. Its stated payoff (mixed-rank bugs 2 and 3) was banked by step 3.
+
+Of the four bullets that survived, only the `single_canvas` one shipped. The
+image grid is due for a rewrite once the canvas stabilizes, so its bypass and
+duplicated shape discovery wait for that — and with them `ViewIntent.fan_out`,
+which should be designed against the rewrite rather than retrofitted. The
+`"time"`-first key sort stays in `RunDisplayWidget`: ordering keys for display
+is not domain policy, and that area is due to grow a sort-by-dimensionality
+rule. What landed is the real find — `_do_update_plot` was a second
+implementation of `PlotSession._retained_trace_keys`, and the canvas now reads
+the session's `TraceSet` instead of rebuilding it every 100 ms.
 
 Step 5 named the types to delete but no destination for the fifteen live
 functions in `cube_view.py` that were not types. The import graph settled it —
@@ -157,7 +175,9 @@ buttons.
 4. **`KeyInfo.hinted` semantics** — confirm `get_hinted_keys` produces the set
    the "Show All Keys" checkbox was meant to toggle (bug 4).
 5. **Fan-out API** for the image grid. When added it lives on `ViewIntent`,
-   enumerating INDEX values along one reduce axis.
+   enumerating INDEX values along one reduce axis. **Deferred to the
+   `ImageGridCanvas` rewrite** (see step C) — designing it against today's
+   bypass would retrofit an API onto code that is about to be replaced.
 6. **`DisplayManager` is nearly `AppModel`.** The remaining difference is
    catalog creation and selection, which `CatalogSwitcher` reaches around to
    get. Worth resolving when step F touches the presenter.
@@ -197,8 +217,12 @@ them.
 
 - **[`codebase_problem_statement.md`](codebase_problem_statement.md)** — the
   ranked problem inventory. Still the backlog. Item 2 (display vs storage) is
-  what steps 3 and 4 close; item 7 (domain policy in views) is what step C
-  closes.
+  what steps 3 and 4 close. Item 7 (domain policy in views) is mostly gone:
+  the `DimensionControl` bullet fell to step 6 and the
+  `MplCanvas._do_update_plot` bullet to step C. Two of the remaining three
+  are not defects — `run_display.py`'s key sort is display, and
+  `views/catalog/base.py`'s proxies are invariant 1's carve-out — so item 7
+  reduces to the `ImageGridCanvas` bullet, which its rewrite absorbs.
 - **[`structural_remediation_plan.md`](structural_remediation_plan.md)** —
   its steps 3–8 are superseded (they plan folder splits this refactor
   cancels). **Steps 2 and 9–12 are live and independent**: CI and the
@@ -229,3 +253,5 @@ them.
 | 2026-09-08 | Bug 11 fixed (`6d2b3ef`): the legend kept labels for deselected keys. One `updateLegend()` before the paint in `_do_update_plot`. Reproduced and verified with a scratch script under a real `QApplication`; `tests/` cannot reach it, since `MplCanvas` is a `QWidget`. |
 | 2026-09-08 | Recorded widget-level testing as the work that follows this refactor, under "After this refactor". Three bugs in one step (9, 10, 11) were unreachable from `tests/`; deferred deliberately so the harness is not written against constructors steps B–F will change. |
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |
+| 2026-09-09 | Step C audited against the tree before starting. Two bullets superseded by step 6 (one closed, one reversed) and its payoff banked by step 3; the sub-plan records which and why. Four live bullets remain: the canvas x × y × run product, the `ImageGridCanvas` `Trace` bypass, `_get_shape_info`, and the `time`-first sort plus `_make_slice_info`. Open question 5 (`ViewIntent.fan_out`) is now on step C's critical path, not optional. |
+| 2026-09-09 | Step C landed, narrowed to `single_canvas`. `MplCanvas._do_update_plot` was recomputing `PlotSession._retained_trace_keys` and calling `ensure_trace` a second time; it now renders the session's `TraceSet` and decides only visibility. `updatePlotData` and `remove_run_data` deleted; `Trace.dispose` gained the outgoing-signal disconnect the latter had owned. The image grid and `RunDisplayWidget` are deferred by decision — the grid to its own rewrite, which also absorbs open question 5 and the last live half of problem-statement item 7. Suite 361 → 362; `single_canvas.py` 1695 → 1667. |

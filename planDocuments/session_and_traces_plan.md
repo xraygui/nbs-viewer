@@ -5,7 +5,8 @@ half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
 **Status:** steps A and B landed; C–F not started. Everything this plan's
-predecessors marked done is verified against the tree below.
+predecessors marked done is verified against the tree below. Step C was
+re-scoped 2026-09-09 after view-pipeline step 6 closed two of its bullets.
 
 **Replaces** `model_core_refactor_plan.md` (steps 4–8) and
 `plot_session_list_adapter_plan.md` (P2–P3), both deleted 2026-09-08 and
@@ -274,42 +275,112 @@ canvas method meaning "fetch and draw this", not the deleted class.
 
 ---
 
-## Step C — Consumer sweep
+## Step C — Consumer sweep (narrowed to `single_canvas`)
 
 **Depends on** step B and view-pipeline step 6.
 
-### Do
+**Re-scoped twice, 2026-09-09.** First against the tree: two of the six
+bullets were already closed or reversed by step 6, and the step's stated
+payoff was banked by step 3. Then against the maintainer's call: the image
+grid and `RunDisplayWidget` are deferred, so what shipped is the
+`single_canvas` half alone.
 
-- [ ] `MplCanvas` renders a `TraceSet` — iterate traces, map trace → artist.
-  Step B gave it the map (`self._artists`); what is left is the product.
-  It stops computing the x × y × run cartesian product
-  (`single_canvas.py:584-607`).
-- [ ] `DimensionControl` builds and pushes a `ViewIntent` instead of owning
-  and mutating a spec. `_default_xkey` becomes `intent.axis_order == ()`.
-- [ ] Delete the `ImageGridCanvas` bypass: it constructs `PlotDataModel`
-  directly (`image_grid_canvas.py:393-401`) and keeps a private
-  `(uid, image_idx)` map. Both collapse into `intent.fan_out()`, which makes
-  each grid cell an ordinary trace.
-- [ ] Delete the duplicated shape discovery in `ImageGridCanvas._get_shape_info`.
-- [ ] Move the remaining domain policy out of views: `run_display.py:191-193`
-  sorting `"time"` to the front, the 2-D multi-dataset `QMessageBox` rule
-  (`single_canvas.py:422-437`), `_make_slice_info`.
+### Did
 
-### Closes
+- [x] `MplCanvas` renders the `TraceSet`. `_do_update_plot` iterated
+  `visible_models × selection.x × selection.y` and called `ensure_trace` for
+  each — **a second implementation of `PlotSession._retained_trace_keys`**,
+  which `rebuild()` already runs from seven call sites. The canvas now reads
+  `self.traces` and decides only visibility, from `plot_model.visible_uids`.
+- [x] Deleted `updatePlotData`, which existed only to serve that product.
+  Its signal wiring moved to `_on_trace_added`, connected to the set's
+  existing `trace_added` — the canvas now *learns* of a trace instead of
+  asking for one. `__init__` adopts any traces that already exist, so a
+  canvas built after runs are loaded is not blind to them.
+- [x] Deleted `remove_run_data` (44 lines). The session emits `run_removed`,
+  then `rebuild()` disposes the run's traces, and `_on_trace_removed` —
+  which step B added and which already handled *every* other removal path —
+  destroys each artist. All `remove_run_data` still owned was the axes reset.
+- [x] Dropped the `TraceKey` import from the canvas. Nothing under
+  `views/plot/mplCanvas/single_canvas.py` constructs a trace identity now.
 
-Mixed-rank bugs 2 and 3 from the view pipeline plan: the canvas stops passing
-the driving key's slice tuple to every trace, so a 1-D guest no longer
-collapses to 0-D, and `plot_axis_names` decides overlay compatibility.
+### Deferred by decision, not left open
+
+- **`ImageGridCanvas`** — the `Trace` bypass, the private `(uid, image_idx)`
+  map, `_get_shape_info` and `_make_slice_info`. It is due for a rewrite once
+  `single_canvas` stabilizes, so tidying it now is wasted, and
+  `intent.fan_out()` (master-plan open question 5) should be designed against
+  that rewrite rather than retrofitted. **This keeps the ownership guard's
+  `allowed` set non-empty**; see exit criteria.
+- **`run_display.py`'s `"time"`-first sort** — a display concern, correctly
+  in the widget. Key ordering is due to grow a sort-by-dimensionality rule,
+  so `RunDisplayWidget` is deferred on the same grounds.
+- **The 2-D `QMessageBox`** — reversed by step 6, not deferred. It is
+  `accepts_plot_ndim`, and it tests how many artists are visible, which only
+  the canvas knows. Moving it would re-add the artist state step B deleted.
+
+### The ordering the deletion exposed
+
+`run_removed` is emitted *before* `rebuild()` disposes the traces, so an
+`_on_run_removed` that reset the axes immediately would have run while the
+artists were still on them. The reset is deferred to a `_needs_axes_reset`
+flag consumed at the top of the next scheduled `_do_update_plot`, which the
+session already triggers via `request_plot_update`. The old code got away
+with the ordering only because it did the destruction itself.
+
+### `Trace.dispose` had to grow
+
+`remove_run_data` was the only place a dropped trace's *outgoing* signals were
+disconnected. Removal is announced by key, so `_on_trace_removed` never gets
+the trace and cannot unsubscribe on its behalf — and a `Trace` is a child of
+the `TraceSet`, so Qt keeps it alive past its own removal. `dispose` now drops
+`data_changed`, `visibility_changed` and `render_mode_changed` along with the
+run connection it already dropped.
+
+A first attempt gated this on `self.receivers(signal)` to avoid PySide6's
+warning when nothing is connected. `receivers()` takes a *signature string*
+there, so it raised `TypeError`, the surrounding `except` swallowed it, and
+the disconnect silently never ran — the suite passed anyway. The new test
+caught it. The gate is now `warnings.catch_warnings`.
+
+### Deleted
+
+`MplCanvas.updatePlotData`, `MplCanvas.remove_run_data`, the x × y × run
+product in `_do_update_plot`, the `TraceKey` import under
+`views/plot/mplCanvas/`. `single_canvas.py` 1695 → 1667 lines; the canvas
+gained `_connect_trace` / `_on_trace_added` (25 lines) and lost 82.
 
 ### Exit criteria
 
-- [ ] `EXPECTED_VIOLATIONS` in the ownership guard is empty — moved from
-  step B, which could not close it: the entry is `image_grid_canvas.py`
-  constructing a `Trace`, and only deleting the bypass removes it
+- [ ] The views-construct-no-traces guard has an empty `allowed` set —
+  **deliberately still open.** The guard is
+  `test_views_do_not_construct_traces_except_image_grid`
+  (`tests/test_plot_model_step3.py:194`), not a constant named
+  `EXPECTED_VIOLATIONS` as step B's criterion claimed. Its one entry is the
+  image grid, which is deferred to its rewrite. Carry this to that work
 - [x] No `plot_data._`-prefixed access under `views/` — done in step B
-- [ ] `ImageGridCanvas` constructs no models
-- [ ] A 1-D key and a 1-D projection of a 3-D key plot together
-- [ ] `codebase_problem_statement.md` item 7 can be struck
+- [x] `MplCanvas` constructs no models and no trace keys
+- [ ] `ImageGridCanvas` constructs no models — deferred with the rewrite
+- [x] A 1-D key and a 1-D projection of a 3-D key plot together — already
+  true model-side after step 6; the canvas no longer flattens the set
+- [ ] `codebase_problem_statement.md` item 7 can be struck — its
+  `MplCanvas._do_update_plot` bullet can be struck now. The `ImageGridCanvas`
+  bullet is deferred; the `run_display.py` bullet should be **deleted** from
+  item 7, since sorting keys for display is not domain policy; and the
+  `views/catalog/base.py` bullet is invariant 1's explicit carve-out and
+  should be deleted too
+
+### Tests
+
+`tests/test_trace.py::test_dropping_a_trace_drops_its_outgoing_connections`
+— the one piece of this step that is reachable headlessly. Suite 361 → 362.
+
+Two scratch scripts under a real `QApplication`, since the suite runs on
+`QCoreApplication`: a line-plot session (two runs × two Y keys through add,
+hide, show, deselect and remove — 25 assertions) and a 2-D image session
+(image render, committed crop, hide/show, removal tearing down the colorbar
+and render mode — 18 assertions). Both pass; neither is committed, for the
+same reason steps A and B did not commit theirs.
 
 ---
 
@@ -407,3 +478,5 @@ they synthesise data, which is a data-layer job.
 | 2026-09-08 | Step A landed (`5330b81`). Aliases dropped rather than held for a commit. `RunListView` builds the item model instead of `PlotPresenter`, which removes the `models/` → `views/` import the step as written would have created; the dead-consumer count that justified it is recorded in the step. Bugs 9 and 10 found en route, 9 closed. |
 | 2026-09-08 | Step B landed. `TraceSet` and `Trace` split into two files; the artist map is canvas-side. Two things the plan left open are resolved in the step: the live-data cache rule (invalidate on the run's `data_changed`) and the fact that removal must be *announced* by key rather than performed. The `EXPECTED_VIOLATIONS` exit criterion moved to step C — it names the `ImageGridCanvas` bypass, which step B does not touch. |
 | 2026-09-08 | Sizes re-measured; `RunSource` (792 → 955) and `Trace` (496 → 483) had drifted. Step D's `PlotSession` figure corrected to 1938. Step A's findings now point at the master plan's "After this refactor" section for the widget-testing gap. |
+| 2026-09-09 | Step C re-scoped before starting, against the tree rather than the plan. Its `DimensionControl` bullet was closed by view-pipeline step 6, which had to do it to move the axis-order policy out of a widget. Its `QMessageBox` bullet was *reversed* by the same step: `accepts_plot_ndim` tests visible-artist count, which only the canvas knows, so moving it would re-add the artist state step B deleted. Its "Closes" payoff was banked by step 3. The four live bullets remain, and one of them (`fan_out`) needs master-plan open question 5 answered first. |
+| 2026-09-09 | Step C landed, narrowed to `single_canvas` by the maintainer: the image grid is due for a rewrite once the canvas stabilizes, and `run_display.py`'s key sort is a display concern that belongs in the widget and will grow a dimensionality rule. The canvas stopped recomputing `_retained_trace_keys` and now reads the session's `TraceSet`; `updatePlotData` and `remove_run_data` are gone. `Trace.dispose` grew the outgoing-signal disconnect that `remove_run_data` had owned. The ownership guard stays non-empty by decision and carries to the grid rewrite. |

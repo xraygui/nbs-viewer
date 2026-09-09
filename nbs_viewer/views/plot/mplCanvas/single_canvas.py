@@ -20,7 +20,6 @@ from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from nbs_viewer.models.plot.view_spec import Projection
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
-from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle, view_fingerprint_from_bundle
 from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiSetModel
@@ -137,6 +136,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.plot_model = presenter.session
         self._connected_traces = set()
         self._artists = {}
+        self._needs_axes_reset = False
         self._worker_generations = {}
         self._active_workers = {}
         self._pending_workers = set()
@@ -169,7 +169,10 @@ class MplCanvas(FigureCanvasQTAgg):
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
 
+        self.plot_model.traces.trace_added.connect(self._on_trace_added)
         self.plot_model.traces.trace_removed.connect(self._on_trace_removed)
+        for trace in self.plot_model.traces.values():
+            self._connect_trace(trace)
         self.plot_model.cube_view_changed.connect(self._on_view_intent_changed)
         self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
@@ -253,6 +256,33 @@ class MplCanvas(FigureCanvasQTAgg):
                 artist.set_array([])
         except Exception as e:
             print(f"[MplCanvas._destroy_artist] Error cleaning up artist: {e}")
+
+    def _connect_trace(self, trace):
+        """
+        Subscribe to one trace's signals, once.
+
+        Parameters
+        ----------
+        trace : Trace
+            Trace the session has added to its set.
+        """
+        key = trace.trace_key
+        if key in self._connected_traces:
+            return
+        trace.data_changed.connect(self.plot_data)
+        trace.visibility_changed.connect(self._on_trace_visibility_changed)
+        trace.render_mode_changed.connect(self._on_render_mode_changed)
+        self._connected_traces.add(key)
+
+    def _on_trace_added(self, trace):
+        """
+        Adopt a trace the session created.
+
+        Membership is the session's, so the canvas learns of a new trace
+        rather than asking for one. Painting is left to the scheduled
+        update, which the session also triggers.
+        """
+        self._connect_trace(trace)
 
     def _on_trace_removed(self, trace_key):
         """
@@ -527,33 +557,6 @@ class MplCanvas(FigureCanvasQTAgg):
             self.clear()
             self.currentDim = intent.plot_ndim
 
-    def updatePlotData(self, runSource, xkey, ykey, norm_keys=None):
-        """
-        Create or refresh a plot model for one x/y key pair.
-
-        List-owned path: updates metadata without emitting ``data_changed`` and
-        starts at most one worker when a refetch is needed.
-        """
-        plotData = self.plot_model.ensure_trace(
-            runSource, xkey, ykey, norm_keys=norm_keys
-        )
-        key = plotData.trace_key
-        if key not in self._connected_traces:
-            print_debug(
-                "MplCanvas.updatePlotData",
-                f"connect {xkey}/{ykey}",
-                category="plots",
-            )
-            plotData.data_changed.connect(self.plot_data)
-            plotData.visibility_changed.connect(
-                self._on_trace_visibility_changed
-            )
-            plotData.render_mode_changed.connect(self._on_render_mode_changed)
-            self._connected_traces.add(key)
-            self.plot_data(plotData)
-        elif plotData.needs_fetch() or self.artist_for(key) is None:
-            self.plot_data(plotData)
-
     def set_lock_aspect(self, locked: bool) -> None:
         """
         Set whether image plots use equal data aspect.
@@ -637,7 +640,15 @@ class MplCanvas(FigureCanvasQTAgg):
         self.draw()
 
     def _on_run_removed(self, run):
-        self.remove_run_data(run.uid)
+        """
+        Reset the axes once the session has finished dropping the run.
+
+        The session emits ``run_removed`` before it rebuilds, so the run's
+        traces still exist here. ``trace_removed`` destroys each artist; all
+        this owes is the axes reset, deferred to the scheduled update so it
+        runs after the disposals.
+        """
+        self._needs_axes_reset = True
 
     def updatePlot(self):
         self._update_timer = getattr(self, "_update_timer", None)
@@ -659,26 +670,30 @@ class MplCanvas(FigureCanvasQTAgg):
     def _do_update_plot(self):
         t0 = ttime.time()
         try:
-            visible_keys = set()
-            for runSource in self.plot_model.visible_models:
-                sel = self.plot_model.selection_for(runSource.uid)
-                xkeys, ykeys, normkeys = sel.as_lists()
-                for xkey in xkeys:
-                    for ykey in ykeys:
-                        visible_keys.add(TraceKey(runSource.uid, xkey, ykey))
-                        self.updatePlotData(runSource, xkey, ykey, normkeys)
+            if self._needs_axes_reset:
+                self._needs_axes_reset = False
+                self._reset_plot_axes()
 
+            # Membership is the session's: it holds a trace for every
+            # run x selection pair already, so the canvas reads that set
+            # rather than recomputing the product and calling ensure_trace
+            # a second time. Visibility is the only thing decided here.
+            visible_uids = self.plot_model.visible_uids
+            visible_keys = set()
             for key, trace in self.traces.items():
-                if key not in visible_keys:
+                if key.uid not in visible_uids:
                     trace.set_visible(False)
                     continue
+                visible_keys.add(key)
                 trace.set_visible(True)
                 artist = self.artist_for(key)
                 needs_artist = artist is None or (
                     isinstance(artist, Line2D)
                     and not self._line_artist_on_axes(artist)
                 )
-                if needs_artist and key not in self._active_workers:
+                if (
+                    needs_artist or trace.needs_fetch()
+                ) and key not in self._active_workers:
                     self.plot_data(trace)
 
             workers_pending = len(self._active_workers) > 0
@@ -1650,46 +1665,3 @@ class MplCanvas(FigureCanvasQTAgg):
             f"active_workers={len(self._active_workers)}",
             category="plots",
         )
-
-    def remove_run_data(self, run_uid):
-        print_debug(
-            "MplCanvas.remove_run_data",
-            f"Removing run {run_uid}",
-            category="plots",
-        )
-        keys_to_remove = [
-            key for key in list(self._connected_traces) if key.uid == run_uid
-        ]
-
-        for key in keys_to_remove:
-            self._worker_generations.pop(key, None)
-            worker = self._active_workers.pop(key, None)
-            retire_plot_worker(worker, self._pending_workers)
-
-        for key in keys_to_remove:
-            trace = self.traces.get(key)
-            if trace is not None:
-                try:
-                    trace.data_changed.disconnect(self.plot_data)
-                    trace.render_mode_changed.disconnect(
-                        self._on_render_mode_changed
-                    )
-                    trace.visibility_changed.disconnect(
-                        self._on_trace_visibility_changed
-                    )
-                except (TypeError, RuntimeError):
-                    pass
-            self._destroy_artist(key)
-            self._connected_traces.discard(key)
-
-        self.draw()
-        self.updateLegend()
-        print_debug(
-            "MplCanvas.remove_run_data",
-            "Completed cleanup",
-            category="plots",
-        )
-        if keys_to_remove:
-            self._reset_plot_axes()
-            self.updateLegend()
-            self.draw()

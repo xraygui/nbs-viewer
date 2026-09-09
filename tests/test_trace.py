@@ -119,6 +119,29 @@ def test_dropping_a_trace_announces_its_key():
     assert key not in plot.traces
 
 
+def test_dropping_a_trace_drops_its_outgoing_connections():
+    """
+    Removal is announced by key, so a subscriber cannot unsubscribe itself.
+
+    The trace is a child of the set and so survives its own removal in Qt.
+    Nothing else can reach it once the set has let go, which makes
+    ``dispose`` the only place its own signals can be dropped.
+    """
+    plot, run, xkey, ykey = _session_with_run()
+    key = TraceKey(run.uid, xkey, ykey)
+    trace = plot.traces.get(key)
+
+    seen = []
+    trace.visibility_changed.connect(lambda *args: seen.append(args))
+    trace.set_visible(not trace.visible)
+    assert len(seen) == 1
+
+    plot.remove_run(run)
+
+    trace.set_visible(not trace.visible)
+    assert len(seen) == 1
+
+
 def test_trace_module_imports_without_matplotlib():
     """
     The ownership guard that a unit test inside the suite cannot make.
