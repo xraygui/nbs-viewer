@@ -50,6 +50,7 @@ from .selection import KeySelection, Selection
 from .trace import Trace
 from .trace_set import TraceSet
 from .view_spec import (
+    Projection,
     ViewCrop,
     ViewIntent,
     classify_profile_kind,
@@ -827,7 +828,7 @@ class PlotSession(QObject):
             return None
         return best
 
-    def driving_projection(self) -> Optional["Projection"]:
+    def driving_projection(self) -> Optional[Projection]:
         """
         Return the intent projected onto the key the dimension rows describe.
 
@@ -878,21 +879,13 @@ class PlotSession(QObject):
         assignments : mapping
             ``{storage_axis: (DimRole, index)}`` from the dimension rows.
         """
-        projection = self.driving_projection()
-        if projection is None:
+        edited = self.driving_projection()
+        if edited is None:
             return
-        roles = list(projection.roles)
-        indices = list(projection.indices)
         for storage_axis, (role, index) in assignments.items():
-            roles[storage_axis] = role
-            indices[storage_axis] = index
-        edited = Projection(
-            ndim=projection.ndim,
-            plot_ndim=projection.plot_ndim,
-            roles=tuple(roles),
-            indices=tuple(indices),
-            axis_order=projection.axis_order,
-        )
+            edited = edited.with_slice_role(storage_axis, role).with_index(
+                storage_axis, index
+            )
         self.set_view_intent(self._intent.with_reduce_from(edited))
 
     def set_plot_ndim(self, plot_ndim: int) -> None:
@@ -1583,7 +1576,7 @@ class PlotSession(QObject):
 
     def _commit_span_full(
         self,
-        parent_spec: "Projection",
+        parent_spec: Projection,
         profile_storage_axis: int,
         span_full: bool,
     ) -> bool:
