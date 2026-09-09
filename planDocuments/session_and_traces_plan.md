@@ -4,8 +4,7 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** steps A, B and C landed. The remaining sequence is **G, D, H, E,
-F**, re-derived 2026-09-09 from the object-boundary question rather than taken
+**Status:** steps A, B, C, G and D landed; **H, E, F** remain. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
 from the original step order; the target ownership tree below was rewritten in
 the same pass. Everything marked done is verified against the tree.
 
@@ -609,7 +608,7 @@ still resets, and step C's line and image regressions still pass.
 
 ---
 
-## Step D — `RegionController` (crop and ROI are one child)
+## Step D — `RegionController` (crop and ROI are one child) ✅ (`aba26a3`)
 
 **Depends on** step G, which gives it `orientation_changed` to consume instead
 of the session's self-signal, and on view-pipeline step 4.
@@ -642,55 +641,116 @@ session** and the controller is constructed with a reference to it.
 
 ### Do
 
-- [ ] `RegionController(QObject)` in `models/plot/region_controller.py`, owned
+- [x] `RegionController(QObject)` in `models/plot/region_controller.py`, owned
   by the session as `session.region`, holding `RoiSetModel` and the crop pair
   (`ViewCrop` + the trace key it was drawn on).
-- [ ] Move the ROI pipeline: `build_roi_profile_request`,
+- [x] Move the ROI pipeline: `build_roi_profile_request`,
   `preview_roi_profile`, `prepare_roi_commit`, `commit_roi_profile`,
   `finalize_roi_commit`, `resolve_roi_entry`,
   `cached_parent_bundle_for_preview`, `resolve_parent_frame`,
   `apply_roi_region_to_selected`, `apply_expanded_roi_profile_span`,
   `_commit_span_full`.
-- [ ] Move the crop half with it: `view_crop`, `set_view_crop`,
+- [x] Move the crop half with it: `view_crop`, `set_view_crop`,
   `clear_view_crop`, `crop_applies_to`, `crop_status_text`,
   `apply_view_crop_from_region`, `invalidate_view_crop_if_invalid`.
-- [ ] Move the shared machinery: `resolve_current_view_fingerprint`,
+- [x] Move the shared machinery: `resolve_current_view_fingerprint`,
   `sync_region_state_with_view`, `invalidate_all_region_state`, and the
   `region_status_changed` / `region_invalidation_requested` /
   `view_crop_changed` signals.
-- [ ] **Delete `MplCanvas.current_view_fingerprint`**, which is
+- [x] **Delete `MplCanvas.current_view_fingerprint`**, which is
   `resolve_current_view_fingerprint` written a second time against the
   canvas's own active bundle. One fingerprint policy, in the controller.
-- [ ] `RegionController` connects `intent.orientation_changed` →
+- [x] `RegionController` connects `intent.orientation_changed` →
   `sync_region_state_with_view` and `intent.plot_ndim_changed` → the
   leaving-2-D invalidation. Two more self-signals become real connections.
-- [ ] **No delegating methods on the session.** `roi/window.py`,
+- [x] **No delegating methods on the session.** `roi/window.py`,
   `roi/preview_canvas.py` and `MplCanvas` retarget to `session.region` and
   `session.region.roi_set`.
-- [ ] `MplCanvas` connects `region.crop_changed` → `_needs_axes_reset`,
+- [x] `MplCanvas` connects `region.view_crop_changed` → `_needs_axes_reset`,
   deleting `_last_2d_view_crop` and its diff — the crop twin of bug 12,
   though this one over-fires correctly since a crop really does move the
   extent.
-- [ ] Collapse `set_view_crop` / `clear_view_crop` /
+- [x] Collapse `set_view_crop` / `clear_view_crop` /
   `apply_view_crop_from_region` into one entry point now that they are in one
   object.
-- [ ] Break the last region self-signal: the session connects
+- [x] Break the last region self-signal: the session connects
   `selected_keys_changed` → `_on_selected_keys_changed_for_region`, which
   invalidates all crop and ROI state on every key change. Make it an explicit
   call, or a connection from `Selection` once step H lands.
 
+### The decisions the plan had not predicted
+
+**`cached_parent_bundle_for_preview` deleted rather than moved.** It rebuilt
+the session request and compared its projection against the trace's, returning
+None when they differed. That comparison can no longer fail:
+`_refresh_held_requests` is wired to every signal that moves the session view
+— the intent's `changed`, the transform, and this controller's
+`view_crop_changed` — so a held request is rewritten before anything can
+observe it as stale. Verified empirically across axis-order, slider, crop,
+plot-rank, selection and transform changes before the comparison was dropped.
+Step F had queued this as "an equality check"; it is now literally that, so
+step F's entry is closed here.
+
+**The crop collapse went one method, not three.** The plan said to collapse
+`set_view_crop` / `clear_view_crop` / `apply_view_crop_from_region` into one
+entry point. Examined, they are a primitive plus two guarded uses, and two of
+the three have distinct production callers — merging them would need a
+polymorphic setter, which is worse. What was actually available: `set_view_crop`
+now guards on real change (the rule step G established for the intent's
+mutators), which leaves `clear_view_crop` as a null check wrapped around
+`set_view_crop(None)`. That one is deleted; the other two stay.
+
+**The controller borrows two things, and returns one.** Tracing every `self.`
+reference in the moved code, its coupling to the session is
+`resolve_single_visible_2d_trace` (×10) and the session-default X keys (×1).
+Both are joins the session owns. The reverse direction is a single signal:
+`view_crop_changed`, which the session connects to `_refresh_held_requests`
+then `request_plot_update`, because the crop rides on every request and the
+controller does not own the traces. `_build_plot_request` and
+`_refresh_held_requests` were on the borrowed list until the two decisions
+above removed them.
+
 ### Exit criteria
 
-- [ ] `plot_session.py` under ~900 file lines (from 2051)
-- [ ] `rg "roi|crop|region|fingerprint" nbs_viewer/models/plot/plot_session.py`
-  returns nothing outside the controller's construction
-- [ ] `rg "current_view_fingerprint" nbs_viewer/views/` returns nothing
-- [ ] No delegating ROI or crop method remains on the session
-- [ ] Three of the five session self-signal connections are gone
-- [ ] `test_roi_preview_commit` and `test_roi_wiring` green. **They will need
+- [ ] `plot_session.py` under ~900 file lines — **2045 → 1263, not met.** The
+  remainder is runs/visibility (27 methods) and selection, which is step H's
+  content; region work alone could not reach 900
+- [x] `rg "roi|crop|region|fingerprint" nbs_viewer/models/plot/plot_session.py`
+  returns nothing outside the controller's construction. Enforced by
+  `test_the_session_defines_no_region_methods`, which allows exactly `region`
+  and `_on_view_crop_changed`
+- [x] `rg "current_view_fingerprint" nbs_viewer/views/` returns nothing —
+  enforced by `test_the_canvas_holds_no_second_fingerprint_policy`
+- [x] No delegating ROI or crop method remains on the session
+- [ ] Three of the five session self-signal connections are gone — **two, not
+  three.** Step G took `cube_view_changed`; this step took
+  `selected_keys_changed`. The third the criterion counted on is
+  `available_keys_changed` → selection revalidation, which is step H's, and
+  the remaining pair is the deferred cache aggregation
+- [x] `test_roi_preview_commit` and `test_roi_wiring` green. **They needed
   edits** — the original step used "unchanged" as the thinness check, which no
   longer applies now that the delegation is deliberately deleted. Retarget
   them at the controller; the assertions themselves should not change.
+
+### Tests
+
+Suite 380 → 389. `tests/test_region_controller.py` (9): the session owns one
+region child and re-exports none of it; sessions get distinct controllers; the
+crop mutator guards on real change; a crop change rewrites held requests
+*before* the repaint is scheduled; leaving 2-D and changing the selection each
+invalidate; and two AST guards — the session defines no method named for ROI,
+crop or fingerprints beyond `region` and `_on_view_crop_changed`, and the
+canvas defines no `current_view_fingerprint`. Those two are what stop the
+forwarding layer growing back.
+
+110 references across three views and eight test modules were retargeted onto
+`session.region`. All four `QApplication` scripts still pass, plus an 18-case
+ROI-window sweep over x key × axis order × profile axis on the 3-D cube.
+
+### Sizes
+
+`plot_session.py` 2045 → 1263; `region_controller.py` 953 new lines;
+`single_canvas.py` 1676 → 1674. Session self-signal connections 4 → 3.
 
 ---
 
@@ -814,3 +874,4 @@ they synthesise data, which is a data-layer job.
 | 2026-09-09 | Step C re-scoped before starting, against the tree rather than the plan. Its `DimensionControl` bullet was closed by view-pipeline step 6, which had to do it to move the axis-order policy out of a widget. Its `QMessageBox` bullet was *reversed* by the same step: `accepts_plot_ndim` tests visible-artist count, which only the canvas knows, so moving it would re-add the artist state step B deleted. Its "Closes" payoff was banked by step 3. The four live bullets remain, and one of them (`fan_out`) needs master-plan open question 5 answered first. |
 | 2026-09-09 | Step C landed (`940d45c`), narrowed to `single_canvas` by the maintainer: the image grid is due for a rewrite once the canvas stabilizes, and `run_display.py`'s key sort is a display concern that belongs in the widget and will grow a dimensionality rule. The canvas stopped recomputing `_retained_trace_keys` and now reads the session's `TraceSet`; `updatePlotData` and `remove_run_data` are gone. `Trace.dispose` grew the outgoing-signal disconnect that `remove_run_data` had owned. The ownership guard stays non-empty by decision and carries to the grid rewrite. |
 | 2026-09-09 | Remaining sequence re-derived and the ownership tree rewritten. Step D's original mandate to keep thin delegating methods was dropped — it is the forwarding layer rule 1 forbids, and it is affordable to drop because every heavyweight ROI member has exactly one caller, none of them `MplCanvas`. Crop merged into the ROI child (one lifecycle, one fingerprint, two shared invalidation methods); `RoiSetModel` kept as a sibling (22 of 23 members have external consumers, so subsuming it would force a 15-member re-export). New steps G (`ViewIntent` becomes an emitting model, three signals derived from consumers) and H (`RunCollection` / `Selection` promoted, reversing an over-thinning). Bug 12 confirmed while designing G's signals. Cache aggregation ruled out as a child and deferred. |
+| 2026-09-09 | Step D landed (`aba26a3`), rewritten from its original text: no delegating methods, and crop merged into the ROI child. Two unpredicted decisions are recorded in the step — `cached_parent_bundle_for_preview` deleted rather than moved (its equality check is now structurally unreachable, which also closes step F's entry for it), and the crop collapse reduced to deleting `clear_view_crop` once `set_view_crop` guards on real change. Two exit criteria are honestly unmet: `plot_session.py` is 1263 rather than under 900, and two rather than three self-signals are gone; both remainders are step H's content. |
