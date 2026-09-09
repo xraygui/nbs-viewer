@@ -141,7 +141,6 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_workers = {}
         self._pending_workers = set()
         self._last_2d_plot_key = None
-        self._last_2d_intent = None
         self._last_view_frame: Optional[PlotViewFrame] = None
 
         self._artist_count = 0
@@ -173,7 +172,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self.plot_model.traces.trace_removed.connect(self._on_trace_removed)
         for trace in self.plot_model.traces.values():
             self._connect_trace(trace)
-        self.plot_model.cube_view_changed.connect(self._on_view_intent_changed)
+        intent = self.plot_model.view_intent
+        intent.plot_ndim_changed.connect(self._on_plot_ndim_changed)
+        intent.orientation_changed.connect(self._on_orientation_changed)
         self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
@@ -545,17 +546,30 @@ class MplCanvas(FigureCanvasQTAgg):
         msg.exec_()
         return False
 
-    def _on_view_intent_changed(self, intent):
+    def _on_plot_ndim_changed(self, plot_ndim):
         """
-        Reset the axes when the session view changes dimensionality.
+        Rebuild the axes when the session view changes dimensionality.
 
-        The session owns the view; the canvas reacts. A rank change needs the
-        axes rebuilt, everything else only needs a refetch, and
-        ``request_plot_update`` already schedules that.
+        The session owns the view; the canvas reacts.
         """
-        if self.currentDim != intent.plot_ndim:
+        if self.currentDim != plot_ndim:
             self.clear()
-            self.currentDim = intent.plot_ndim
+            self.currentDim = plot_ndim
+
+    def _on_orientation_changed(self):
+        """
+        Note that the 2-D axes must be torn down before the next paint.
+
+        The plot plane's coordinate frame moved, so extents and the colorbar
+        no longer describe what is drawn. Deferred to the scheduled update
+        rather than done here, because the session emits before the traces
+        have been refetched.
+
+        A reduce change deliberately does not reach this: slicing to another
+        index leaves the frame where it was. Diffing the whole intent instead
+        is what made every slider tick destroy the image and its colorbar.
+        """
+        self._needs_axes_reset = True
 
     def set_lock_aspect(self, locked: bool) -> None:
         """
@@ -968,19 +982,15 @@ class MplCanvas(FigureCanvasQTAgg):
     def _prepare_2d_axes(self, plot_key):
         crop = self._view_crop
         crop_key = crop.storage_bbox if crop is not None else None
-        intent = self.plot_model.view_intent
-        spec_changed = intent != self._last_2d_intent
         crop_changed = crop_key != self._last_2d_view_crop
         if (
             self._last_2d_plot_key != plot_key
             or self._active_render_mode not in ("image", "mesh")
             or self.currentDim != 2
-            or spec_changed
             or crop_changed
         ):
             self._reset_plot_axes()
         self._last_2d_plot_key = plot_key
-        self._last_2d_intent = intent
         self._last_2d_view_crop = crop_key
 
     def _reset_plot_axes(self):
@@ -1481,7 +1491,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self._colorbar_state.clear()
         self._last_2d_plot_key = None
-        self._last_2d_intent = None
         self.currentDim = 1
         self._active_render_mode = None
         self._artist_count = 0

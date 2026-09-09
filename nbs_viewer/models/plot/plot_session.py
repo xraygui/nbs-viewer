@@ -14,7 +14,6 @@ Freeze and unlinked display read :meth:`selection_for`.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
 
 from qtpy.QtCore import QObject, Signal
@@ -49,10 +48,10 @@ from .runSource import RunSource
 from .selection import KeySelection, Selection
 from .trace import Trace
 from .trace_set import TraceSet
+from .view_intent import ViewIntent
 from .view_spec import (
     Projection,
     ViewCrop,
-    ViewIntent,
     classify_profile_kind,
     default_profile_label,
     is_plot_plane_storage_axis,
@@ -81,7 +80,6 @@ class PlotSession(QObject):
     selected_keys_changed = Signal(list, list, list)
     transform_changed = Signal(dict)
     request_plot_update = Signal()
-    cube_view_changed = Signal(object)
     view_crop_changed = Signal(object)
     region_status_changed = Signal(str)
     region_invalidation_requested = Signal(str)
@@ -115,7 +113,7 @@ class PlotSession(QObject):
         self._retain_selection = False
         self._transform = {"enabled": False, "text": ""}
 
-        self._intent = ViewIntent(plot_ndim=1)
+        self._intent = ViewIntent(plot_ndim=1, parent=self)
         self._view_crop: Optional[ViewCrop] = None
         self._view_crop_key: Optional[tuple] = None
         self._roi_draw_enabled = False
@@ -129,7 +127,15 @@ class PlotSession(QObject):
 
 
         self.available_keys_changed.connect(self._on_available_keys_changed)
-        self.cube_view_changed.connect(self._on_cube_view_changed_for_region)
+        # The intent is a child that announces its own changes. Requests
+        # must be rewritten before the refetch is scheduled, so the order
+        # of these two connections is load-bearing.
+        self._intent.changed.connect(self._refresh_held_requests)
+        self._intent.changed.connect(self.request_plot_update.emit)
+        self._intent.orientation_changed.connect(
+            self.sync_region_state_with_view
+        )
+        self._intent.plot_ndim_changed.connect(self._on_plot_ndim_changed)
         self.selected_keys_changed.connect(self._on_selected_keys_changed_for_region)
         self.run_added.connect(self._refresh_cache_progress_connections)
         self.run_removed.connect(self._refresh_cache_progress_connections)
@@ -741,25 +747,6 @@ class PlotSession(QObject):
         """
         return self._intent
 
-    def set_view_intent(self, intent: ViewIntent) -> None:
-        """
-        Replace the session view intent.
-
-        Parameters
-        ----------
-        intent : ViewIntent
-            New view state.
-        """
-        if intent == self._intent:
-            return
-        was_2d = self._intent.plot_ndim == 2
-        self._intent = intent
-        if was_2d and intent.plot_ndim != 2:
-            self.invalidate_all_region_state("switched out of 2D mode")
-        self.cube_view_changed.emit(intent)
-        self._refresh_held_requests()
-        self.request_plot_update.emit()
-
     def follow_x_selection(self) -> None:
         """
         Point the default axis order at the current X selection.
@@ -769,7 +756,7 @@ class PlotSession(QObject):
         supersedes a manual arrangement; picking the same one leaves the
         arrangement alone.
         """
-        self.set_view_intent(self._intent.follow_xkey(self._primary_xkey()))
+        self._intent.follow_xkey(self._primary_xkey())
 
     def _primary_xkey(self) -> Optional[str]:
         """
@@ -864,11 +851,7 @@ class PlotSession(QObject):
         if target < 1 or target > projection.ndim - 1:
             return
         swapped = projection.swap_rows(target)
-        self.set_view_intent(
-            self._intent.with_axis_order(
-                swapped.axis_order, driving[2].names
-            )
-        )
+        self._intent.set_axis_order(swapped.axis_order, driving[2].names)
 
     def set_axis_reduce(self, assignments) -> None:
         """
@@ -886,7 +869,7 @@ class PlotSession(QObject):
             edited = edited.with_slice_role(storage_axis, role).with_index(
                 storage_axis, index
             )
-        self.set_view_intent(self._intent.with_reduce_from(edited))
+        self._intent.set_reduce_from(edited)
 
     def set_plot_ndim(self, plot_ndim: int) -> None:
         """
@@ -897,7 +880,7 @@ class PlotSession(QObject):
         plot_ndim : int
             1 for line plots, 2 for image plots.
         """
-        self.set_view_intent(replace(self._intent, plot_ndim=plot_ndim))
+        self._intent.set_plot_ndim(plot_ndim)
 
     @property
     def view_crop(self) -> Optional[ViewCrop]:
@@ -1125,8 +1108,15 @@ class PlotSession(QObject):
         if had_rois and self._view_crop is None:
             self.region_status_changed.emit(f"ROI marked stale: {reason}")
 
-    def _on_cube_view_changed_for_region(self, _spec) -> None:
-        self.sync_region_state_with_view()
+    def _on_plot_ndim_changed(self, plot_ndim: int) -> None:
+        """
+        Invalidate region state when the session stops showing a 2-D plane.
+
+        Crop and ROI geometry live on that plane, so leaving it invalidates
+        both. Entering it does not: there is no stale geometry to clear.
+        """
+        if plot_ndim != 2:
+            self.invalidate_all_region_state("switched out of 2D mode")
 
     def _on_selected_keys_changed_for_region(
         self,
@@ -1205,11 +1195,14 @@ class PlotSession(QObject):
         except Exception:
             names = None
         intent = self._intent
-        if len(shape) < intent.plot_ndim:
-            # A key that cannot fill the session plot still plots on its own
-            # terms rather than dropping out: a 1-D spectrum beside a 2-D
-            # image is the mixed-rank case, not an error.
-            intent = replace(intent, plot_ndim=len(shape))
+        # A key that cannot fill the session plot still plots on its own
+        # terms rather than dropping out: a 1-D spectrum beside a 2-D image
+        # is the mixed-rank case, not an error. Projecting at an overridden
+        # rank avoids manufacturing a throwaway intent, which a mutable
+        # model cannot supply.
+        plot_ndim = (
+            len(shape) if 0 < len(shape) < intent.plot_ndim else None
+        )
         return build_plot_request(
             uid=run_model.uid,
             xkeys=[xkey] if xkey else (),
@@ -1220,6 +1213,7 @@ class PlotSession(QObject):
                 shape,
                 names,
                 crop=self._crop_for_trace(trace_key),
+                plot_ndim=plot_ndim,
             ),
             transform=self._effective_transform_text(run_model),
         )

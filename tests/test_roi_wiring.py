@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tests.fixtures.view import intent_from_projection
+from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
@@ -55,7 +55,7 @@ def _wired_image_scan_with_roi(
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    session.session.set_view_intent(intent_from_projection(parent_spec))
+    apply_projection(session.session.view_intent, parent_spec)
     session.session.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = session.session.ensure_trace(

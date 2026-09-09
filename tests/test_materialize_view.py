@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.plot_bundle import materialize_view
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
     Projection,
     eligible_profile_axes,

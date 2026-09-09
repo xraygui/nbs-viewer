@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
     Projection,
 )
@@ -18,7 +18,7 @@ from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_session import PlotSession
-from tests.fixtures.view import intent_from_projection
+from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
@@ -120,10 +120,8 @@ def test_two_plot_models_independent_keys_and_maps(qapp):
 
 def test_cube_view_and_crop_without_canvas(qapp):
     plot_model = PlotSession()
-    intent = ViewIntent(plot_ndim=2)
-    plot_model.set_view_intent(intent)
+    plot_model.view_intent.set_plot_ndim(2)
     assert plot_model.dimension == 2
-    assert plot_model.view_intent is intent
 
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
     plot_model.set_view_crop(crop, ("x", "y", "uid"))
@@ -147,7 +145,7 @@ def _image_session(qapp):
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    plot_model.set_view_intent(intent_from_projection(parent))
+    apply_projection(plot_model.view_intent, parent)
     plot_data = plot_model.ensure_trace(
         run_model, "pixel", "detector_image"
     )

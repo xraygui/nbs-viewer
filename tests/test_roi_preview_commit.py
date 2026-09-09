@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.fixtures.view import intent_from_projection
+from tests.fixtures.view import apply_projection
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
     Projection,
 )
@@ -34,7 +34,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    plot_model.set_view_intent(intent_from_projection(parent_spec))
+    apply_projection(plot_model.view_intent, parent_spec)
     plot_model.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = plot_model.ensure_trace(
@@ -188,7 +188,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     plot_model.add_run(run_model)
 
     parent_spec = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
-    plot_model.set_view_intent(intent_from_projection(parent_spec))
+    apply_projection(plot_model.view_intent, parent_spec)
     plot_model.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
     plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"

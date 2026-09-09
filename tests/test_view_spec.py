@@ -4,17 +4,17 @@ import numpy as np
 import pytest
 
 from tests.fixtures.view import intent_from_projection
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
     Projection,
     spec_from_slice_info,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
 from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     ViewCrop,
-    ViewIntent,
     Projection,
     plot_axis_names,
 )
@@ -465,11 +465,10 @@ def test_with_slice_role():
 
 
 def test_changing_plot_ndim_reassigns_the_plane():
-    """Switching 1-D to 2-D is a field on the intent, not a spec rewrite."""
-    from dataclasses import replace
-
+    """Switching 1-D to 2-D is a mutation on the intent, not a spec rewrite."""
     intent = ViewIntent(plot_ndim=1)
-    spec2 = replace(intent, plot_ndim=2).project(4)
+    assert intent.set_plot_ndim(2) is True
+    spec2 = intent.project(4)
     assert spec2.plot_ndim == 2
     assert spec2.roles[-2:] == (DimRole.PLOT_Y, DimRole.PLOT_X)
 

@@ -5,9 +5,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from tests.fixtures.view import intent_from_projection
+from tests.fixtures.view import apply_projection
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
 )
 from nbs_viewer.models.data.memory import MemoryRun
@@ -46,9 +46,9 @@ def test_a_low_rank_key_projects_on_its_own_terms():
     assert image.indices[0] == 4
     assert image.base_slice() == (4, slice(None), slice(None))
 
-    from dataclasses import replace as _replace
-
-    line = _replace(intent, plot_ndim=1).project(1, (11,))
+    # The mixed-rank case projects at an overridden rank rather than
+    # manufacturing a throwaway intent, which is what production does too.
+    line = intent.project(1, (11,), plot_ndim=1)
     assert line.ndim == 1
     assert line.plot_ndim == 1
     assert line.roles == (DimRole.PLOT_X,)
@@ -179,7 +179,7 @@ def test_ensure_trace_assembles_request(qapp):
     plot_model, _ = make_plot_session()
     plot_model.add_run(run_model)
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
-    plot_model.set_view_intent(intent_from_projection(cube))
+    apply_projection(plot_model.view_intent, cube)
     first = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
@@ -190,7 +190,7 @@ def test_ensure_trace_assembles_request(qapp):
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
     assert same is first
-    plot_model.set_view_intent(intent_from_projection(cube.with_index(0, 7)))
+    apply_projection(plot_model.view_intent, cube.with_index(0, 7))
     assert same.request.view.indices[0] == 7
     assert same.trace_key == key
 

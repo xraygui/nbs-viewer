@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_spec import DimRole, ViewIntent
+from nbs_viewer.models.plot.view_intent import ViewIntent
+from nbs_viewer.models.plot.view_spec import DimRole
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
@@ -107,12 +108,26 @@ def test_move_view_axis_records_a_named_order():
 
 
 def test_move_view_axis_off_the_ends_is_a_no_op():
+    """
+    Moving past either end changes nothing and announces nothing.
+
+    This used to assert ``session.view_intent is intent``. The session now
+    owns one live intent it mutates rather than replaces, so that identity is
+    trivially true and the assertion was vacuous. The observable no-op is
+    that no signal fired and no field moved.
+    """
     session, run = _session()
     intent = session.view_intent
+    before = (intent.dim_order, intent.xkey, intent.plot_ndim)
+    fired = []
+    intent.changed.connect(lambda: fired.append(1))
+
     session.move_view_axis(0, direction=-1)
     ndim = len(session.driving_axes()[2].shape)
     session.move_view_axis(ndim - 1, direction=1)
-    assert session.view_intent is intent
+
+    assert fired == []
+    assert (intent.dim_order, intent.xkey, intent.plot_ndim) == before
 
 
 def test_a_new_x_selection_supersedes_a_manual_order():
@@ -156,3 +171,39 @@ def test_gestures_reach_a_rank_three_key():
     bundle = trace.get_plot_bundle()
     assert bundle.render_mode in ("image", "mesh")
     assert bundle.y.ndim == 2
+
+
+def test_the_session_wires_the_intent_to_requests_then_a_refetch():
+    """
+    Order is load-bearing: held requests must be rewritten before the
+    refetch is scheduled, or the refetch reads the old projection.
+    """
+    session, run = _session()
+    session.set_selected_keys(["time"], ["image"], [])
+    trace = next(iter(session.traces.values()))
+
+    seen = []
+    session.request_plot_update.connect(
+        lambda: seen.append(trace.request.view.indices)
+    )
+    session.set_axis_reduce({0: (DimRole.INDEX, 3)})
+
+    assert seen, "request_plot_update did not fire"
+    assert seen[0] == trace.request.view.indices
+
+
+def test_leaving_two_d_invalidates_region_state():
+    """
+    Crop and ROI geometry live on the 2-D plane, so leaving it clears them.
+    Entering it does not: there is no stale geometry to clear.
+    """
+    session, run = _session()
+    session.set_selected_keys(["time"], ["image"], [])
+    reasons = []
+    session.region_invalidation_requested.connect(reasons.append)
+
+    session.view_intent.set_plot_ndim(2)
+    assert reasons == []
+
+    session.view_intent.set_plot_ndim(1)
+    assert reasons == ["switched out of 2D mode"]

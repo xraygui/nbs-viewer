@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
 )
 from nbs_viewer.models.plot.plot_bundle import (
@@ -16,7 +16,8 @@ from nbs_viewer.models.plot.plot_bundle import (
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_spec import ViewCrop, ViewIntent, Projection
+from nbs_viewer.models.plot.view_intent import ViewIntent
+from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
 from nbs_viewer.models.sources.fixtures import (
     make_vppem_run,
     voltage_axis,

@@ -10,9 +10,9 @@ without a QWidget (the suite runs on QCoreApplication only).
 
 import pytest
 
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
-    ViewIntent,
 )
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
@@ -147,10 +147,10 @@ NAMES_2D = ["x", "dim_1"]
 def test_a_manual_order_is_honoured():
     intent = ViewIntent(plot_ndim=2, xkey="x")
     swapped = intent.project(2, dim_names=NAMES_2D).swap_rows(1)
-    manual = intent.with_axis_order(swapped.axis_order, NAMES_2D)
+    assert intent.set_axis_order(swapped.axis_order, NAMES_2D) is True
 
-    assert manual.dim_order == ("x", "dim_1")
-    assert _placement(manual.project(2, dim_names=NAMES_2D), NAMES_2D) == (
+    assert intent.dim_order == ("x", "dim_1")
+    assert _placement(intent.project(2, dim_names=NAMES_2D), NAMES_2D) == (
         "x",
         "dim_1",
     )
@@ -158,17 +158,22 @@ def test_a_manual_order_is_honoured():
 
 def test_the_same_selection_keeps_a_manual_order():
     manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
-    assert manual.follow_xkey("x") is manual
+    fired = []
+    manual.changed.connect(lambda: fired.append(1))
+
+    assert manual.follow_xkey("x") is False
+    assert manual.dim_order == ("x", "dim_1")
+    assert fired == []
 
 
 def test_a_different_selection_supersedes_a_manual_order():
     manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
-    fresh = manual.follow_xkey("y")
+    assert manual.follow_xkey("y") is True
 
-    assert fresh.xkey == "y"
-    assert fresh.dim_order == ()
+    assert manual.xkey == "y"
+    assert manual.dim_order == ()
     names = ["y", "dim_1"]
-    assert _placement(fresh.project(2, dim_names=names), names) == (
+    assert _placement(manual.project(2, dim_names=names), names) == (
         "dim_1",
         "y",
     )
@@ -192,11 +197,9 @@ def test_a_rank_change_re_derives_rather_than_half_applying():
 
 
 def test_switching_plot_dimensions_preserves_a_manual_order():
-    from dataclasses import replace
-
     manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
-    one_d = replace(manual, plot_ndim=1)
-    spec = one_d.project(2, dim_names=NAMES_2D)
+    manual.set_plot_ndim(1)
+    spec = manual.project(2, dim_names=NAMES_2D)
 
     assert spec.plot_ndim == 1
     assert spec.axis_order == (0, 1)

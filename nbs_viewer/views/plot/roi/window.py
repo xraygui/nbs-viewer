@@ -262,7 +262,9 @@ class RoiWindow(QDialog):
         self.roi_set.entries_changed.connect(self.refresh_entry_list)
         self.roi_set.entry_changed.connect(self._on_entry_changed)
         self.roi_set.selection_changed.connect(self._on_model_selection_changed)
-        self.plot_model.cube_view_changed.connect(self._on_view_context_changed)
+        self.plot_model.view_intent.changed.connect(
+            self._on_view_context_changed
+        )
         self.plot_model.view_crop_changed.connect(self._on_view_context_changed)
         self.plot_model.roi_draw_enabled_changed.connect(self._on_model_roi_draw_changed)
         self.finished.connect(self._on_finished)

@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
     Projection,
     classify_profile_kind,

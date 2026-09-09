@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.view_spec import DimRole, ViewIntent
+from nbs_viewer.models.plot.view_intent import ViewIntent
+from nbs_viewer.models.plot.view_spec import DimRole
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
@@ -26,11 +27,8 @@ def test_a_stale_two_dimensional_view_cannot_poison_a_one_dimensional_key():
     has nothing to clear -- it projects onto whatever rank it is asked for.
     """
     run, plot, x_keys, _, norm_keys = _test_session()
-    plot.set_view_intent(
-        ViewIntent(
-            plot_ndim=2, reduce_roles=(DimRole.INDEX,), reduce_indices=(7,)
-        )
-    )
+    plot.view_intent.set_plot_ndim(2)
+    plot.view_intent.set_reduce((DimRole.INDEX,), (7,))
     assert plot.dimension == 2
 
     plot.set_selected_keys(x_keys, ["y"], norm_keys)
@@ -54,14 +52,14 @@ def test_y_image_y_selection_sequence():
     assert bundle_y.render_mode == "line"
 
     plot.set_selected_keys(x_keys, ["image"], norm_keys)
-    plot.set_view_intent(ViewIntent(plot_ndim=2))
+    plot.view_intent.set_plot_ndim(2)
     bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
     ).get_plot_bundle()
     assert bundle_image.render_mode == "image"
 
     plot.set_selected_keys(x_keys, ["y"], norm_keys)
-    plot.set_view_intent(ViewIntent(plot_ndim=1))
+    plot.view_intent.set_plot_ndim(1)
     bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y_again.render_mode == "line"
     assert "dim_1" not in bundle_y_again.axis_names
@@ -78,7 +76,7 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     xkey = x_keys[0]
 
     plot.set_selected_keys(x_keys, ["y", "image"], norm_keys)
-    plot.set_view_intent(ViewIntent(plot_ndim=2))
+    plot.view_intent.set_plot_ndim(2)
 
     bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     bundle_image = plot.ensure_trace(

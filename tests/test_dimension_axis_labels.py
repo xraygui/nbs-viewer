@@ -2,8 +2,8 @@
 
 import numpy as np
 
+from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
-    ViewIntent,
     DimRole,
 )
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
