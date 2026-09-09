@@ -308,11 +308,12 @@ session-plan step C.
 
 ### 7. Domain policy still lives in views
 
-- **`DimensionControl`** imports `CubeViewSpec`, `default_spec`,
-  `resolve_roles`, `spec_for_plot_ndim`, builds and mutates the spec, then
-  pushes it through `canvas.update_view_state` (`dimension.py:16–24`,
-  `:337–343`, `:491–509`). `get_shape_info` (66 lines) scans runs and picks a
-  max shape across y-keys — data-selection policy.
+- ~~**`DimensionControl`** builds and mutates the spec, then pushes it through
+  `canvas.update_view_state`~~ — ✅ closed by view-pipeline step 6. It reads
+  `session.driving_projection()` and sends gestures back; it holds no view
+  state. `get_shape_info`'s policy half is `PlotSession.driving_axes`, and it
+  now decides only which sliders are shown — the fetch path projects the
+  session intent onto each key's own rank.
 - **`MplCanvas._do_update_plot`** computes the x × y × run cartesian product
   that drives `ensure_trace` (`single_canvas.py:584–607`), and shows a
   `QMessageBox` for the 2-D multi-dataset rule (`:422–437`).

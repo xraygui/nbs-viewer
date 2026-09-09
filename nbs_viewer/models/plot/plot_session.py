@@ -14,6 +14,7 @@ Freeze and unlinked display read :meth:`selection_for`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
 
 from qtpy.QtCore import QObject, Signal
@@ -50,6 +51,7 @@ from .trace import Trace
 from .trace_set import TraceSet
 from .view_spec import (
     ViewCrop,
+    ViewIntent,
     classify_profile_kind,
     default_profile_label,
     is_plot_plane_storage_axis,
@@ -112,9 +114,7 @@ class PlotSession(QObject):
         self._retain_selection = False
         self._transform = {"enabled": False, "text": ""}
 
-        self._dimension = 1
-        self._slice = None
-        self._cube_view_spec = None
+        self._intent = ViewIntent(plot_ndim=1)
         self._view_crop: Optional[ViewCrop] = None
         self._view_crop_key: Optional[tuple] = None
         self._roi_draw_enabled = False
@@ -727,57 +727,184 @@ class PlotSession(QObject):
         """
         Plot dimensionality (1 or 2).
         """
-        return self._dimension
+        return self._intent.plot_ndim
 
     @property
-    def slice(self):
+    def view_intent(self) -> ViewIntent:
         """
-        Current load slice info.
-        """
-        return self._slice
+        Rank-agnostic view state for this session.
 
-    @property
-    def cube_view_spec(self):
+        The single source of truth for plot dimensionality, axis order and
+        reduce policy. Views read it and send gestures back; they do not
+        hold a copy.
         """
-        Current projection, if any.
-        """
-        return self._cube_view_spec
+        return self._intent
 
-    def set_view_state(
-        self,
-        indices=None,
-        dimension: Optional[int] = None,
-        cube_view_spec: Optional["Projection"] = None,
-    ) -> None:
+    def set_view_intent(self, intent: ViewIntent) -> None:
         """
-        Update slice, plot dimension, and projection.
+        Replace the session view intent.
 
         Parameters
         ----------
-        indices : optional
-            Load slice info.
-        dimension : int, optional
-            Plot dimensionality.
-        cube_view_spec : Projection, optional
-            N-D view specification.
+        intent : ViewIntent
+            New view state.
         """
-        changed = False
-        if dimension is not None and dimension != self._dimension:
-            self._dimension = dimension
-            changed = True
-            if dimension != 2:
-                self.invalidate_all_region_state("switched out of 2D mode")
-        if indices != self._slice:
-            self._slice = indices
-            changed = True
-        if cube_view_spec != self._cube_view_spec:
-            self._cube_view_spec = cube_view_spec
-            changed = True
-            self.cube_view_changed.emit(self._cube_view_spec)
+        if intent == self._intent:
+            return
+        was_2d = self._intent.plot_ndim == 2
+        self._intent = intent
+        if was_2d and intent.plot_ndim != 2:
+            self.invalidate_all_region_state("switched out of 2D mode")
+        self.cube_view_changed.emit(intent)
+        self._refresh_held_requests()
+        self.request_plot_update.emit()
 
-        if changed:
-            self._refresh_held_requests()
-            self.request_plot_update.emit()
+    def follow_x_selection(self) -> None:
+        """
+        Point the default axis order at the current X selection.
+
+        Called when the selection changes. Picking a different X key is an
+        explicit statement about which dimension is horizontal, so it
+        supersedes a manual arrangement; picking the same one leaves the
+        arrangement alone.
+        """
+        self.set_view_intent(self._intent.follow_xkey(self._primary_xkey()))
+
+    def _primary_xkey(self) -> Optional[str]:
+        """
+        Return the X key the default axis order follows.
+
+        The first X key of the first visible run, matching how
+        :meth:`driving_axes` picks the key the dimension rows describe.
+
+        Returns
+        -------
+        str or None
+        """
+        for run_model in self.visible_models:
+            selection = self.selection_for(run_model.uid)
+            if selection.x:
+                return selection.x[0]
+        return None
+
+    def driving_axes(self):
+        """
+        Return the axis layout of the key the dimension rows describe.
+
+        The highest-rank visible non-synthetic Y key, breaking ties on the
+        larger extent. This decides only *which sliders are shown*: the fetch
+        path projects the intent onto each key's own rank, so no trace
+        depends on this choice.
+
+        Returns
+        -------
+        tuple or None
+            ``(run_model, ykey, AxisLayout)``, or None when nothing visible
+            has more than one dimension.
+        """
+        best = None
+        for run_model in self.visible_models:
+            sel = self.selection_for(run_model.uid)
+            x_keys = list(sel.x)
+            for ykey in sel.y:
+                if run_model.is_synthetic_key(ykey):
+                    continue
+                try:
+                    layout = run_model.describe_axes(ykey, x_keys)
+                except Exception:
+                    continue
+                shape = layout.shape
+                if best is None:
+                    best = (run_model, ykey, layout)
+                    continue
+                current = best[2].shape
+                if len(shape) > len(current) or (
+                    len(shape) == len(current)
+                    and any(s > c for s, c in zip(shape, current))
+                ):
+                    best = (run_model, ykey, layout)
+        if best is None or len(best[2].shape) <= 1:
+            return None
+        return best
+
+    def driving_projection(self) -> Optional["Projection"]:
+        """
+        Return the intent projected onto the key the dimension rows describe.
+
+        Returns
+        -------
+        Projection or None
+            None when no visible key has more than one dimension.
+        """
+        driving = self.driving_axes()
+        if driving is None:
+            return None
+        _run_model, _ykey, layout = driving
+        return self._intent.project(
+            len(layout.shape), layout.shape, layout.names
+        )
+
+    def move_view_axis(self, row_index: int, direction: int) -> None:
+        """
+        Move one dimension row up or down, recording a manual arrangement.
+
+        Parameters
+        ----------
+        row_index : int
+            Position of the row in the displayed order.
+        direction : int
+            Negative to move outward, positive to move inward.
+        """
+        projection = self.driving_projection()
+        driving = self.driving_axes()
+        if projection is None or driving is None:
+            return
+        target = row_index if direction < 0 else row_index + 1
+        if target < 1 or target > projection.ndim - 1:
+            return
+        swapped = projection.swap_rows(target)
+        self.set_view_intent(
+            self._intent.with_axis_order(
+                swapped.axis_order, driving[2].names
+            )
+        )
+
+    def set_axis_reduce(self, assignments) -> None:
+        """
+        Set the role and index of every slice/reduce axis at once.
+
+        Parameters
+        ----------
+        assignments : mapping
+            ``{storage_axis: (DimRole, index)}`` from the dimension rows.
+        """
+        projection = self.driving_projection()
+        if projection is None:
+            return
+        roles = list(projection.roles)
+        indices = list(projection.indices)
+        for storage_axis, (role, index) in assignments.items():
+            roles[storage_axis] = role
+            indices[storage_axis] = index
+        edited = Projection(
+            ndim=projection.ndim,
+            plot_ndim=projection.plot_ndim,
+            roles=tuple(roles),
+            indices=tuple(indices),
+            axis_order=projection.axis_order,
+        )
+        self.set_view_intent(self._intent.with_reduce_from(edited))
+
+    def set_plot_ndim(self, plot_ndim: int) -> None:
+        """
+        Set plot dimensionality.
+
+        Parameters
+        ----------
+        plot_ndim : int
+            1 for line plots, 2 for image plots.
+        """
+        self.set_view_intent(replace(self._intent, plot_ndim=plot_ndim))
 
     @property
     def view_crop(self) -> Optional[ViewCrop]:
@@ -936,7 +1063,7 @@ class PlotSession(QObject):
         if trace is None or trace.trace_key.as_tuple() != self._view_crop_key:
             self.clear_view_crop()
             return "dataset changed"
-        parent_spec = self._cube_view_spec
+        parent_spec = trace.request.view
         if parent_spec is None or parent_spec.plot_ndim != 2:
             self.clear_view_crop()
             return "view no longer available"
@@ -1079,16 +1206,28 @@ class PlotSession(QObject):
             Frozen request for this trace.
         """
         trace_key = TraceKey(run_model.uid, xkey, ykey)
+        shape = run_model.get_shape(ykey)
+        try:
+            names = run_model.describe_axes(ykey, [xkey] if xkey else []).names
+        except Exception:
+            names = None
+        intent = self._intent
+        if len(shape) < intent.plot_ndim:
+            # A key that cannot fill the session plot still plots on its own
+            # terms rather than dropping out: a 1-D spectrum beside a 2-D
+            # image is the mixed-rank case, not an error.
+            intent = replace(intent, plot_ndim=len(shape))
         return build_plot_request(
             uid=run_model.uid,
             xkeys=[xkey] if xkey else (),
             ykey=ykey,
-            shape=run_model.get_shape(ykey),
             norm_keys=norm_keys,
-            plot_ndim=self._dimension,
-            projection=self._cube_view_spec,
-            slice_info=self._slice,
-            crop=self._crop_for_trace(trace_key),
+            projection=intent.project(
+                len(shape),
+                shape,
+                names,
+                crop=self._crop_for_trace(trace_key),
+            ),
             transform=self._effective_transform_text(run_model),
         )
 
@@ -1489,7 +1628,8 @@ class PlotSession(QObject):
         ValueError
             If the ROI cannot be committed (missing view, local profile, etc.).
         """
-        spec = self._cube_view_spec
+        trace = trace or self.resolve_single_visible_2d_trace()
+        spec = trace.request.view if trace is not None else None
         if spec is None:
             raise ValueError("Parent projection is unavailable")
 
@@ -1636,16 +1776,15 @@ class PlotSession(QObject):
         if committed_xkey is None:
             default_x = self._selection.default.x
             committed_xkey = default_x[0] if default_x else ""
+        parent_spec = trace.request.view
         if cube_fingerprint is None:
-            cube_fingerprint = (
-                tuple(self._slice) if self._slice else None,
-                str(self._cube_view_spec),
-            )
+            base = parent_spec.base_slice() if parent_spec else None
+            cube_fingerprint = (base, str(parent_spec))
         frozen = trace.build_roi_frozen_spectrum(
             bundle,
             request,
             label=label,
-            parent_spec=self._cube_view_spec,
+            parent_spec=parent_spec,
             cube_fingerprint=cube_fingerprint,
             committed_xkey=committed_xkey,
         )

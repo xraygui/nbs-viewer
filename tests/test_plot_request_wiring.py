@@ -1,11 +1,14 @@
-"""Tests for PlotRequest construction from legacy view state and RunSource fetch."""
+"""Tests for PlotRequest construction and RunSource fetch."""
+
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
+from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
-    default_spec,
 )
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
@@ -14,7 +17,6 @@ from nbs_viewer.models.plot.plot_request import (
     build_plot_request,
     plan_fetch,
     roi_profile_request,
-    projection_for_shape,
 )
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
@@ -28,48 +30,38 @@ from nbs_viewer.models.sources.fixtures import (
 )
 
 
-def test_projection_for_shape_prefers_matching_cube_spec():
-    cube = default_spec(3, 2).with_index(0, 4)
-    view = projection_for_shape(
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        projection=cube,
-        slice_info=(0, slice(None), slice(None)),
+def test_a_low_rank_key_projects_on_its_own_terms():
+    """
+    The fallback chain ``projection_for_shape`` used to implement is gone.
+
+    A rank-agnostic intent projects onto each key's own rank, so the session
+    never has to guess whether a stored rank-bound spec fits: a 1-D key beside
+    a 2-D image gets a 1-D projection, not a discarded one.
+    """
+    intent = ViewIntent(
+        plot_ndim=2, reduce_roles=(DimRole.INDEX,), reduce_indices=(4,)
     )
-    assert view.indices[0] == 4
-    assert view.base_slice() == (4, slice(None), slice(None))
+    image = intent.project(3, VPPEM_SHAPE)
+    assert image.plot_ndim == 2
+    assert image.indices[0] == 4
+    assert image.base_slice() == (4, slice(None), slice(None))
 
+    from dataclasses import replace as _replace
 
-def test_projection_for_shape_uses_slice_info_when_no_cube():
-    slice_info = (3, slice(None), slice(None))
-    view = projection_for_shape(
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        slice_info=slice_info,
-    )
-    assert view.roles[0] == DimRole.INDEX
-    assert view.indices[0] == 3
-    assert view.plot_ndim == 2
-
-
-def test_projection_for_shape_rank1_with_2d_plot_ndim_falls_back():
-    view = projection_for_shape(shape=(11,), plot_ndim=2)
-    assert view.ndim == 1
-    assert view.plot_ndim == 1
-    assert view.roles == (DimRole.PLOT_X,)
+    line = _replace(intent, plot_ndim=1).project(1, (11,))
+    assert line.ndim == 1
+    assert line.plot_ndim == 1
+    assert line.roles == (DimRole.PLOT_X,)
 
 
 def test_plan_fetch_narrows_the_load_with_the_request_crop():
-    cube = default_spec(3, 2).with_index(0, 4)
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     req = build_plot_request(
         uid=VPPEM_UID,
         xkeys=("sampleVoltage_VSource",),
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        projection=cube,
-        crop=crop,
+        projection=replace(cube, crop=crop),
     )
     assert req.view.base_slice() == (4, slice(None), slice(None))
     assert plan_fetch(req).slice_info == (4, slice(2, 10), slice(4, 20))
@@ -79,7 +71,7 @@ def test_run_model_get_plot_bundle_from_request():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
-    cube = default_spec(3, 2).with_index(0, 4)
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     xkeys = ["sampleVoltage_VSource"]
     ykey = "PCOEdge_image"
 
@@ -87,8 +79,6 @@ def test_run_model_get_plot_bundle_from_request():
         uid=run.uid,
         xkeys=xkeys,
         ykey=ykey,
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
         projection=cube,
     )
     via_request = model.get_plot_bundle(req)
@@ -102,16 +92,13 @@ def test_run_model_get_plot_bundle_request_with_crop():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
-    cube = default_spec(3, 2).with_index(0, 4)
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     req = build_plot_request(
         uid=run.uid,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        projection=cube,
-        crop=crop,
+        projection=replace(cube, crop=crop),
     )
     bundle = model.get_plot_bundle(req)
     expected = (a[4] * np.outer(b, c))[2:10, 4:20]
@@ -138,8 +125,6 @@ def test_plot_data_model_holds_request_and_fetches():
         uid=run.uid,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=1,
         projection=cube,
     )
     plot_data = Trace(model, request)
@@ -156,13 +141,11 @@ def test_set_request_keeps_trace_key():
 
     run = make_vppem_run()
     model = RunSource(run)
-    cube = default_spec(3, 2).with_index(0, 4)
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     first = build_plot_request(
         uid=run.uid,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
         projection=cube,
     )
     plot_data = Trace(model, first)
@@ -171,10 +154,8 @@ def test_set_request_keeps_trace_key():
         uid=run.uid,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        projection=cube.with_index(0, 5),
         transform="y = y * 2",
+        projection=cube.with_index(0, 5),
     )
     assert plot_data.set_request(second)
     assert plot_data.trace_key is key
@@ -183,8 +164,7 @@ def test_set_request_keeps_trace_key():
         uid=run.uid,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_stats",
-        shape=(11,),
-        plot_ndim=1,
+        projection=ViewIntent(plot_ndim=1).project(len((11,)), (11,)),
     )
     with pytest.raises(ValueError, match="does not match"):
         plot_data.set_request(other)
@@ -198,12 +178,8 @@ def test_ensure_trace_assembles_request(qapp):
     run_model = RunSource(run)
     plot_model, _ = make_plot_session()
     plot_model.add_run(run_model)
-    cube = default_spec(3, 2).with_index(0, 4)
-    plot_model.set_view_state(
-        indices=cube.base_slice(),
-        dimension=2,
-        cube_view_spec=cube,
-    )
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
+    plot_model.set_view_intent(intent_from_projection(cube))
     first = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
@@ -214,11 +190,7 @@ def test_ensure_trace_assembles_request(qapp):
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
     assert same is first
-    plot_model.set_view_state(
-        indices=cube.with_index(0, 7).base_slice(),
-        dimension=2,
-        cube_view_spec=cube.with_index(0, 7),
-    )
+    plot_model.set_view_intent(intent_from_projection(cube.with_index(0, 7)))
     assert same.request.view.indices[0] == 7
     assert same.trace_key == key
 
@@ -240,9 +212,7 @@ def test_get_plot_bundle_records_the_display_reversal():
         uid=VPPEM_UID,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
-        projection=default_spec(3, 2).with_index(0, 4),
+        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
     )
 
     bundle = model.get_plot_bundle(req)
@@ -265,13 +235,11 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
-    parent_spec = default_spec(3, 2).with_index(0, 4)
+    parent_spec = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     parent_req = build_plot_request(
         uid=VPPEM_UID,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
-        plot_ndim=2,
         projection=parent_spec,
     )
     frame = _vppem_frame(model, parent_req)
@@ -306,10 +274,8 @@ def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
         uid=VPPEM_UID,
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
-        shape=VPPEM_SHAPE,
         norm_keys=["PCOEdge_flat"],
-        plot_ndim=2,
-        projection=default_spec(3, 2).with_index(0, 4),
+        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
     )
     bundle = model.get_plot_bundle(req)
 

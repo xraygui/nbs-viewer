@@ -351,7 +351,7 @@ class RoiWindow(QDialog):
             source = f"{trace.label} · {trace.ykey}"
         self.set_context(source)
 
-        parent_spec = self.plot_model.cube_view_spec
+        parent_spec = trace.request.view if trace is not None else None
         parent_frame = self.plot_model.resolve_parent_frame(trace)
         self.set_profile_context(
             parent_spec,
@@ -634,7 +634,6 @@ class RoiWindow(QDialog):
                 bundle,
                 request,
                 parent_trace=trace,
-                parent_spec=self.plot_model.cube_view_spec,
                 axis_names=self._dimension_axis_names(),
             )
         except ValueError as exc:

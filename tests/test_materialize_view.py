@@ -5,9 +5,9 @@ import pytest
 
 from nbs_viewer.models.plot.plot_bundle import materialize_view
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
     Projection,
-    default_spec,
     eligible_profile_axes,
     profile_storage_axis,
     profile_view_spec,
@@ -60,7 +60,7 @@ def test_materialize_view_mean_and_2d_plot():
 
 
 def test_materialize_view_rejects_region_without_frame():
-    spec = default_spec(2, plot_ndim=1)
+    spec = ViewIntent(plot_ndim=1).project(2)
     region = RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0)
     with pytest.raises(ValueError, match="region_frame is required"):
         materialize_view(

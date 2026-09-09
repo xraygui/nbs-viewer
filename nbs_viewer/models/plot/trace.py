@@ -23,7 +23,7 @@ from .frozen_spectrum import (
     copy_plot_bundle,
 )
 from .plot_geometry import PlotBundle, RenderMode
-from .plot_request import PlotRequest, TraceKey, build_plot_request
+from .plot_request import PlotRequest, TraceKey
 from .view_spec import Projection
 
 
@@ -330,75 +330,32 @@ class Trace(QObject):
             self._render_mode = bundle.render_mode
             self.render_mode_changed.emit(self, bundle.render_mode)
 
-    def update_data_info(
-        self,
-        norm_keys=None,
-        indices=None,
-        cube_view_spec=None,
-        dimension=None,
-        emit=True,
-    ):
+    def set_projection(self, projection: Projection, emit: bool = True) -> bool:
         """
-        Update slice, norm, cube-view, or dimension metadata.
+        Replace the view on the held request.
 
         Parameters
         ----------
-        norm_keys : list of str, optional
-            Normalization keys.
-        indices : tuple, optional
-            Legacy slice indices.
-        cube_view_spec : Projection, optional
-            N-D projection.
-        dimension : int, optional
-            Plot dimensionality.
+        projection : Projection
+            Rank-bound view for this key.
         emit : bool, optional
-            If True (default), emit ``data_changed`` when values change so the
-            artist bus can refetch. List-owned updates pass False and start
-            workers explicitly.
+            If True (default), emit ``data_changed`` when the request changed
+            so the canvas refetches. Callers that start a worker themselves
+            pass False.
 
         Returns
         -------
         bool
             True if plot data should be refreshed.
         """
-        view = self._request.view
         changed = self.last_bundle is None
-        if (
-            norm_keys is not None
-            or indices is not None
-            or cube_view_spec is not None
-            or dimension is not None
-        ):
-            shape = self._run.get_shape(self.ykey)
-            request = build_plot_request(
-                uid=self._run.uid,
-                xkeys=[self.xkey] if self.xkey else (),
-                ykey=self.ykey,
-                shape=shape,
-                norm_keys=(
-                    norm_keys
-                    if norm_keys is not None
-                    else list(self._request.norm_keys)
-                ),
-                plot_ndim=(
-                    dimension if dimension is not None else view.plot_ndim
-                ),
-                projection=(
-                    cube_view_spec if cube_view_spec is not None else view
-                ),
-                slice_info=(
-                    indices if indices is not None else view.base_slice()
-                ),
-                crop=view.crop,
-                transform=self._request.transform,
-            )
-            if self.set_request(request):
-                changed = True
+        if self.set_request(replace(self._request, view=projection)):
+            changed = True
         if not self._visible:
             changed = False
         if changed:
             print_debug(
-                "Trace.update_data_info",
+                "Trace.set_projection",
                 f"changed for {self.label} emit={emit}",
                 category="plots",
             )

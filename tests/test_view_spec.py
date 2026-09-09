@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 
+from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
     Projection,
-    default_spec,
-    spec_for_plot_ndim,
     spec_from_slice_info,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
@@ -16,23 +16,29 @@ from nbs_viewer.models.plot.view_spec import (
     ViewCrop,
     ViewIntent,
     Projection,
-    default_view_spec,
     plot_axis_names,
 )
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
 
-def test_default_view_spec_uses_trailing_axes():
+VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
+
+
+def test_projection_without_names_uses_trailing_axes():
+    """With no dimension names there is nothing to orient by."""
     for ndim in (1, 2, 3, 4):
         for plot_ndim in (1, 2):
             if ndim < plot_ndim:
                 continue
-            view = default_view_spec(ndim, plot_ndim)
-            cube = default_spec(ndim, plot_ndim)
-            assert view.roles == cube.roles
-            assert view.indices == cube.indices
-            assert view.axis_order == cube.axis_order
-            assert view.base_slice() == cube.base_slice()
+            view = ViewIntent(plot_ndim=plot_ndim).project(ndim)
+            assert view.axis_order == tuple(range(ndim))
+            assert view.indices == (0,) * ndim
+            expected = (DimRole.INDEX,) * (ndim - plot_ndim) + (
+                (DimRole.PLOT_X,)
+                if plot_ndim == 1
+                else (DimRole.PLOT_Y, DimRole.PLOT_X)
+            )
+            assert view.roles == expected
 
 
 
@@ -56,7 +62,7 @@ def test_view_spec_base_slice_ignores_crop():
         plot_y_axis=1,
         plot_x_axis=2,
     )
-    view = default_view_spec(3, 2).with_index(0, 4)
+    view = ViewIntent(plot_ndim=2).project(3, dim_names=VPPEM_NAMES).with_index(0, 4)
     view = Projection(
         ndim=view.ndim,
         plot_ndim=view.plot_ndim,
@@ -133,7 +139,7 @@ def test_view_intent_project_3d_to_2d():
         reduce_roles=(DimRole.INDEX,),
         reduce_indices=(4,),
     )
-    spec = intent.project(3, VPPEM_SHAPE)
+    spec = intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     assert spec.ndim == 3
     assert spec.plot_ndim == 2
     assert spec.roles == (DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X)
@@ -146,9 +152,9 @@ def test_view_intent_project_3d_to_1d_mean_mean():
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        axis_order=(1, 2, 0),
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
     )
-    spec = intent.project(3, VPPEM_SHAPE)
+    spec = intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     assert spec.roles[0] == DimRole.PLOT_X
     assert spec.roles[1] == DimRole.MEAN
     assert spec.roles[2] == DimRole.MEAN
@@ -174,7 +180,7 @@ def test_view_intent_project_pads_outermost_when_reduce_short():
         reduce_roles=(DimRole.MEAN,),
         reduce_indices=(0,),
     )
-    spec = intent.project(3, VPPEM_SHAPE)
+    spec = intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     assert spec.roles == (DimRole.INDEX, DimRole.MEAN, DimRole.PLOT_X)
     assert spec.indices[0] == 0
 
@@ -185,7 +191,7 @@ def test_view_intent_project_clamps_index_to_shape():
         reduce_roles=(DimRole.INDEX,),
         reduce_indices=(99,),
     )
-    spec = intent.project(3, VPPEM_SHAPE)
+    spec = intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     assert spec.indices[0] == VPPEM_SHAPE[0] - 1
 
 
@@ -202,15 +208,14 @@ def test_view_intent_1d_key_with_1d_plot():
     assert spec.base_slice() == (slice(None),)
 
 
-def test_view_intent_from_view_spec_roundtrip():
+def test_projection_round_trips_through_the_test_lift():
     original = ViewIntent(
         plot_ndim=1,
         reduce_roles=(DimRole.INDEX, DimRole.MEAN),
         reduce_indices=(2, 0),
-        axis_order=(0, 1, 2),
     )
-    projected = original.project(3, VPPEM_SHAPE)
-    lifted = ViewIntent.from_view_spec(projected)
+    projected = original.project(3, VPPEM_SHAPE, VPPEM_NAMES)
+    lifted = intent_from_projection(projected)
     assert lifted.project(3, VPPEM_SHAPE) == projected
 
 
@@ -219,9 +224,9 @@ def test_plot_axis_names_compatibility():
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        axis_order=(1, 2, 0),
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
     )
-    image_spec = intent_1d.project(3, VPPEM_SHAPE)
+    image_spec = intent_1d.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     stats_spec = ViewIntent(plot_ndim=1).project(1, (11,))
 
     image_names = plot_axis_names(
@@ -235,9 +240,8 @@ def test_plot_axis_names_compatibility():
         plot_ndim=1,
         reduce_roles=(DimRole.INDEX, DimRole.MEAN),
         reduce_indices=(0, 0),
-        axis_order=(0, 1, 2),
     )
-    detector_spec = detector_intent.project(3, VPPEM_SHAPE)
+    detector_spec = detector_intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     detector_names = plot_axis_names(
         detector_spec, ["sampleVoltage_VSource", "dim_1", "dim_2"]
     )
@@ -246,7 +250,7 @@ def test_plot_axis_names_compatibility():
 
 
 def test_plot_request_hash_and_equality():
-    view = default_view_spec(3, 2).with_index(0, 4)
+    view = ViewIntent(plot_ndim=2).project(3, dim_names=VPPEM_NAMES).with_index(0, 4)
     a = PlotRequest(
         uid=VPPEM_UID,
         xkeys=("sampleVoltage_VSource",),
@@ -267,8 +271,8 @@ def test_plot_request_hash_and_equality():
 
 
 def test_plot_request_identity_changes_with_view_and_transform():
-    base_view = default_view_spec(3, 2).with_index(0, 4)
-    other_view = default_view_spec(3, 2).with_index(0, 5)
+    base_view = ViewIntent(plot_ndim=2).project(3, dim_names=VPPEM_NAMES).with_index(0, 4)
+    other_view = ViewIntent(plot_ndim=2).project(3, dim_names=VPPEM_NAMES).with_index(0, 5)
     base = PlotRequest(
         uid=VPPEM_UID,
         xkeys=("sampleVoltage_VSource",),
@@ -302,7 +306,7 @@ def test_plot_request_identity_changes_with_view_and_transform():
 
 
 def test_plot_request_empty_transform_means_off():
-    view = default_view_spec(1, 1)
+    view = ViewIntent(plot_ndim=1).project(1)
     off = PlotRequest(
         uid=VPPEM_UID,
         xkeys=("sampleVoltage_VSource",),
@@ -344,7 +348,7 @@ def test_plot_request_roi_requires_a_profile_axis():
             xkeys=("x",),
             ykey="image",
             norm_keys=(),
-            view=default_view_spec(2, 2),
+            view=ViewIntent(plot_ndim=2).project(2),
             region=RectRegion(0.0, 1.0, 0.0, 1.0),
         )
 
@@ -401,8 +405,8 @@ def test_view_crop_rejects_empty_bbox():
         ViewCrop(storage_bbox=(2, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
 
 
-def test_default_spec_1d_trailing_axis():
-    spec = default_spec(4, plot_ndim=1)
+def test_projection_1d_trailing_axis():
+    spec = ViewIntent(plot_ndim=1).project(4)
     assert spec.roles == (
         DimRole.INDEX,
         DimRole.INDEX,
@@ -412,8 +416,8 @@ def test_default_spec_1d_trailing_axis():
     assert spec.base_slice() == (0, 0, 0, slice(None))
 
 
-def test_default_spec_2d_trailing_axes():
-    spec = default_spec(4, plot_ndim=2)
+def test_projection_2d_trailing_axes():
+    spec = ViewIntent(plot_ndim=2).project(4)
     assert spec.roles[-2:] == (DimRole.PLOT_Y, DimRole.PLOT_X)
     assert spec.base_slice()[-2:] == (slice(None), slice(None))
 
@@ -429,7 +433,7 @@ def test_spec_from_slice_info_roundtrip():
 
 
 def test_swap_rows_exchanges_roles():
-    spec = default_spec(3, plot_ndim=1)
+    spec = ViewIntent(plot_ndim=1).project(3, dim_names=VPPEM_NAMES)
     swapped = spec.swap_rows(1)
     d0, d1 = spec.axis_order[0], spec.axis_order[1]
     assert swapped.roles[d0] == spec.roles[d1]
@@ -449,20 +453,23 @@ def test_construction_assigns_plot_x_from_axis_order():
 
 
 def test_swap_rows_moves_plot_axis():
-    spec = default_spec(3, plot_ndim=1)
+    spec = ViewIntent(plot_ndim=1).project(3, dim_names=VPPEM_NAMES)
     swapped = spec.swap_rows(2)
     assert swapped.roles[swapped.axis_order[-1]] == DimRole.PLOT_X
 
 
 def test_with_slice_role():
-    spec = default_spec(3, plot_ndim=1)
+    spec = ViewIntent(plot_ndim=1).project(3, dim_names=VPPEM_NAMES)
     updated = spec.with_slice_role(0, DimRole.SUM)
     assert updated.roles[0] == DimRole.SUM
 
 
-def test_spec_for_plot_ndim_switches_to_2d():
-    spec = default_spec(4, plot_ndim=1)
-    spec2 = spec_for_plot_ndim(spec, 2)
+def test_changing_plot_ndim_reassigns_the_plane():
+    """Switching 1-D to 2-D is a field on the intent, not a spec rewrite."""
+    from dataclasses import replace
+
+    intent = ViewIntent(plot_ndim=1)
+    spec2 = replace(intent, plot_ndim=2).project(4)
     assert spec2.plot_ndim == 2
     assert spec2.roles[-2:] == (DimRole.PLOT_Y, DimRole.PLOT_X)
 

@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
     Projection,
     classify_profile_kind,
-    default_spec,
     scan_profile_storage_axis,
 )
 from nbs_viewer.models.plot.frozen_spectrum import (
@@ -70,12 +70,18 @@ def _frozen_entry(model, key_suffix="abc", y=None):
     )
 
 
-def _plot_request(model, xkeys, ykey, **kwargs):
+def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
+    shape = model.get_shape(ykey)
+    if projection is None:
+        # As the session does: a key that cannot fill the plot projects on
+        # its own rank rather than dropping out.
+        plot_ndim = min(plot_ndim, len(shape))
+        projection = ViewIntent(plot_ndim=plot_ndim).project(len(shape), shape)
     return build_plot_request(
         uid=model.uid,
         xkeys=xkeys,
         ykey=ykey,
-        shape=model.get_shape(ykey),
+        projection=projection,
         **kwargs,
     )
 
@@ -285,20 +291,15 @@ def test_synthetic_norm_without_get_data_for_norm_key(qapp):
     model._run.getData.assert_called_once()
 
 
-def test_frozen_plot_ignores_parent_cube_view_spec(qapp):
+def test_frozen_plot_projects_on_its_own_rank(qapp):
     model = _run_model()
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
-    spec = default_spec(2, plot_ndim=2)
+    # The session downgrades plot_ndim for a key that cannot fill the plot,
+    # so a 1-D frozen spectrum never receives the 2-D image's projection.
     bundle = model.get_plot_bundle(
-        _plot_request(
-            model,
-            ["en_energy"],
-            entry.key,
-            plot_ndim=2,
-            projection=spec,
-        )
+        _plot_request(model, ["en_energy"], entry.key, plot_ndim=2)
     )
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])

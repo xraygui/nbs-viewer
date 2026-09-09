@@ -1,41 +1,57 @@
-"""The selected X key drives the default plot-axis order."""
+"""
+The selected X key drives the default plot-axis order.
+
+Both halves of the rule live in ``resolve_axis_order`` and are reached
+through ``ViewIntent.project``: the default orientation, and when a manual
+arrangement is kept or re-derived. That is the decision the dimension
+controls used to make on every rebuild; on the model side it can be tested
+without a QWidget (the suite runs on QCoreApplication only).
+"""
 
 import pytest
 
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
-    default_spec,
-    default_spec_for_selection,
-    spec_for_shape_and_selection,
+    ViewIntent,
 )
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
 def _placement(spec, names):
-    """Return ``(vertical, horizontal)`` dimension names for a spec."""
+    """Return ``(vertical, horizontal)`` dimension names for a projection."""
     order = spec.plot_axis_order()
     if spec.plot_ndim == 2:
         return names[order[-2]], names[order[-1]]
     return None, names[order[-1]]
 
 
+def _project(names, xkey=None, plot_ndim=2, dim_order=()):
+    intent = ViewIntent(
+        plot_ndim=plot_ndim, xkey=xkey or "", dim_order=tuple(dim_order)
+    )
+    return intent.project(len(names), dim_names=names)
+
+
+def _trailing(ndim, plot_ndim=2):
+    return ViewIntent(plot_ndim=plot_ndim).project(ndim).axis_order
+
+
 def test_no_selection_keeps_the_trailing_axis_default():
     names = ["x", "dim_1"]
-    spec = default_spec_for_selection(2, 2, names, None)
-    assert spec.axis_order == default_spec(2, 2).axis_order
+    spec = _project(names, None)
+    assert spec.axis_order == _trailing(2)
     assert _placement(spec, names) == ("x", "dim_1")
 
 
 def test_unknown_x_key_keeps_the_trailing_axis_default():
     names = ["x", "dim_1"]
-    spec = default_spec_for_selection(2, 2, names, "not_a_dimension")
-    assert spec.axis_order == default_spec(2, 2).axis_order
+    assert _project(names, "not_a_dimension").axis_order == _trailing(2)
 
 
 def test_selected_x_goes_horizontal_on_a_two_dimensional_key():
     names = ["x", "dim_1"]
-    spec = default_spec_for_selection(2, 2, names, "x")
+    spec = _project(names, "x")
     assert _placement(spec, names) == ("dim_1", "x")
     assert spec.roles[names.index("x")] == DimRole.PLOT_X
     assert spec.roles[names.index("dim_1")] == DimRole.PLOT_Y
@@ -43,8 +59,8 @@ def test_selected_x_goes_horizontal_on_a_two_dimensional_key():
 
 def test_selected_x_already_horizontal_is_left_alone():
     names = ["x", "dim_1"]
-    spec = default_spec_for_selection(2, 2, names, "dim_1")
-    assert spec.axis_order == default_spec(2, 2).axis_order
+    spec = _project(names, "dim_1")
+    assert spec.axis_order == _trailing(2)
     assert _placement(spec, names) == ("x", "dim_1")
 
 
@@ -56,8 +72,8 @@ def test_slice_axis_selection_leaves_the_plane_alone():
     frame is replaced by a voltage-versus-column view.
     """
     names = ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    spec = default_spec_for_selection(3, 2, names, "sampleVoltage_VSource")
-    assert spec.axis_order == default_spec(3, 2).axis_order
+    spec = _project(names, "sampleVoltage_VSource")
+    assert spec.axis_order == _trailing(3)
     assert _placement(spec, names) == ("dim_1", "dim_2")
     assert spec.roles[0] == DimRole.INDEX
 
@@ -67,9 +83,10 @@ def test_one_dimensional_plot_always_takes_the_selected_x():
     The trailing-axis default plots a detector against its column index.
     """
     names = ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    assert _placement(default_spec(3, 1), names) == (None, "dim_2")
+    plain = ViewIntent(plot_ndim=1).project(3)
+    assert _placement(plain, names) == (None, "dim_2")
 
-    spec = default_spec_for_selection(3, 1, names, "sampleVoltage_VSource")
+    spec = _project(names, "sampleVoltage_VSource", plot_ndim=1)
     assert _placement(spec, names) == (None, "sampleVoltage_VSource")
     assert spec.roles[0] == DimRole.PLOT_X
     assert spec.roles[1] == DimRole.INDEX
@@ -82,8 +99,10 @@ def test_tes_like_layout_comes_from_the_selection():
     user picking en_energy as X.
     """
     names = ["en_energy", "tes_mca_energies"]
-    spec = default_spec_for_selection(2, 2, names, "en_energy")
-    assert _placement(spec, names) == ("tes_mca_energies", "en_energy")
+    assert _placement(_project(names, "en_energy"), names) == (
+        "tes_mca_energies",
+        "en_energy",
+    )
 
 
 @pytest.mark.parametrize("plot_ndim", [1, 2])
@@ -106,110 +125,90 @@ def test_rule_holds_against_the_shipped_fixtures(plot_ndim):
                 if xkey not in names:
                     continue
                 seen += 1
-                spec = default_spec_for_selection(
-                    len(shape), plot_ndim, names, xkey
-                )
+                spec = _project(names, xkey, plot_ndim=plot_ndim)
                 x_axis = names.index(xkey)
-                plane = default_spec(len(shape), plot_ndim).plot_axis_order()
+                plane = ViewIntent(plot_ndim=plot_ndim).project(
+                    len(shape)
+                ).plot_axis_order()
                 if plot_ndim == 1 or x_axis in plane:
                     assert spec.plot_axis_order()[-1] == x_axis
                 else:
-                    assert spec.axis_order == default_spec(
-                        len(shape), plot_ndim
-                    ).axis_order
+                    assert spec.axis_order == _trailing(len(shape), plot_ndim)
     assert seen > 0
 
 
 # ---------------------------------------------------------------------------
-# spec_for_shape_and_selection: when the default is re-derived, and when the
-# order in use is left alone. This is the decision DimensionControl makes on
-# every rebuild; it lives on the model side so it can be tested without a
-# QWidget (the suite runs on QCoreApplication only).
+# Manual arrangement versus selection: last one wins.
 # ---------------------------------------------------------------------------
 
 NAMES_2D = ["x", "dim_1"]
 
 
-def _first(names=NAMES_2D, xkey="x", plot_ndim=2):
-    return spec_for_shape_and_selection(
-        None,
-        ndim=len(names),
-        plot_ndim=plot_ndim,
-        dim_names=names,
-        xkey=xkey,
-        derived_from_xkey=None,
+def test_a_manual_order_is_honoured():
+    intent = ViewIntent(plot_ndim=2, xkey="x")
+    swapped = intent.project(2, dim_names=NAMES_2D).swap_rows(1)
+    manual = intent.with_axis_order(swapped.axis_order, NAMES_2D)
+
+    assert manual.dim_order == ("x", "dim_1")
+    assert _placement(manual.project(2, dim_names=NAMES_2D), NAMES_2D) == (
+        "x",
+        "dim_1",
     )
 
 
-def test_first_call_derives_from_the_selection():
-    spec, derived = _first()
-    assert derived == "x"
-    assert _placement(spec, NAMES_2D) == ("dim_1", "x")
+def test_the_same_selection_keeps_a_manual_order():
+    manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
+    assert manual.follow_xkey("x") is manual
 
 
-def test_same_selection_keeps_the_order_in_use():
-    spec, derived = _first()
-    reordered = spec.swap_rows(1)
-    assert _placement(reordered, NAMES_2D) == ("x", "dim_1")
+def test_a_different_selection_supersedes_a_manual_order():
+    manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
+    fresh = manual.follow_xkey("y")
 
-    kept, still = spec_for_shape_and_selection(
-        reordered,
-        ndim=2,
-        plot_ndim=2,
-        dim_names=NAMES_2D,
-        xkey="x",
-        derived_from_xkey=derived,
-    )
-    assert kept.axis_order == reordered.axis_order
-    assert still == "x"
-
-
-def test_a_different_selection_re_derives():
-    spec, derived = _first()
-    reordered = spec.swap_rows(1)
-
+    assert fresh.xkey == "y"
+    assert fresh.dim_order == ()
     names = ["y", "dim_1"]
-    fresh, now = spec_for_shape_and_selection(
-        reordered,
-        ndim=2,
-        plot_ndim=2,
-        dim_names=names,
-        xkey="y",
-        derived_from_xkey=derived,
+    assert _placement(fresh.project(2, dim_names=names), names) == (
+        "dim_1",
+        "y",
     )
-    assert now == "y"
-    assert _placement(fresh, names) == ("dim_1", "y")
 
 
-def test_a_rank_change_re_derives():
-    spec, derived = _first()
+def test_a_rank_change_re_derives_rather_than_half_applying():
+    """
+    A manual arrangement describes the axes it names, not a position.
+
+    Honouring only the axes a rank change left behind would silently
+    reinterpret which one the user meant to be horizontal, so a partial
+    match falls back to the selection rule.
+    """
+    manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
     names = ["x", "dim_1", "dim_2"]
-    fresh, now = spec_for_shape_and_selection(
-        spec,
-        ndim=3,
-        plot_ndim=2,
-        dim_names=names,
-        xkey="x",
-        derived_from_xkey=derived,
-    )
-    assert fresh.ndim == 3
-    assert now == "x"
-    # x is now the slice axis, so the plane keeps its own orientation
-    assert _placement(fresh, names) == ("dim_1", "dim_2")
+    spec = manual.project(3, dim_names=names)
+
+    assert spec.ndim == 3
+    # x is a slice axis at rank 3, so the plane keeps its own orientation
+    assert _placement(spec, names) == ("dim_1", "dim_2")
 
 
 def test_switching_plot_dimensions_preserves_a_manual_order():
-    spec, derived = _first()
-    reordered = spec.swap_rows(1)
+    from dataclasses import replace
 
-    one_d, _ = spec_for_shape_and_selection(
-        reordered,
-        ndim=2,
-        plot_ndim=1,
-        dim_names=NAMES_2D,
-        xkey="x",
-        derived_from_xkey=derived,
-    )
-    assert one_d.plot_ndim == 1
-    assert one_d.axis_order == reordered.axis_order
-    assert _placement(one_d, NAMES_2D) == (None, "dim_1")
+    manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("x", "dim_1"))
+    one_d = replace(manual, plot_ndim=1)
+    spec = one_d.project(2, dim_names=NAMES_2D)
+
+    assert spec.plot_ndim == 1
+    assert spec.axis_order == (0, 1)
+    assert _placement(spec, NAMES_2D) == (None, "dim_1")
+
+
+def test_the_order_survives_a_key_with_the_same_axes():
+    """
+    Names, not positions: the arrangement transfers to any key that has the
+    axes it names, which a stored permutation could not express.
+    """
+    manual = ViewIntent(plot_ndim=2, xkey="x", dim_order=("dim_1", "x"))
+    for names in (["x", "dim_1"], ["dim_1", "x"]):
+        spec = manual.project(2, dim_names=names)
+        assert _placement(spec, names) == ("dim_1", "x")

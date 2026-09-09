@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
 )
 from nbs_viewer.models.plot.plot_bundle import (
@@ -21,6 +22,9 @@ from nbs_viewer.models.sources.fixtures import (
     voltage_axis,
     vppem_factors,
 )
+
+
+VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
 
 
 def _request(
@@ -122,7 +126,6 @@ def test_rank1_projection_needs_no_frozen_short_circuit(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.INDEX, DimRole.MEAN),
         reduce_indices=(4, 0),
-        axis_order=(0, 1, 2),
     )
     view = intent.project(1)
     assert view.ndim == 1
@@ -145,7 +148,7 @@ def test_2d_image_index_slice(qapp):
         plot_ndim=2,
         reduce_roles=(DimRole.INDEX,),
         reduce_indices=(4,),
-    ).project(3, (11, 24, 32))
+    ).project(3, (11, 24, 32), VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -166,8 +169,8 @@ def test_3d_mean_detectors_line_vs_voltage(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        axis_order=(1, 2, 0),
-    ).project(3)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
+    ).project(3, dim_names=VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -193,8 +196,7 @@ def test_2d_crop_on_view_spec(qapp):
         plot_ndim=2,
         reduce_roles=(DimRole.INDEX,),
         reduce_indices=(4,),
-        crop=crop,
-    ).project(3, (11, 24, 32))
+    ).project(3, (11, 24, 32), VPPEM_NAMES, crop=crop)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -213,8 +215,8 @@ def test_mesh_when_plot_y_is_nonuniform_voltage(qapp):
         plot_ndim=2,
         reduce_roles=(DimRole.MEAN,),
         reduce_indices=(0,),
-        axis_order=(1, 0, 2),
-    ).project(3)
+        dim_order=("dim_1", "sampleVoltage_VSource", "dim_2"),
+    ).project(3, dim_names=VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -252,7 +254,7 @@ def test_normalize_cube_by_i0_index_slice(qapp):
         plot_ndim=2,
         reduce_roles=(DimRole.INDEX,),
         reduce_indices=(4,),
-    ).project(3, (11, 24, 32))
+    ).project(3, (11, 24, 32), VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -274,8 +276,8 @@ def test_normalize_cube_by_i0_mean_detectors(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        axis_order=(1, 2, 0),
-    ).project(3)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
+    ).project(3, dim_names=VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,
@@ -326,8 +328,8 @@ def test_sum_role_matches_closed_form(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.SUM, DimRole.SUM),
         reduce_indices=(0, 0),
-        axis_order=(1, 2, 0),
-    ).project(3)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
+    ).project(3, dim_names=VPPEM_NAMES)
     bundle = model.get_plot_bundle(
         _request(
             model.run,

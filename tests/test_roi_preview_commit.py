@@ -8,7 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_spec import (
+    ViewIntent,
     DimRole,
     Projection,
 )
@@ -32,7 +34,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    plot_model.set_view_state(dimension=2, cube_view_spec=parent_spec)
+    plot_model.set_view_intent(intent_from_projection(parent_spec))
     plot_model.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = plot_model.ensure_trace(
@@ -178,9 +180,6 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.view_spec import (
-    default_spec,
-)
     from nbs_viewer.models.plot.region import PolygonRegion, compile_with_mask_mode
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 
@@ -188,8 +187,8 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     run_model = RunSource(make_vppem_run())
     plot_model.add_run(run_model)
 
-    parent_spec = default_spec(3, 2).with_index(0, 4)
-    plot_model.set_view_state(dimension=2, cube_view_spec=parent_spec)
+    parent_spec = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
+    plot_model.set_view_intent(intent_from_projection(parent_spec))
     plot_model.set_selected_keys(["sampleVoltage_VSource"], ["PCOEdge_image"])
     plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"

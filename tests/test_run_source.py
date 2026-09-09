@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from nbs_viewer.models.plot.view_spec import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
@@ -63,12 +64,15 @@ def _frozen_entry(model, key_suffix="abc", y=None, label=None):
     )
 
 
-def _plot_request(model, xkeys, ykey, **kwargs):
+def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
+    shape = model.get_shape(ykey)
+    if projection is None:
+        projection = ViewIntent(plot_ndim=plot_ndim).project(len(shape), shape)
     return build_plot_request(
         uid=model.uid,
         xkeys=xkeys,
         ykey=ykey,
-        shape=model.get_shape(ykey),
+        projection=projection,
         **kwargs,
     )
 

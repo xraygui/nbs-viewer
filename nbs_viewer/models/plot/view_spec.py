@@ -17,7 +17,6 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
-import numpy as np
 
 SliceItem = Union[int, slice]
 SpatialReduce = Literal["sum", "mean"]
@@ -314,8 +313,6 @@ class Projection:
         return replace(self, roles=tuple(roles))
 
 
-
-
 def plot_axis_names(
     spec: Projection,
     dim_names: Sequence[str],
@@ -347,38 +344,87 @@ def plot_axis_names(
     return tuple(dim_names[i] for i in spec.plot_axis_order())
 
 
-def default_view_spec(ndim: int, plot_ndim: int = 1) -> Projection:
+def resolve_axis_order(
+    ndim: int,
+    plot_ndim: int,
+    *,
+    dim_names: Optional[Sequence[str]] = None,
+    dim_order: Sequence[str] = (),
+    xkey: str = "",
+) -> Tuple[int, ...]:
     """
-    Build a trailing-axis view: INDEX on leading axes, plot on trailing.
+    Decide the storage-axis order of the plot plane.
+
+    **The only place that decision is made.** Both the default orientation
+    and a manual arrangement resolve here, so a key of any rank gets the
+    same policy applied to its own dimension names.
+
+    Orientation is a view decision, so it is expressed here rather than by a
+    renderer. The rule is that a key the user picked as X is plotted
+    horizontally, with one guard: when the X key names a slice axis rather
+    than one of the axes the plot plane already shows -- an image stack
+    scrubbed by voltage or time -- the plane keeps its own orientation and
+    the selection drives nothing. Forcing the stack axis onto the plane
+    would replace the camera frame with a voltage-versus-column view.
+
+    For 1-D plots there is only one plot axis, so the selected X always
+    takes it. That is the larger correction: a trailing-axis default plots a
+    rank-3 detector against its own column index.
+
+    A manual arrangement is honoured only while it still describes this key.
+    Half-applying a stale order to a key of another rank would silently
+    reinterpret which axis the user meant to be horizontal, so a partial
+    match re-derives the default instead.
 
     Parameters
     ----------
     ndim : int
-        Number of storage dimensions.
+        Storage rank of the key.
     plot_ndim : int
         1 for line plots, 2 for image plots.
+    dim_names : sequence of str, optional
+        Dimension name per storage axis, as returned by
+        ``RunSource.describe_axes``. Without it only the trailing-axis
+        default can be expressed.
+    dim_order : sequence of str, optional
+        Manual arrangement as dimension names, outermost first.
+    xkey : str, optional
+        Selected X key the default order follows.
 
     Returns
     -------
-    Projection
-        Default specification.
+    tuple of int
+        Storage axis indices, outermost first; the last ``plot_ndim`` of
+        them are the plot axes, X innermost.
     """
     if ndim <= 0:
         raise ValueError("ndim must be positive")
     if ndim < plot_ndim:
         raise ValueError(f"ndim {ndim} is below plot_ndim {plot_ndim}")
-    roles: List[DimRole] = [DimRole.INDEX] * (ndim - plot_ndim)
-    if plot_ndim == 1:
-        roles.append(DimRole.PLOT_X)
-    else:
-        roles.extend([DimRole.PLOT_Y, DimRole.PLOT_X])
-    return Projection(
-        ndim=ndim,
-        plot_ndim=plot_ndim,
-        roles=tuple(roles),
-        indices=tuple(0 for _ in range(ndim)),
-        axis_order=tuple(range(ndim)),
+
+    natural = tuple(range(ndim))
+    names = (
+        list(dim_names)
+        if dim_names is not None and len(dim_names) == ndim
+        else []
     )
+
+    if dim_order and names and set(dim_order) == set(names):
+        return tuple(names.index(name) for name in dim_order)
+
+    if not xkey or xkey not in names:
+        return natural
+    x_axis = names.index(xkey)
+
+    plane = natural[ndim - plot_ndim :]
+    if x_axis == plane[-1]:
+        return natural
+    if plot_ndim == 1:
+        return tuple(a for a in natural if a != x_axis) + (x_axis,)
+    if x_axis not in plane:
+        return natural
+    other = next(a for a in plane if a != x_axis)
+    return tuple(a for a in natural if a not in plane) + (other, x_axis)
 
 
 @dataclass(frozen=True)
@@ -386,15 +432,26 @@ class ViewIntent:
     """
     Rank-agnostic session view state.
 
-    The session and dimension controls edit one intent. At request-build time
-    the intent is projected onto each key's rank via :meth:`project`. Keys
-    with ``ndim < plot_ndim`` cannot participate (a 1-D spectrum cannot fill
-    a 2-D image plot). Whether two projected keys may share a plot is a
-    separate check on :func:`plot_axis_names`.
+    One intent per plot session. At request-build time it is projected onto
+    each key's own rank and dimension names by :meth:`project`, so a 1-D
+    spectrum and a 1-D projection of a 3-D detector can be built from the
+    same state without either being reinterpreted. Whether two projected
+    keys may share a plot is a separate check on :func:`plot_axis_names`.
+
+    Axis order is stored as **dimension names**, not as a permutation, and
+    that is what makes the intent rank-agnostic: a permutation only means
+    something for the one rank it was written against, whereas "``x`` is
+    horizontal" survives a key gaining or losing an axis. It is resolved
+    against each key by :func:`resolve_axis_order`, the single place the
+    order is decided.
 
     Reduce policy is stored outermost-first, matching the leading rows of
     the dimension UI. When projecting to a smaller rank, outermost reduce
     axes are dropped so the axes nearest the plot plane are preserved.
+
+    The crop is deliberately *not* held here. A crop is storage indices on
+    one trace's plot plane and means nothing on another, so it is trace
+    state that rides on the request; the intent is session state.
 
     Parameters
     ----------
@@ -404,19 +461,19 @@ class ViewIntent:
         INDEX / SUM / MEAN policies for non-plot axes, outermost first.
     reduce_indices : tuple of int
         Index values parallel to ``reduce_roles`` (used when role is INDEX).
-    axis_order : tuple of int, optional
-        Storage-axis permutation for the rank this intent was edited against.
-        When empty, or when its length does not match the projected ``ndim``,
-        natural order ``range(ndim)`` is used.
-    crop : ViewCrop, optional
-        Persistent spatial crop. Only applied when ``plot_ndim == 2``.
+    dim_order : tuple of str, optional
+        Manual axis arrangement as dimension names, outermost first. Empty
+        means "follow :attr:`xkey`".
+    xkey : str, optional
+        X key the default order follows. Selecting a different X supersedes
+        a manual arrangement -- see :meth:`follow_xkey`.
     """
 
-    plot_ndim: int
+    plot_ndim: int = 1
     reduce_roles: Tuple[DimRole, ...] = ()
     reduce_indices: Tuple[int, ...] = ()
-    axis_order: Tuple[int, ...] = ()
-    crop: Optional[ViewCrop] = None
+    dim_order: Tuple[str, ...] = ()
+    xkey: str = ""
 
     def __post_init__(self) -> None:
         if self.plot_ndim not in (1, 2):
@@ -428,16 +485,42 @@ class ViewIntent:
                 raise ValueError(
                     f"reduce roles must be INDEX/SUM/MEAN, got {role}"
                 )
-        if self.crop is not None and self.plot_ndim != 2:
-            raise ValueError("crop requires plot_ndim == 2")
+
+    def follow_xkey(self, xkey: Optional[str]) -> "ViewIntent":
+        """
+        Point the default axis order at a new X selection.
+
+        Reordering rows and picking an X key are both explicit statements
+        about which dimension is horizontal, so the later one wins: a manual
+        arrangement survives every rebuild until the X selection actually
+        changes, and is dropped when it does.
+
+        Parameters
+        ----------
+        xkey : str or None
+            Newly selected X key.
+
+        Returns
+        -------
+        ViewIntent
+            This intent when the selection is unchanged, otherwise one
+            following the new key with any manual order cleared.
+        """
+        xkey = xkey or ""
+        if xkey == self.xkey:
+            return self
+        return replace(self, xkey=xkey, dim_order=())
 
     def project(
         self,
         ndim: int,
         shape: Optional[Sequence[int]] = None,
+        dim_names: Optional[Sequence[str]] = None,
+        *,
+        crop: Optional[ViewCrop] = None,
     ) -> Projection:
         """
-        Project this intent onto a concrete array rank.
+        Project this intent onto one key's rank and dimension names.
 
         Parameters
         ----------
@@ -446,6 +529,12 @@ class ViewIntent:
         shape : sequence of int, optional
             Per-axis sizes used to clamp INDEX values. When omitted, indices
             are left as stored (still non-negative).
+        dim_names : sequence of str, optional
+            Dimension name per storage axis. Without it the axis order falls
+            back to the trailing-axis default.
+        crop : ViewCrop, optional
+            Trace-scoped crop to carry on the projection. Rewritten onto this
+            key's plot-plane axes when they differ.
 
         Returns
         -------
@@ -455,19 +544,27 @@ class ViewIntent:
         Raises
         ------
         ValueError
-            If ``ndim < plot_ndim`` — the key cannot fill this plot.
+            If ``ndim < plot_ndim`` -- the key cannot fill this plot.
         """
+        if ndim <= 0:
+            raise ValueError("ndim must be positive")
         if ndim < self.plot_ndim:
             raise ValueError(
                 f"cannot project intent with plot_ndim={self.plot_ndim} "
                 f"onto array of rank {ndim}"
             )
-        if ndim <= 0:
-            raise ValueError("ndim must be positive")
         if shape is not None and len(shape) != ndim:
             raise ValueError(
                 f"shape length {len(shape)} must match ndim {ndim}"
             )
+
+        axis_order = resolve_axis_order(
+            ndim,
+            self.plot_ndim,
+            dim_names=dim_names,
+            dim_order=self.dim_order,
+            xkey=self.xkey,
+        )
 
         n_reduce = ndim - self.plot_ndim
         if len(self.reduce_roles) >= n_reduce:
@@ -482,11 +579,6 @@ class ViewIntent:
             roles_reduce = (DimRole.INDEX,) * pad + self.reduce_roles
             indices_reduce = (0,) * pad + self.reduce_indices
 
-        if self.axis_order and len(self.axis_order) == ndim:
-            axis_order = self.axis_order
-        else:
-            axis_order = tuple(range(ndim))
-
         roles: List[DimRole] = [DimRole.INDEX] * ndim
         indices: List[int] = [0] * ndim
         for pos, storage_axis in enumerate(axis_order):
@@ -495,10 +587,7 @@ class ViewIntent:
                 idx = int(indices_reduce[pos])
                 if shape is not None:
                     size = int(shape[storage_axis])
-                    if size <= 0:
-                        idx = 0
-                    else:
-                        idx = max(0, min(idx, size - 1))
+                    idx = 0 if size <= 0 else max(0, min(idx, size - 1))
                 elif idx < 0:
                     idx = 0
                 indices[storage_axis] = idx
@@ -507,7 +596,6 @@ class ViewIntent:
             else:
                 roles[storage_axis] = DimRole.PLOT_X
 
-        crop = self.crop
         if crop is not None:
             plot_y = axis_order[n_reduce]
             plot_x = axis_order[n_reduce + 1]
@@ -527,187 +615,57 @@ class ViewIntent:
             crop=crop,
         )
 
-    @classmethod
-    def from_view_spec(cls, spec: Projection) -> "ViewIntent":
+    def with_axis_order(
+        self, axis_order: Sequence[int], dim_names: Sequence[str]
+    ) -> "ViewIntent":
         """
-        Lift a concrete spec into a rank-agnostic intent.
-
-        Useful when adapting today's projection-based UI state into the
-        new model.
+        Record a manual arrangement, translated into dimension names.
 
         Parameters
         ----------
-        spec : Projection
-            Concrete view to lift.
+        axis_order : sequence of int
+            Storage axis indices, outermost first.
+        dim_names : sequence of str
+            Dimension name per storage axis.
 
         Returns
         -------
         ViewIntent
-            Intent whose :meth:`project` of ``spec.ndim`` recovers ``spec``
-            (crop axes may be rewritten to match plot order).
+            Intent carrying the arrangement as names.
         """
-        reduce_roles = []
-        reduce_indices = []
-        for storage_axis in spec.slice_axis_order():
-            reduce_roles.append(spec.roles[storage_axis])
-            reduce_indices.append(spec.indices[storage_axis])
-        return cls(
-            plot_ndim=spec.plot_ndim,
-            reduce_roles=tuple(reduce_roles),
-            reduce_indices=tuple(reduce_indices),
-            axis_order=spec.axis_order,
-            crop=spec.crop,
+        return replace(
+            self, dim_order=tuple(dim_names[a] for a in axis_order)
         )
 
+    def with_reduce_from(self, projection: Projection) -> "ViewIntent":
+        """
+        Take reduce roles and indices back off a projection.
 
-def default_spec(ndim: int, plot_ndim: int = 1) -> Projection:
-    """
-    Build the trailing-axis plot convention as a projection.
+        The dimension rows are edited per storage axis; this reads the whole
+        slice section back in the intent's outermost-first order so one
+        assignment carries every row.
 
-    Parameters
-    ----------
-    ndim : int
-        Number of storage dimensions.
-    plot_ndim : int
-        1 for line plots, 2 for image plots.
+        Parameters
+        ----------
+        projection : Projection
+            Projection whose slice section holds the edited values.
 
-    Returns
-    -------
-    Projection
-        Index on leading axes, plot axes on trailing dimensions.
-    """
-    if ndim <= 0:
-        raise ValueError("ndim must be positive")
-    roles: List[DimRole] = [DimRole.INDEX] * (ndim - plot_ndim)
-    if plot_ndim == 1:
-        roles.append(DimRole.PLOT_X)
-    else:
-        roles.extend([DimRole.PLOT_Y, DimRole.PLOT_X])
-    return Projection(
-        ndim=ndim,
-        plot_ndim=plot_ndim,
-        roles=tuple(roles),
-        indices=tuple(0 for _ in range(ndim)),
-        axis_order=tuple(range(ndim)),
-    )
-
-
-def default_spec_for_selection(
-    ndim: int,
-    plot_ndim: int = 1,
-    dim_names: Optional[Sequence[str]] = None,
-    xkey: Optional[str] = None,
-) -> Projection:
-    """
-    Trailing-axis default, with the selected X key placed on Plot X.
-
-    Orientation is a view decision, so it is expressed here rather than by a
-    renderer. The rule is that a key the user picked as X is plotted
-    horizontally, with one guard: when the X key names a slice axis rather
-    than one of the axes the plot plane already shows -- an image stack
-    scrubbed by voltage or time -- the plane keeps its own orientation and
-    the selection drives nothing. Forcing the stack axis onto the plane
-    would replace the camera frame with a voltage-versus-column view.
-
-    For 1-D plots there is only one plot axis, so the selected X always
-    takes it. That is the larger correction: a trailing-axis default plots a
-    rank-3 detector against its own column index.
-
-    Parameters
-    ----------
-    ndim : int
-        Number of storage dimensions.
-    plot_ndim : int
-        1 for line plots, 2 for image plots.
-    dim_names : sequence of str, optional
-        Dimension name per storage axis, as returned by
-        ``RunSource.describe_axes``. When omitted the plain trailing-axis
-        default is used.
-    xkey : str, optional
-        Selected X key. When it does not name a dimension the plain
-        trailing-axis default is used.
-
-    Returns
-    -------
-    Projection
-        Default view for this shape and selection.
-    """
-    spec = default_spec(ndim, plot_ndim)
-    if not xkey or not dim_names:
-        return spec
-    names = list(dim_names)
-    if xkey not in names:
-        return spec
-    x_axis = names.index(xkey)
-    if x_axis >= ndim:
-        return spec
-
-    plane = list(spec.plot_axis_order())
-    if x_axis == plane[-1]:
-        return spec
-
-    if plot_ndim == 1:
-        order = [a for a in spec.axis_order if a != x_axis] + [x_axis]
-        return replace(spec, axis_order=tuple(order))
-
-    if x_axis not in plane:
-        return spec
-
-    other = next(a for a in plane if a != x_axis)
-    order = [a for a in spec.axis_order if a not in plane] + [other, x_axis]
-    return replace(spec, axis_order=tuple(order))
-
-
-def spec_for_shape_and_selection(
-    current: Optional[Projection],
-    *,
-    ndim: int,
-    plot_ndim: int,
-    dim_names: Optional[Sequence[str]] = None,
-    xkey: Optional[str] = None,
-    derived_from_xkey: Optional[str] = None,
-    shape: Optional[Sequence[int]] = None,
-) -> Tuple[Projection, Optional[str]]:
-    """
-    Choose the view spec for a shape and X selection, and say what it follows.
-
-    Re-derives the default when there is no spec yet, when the rank changed,
-    or when the user picked a different X key. Otherwise the existing order
-    is kept and only adapted to ``plot_ndim``.
-
-    Reordering rows and picking an X key are both explicit statements about
-    which dimension is horizontal, so the later one wins: a manual order
-    survives every rebuild until the X selection actually changes.
-
-    Parameters
-    ----------
-    current : Projection or None
-        Spec in use, if any.
-    ndim : int
-        Storage rank of the Y key.
-    plot_ndim : int
-        1 for line plots, 2 for image plots.
-    dim_names : sequence of str, optional
-        Dimension name per storage axis.
-    xkey : str, optional
-        Currently selected X key.
-    derived_from_xkey : str, optional
-        X key the current order was derived from, as returned by a previous
-        call. Pass None the first time.
-    shape : sequence of int, optional
-        Per-axis sizes, used to clamp indices when adapting ``plot_ndim``.
-
-    Returns
-    -------
-    tuple
-        ``(spec, derived_from_xkey)`` to store for the next call.
-    """
-    if current is None or current.ndim != ndim or xkey != derived_from_xkey:
-        return (
-            default_spec_for_selection(ndim, plot_ndim, dim_names, xkey),
-            xkey,
+        Returns
+        -------
+        ViewIntent
+            Intent with reduce policy replaced.
+        """
+        roles = []
+        indices = []
+        for storage_axis in projection.slice_axis_order():
+            role = projection.roles[storage_axis]
+            roles.append(role if role in SLICE_ROLES else DimRole.INDEX)
+            indices.append(projection.indices[storage_axis])
+        return replace(
+            self,
+            reduce_roles=tuple(roles),
+            reduce_indices=tuple(indices),
         )
-    return spec_for_plot_ndim(current, plot_ndim, shape), derived_from_xkey
 
 
 def spec_from_slice_info(
@@ -749,46 +707,6 @@ def spec_from_slice_info(
         plot_ndim=plot_ndim,
         roles=tuple(roles),
         indices=tuple(indices),
-    )
-
-
-def spec_for_plot_ndim(
-    spec: Projection, plot_ndim: int, shapes: Optional[Sequence[int]] = None
-) -> Projection:
-    """
-    Adapt a spec when the user switches between 1D and 2D plot modes.
-
-    Parameters
-    ----------
-    spec : Projection
-        Current specification.
-    plot_ndim : int
-        Target plot dimension count.
-    shapes : sequence of int, optional
-        Per-storage-axis sizes for clamping indices.
-
-    Returns
-    -------
-    Projection
-        Updated specification using trailing-axis defaults when needed.
-    """
-    if plot_ndim == spec.plot_ndim:
-        return spec
-    indices = list(spec.indices)
-    if shapes is not None:
-        for i, size in enumerate(shapes):
-            if size > 0:
-                indices[i] = max(0, min(indices[i], size - 1))
-    roles = list(spec.roles)
-    for i, role in enumerate(roles):
-        if role not in SLICE_ROLES:
-            roles[i] = DimRole.INDEX
-    return Projection(
-        ndim=spec.ndim,
-        plot_ndim=plot_ndim,
-        roles=tuple(roles),
-        indices=tuple(indices),
-        axis_order=spec.axis_order,
     )
 
 

@@ -5,8 +5,8 @@ How a plot request becomes storage indices, and how those indices become a
 half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
-**Status:** steps 1–5 landed on branch `mesh-transpose-removal`
-(2026-09-08), through `e0d2ef1`. Steps 6–7 not started.
+**Status:** steps 1–6 landed on branch `mesh-transpose-removal`
+(2026-09-08/09). Step 7 not started.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -224,13 +224,15 @@ Test catalog keys `x`, `y`, `image` of shape `(100, 32)`:
 1. **Wrong default orientation.** With X = `x`, adding `image` as a 1-D slice
    defaulted to *slice `x` at index 0, plot `dim_1`*. **Closed by step 2** —
    it now plots `x` and slices `dim_1`.
-2. **0-D collapse on 1-D guests.** The canvas passes the driving key's
-   `to_load_slice_info()` to every trace, so a 1-D `y` truncates
-   `(0, slice(None))` to `(0,)` and raises "Unsupported plot dimensionality:
-   0". **Open** — step 6.
-3. **No semantic model for mixed overlay.** Flipping the plot axis is valid for
-   `image` but makes `y` unplottable on the same horizontal axis. **Open** —
-   `ViewIntent.project` plus `plot_axis_names` is the intended answer, step 6.
+2. **0-D collapse on 1-D guests.** **Closed before step 6, by steps 3–4** —
+   each trace builds its own request and the rank guard in
+   `projection_for_shape` stopped the truncation. Verified against the tree
+   before step 6 started; the step could not be justified on it.
+3. **No semantic model for mixed overlay.** **Also already closed** — a 1-D
+   `y` and a 1-D projection of `image` plot together against `x`, verified by
+   running them. What was *not* closed, and what step 6 actually fixed, is
+   recorded under the step: the model and the widget were applying two
+   different orientation policies.
 
 ---
 
@@ -526,24 +528,152 @@ and the suite cannot build it. Driven from a scratch script under a real
 `spec_for_plot_ndim`, `swap_rows` re-resolving roles with no helper, and an
 image bundle out the far end.
 
-### Step 6 — Adopt `ViewIntent`, or delete it
+### Step 6 — Adopt `ViewIntent` ✅ 2026-09-09 (`__COMMIT__`)
 
-**Not started.** Depends on step 5.
+**Not behaviour-preserving.** Fixes the orientation split below.
 
-`ViewIntent` has zero production callers today. Either the session holds one
-instead of `PlotModel._dimension` / `_slice` / `_cube_view_spec` /
-`_view_crop`, or it goes — an unused abstraction is worse than none, because
-the next plan gets written against it.
+Adopted, not deleted — but on a different justification than the step was
+written with, and after reshaping the type.
 
-- `PlotModel` holds one `ViewIntent`; `_build_plot_request` becomes
-  `intent.project(ndim, shape)`
-- `DimensionControl` edits the intent instead of owning a spec
-- `ViewIntent.axis_order == ()` means "derive from the selection", replacing
-  `DimensionControl._default_xkey`
-- closes mixed-rank bugs 2 and 3 above
+#### The step's stated payoff was already banked
 
-Deletes: four hand-synced fields on `PlotModel`; `DimensionControl`'s ownership
-of domain policy (problem statement item 7).
+Step 6 claimed it "closes mixed-rank bugs 2 and 3". Both were already closed
+by steps 3–4, verified by running them before starting: a 1-D `y` and a 1-D
+projection of a 2-D `image` plot together against `x`, and nothing truncates a
+rank-2 slice tuple onto a rank-1 key. Adopting `ViewIntent` had to be
+justified on something else.
+
+#### What was actually broken: two orientation policies
+
+`default_spec_for_selection` — the rule that a key the user picked as X is
+plotted horizontally — had exactly **one** caller,
+`views/plot/controls/dimension.py:340`. The model's own `projection_for_shape`
+fell back to `default_view_spec`, the plain trailing-axis rule, whenever the
+widget's rank-bound spec did not fit a key. So the pipeline silently applied a
+*different orientation policy* to exactly the mixed-rank keys:
+
+```
+plot_ndim=1, X = "x" selected, image of shape (100, 32)
+before:  roles=['index', 'plot_x']  -> axis_names=['dim_1']   # the column index
+after:   order=(1, 0)               -> axis_names=['x']
+```
+
+`default_view_spec` was also a byte-for-byte duplicate of `default_spec` bar
+one guard — the tell that the model/widget split had been cloning the policy.
+
+#### Decision: axis order is stored as dimension *names*
+
+`ViewIntent.axis_order` was a rank-bound permutation with "when its length
+does not match the projected `ndim`, natural order is used". Lifting the
+image's intent (X = `x`, order `(1,0)`) and projecting onto a rank-3 detector
+discarded the orientation — the same bug, relocated into the type meant to fix
+it. That was the omitted decision the step never asked: **is axis order a
+stored permutation, or a rule?**
+
+It is neither on its own. `dim_order` is now a tuple of dimension *names*,
+outermost first, plus `xkey`, the selection the default follows. Names survive
+a key gaining or losing an axis, which a permutation cannot; and both the
+default and a manual arrangement resolve through one function,
+`resolve_axis_order`, which is the only place the order is decided.
+
+A manual arrangement is honoured only while it still names exactly this key's
+axes. Half-applying a stale order would silently reinterpret which axis the
+user meant to be horizontal, so a partial match re-derives from `xkey`.
+Decision 7's "last one wins" is now state rather than bookkeeping:
+`follow_xkey` clears `dim_order` when the X selection actually changes.
+
+The crop is **not** intent state. A crop is storage indices on one trace's
+plot plane and means nothing on another, so `ViewIntent.crop` is gone and
+`project(..., crop=)` takes it per trace. That is Decision 2 applied to
+ownership rather than to the fetch.
+
+#### The widget stopped owning the view
+
+`DimensionControl` held the authoritative spec and pushed it *down* through
+`canvas.update_view_state` → `session.set_view_state`; the session was
+downstream of a widget. It now reads `session.driving_projection()` and sends
+gestures back — `move_view_axis`, `set_axis_reduce`, `set_plot_ndim`,
+`follow_x_selection`. It holds no view state of its own.
+
+Two hacks disappeared with the ownership. `on_selection_changed` used to set
+`self._cube_view_spec = None`, and `on_dimension_changed` hand-rolled a
+rollback that re-applied `spec_for_plot_ndim` in reverse and rebuilt twice.
+The canvas keeps only the rule it actually owns — "2-D shows one dataset" —
+as `accepts_plot_ndim`, asked *before* the session is told.
+
+`get_shape_info`'s policy half moved too, as `PlotSession.driving_axes`. Worth
+being precise about what that buys: the request path does not need it at all,
+because each trace projects onto its own key's rank and names. It now decides
+only *which sliders are shown*.
+
+#### Deleted
+
+`projection_for_shape` and its three-way fallback; `default_view_spec`;
+`default_spec`; `default_spec_for_selection`; `spec_for_shape_and_selection`;
+`spec_for_plot_ndim`; **`ViewIntent.from_view_spec`** (a lift-from-legacy
+converter, and the only thing that had connected `ViewIntent` to anything);
+`ViewIntent.crop`; `ViewIntent.axis_order` as a permutation;
+`PlotSession._dimension` / `_slice` / `_cube_view_spec` and the `slice` /
+`cube_view_spec` properties; `set_view_state`; `Trace.update_data_info`
+(replaced by `set_projection`); `MplCanvas.update_view_state` and its
+`_slice` / `_cube_view_spec` forwarding properties;
+`DimensionControl._cube_view_spec` (34 references), `_default_xkey`,
+`_primary_xkey`, `_sync_spec_from_rows`, `_apply_view_state`, and its three
+signals `indicesUpdated` / `cubeViewChanged` / `dimensionChanged`, all of
+which had zero subscribers. `build_plot_request` lost `shape`, `plot_ndim`,
+`slice_info` and `crop` — it takes a `Projection`.
+
+`models/plot/` **4952 → 4897** code lines (−55); `views/plot/`
+**5584 → 5484** (−100). `dimension.py` 556 → 475 (−81), `view_spec.py`
+509 → 454 (−55), `plot_request.py` 276 → 245 (−31). `plot_session.py` grew
+1031 → 1099 (+68): the policy the widget was holding had to land somewhere,
+and the model is where it belongs. Net **−155**. Suite 350 → 350.
+
+#### Findings
+
+**`_slice` was never independent state.** `DimensionControl` passed
+`indices=spec.base_slice()` alongside the spec it came from, so two of the
+four session fields were the same information. That is also why
+`projection_for_shape`'s middle branch was dead in the session path: if the
+projection's rank did not match, neither did the slice tuple's. Its one live
+caller was the `ImageGridCanvas` bypass, which now builds its own
+`Projection` through `spec_from_slice_info` — the last caller of that
+function, and it goes with the bypass in session-plan step C.
+
+**A rank-2 `Projection` in the session was poison for a rank-1 key.** The
+clearest statement of the disease was a test:
+`test_set_view_state_clears_cube_view_spec` — *"DimensionControl passes
+`cube_view_spec=None` when only 1D Y keys remain selected; leaving the old
+spec caused 1D fetches to fail."* The widget had to detoxify the session. A
+rank-agnostic intent has nothing to clear, so the test is now the opposite
+assertion: a 2-D intent held while a 1-D key is selected simply projects to
+1-D.
+
+**The ROI window and the crop validator were reading the session spec as "the
+parent projection".** Both now read `trace.request.view`, which is
+rank-correct and is what the crop and the mask were expressed against anyway.
+
+#### Tests
+
+`test_default_axis_order.py` rewritten against `ViewIntent` — it is the
+orientation policy's test suite and the policy moved. Four new cases cover
+what names buy over a permutation: a manual order is honoured, the same
+selection keeps it, a different selection supersedes it, a rank change
+re-derives rather than half-applying, and the order transfers to another key
+with the same axes in a different storage layout.
+
+`ViewIntent.from_view_spec` was deleted from production but tests still want
+to say "set the session up so this key projects to *this*". That lift lives in
+`tests/fixtures/view.py` as `intent_from_projection`, documented as test-only,
+so the bridge is not in the production surface.
+
+`DimensionControl` is the widget most exposed by this step and the suite
+cannot build it. Driven from a scratch script under a real `QApplication`:
+rows build from the session projection, the widget holds no spec, the spinbox
+reaches `set_plot_ndim`, a reorder lands on the intent **as names**, a new X
+selection clears it, and a slider edit reaches `reduce_indices`. That script
+caught a break no test could: `MplCanvas._handle_plot_data` and
+`roi/window.py` were still reading `session.cube_view_spec`.
 
 ### Step 7 — `plot_bundle.py`
 
@@ -593,4 +723,5 @@ plan, not here.
 | 2026-09-08 | Step 3 landed (`dbe6083`). Findings recorded: normalization must follow the orientation; a rectangular ROI cannot detect either mapping bug; bug 8 moved to step 4. |
 | 2026-09-08 | Step 4 landed (`b431c47`). `derived_fetch.py` and `view_crop.py` deleted. Findings recorded: the fat crop held three unrelated things; transform and ROI still disagree across the cached and loaded paths; the trailing-axes assumption in `_materialize_roi_profile` moves to step 5. |
 | 2026-09-08 | Fixed `storage_axis_to_plot_axis` reading the plot-axis mapping off the frame instead of the spec, which made "span full profile axis" widen the reduction axis. Recorded under step 4. |
+| 2026-09-09 | Step 6 landed. Adopted rather than deleted, but not on the plan's justification: mixed-rank bugs 2 and 3 were already closed by steps 3–4, and the live defect was that the orientation policy had two implementations, one of them in a widget. `ViewIntent.axis_order` reshaped from a rank-bound permutation to dimension names plus `xkey`, which was the decision the step had omitted; `ViewIntent.crop` dropped because a crop is trace state. `DimensionControl` no longer owns a spec. |
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |

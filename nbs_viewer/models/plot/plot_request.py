@@ -29,61 +29,11 @@ from .view_spec import (
     SpatialReduce,
     ViewCrop,
     Projection,
-    default_view_spec,
     plot_axis_to_storage_axis,
-    spec_from_slice_info,
     storage_axis_to_plot_axis,
 )
 
 SliceItem = Union[int, slice]
-
-
-def projection_for_shape(
-    *,
-    shape: Sequence[int],
-    plot_ndim: int = 1,
-    projection: Optional[Projection] = None,
-    slice_info: Optional[Tuple[SliceItem, ...]] = None,
-    crop=None,
-) -> Projection:
-    """
-    Choose the :class:`Projection` for an array of this shape.
-
-    Prefer ``projection`` when it fits the array rank. Otherwise infer from
-    ``slice_info``, then fall back to a trailing-axis default.
-
-    Parameters
-    ----------
-    shape : sequence of int
-        Shape of the y key.
-    plot_ndim : int
-        Desired plot dimensionality (1 or 2).
-    projection : Projection, optional
-        Session projection.
-    slice_info : tuple, optional
-        Per-axis slice tuple from session state.
-    crop : ViewCrop, optional
-        Plot-plane crop in storage indices.
-
-    Returns
-    -------
-    Projection
-        Rank-bound view for the request.
-    """
-    ndim = len(shape)
-    if ndim <= 0:
-        raise ValueError("shape must have at least one dimension")
-
-    effective_plot_ndim = plot_ndim if ndim >= plot_ndim else 1
-
-    if projection is not None and projection.ndim == ndim:
-        return replace(projection, crop=crop)
-
-    if slice_info is not None and len(slice_info) == ndim:
-        inferred = spec_from_slice_info(tuple(slice_info), effective_plot_ndim)
-        return replace(inferred, crop=crop)
-
-    return default_view_spec(ndim, effective_plot_ndim)
 
 
 def build_plot_request(
@@ -91,16 +41,15 @@ def build_plot_request(
     uid: str,
     xkeys: Sequence[str],
     ykey: str,
-    shape: Sequence[int],
+    projection: Projection,
     norm_keys: Optional[Sequence[str]] = None,
-    plot_ndim: int = 1,
-    projection: Optional[Projection] = None,
-    slice_info: Optional[Tuple[SliceItem, ...]] = None,
-    crop: Optional[ViewCrop] = None,
     transform: str = "",
 ) -> "PlotRequest":
     """
-    Build a :class:`PlotRequest` from run identity and session view state.
+    Assemble a :class:`PlotRequest` around an already-chosen projection.
+
+    Choosing the projection is ``ViewIntent.project``'s job and happens
+    exactly once, in the session; this only packages it with run identity.
 
     Parameters
     ----------
@@ -110,18 +59,10 @@ def build_plot_request(
         X-axis keys.
     ykey : str
         Y data key.
-    shape : sequence of int
-        Shape of ``ykey``.
+    projection : Projection
+        Rank-bound view for this key, crop included.
     norm_keys : sequence of str, optional
         Normalization keys.
-    plot_ndim : int
-        Desired plot dimensionality.
-    projection : Projection, optional
-        Session projection.
-    slice_info : tuple, optional
-        Per-axis slice tuple from session state.
-    crop : ViewCrop, optional
-        Plot-plane crop in storage indices.
     transform : str
         Effective transform expression.
 
@@ -130,19 +71,12 @@ def build_plot_request(
     PlotRequest
         Frozen request for the fetch path.
     """
-    view = projection_for_shape(
-        shape=shape,
-        plot_ndim=plot_ndim,
-        projection=projection,
-        slice_info=slice_info,
-        crop=crop,
-    )
     return PlotRequest(
         uid=uid,
         xkeys=tuple(xkeys),
         ykey=ykey,
         norm_keys=tuple(norm_keys or ()),
-        view=view,
+        view=projection,
         transform=transform or "",
     )
 

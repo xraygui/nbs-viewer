@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.view_spec import (
-    default_spec,
-    spec_for_plot_ndim,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, ViewIntent
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
@@ -21,23 +18,25 @@ def _test_session():
     return run, plot, x_keys, y_keys, norm_keys
 
 
-def test_set_view_state_clears_cube_view_spec():
+def test_a_stale_two_dimensional_view_cannot_poison_a_one_dimensional_key():
     """
-    Resetting to 1D must drop a stale 2D cube view spec.
-
-    DimensionControl passes ``cube_view_spec=None`` when only 1D Y keys
-    remain selected; leaving the old spec caused 1D fetches to fail.
+    The failure this replaces: a rank-2 ``Projection`` held by the session
+    was poison for a rank-1 key, so ``DimensionControl`` had to hand the
+    session ``cube_view_spec=None`` to detoxify it. A rank-agnostic intent
+    has nothing to clear -- it projects onto whatever rank it is asked for.
     """
-    _, plot, x_keys, _, norm_keys = _test_session()
-    shape = (100, 32)
-    spec = spec_for_plot_ndim(default_spec(2, 2), 2, shape)
-    plot.set_view_state(dimension=2, cube_view_spec=spec)
+    run, plot, x_keys, _, norm_keys = _test_session()
+    plot.set_view_intent(
+        ViewIntent(
+            plot_ndim=2, reduce_roles=(DimRole.INDEX,), reduce_indices=(7,)
+        )
+    )
+    assert plot.dimension == 2
 
-    plot.set_view_state(indices=None, dimension=1, cube_view_spec=None)
-
-    assert plot.dimension == 1
-    assert plot.cube_view_spec is None
-    assert plot.slice is None
+    plot.set_selected_keys(x_keys, ["y"], norm_keys)
+    bundle = plot.ensure_trace(run, x_keys[0], "y", norm_keys).get_plot_bundle()
+    assert bundle.render_mode == "line"
+    assert bundle.y.shape == (100,)
 
 
 def test_y_image_y_selection_sequence():
@@ -55,14 +54,14 @@ def test_y_image_y_selection_sequence():
     assert bundle_y.render_mode == "line"
 
     plot.set_selected_keys(x_keys, ["image"], norm_keys)
-    plot.set_view_state(dimension=2)
+    plot.set_view_intent(ViewIntent(plot_ndim=2))
     bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
     ).get_plot_bundle()
     assert bundle_image.render_mode == "image"
 
     plot.set_selected_keys(x_keys, ["y"], norm_keys)
-    plot.set_view_state(indices=None, dimension=1, cube_view_spec=None)
+    plot.set_view_intent(ViewIntent(plot_ndim=1))
     bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     assert bundle_y_again.render_mode == "line"
     assert "dim_1" not in bundle_y_again.axis_names
@@ -77,11 +76,9 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     """
     run, plot, x_keys, _, norm_keys = _test_session()
     xkey = x_keys[0]
-    shape = (100, 32)
-    spec = spec_for_plot_ndim(default_spec(2, 2), 2, shape)
 
     plot.set_selected_keys(x_keys, ["y", "image"], norm_keys)
-    plot.set_view_state(dimension=2, cube_view_spec=spec)
+    plot.set_view_intent(ViewIntent(plot_ndim=2))
 
     bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
     bundle_image = plot.ensure_trace(

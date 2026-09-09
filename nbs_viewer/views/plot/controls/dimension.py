@@ -17,9 +17,6 @@ from nbs_viewer.models.plot.view_spec import (
     DimRole,
     ROLE_LABELS,
     SLICE_ROLES,
-    Projection,
-    spec_for_plot_ndim,
-    spec_for_shape_and_selection,
 )
 from nbs_viewer.utils import print_debug
 from nbs_viewer.views.common.panel import CollapsiblePanel
@@ -211,10 +208,6 @@ class DimensionControl(QWidget):
     Plot Y (2D only) and Plot X, assigned only by row order.
     """
 
-    indicesUpdated = Signal(tuple)
-    cubeViewChanged = Signal(object)
-    dimensionChanged = Signal(int)
-
     def __init__(self, presenter, canvas, parent=None):
         """
         Initialize the dimension control widget.
@@ -241,12 +234,10 @@ class DimensionControl(QWidget):
         self._dim_names = None
         self._axis_arrays = None
         self._associated_data = None
-        self._cube_view_spec = None
-        # X key the current default axis order was derived from. A manual
-        # reorder leaves it as-is, so the order survives until the user makes
-        # the other explicit choice about the horizontal axis -- picking a
-        # different X. Moves onto ViewIntent when the session owns the spec.
-        self._default_xkey = None
+        # The projection currently drawn as rows. Read from the session on
+        # every rebuild; never edited here. Axis order, roles and indices all
+        # live on ``session.view_intent``.
+        self._projection = None
         self._updating_ui = False
 
         self.plot_model.run_added.connect(self.on_run_added)
@@ -314,10 +305,7 @@ class DimensionControl(QWidget):
 
         if not shape_info:
             self.dimension_container.hide()
-            self._cube_view_spec = None
-            self.canvas.update_view_state(
-                None, 1, validate=False, cube_view_spec=None
-            )
+            self._projection = None
             self._refresh_parent_panel()
             return
 
@@ -334,20 +322,12 @@ class DimensionControl(QWidget):
             if self.dimension_spinbox.value() != 1:
                 self.dimension_spinbox.setValue(1)
 
-        plot_ndim = self.dimension_spinbox.value()
-        ndim = len(y_shape)
+        self._projection = self.plot_model.driving_projection()
+        if self._projection is None:
+            self._refresh_parent_panel()
+            return
 
-        self._cube_view_spec, self._default_xkey = spec_for_shape_and_selection(
-            self._cube_view_spec,
-            ndim=ndim,
-            plot_ndim=plot_ndim,
-            dim_names=dim_names,
-            xkey=self._primary_xkey(),
-            derived_from_xkey=self._default_xkey,
-            shape=y_shape,
-        )
-
-        order = self._cube_view_spec.axis_order
+        order = self._projection.axis_order
         visible_positions = [
             pos for pos, sa in enumerate(order) if y_shape[sa] > 1
         ]
@@ -361,7 +341,7 @@ class DimensionControl(QWidget):
         )
         self.sliders_layout.addWidget(slice_header)
 
-        n_slice = self._cube_view_spec.n_slice_axes
+        n_slice = self._projection.n_slice_axes
 
         for pos in range(n_slice):
             storage_axis = order[pos]
@@ -409,7 +389,6 @@ class DimensionControl(QWidget):
             self.sliders_layout.addWidget(row)
             self._plot_rows.append(row)
 
-        self._apply_view_state()
         self.refresh_plot_axis_labels()
         self._refresh_parent_panel()
 
@@ -443,11 +422,11 @@ class DimensionControl(QWidget):
             y_shape[storage_axis] - 1,
         )
         row.storage_axis = storage_axis
-        role = self._cube_view_spec.roles[storage_axis]
+        role = self._projection.roles[storage_axis]
         if role not in SLICE_ROLES:
             role = DimRole.INDEX
         row.set_role(role)
-        row.slider.setValue(self._cube_view_spec.indices[storage_axis])
+        row.slider.setValue(self._projection.indices[storage_axis])
         row.changed.connect(self._on_row_changed)
         row.move_up_requested.connect(
             lambda r=row_index: self._move_row(r, direction=-1)
@@ -475,65 +454,18 @@ class DimensionControl(QWidget):
         self._plot_rows = []
 
     def _move_row(self, row_index, direction):
-        if self._cube_view_spec is None:
-            return
-        if direction < 0:
-            if row_index < 1:
-                return
-            self._cube_view_spec = self._cube_view_spec.swap_rows(row_index)
-        else:
-            if row_index >= self._cube_view_spec.ndim - 1:
-                return
-            self._cube_view_spec = self._cube_view_spec.swap_rows(row_index + 1)
+        self.plot_model.move_view_axis(row_index, direction)
         self.create_sliders()
 
     def _on_row_changed(self):
-        if self._updating_ui or self._cube_view_spec is None:
+        if self._updating_ui or self._projection is None:
             return
-        self._sync_spec_from_rows()
-        self._apply_view_state()
-
-    def _sync_spec_from_rows(self):
-        roles = list(self._cube_view_spec.roles)
-        indices = list(self._cube_view_spec.indices)
-
-        for row in self._slice_rows:
-            storage_axis = row.storage_axis
-            role = row.get_role()
-            roles[storage_axis] = role
-            indices[storage_axis] = row.get_index()
-
-        self._cube_view_spec = Projection(
-            ndim=self._cube_view_spec.ndim,
-            plot_ndim=self.dimension_spinbox.value(),
-            roles=tuple(roles),
-            indices=tuple(indices),
-            axis_order=self._cube_view_spec.axis_order,
+        self.plot_model.set_axis_reduce(
+            {
+                row.storage_axis: (row.get_role(), row.get_index())
+                for row in self._slice_rows
+            }
         )
-
-    def _apply_view_state(self, update_plot=True):
-        if self._cube_view_spec is None:
-            return
-
-        slice_info = self._cube_view_spec.base_slice()
-        plot_ndim = self.dimension_spinbox.value()
-
-        print_debug(
-            "DimensionControl",
-            f"view spec roles={self._cube_view_spec.roles} slice={slice_info}",
-            category="dimension",
-        )
-
-        if update_plot:
-            self.canvas.update_view_state(
-                slice_info,
-                plot_ndim,
-                validate=False,
-                cube_view_spec=self._cube_view_spec,
-            )
-
-        self.indicesUpdated.emit(slice_info)
-        self.cubeViewChanged.emit(self._cube_view_spec)
 
     def _plot_axis_label_for_storage(self, storage_axis: int) -> str:
         """
@@ -556,9 +488,9 @@ class DimensionControl(QWidget):
         str
             Plot axis role label, or empty when the axis is not a plot axis.
         """
-        if self._cube_view_spec is None:
+        if self._projection is None:
             return ""
-        role = self._cube_view_spec.roles[storage_axis]
+        role = self._projection.roles[storage_axis]
         if role in (DimRole.PLOT_X, DimRole.PLOT_Y):
             return ROLE_LABELS[role]
         return ""
@@ -613,26 +545,6 @@ class DimensionControl(QWidget):
             else:
                 aligned.append(placeholders[i])
         return aligned, associated_data
-
-    def _primary_xkey(self):
-        """
-        Return the X key the default axis order should follow.
-
-        The first X key of the first visible run, matching how
-        :meth:`get_shape_info` reads the selection.
-
-        Returns
-        -------
-        str or None
-            Selected X key, or None when nothing is selected.
-        """
-        if not self.plot_model:
-            return None
-        for run_model in self.plot_model.visible_models:
-            selection = self.plot_model.selection_for(run_model.uid)
-            if selection.x:
-                return selection.x[0]
-        return None
 
     def get_shape_info(self):
         """
@@ -709,41 +621,26 @@ class DimensionControl(QWidget):
     def on_dimension_changed(self):
         """
         Handle changes to the plot dimension spinbox.
+
+        The canvas may refuse 2-D when several datasets are visible, in which
+        case only the spinbox is rolled back -- the session was never told,
+        so there is no view state to undo.
         """
         old_dim = self.plot_model.dimension
         new_dim = self.dimension_spinbox.value()
+        if new_dim == old_dim:
+            return
 
-        if self._cube_view_spec is not None and self._shape is not None:
-            self._cube_view_spec = spec_for_plot_ndim(
-                self._cube_view_spec, new_dim, self._shape
-            )
+        if not self.canvas.accepts_plot_ndim(new_dim):
+            self._updating_ui = True
+            self.dimension_spinbox.setValue(old_dim)
+            self._updating_ui = False
+            return
 
+        self.plot_model.set_plot_ndim(new_dim)
         self._updating_ui = True
         self.create_sliders()
         self._updating_ui = False
-
-        slice_info = (
-            self._cube_view_spec.base_slice()
-            if self._cube_view_spec
-            else None
-        )
-        update_accepted = self.canvas.update_view_state(
-            slice_info,
-            new_dim,
-            validate=True,
-            cube_view_spec=self._cube_view_spec,
-        )
-
-        if not update_accepted:
-            self.dimension_spinbox.setValue(old_dim)
-            if self._shape is not None:
-                self._cube_view_spec = spec_for_plot_ndim(
-                    self._cube_view_spec, old_dim, self._shape
-                )
-            self.create_sliders()
-            return
-
-        self.dimensionChanged.emit(new_dim)
 
     def on_run_added(self, run_model):
         self.create_sliders()
@@ -752,5 +649,5 @@ class DimensionControl(QWidget):
         self.create_sliders()
 
     def on_selection_changed(self):
-        self._cube_view_spec = None
+        self.plot_model.follow_x_selection()
         self.create_sliders()

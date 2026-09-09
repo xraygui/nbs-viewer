@@ -67,8 +67,8 @@ They interleave; the order below is the merged sequence.
 | A | `PlotSession` / `RunListItemModel` rename and move | session & traces | ✅ `5330b81` |
 | 5 | Invert the dependency, delete `cube_view.py` | view pipeline | ✅ `e0d2ef1` |
 | B | `Trace` | session & traces | ✅ `0aaa133` |
-| 6 | Adopt `ViewIntent`, or delete it | view pipeline | unblocked — next |
-| C | Consumer sweep — canvas `TraceSet`, `DimensionControl` pushes intent | session & traces | after 6 |
+| 6 | Adopt `ViewIntent` | view pipeline | ✅ `__COMMIT__` |
+| C | Consumer sweep — canvas `TraceSet`, `ImageGridCanvas` bypass | session & traces | unblocked — next |
 | D | Extract the ROI pipeline off the session | session & traces | unblocked |
 | E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
 | 7 | `plot_bundle.py` | view pipeline | unblocked |
@@ -95,6 +95,15 @@ that cannot touch artists cannot dispose one, so removal is announced by
 `TraceKey` and the canvas performs it. Its `EXPECTED_VIOLATIONS` exit
 criterion moved to step C, which is the step that deletes the construction it
 names.
+
+Step 6 adopted `ViewIntent` rather than deleting it, but the plan's stated
+payoff — mixed-rank bugs 2 and 3 — was already banked by steps 3–4. The real
+defect was that the orientation policy had two implementations, and the one
+the maintainer chose lived in a widget. The step also had an omitted decision:
+`ViewIntent.axis_order` was a rank-bound permutation, so projecting onto
+another rank silently discarded the user's orientation — the same bug inside
+the type meant to fix it. Axis order is now dimension names plus the X
+selection it follows, resolved by one function.
 
 Step 5 named the types to delete but no destination for the fifteen live
 functions in `cube_view.py` that were not types. The import graph settled it —

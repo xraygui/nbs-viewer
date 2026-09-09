@@ -141,7 +141,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self._active_workers = {}
         self._pending_workers = set()
         self._last_2d_plot_key = None
-        self._last_2d_cube_view_spec = None
+        self._last_2d_intent = None
         self._last_view_frame: Optional[PlotViewFrame] = None
 
         self._artist_count = 0
@@ -170,6 +170,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.aspect_ratio = width / height
 
         self.plot_model.traces.trace_removed.connect(self._on_trace_removed)
+        self.plot_model.cube_view_changed.connect(self._on_view_intent_changed)
         self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
         self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
@@ -267,14 +268,6 @@ class MplCanvas(FigureCanvasQTAgg):
         self._connected_traces.discard(trace_key)
         self._destroy_artist(trace_key)
         self.draw()
-
-    @property
-    def _slice(self):
-        return self.plot_model.slice
-
-    @property
-    def _cube_view_spec(self):
-        return self.plot_model.cube_view_spec
 
     @property
     def _view_crop(self):
@@ -484,47 +477,55 @@ class MplCanvas(FigureCanvasQTAgg):
     def heightForWidth(self, width):
         return int(width / self.aspect_ratio)
 
-    def update_view_state(
-        self, indices, dimension, validate=False, cube_view_spec=None
-    ):
-        print_debug(
-            "MplCanvas.update_view_state",
-            f"indices={indices}, dimension={dimension}, validate={validate}",
-            category="plots",
-        )
-        if dimension == 2 and validate:
-            visible_count = sum(
-                1
-                for key in self.traces
-                if (artist := self.artist_for(key)) is not None
-                and artist.get_visible()
-            )
-            if visible_count > 1:
-                msg = QMessageBox()
-                msg.setIcon(QMessageBox.Warning)
-                msg.setText("Cannot switch to 2D mode with multiple datasets")
-                msg.setInformativeText(
-                    "Please select only one dataset for 2D plotting."
-                )
-                msg.setWindowTitle("Invalid Plot Configuration")
-                msg.exec_()
-                return False
+    def accepts_plot_ndim(self, plot_ndim):
+        """
+        Return whether the canvas can switch to this plot dimensionality.
 
-        if self.plot_model.dimension != dimension:
+        The one rule the canvas owns: a 2-D plot shows one dataset, and only
+        the canvas knows how many are actually drawn. Says no by warning the
+        user, because refusing silently looks like a broken control.
+
+        Parameters
+        ----------
+        plot_ndim : int
+            Requested plot dimensionality.
+
+        Returns
+        -------
+        bool
+            True when the switch may proceed.
+        """
+        if plot_ndim != 2:
+            return True
+        visible_count = sum(
+            1
+            for key in self.traces
+            if (artist := self.artist_for(key)) is not None
+            and artist.get_visible()
+        )
+        if visible_count <= 1:
+            return True
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText("Cannot switch to 2D mode with multiple datasets")
+        msg.setInformativeText(
+            "Please select only one dataset for 2D plotting."
+        )
+        msg.setWindowTitle("Invalid Plot Configuration")
+        msg.exec_()
+        return False
+
+    def _on_view_intent_changed(self, intent):
+        """
+        Reset the axes when the session view changes dimensionality.
+
+        The session owns the view; the canvas reacts. A rank change needs the
+        axes rebuilt, everything else only needs a refetch, and
+        ``request_plot_update`` already schedules that.
+        """
+        if self.currentDim != intent.plot_ndim:
             self.clear()
-
-        view_changed = self._slice != indices or self._cube_view_spec != cube_view_spec
-        self.plot_model.set_view_state(
-            indices=indices,
-            dimension=dimension,
-            cube_view_spec=cube_view_spec,
-        )
-        self.currentDim = dimension
-
-        if view_changed:
-            self.updatePlot()
-
-        return True
+            self.currentDim = intent.plot_ndim
 
     def updatePlotData(self, runSource, xkey, ykey, norm_keys=None):
         """
@@ -952,7 +953,8 @@ class MplCanvas(FigureCanvasQTAgg):
     def _prepare_2d_axes(self, plot_key):
         crop = self._view_crop
         crop_key = crop.storage_bbox if crop is not None else None
-        spec_changed = self._cube_view_spec != self._last_2d_cube_view_spec
+        intent = self.plot_model.view_intent
+        spec_changed = intent != self._last_2d_intent
         crop_changed = crop_key != self._last_2d_view_crop
         if (
             self._last_2d_plot_key != plot_key
@@ -963,7 +965,7 @@ class MplCanvas(FigureCanvasQTAgg):
         ):
             self._reset_plot_axes()
         self._last_2d_plot_key = plot_key
-        self._last_2d_cube_view_spec = self._cube_view_spec
+        self._last_2d_intent = intent
         self._last_2d_view_crop = crop_key
 
     def _reset_plot_axes(self):
@@ -1464,7 +1466,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
         self._colorbar_state.clear()
         self._last_2d_plot_key = None
-        self._last_2d_cube_view_spec = None
+        self._last_2d_intent = None
         self.currentDim = 1
         self._active_render_mode = None
         self._artist_count = 0
