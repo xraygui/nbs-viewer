@@ -73,7 +73,7 @@ They interleave; the order below is the merged sequence.
 | D | `RegionController` — crop and ROI are one child | session & traces | ✅ `aba26a3` |
 | H | `RunCollection` / `Selection` become models | session & traces | ✅ `85e653b` |
 | E | `FrozenRun` / `CombinedRun` become data sources | session & traces | ✅ `766f983` |
-| 7 | `plot_bundle.py` | view pipeline | next |
+| 7 | Where the post-load stages run | view pipeline | next |
 | F | Final deletions and renames | session & traces | last |
 
 Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong
@@ -167,6 +167,7 @@ Recorded regardless of whether the step that fixes them lands.
 | 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A (`5330b81`) |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
 | 12 | ✅ Every reduce-slider tick on a 3-D dataset destroys the image artist, the colorbar and any live ROI or crop selector, then rebuilds them. `MplCanvas._prepare_2d_axes` diffs the whole `ViewIntent` against `_last_2d_intent`, so a `reduce_indices` change resets the axes even though the plot plane's coordinate frame did not move. Reproduced under a real `QApplication` with a 4x5x6 cube. | ✅ step G (`63a73f0`) |
+| 13 | The two ROI reduce paths disagree about the transform, so one drawn ROI on a 3-D cube gives a transformed answer along the two plane axes and an untransformed one along the slider axis. `roi_profile_request` sets `transform=""` and the load path honours it; the cached path masks a plane the transform already ran on. Reproduced on a 12x16x3 cube with `y = y * 2`: plane-axis profiles 16212 → 32424 and 12352 → 24704, slider-axis profile 96936 → 96936. Silent wrong answer. | open — step 7 |
 | 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` popped the trace and called `plot_data.clear()`, so the artist left the axes but the trace was gone from the map before `_do_update_plot` iterated it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
