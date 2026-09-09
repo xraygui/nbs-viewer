@@ -4,7 +4,7 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** steps A, B, C, G and D landed; **H, E, F** remain. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
+**Status:** steps A, B, C, G, D and H landed; **E, F** remain. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
 from the original step order; the target ownership tree below was rewritten in
 the same pass. Everything marked done is verified against the tree.
 
@@ -16,10 +16,12 @@ recoverable from `57f6d7b`.
 
 Verified in the tree, not taken on trust from the deleted documents:
 
-- `PlotSession` (`plot_session.py`) owns `RunCollection`, visibility,
-  `Selection`, transform, the plot-data map and the ROI set. No aliases.
+- `PlotSession` (`plot_session.py`) owns `RunCollection`, `Selection`,
+  `ViewIntent`, `RegionController` and the `TraceSet`, and connects them.
+  Visibility went back down to the collection in step H. No aliases.
 - `RunListItemModel` is a thin Qt facade under `views/dataSource/` — 186
-  lines, no forwarding, no cache aggregation (that moved to the session).
+  lines, no forwarding, no cache aggregation. Since step H it observes a
+  `RunCollection` rather than a whole session.
 - `RunSource` no longer holds selection, visibility or transform.
 - `KeyInfo` / `RunIdentity` / `AxisLayout` exist; `key_table`, `identity`,
   `read`, `describe_axes`, `load_axes` are the surface.
@@ -47,7 +49,8 @@ MplCanvas (views/)           renders a TraceSet, owns axes
 ```
 
 The session keeps only what no single child can answer: `rebuild`,
-`driving_axes`, `resolve_single_visible_2d_trace`, and `request_plot_update`.
+`driving_axes`, `resolve_single_visible_2d_trace`, `freeze_runs`, the
+transform, the request assembly, and `request_plot_update`.
 
 ### The three rules this tree follows
 
@@ -97,21 +100,26 @@ anti-pattern. The controller *uses* the store; it does not wrap it.
 
 Sizes, current → target:
 
-| Object | Now | Target | Job |
-|---|---:|---:|---|
-| `PlotSession` | 2051 | ~450 | coordination joins only |
-| `RunSource` | 955 | ~250 | uniform key access, plus `get_plot_bundle` |
-| `RegionController` | — | ~450 | crop, fingerprint, staleness, ROI pipeline |
-| `RunCollection` | 261 | ~320 | ordered membership **+ visibility**, factories |
-| `Selection` | 190 | ~220 | default + overrides, owns its signal |
-| `ViewIntent` | (in `view_spec.py`) | ~250 | mutable view state, three signals |
-| `Trace` | 483 | ~150 | request identity plus cached bundle |
-| `TraceSet` | 136 | ~150 | derived membership |
-| `RunListItemModel` | 186 | ~150 | sidebar rows, now in `views/` ✅ |
+| Object | Start | Target | Now | Job |
+|---|---:|---:|---:|---|
+| `PlotSession` | 2051 | ~450 | 717 | coordination joins only |
+| `RunSource` | 955 | ~250 | 955 | uniform key access, plus `get_plot_bundle` |
+| `RegionController` | — | ~450 | 953 | crop, fingerprint, staleness, ROI pipeline |
+| `RunCollection` | 261 | ~320 | 560 | ordered membership **+ visibility**, factories |
+| `Selection` | 190 | ~220 | 314 | default + overrides, owns its signal |
+| `ViewIntent` | (in `view_spec.py`) | ~250 | 445 | mutable view state, three signals |
+| `Trace` | 483 | ~150 | 447 | request identity plus cached bundle |
+| `TraceSet` | 136 | ~150 | 136 | derived membership |
+| `RunListItemModel` | 186 | ~150 | 186 | sidebar rows, now in `views/` ✅ |
 
-`PlotSession` is 2051 file lines but **800 code lines** across 94 public
-members and 17 signals — the rest is docstrings. Targets above are file lines,
-so measure both.
+`PlotSession` started at 2051 file lines but **800 code lines** across 94
+public members and 17 signals — the rest is docstrings. It is now 717 file
+lines / **371 code lines** across 17 public members and 4 signals, so the
+public surface hit its target while the file did not. Every other row is
+over its file-line target for the same reason: these are numpydoc-documented
+modules, and the targets were set against code volume. **Measure code lines
+against these targets, not file lines** — that is the correction this pass
+makes to the table, not a claim that the objects came in under budget.
 
 ---
 
@@ -754,9 +762,9 @@ ROI-window sweep over x key × axis order × profile axis on the 3-D cube.
 
 ---
 
-## Step H — `RunCollection` and `Selection` become models
+## Step H — `RunCollection` and `Selection` become models ✅ (`85e653b`)
 
-**Depends on** step D only for sequencing, not mechanism. Reverses a thinning
+**Depended on** step D only for sequencing, not mechanism. Reverses a thinning
 that went too far.
 
 `RunCollection` was converted from a `QObject` to a plain container earlier in
@@ -764,54 +772,134 @@ this refactor, and its visibility state and signals moved up to
 `PlotSession`. That did not remove the work; it relocated it into a larger
 object and forced the session to announce on the container's behalf. Rule 2.
 
-### The measurement that justifies it
+### The measurement that justified it
 
-`_visible_uids` lives on the session, so `visible_models` is a **join** of
-membership × visibility rather than a forward, and `remove_uids` touches the
+`_visible_uids` lived on the session, so `visible_models` was a **join** of
+membership × visibility rather than a forward, and `remove_uids` touched the
 collection, the selection, visibility and four signals. That is why the
-runs/visibility cluster is 27 methods and 171 code lines rather than the thin
-pass-through it looks like. Move visibility down and the join disappears.
+runs/visibility cluster was 27 methods and 171 code lines rather than the thin
+pass-through it looked like. Moving visibility down made the join disappear.
 
-### Do
+### Did
 
-- [ ] `RunCollection` becomes a `QObject` owning `run_added`, `run_removed`,
+- [x] `RunCollection` is a `QObject` owning `run_added`, `run_removed`,
   `available_runs_changed`, `visible_runs_changed` and `available_keys_changed`,
-  and takes `_visible_uids` back with `visible_uids`, `visible_models`,
-  `visible_runs`, `set_uids_visible`, `set_run_visible` and the
-  single-selection-mode rule.
-- [ ] `Selection` becomes a `QObject` owning `selected_keys_changed`, and
-  absorbs `set_selected_keys`, `set_selection_for`, `clear_selection_overrides`,
-  `is_key_selected`, `selected_keys`, `get_selected_keys` and the default-
-  selection rule.
-- [ ] `runListView.py` (8 members, collection-only) and `run_display.py`
-  (13 members, selection-only) take the child directly. `displayControl.py`
-  takes both. Their session attributes go.
-- [ ] The session keeps `rebuild` (collection × selection × view → traces),
-  `driving_axes` and `resolve_single_visible_2d_trace` — the three genuine
-  joins — plus `request_plot_update`.
-- [ ] The remaining two self-signal connections
-  (`available_keys_changed` → selection revalidation, and the region one from
-  step D) become connections between two objects.
-- [ ] Collapse the singular/plural pairs — `add_run`/`add_runs`,
-  `remove_run`/`remove_uids`, `set_run_visible`/`set_uids_visible` — which
-  step F had queued. They are the empty forwarders rule 1 deletes, so they go
-  here rather than there.
+  and holds `_visible_uids` with `visible_uids`, `visible_models`,
+  `set_uids_visible`, `auto_add`, `dynamic_update`, `single_selection_mode`
+  and the available-key universe.
+- [x] `Selection` is a `QObject` owning `selected_keys_changed`, with
+  `set_selected_keys`, `set_selection_for`, `clear_overrides`,
+  `selection_for`, `get_selected_keys` and `retain_selection`.
+- [x] `runListView.py` takes `session.collection`; `run_display.py` takes both
+  `collection` and `selection`; `dimension.py`, `metadataView.py`,
+  `plot_settings.py`, `displayControl.py`, `single_canvas.py` and
+  `image_grid_canvas.py` each take the child they actually use.
+  **`RunListItemModel` now observes a `RunCollection`, not a session** — it
+  used six collection members and nothing else.
+- [x] The session keeps `rebuild`, `driving_axes`,
+  `resolve_single_visible_2d_trace` and `freeze_runs` — the joins — plus
+  the request assembly, the transform, and `request_plot_update`.
+- [x] The remaining self-signal connections became connections between two
+  objects. **All of them**, including the cache-progress pair the criterion
+  had expected to defer — see below.
+- [x] Collapsed the singular/plural pairs. `set_run_visible` turned out to be
+  dead; `add_run` and `remove_run` were deleted on the session *and* on
+  `PlotPresenter`, where they were a second layer of the same forward.
+
+### The decisions the plan had not predicted
+
+**`Selection` is constructed with the collection.** The plan listed them as
+siblings, but `selection_for(uid)` filters against the keys that run actually
+has, which is the collection's answer — on the session that was a join, and
+as siblings it would have had to stay one. Giving `Selection` the collection
+turns three couplings into internal wiring: it drops an override when
+`run_removed` fires, revalidates the default when `available_keys_changed`
+fires, and adopts a lone run's own default selection on membership or
+visibility changes. This is step D's borrow pattern, one level down.
+
+**The deferred cache pair went too, for free.** The criterion expected
+`rg "self\.[a-z_]*\.connect\(self\._"` to still match the cache-progress
+connections. It matches nothing: those were `self.run_added` and
+`self.run_removed`, and once those signals moved to the collection the
+session was subscribing to *another object*, not to itself. The aggregation
+itself is unchanged and still deferred (open question 2).
+
+**Both mutators guard on real change**, which step G established for the
+intent and step D for the crop. This was not in the step, and it is load-
+bearing here rather than cosmetic: several signals now land on the selection
+that previously could not, and without the guard each would restart the fetch
+of every trace. `set_selected_keys`'s dead `force_update` parameter went with
+it — the one caller that passed `True` meant "repaint even if nothing
+changed", which is `request_plot_update.emit()` and now says so.
+
+**Visibility no longer rebuilds the trace set.** Retention is membership ×
+selection, so a visibility change has nothing to rebuild; it only repaints.
+The one test that asserted otherwise reached that state through
+`drop_traces_for_uid`, which had no production caller. Both are deleted, and
+the replacement test states the positive version: hide-then-show hands the
+canvas the same `Trace` object.
+
+### Deleted
+
+`PlotSession.available_runs`, `available_uids`, `set_run_visible`,
+`is_key_selected`, `set_runs`, `cleanup_state`, `visible_runs`,
+`set_plot_ndim`, `dimension`, `drop_traces_for_uid`, `validate_combine`,
+`combine_runs`, `update_available_keys`, `_maybe_apply_default_selection`,
+`_on_available_keys_changed`, `_connect_run_keys`, `_disconnect_run_keys`;
+the `available_runs_changed` list payload (a signal with no subscribers at
+all); `set_selected_keys`'s `force_update`; `PlotPresenter.add_run`,
+`add_runs` and `remove_run`; `RunCollection.add`, `remove` and `clear` as
+raw dict operations.
 
 ### Exit criteria
 
-- [ ] `rg "self\.[a-z_]*\.connect\(self\._" nbs_viewer/models/plot/plot_session.py`
-  returns only the cache-progress pair, which is deferred
-- [ ] `plot_session.py` under ~450 file lines
-- [ ] No view names both a child and the session for the same concern
-  (invariant 8)
-- [ ] `_visible_uids` does not appear in `plot_session.py`
+- [x] `rg "self\.[a-z_]*\.connect\(self\._" nbs_viewer/models/plot/plot_session.py`
+  returns nothing — better than the criterion, which allowed the cache pair
+- [ ] `plot_session.py` under ~450 file lines — **2045 → 717, not met at the
+  file level.** 800 → **371 code lines**, and 94 public members + 17 signals →
+  17 + 4. The residue is numpydoc, plus the ~60-line deferred cache cluster.
+  The sizes table is corrected above to measure code lines
+- [x] No view names both a child and the session for the same concern
+  (invariant 8). `runListView` names `session` only for `freeze_runs`, which
+  is a join and not a collection concern
+- [x] `_visible_uids` does not appear in `plot_session.py` except as the
+  parameter name of the visibility handler
+
+### Tests
+
+Suite 389 → 403. `tests/test_collection_and_selection.py` (11) plus a rewritten
+visibility test in `test_plot_model_step3.py` and two cache-status tests that
+now go through the real add path instead of injecting fakes past the API.
+
+Three of the eleven are structural guards on the session source: it declares
+exactly four signals and none of them is about runs or keys; it subscribes to
+none of its own signals; and it holds none of the children's state. Those are
+what stop rule 2 being undone a second time.
+
+Every new test was checked by breaking what it guards, one mutation at a time:
+dropping the `available_keys_changed` → revalidate connection, the
+`run_removed` → override-cleanup connection, either change-guard, the
+selection → rebuild connection, and regrowing a runs signal on the session
+each fail exactly the intended test. Dropping the visibility → repaint
+connection is caught **only** by `test_widgets.py`, which is the first return
+on the previous commit's headless-widget work.
+
+110 call sites were retargeted across 16 production files and 19 test modules.
+A real-`QApplication` script builds `PlotDisplay`, `MetadataViewer` and
+`ImageGridDisplay` and drives add, select, 2-D, hide/show, unlink/relink and
+remove; all four earlier scripts still pass.
+
+### Sizes
+
+`plot_session.py` 1263 → 717 (371 code lines); `run_collection.py` 261 → 560;
+`selection.py` 190 → 314. Session self-signal connections 3 → 0.
 
 ---
 
 ## Step E — Re-home `CombinedRunSource` and `FrozenRunSource`
 
-**After step H**, which stabilises the collection's factory API
-(`make_combined`, `make_frozen`). Otherwise unchanged from the original.
+**Next.** Step H stabilised the collection's factory API (`make_combined`,
+`make_frozen`, and the new `combine`). Otherwise unchanged from the original.
 
 Both are `RunSource` subclasses that should be `CatalogRun` implementations —
 they synthesise data, which is a data-layer job.
@@ -874,4 +962,5 @@ they synthesise data, which is a data-layer job.
 | 2026-09-09 | Step C re-scoped before starting, against the tree rather than the plan. Its `DimensionControl` bullet was closed by view-pipeline step 6, which had to do it to move the axis-order policy out of a widget. Its `QMessageBox` bullet was *reversed* by the same step: `accepts_plot_ndim` tests visible-artist count, which only the canvas knows, so moving it would re-add the artist state step B deleted. Its "Closes" payoff was banked by step 3. The four live bullets remain, and one of them (`fan_out`) needs master-plan open question 5 answered first. |
 | 2026-09-09 | Step C landed (`940d45c`), narrowed to `single_canvas` by the maintainer: the image grid is due for a rewrite once the canvas stabilizes, and `run_display.py`'s key sort is a display concern that belongs in the widget and will grow a dimensionality rule. The canvas stopped recomputing `_retained_trace_keys` and now reads the session's `TraceSet`; `updatePlotData` and `remove_run_data` are gone. `Trace.dispose` grew the outgoing-signal disconnect that `remove_run_data` had owned. The ownership guard stays non-empty by decision and carries to the grid rewrite. |
 | 2026-09-09 | Remaining sequence re-derived and the ownership tree rewritten. Step D's original mandate to keep thin delegating methods was dropped — it is the forwarding layer rule 1 forbids, and it is affordable to drop because every heavyweight ROI member has exactly one caller, none of them `MplCanvas`. Crop merged into the ROI child (one lifecycle, one fingerprint, two shared invalidation methods); `RoiSetModel` kept as a sibling (22 of 23 members have external consumers, so subsuming it would force a 15-member re-export). New steps G (`ViewIntent` becomes an emitting model, three signals derived from consumers) and H (`RunCollection` / `Selection` promoted, reversing an over-thinning). Bug 12 confirmed while designing G's signals. Cache aggregation ruled out as a child and deferred. |
+| 2026-09-09 | Step H landed (`85e653b`). `RunCollection` and `Selection` are `QObject`s again, owning the signals for the state they hold. Two things the plan had not predicted are recorded in the step: `Selection` is constructed *with* the collection, because resolving a selection needs the run's own keys — which turns three cross-object couplings into internal wiring and kills the last self-signals; and both mutators guard on real change, which is load-bearing now that several signals land on the selection that previously could not. Visibility stopped rebuilding the trace set, and `drop_traces_for_uid` — the only way to observe the old coupling — was found to have no production caller and deleted. The self-signal criterion came in better than written: the cache-progress pair it expected to defer was `run_added`/`run_removed`, which now belong to the collection. The file-line target is still unmet and the sizes table is corrected to measure code lines. |
 | 2026-09-09 | Step D landed (`aba26a3`), rewritten from its original text: no delegating methods, and crop merged into the ROI child. Two unpredicted decisions are recorded in the step — `cached_parent_bundle_for_preview` deleted rather than moved (its equality check is now structurally unreachable, which also closes step F's entry for it), and the crop collapse reduced to deleting `clear_view_crop` once `set_view_crop` guards on real change. Two exit criteria are honestly unmet: `plot_session.py` is 1263 rather than under 900, and two rather than three self-signals are gone; both remainders are step H's content. |

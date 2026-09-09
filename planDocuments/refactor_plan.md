@@ -71,8 +71,8 @@ They interleave; the order below is the merged sequence.
 | C | Consumer sweep — canvas renders the `TraceSet` | session & traces | ✅ `940d45c` |
 | G | `ViewIntent` becomes a model | session & traces | ✅ `63a73f0` |
 | D | `RegionController` — crop and ROI are one child | session & traces | ✅ `aba26a3` |
-| H | `RunCollection` / `Selection` become models | session & traces | next |
-| E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | after H |
+| H | `RunCollection` / `Selection` become models | session & traces | ✅ `85e653b` |
+| E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | next |
 | 7 | `plot_bundle.py` | view pipeline | independent |
 | F | Final deletions and renames | session & traces | last |
 
