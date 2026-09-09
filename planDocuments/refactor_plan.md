@@ -69,9 +69,11 @@ They interleave; the order below is the merged sequence.
 | B | `Trace` | session & traces | ✅ `0aaa133` |
 | 6 | Adopt `ViewIntent` | view pipeline | ✅ `505240d` |
 | C | Consumer sweep — canvas renders the `TraceSet` | session & traces | ✅ `940d45c` |
-| D | Extract the ROI pipeline off the session | session & traces | unblocked — next |
-| E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | independent |
-| 7 | `plot_bundle.py` | view pipeline | unblocked |
+| G | `ViewIntent` becomes a model | session & traces | next |
+| D | `RegionController` — crop and ROI are one child | session & traces | after G |
+| H | `RunCollection` / `Selection` become models | session & traces | after D |
+| E | Re-home `CombinedRunSource` / `FrozenRunSource` | session & traces | after H |
+| 7 | `plot_bundle.py` | view pipeline | independent |
 | F | Final deletions and renames | session & traces | last |
 
 Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong
@@ -113,6 +115,22 @@ a widget, and the 2-D `QMessageBox`, which step 6 *reversed*:
 holds, so relocating it would re-add the artist state step B spent its diff
 deleting. Its stated payoff (mixed-rank bugs 2 and 3) was banked by step 3.
 
+The remaining sequence was re-derived on 2026-09-09 rather than executed as
+written. Step D said "extract the ROI pipeline" and "keep thin delegating
+methods so view call sites are unchanged" — the second half is the forwarding
+layer this refactor exists to avoid, and it is affordable to drop because
+every heavyweight ROI member has exactly one caller. Working out *why* it was
+written that way surfaced the real question, which is what the session is: 94
+public members whose consumers partition almost perfectly by concern, and five
+`__init__` connections where the session subscribes to its own signals because
+there is no second object to talk to. Those five name the missing children.
+
+Two candidate children turned out to be category errors — `ChunkCacheProgress`
+is owned by the run and `TiledFetchStatus` is a plain dataclass — and two
+turned out to be one: crop and ROI share a lifecycle, a fingerprint, and two
+invalidation methods, and holding them apart is what produced the duplication.
+Steps G, D and H follow; the sub-plan carries the reasoning and the rules.
+
 Of the four bullets that survived, only the `single_canvas` one shipped. The
 image grid is due for a rewrite once the canvas stabilizes, so its bypass and
 duplicated shape discovery wait for that — and with them `ViewIntent.fan_out`,
@@ -148,6 +166,7 @@ Recorded regardless of whether the step that fixes them lands.
 | 8 | `Trace.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
 | 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A (`5330b81`) |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
+| 12 | Every reduce-slider tick on a 3-D dataset destroys the image artist, the colorbar and any live ROI or crop selector, then rebuilds them. `MplCanvas._prepare_2d_axes` diffs the whole `ViewIntent` against `_last_2d_intent`, so a `reduce_indices` change resets the axes even though the plot plane's coordinate frame did not move. Reproduced under a real `QApplication` with a 4x5x6 cube. | open — step G |
 | 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` popped the trace and called `plot_data.clear()`, so the artist left the axes but the trace was gone from the map before `_do_update_plot` iterated it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
@@ -167,8 +186,16 @@ buttons.
 1. **Live data invalidation.** Bundle caches must invalidate on
    `data_changed`. Specify the rule before step B.
 2. **Cache status aggregation** discovers `run._chunk_cache.progress` by
-   `getattr` chain. Needs a declared interface on `CatalogRun`, or move it to
-   the cache layer.
+   `getattr` chain — three private hops through two layers. Needs a declared
+   interface on `CatalogRun`, or a move to the cache layer.
+   **Deferred by decision (2026-09-09), and deliberately not a `PlotSession`
+   child.** `ChunkCacheProgress` is owned by the run, one per run;
+   `TiledFetchStatus` is a plain dataclass carried by a signal. The session
+   holds neither — it aggregates, and the aggregation is what should move.
+   Blocked on a general progress / error / status interface, which does not
+   exist yet; the session keeps `_progress_sources`, `_cache_statuses` and
+   `cache_status_changed` until it does. **Come back to this** once that
+   interface lands.
 3. **Teardown.** Nothing in the tree has disciplined teardown
    (`codebase_problem_statement.md` §1). The ownership tree makes it possible;
    whether this branch does it is unresolved.
@@ -255,3 +282,4 @@ them.
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` (1212 lines) deleted, `ViewSpec` renamed `Projection`, `models/plot/` 20 → 19 files and 5093 → 4960 code lines. Behaviour-preserving; 19 test modules retargeted against the 14 the plan priced. Steps B and 7 are unblocked and 6 needs B, so B is next. |
 | 2026-09-09 | Step C audited against the tree before starting. Two bullets superseded by step 6 (one closed, one reversed) and its payoff banked by step 3; the sub-plan records which and why. Four live bullets remain: the canvas x × y × run product, the `ImageGridCanvas` `Trace` bypass, `_get_shape_info`, and the `time`-first sort plus `_make_slice_info`. Open question 5 (`ViewIntent.fan_out`) is now on step C's critical path, not optional. |
 | 2026-09-09 | Step C landed (`940d45c`), narrowed to `single_canvas`. `MplCanvas._do_update_plot` was recomputing `PlotSession._retained_trace_keys` and calling `ensure_trace` a second time; it now renders the session's `TraceSet` and decides only visibility. `updatePlotData` and `remove_run_data` deleted; `Trace.dispose` gained the outgoing-signal disconnect the latter had owned. The image grid and `RunDisplayWidget` are deferred by decision — the grid to its own rewrite, which also absorbs open question 5 and the last live half of problem-statement item 7. Suite 361 → 362; `single_canvas.py` 1695 → 1667. |
+| 2026-09-09 | Remaining sequence re-derived before starting step D, and the target ownership tree rewritten. Step D as written mandated delegating wrappers, which is the forwarding layer the refactor exists to avoid; asking why surfaced the object-boundary question behind it. Outcome: crop joins the ROI controller (one lifecycle, one fingerprint), `RoiSetModel` stays a sibling (22 of 23 members have external consumers), `ViewIntent` / `RunCollection` / `Selection` become emitting models, and cache aggregation is neither a child nor in scope. New order G, D, H, E, 7, F. Bug 12 found and confirmed while designing G's signals. |
