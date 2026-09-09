@@ -436,9 +436,9 @@ same reason steps A and B did not commit theirs.
 
 ---
 
-## Step G — `ViewIntent` becomes a model
+## Step G — `ViewIntent` becomes a model ✅ (`63a73f0`)
 
-**Next.** Smallest of the remaining steps, fixes a confirmed defect, and
+**Landed.** Smallest of the remaining steps, fixes a confirmed defect, and
 establishes the pattern the other two promotions follow. Depends on step 6,
 which made `ViewIntent` the single axis-order policy.
 
@@ -524,25 +524,25 @@ Connect to exactly one: connecting to both double-handles.
 
 ### Do
 
-- [ ] `ViewIntent` becomes a `QObject` in its own module (`view_intent.py`),
+- [x] `ViewIntent` becomes a `QObject` in its own module (`view_intent.py`),
   out of `view_spec.py`. Constructor keeps today's keyword parameters so the
   ~40 test construction sites are unchanged.
-- [ ] `follow_xkey`, `with_axis_order`, `with_reduce_from` stop returning new
+- [x] `follow_xkey`, `with_axis_order`, `with_reduce_from` stop returning new
   instances and become `follow_xkey`, `set_axis_order`, `set_reduce`, each
   guarding on real change and emitting per the matrix above.
-- [ ] `project()` is unchanged and still returns a frozen `Projection`.
-- [ ] `PlotSession` holds the intent, wires `intent.changed` →
+- [x] `project()` is unchanged apart from a `plot_ndim` override — see below; and still returns a frozen `Projection`.
+- [x] `PlotSession` holds the intent, wires `intent.changed` →
   `_refresh_held_requests` **then** → `request_plot_update` (in that order;
   requests must be rewritten before the refetch is scheduled), and exposes it
   as `session.view_intent`.
-- [ ] `PlotSession.set_view_intent`, `set_plot_ndim`, `follow_x_selection`,
+- [x] `PlotSession.set_view_intent`, `set_plot_ndim`, `follow_x_selection`,
   `move_view_axis` and `set_axis_reduce` become gestures on the intent. Keep
   `move_view_axis` and `set_axis_reduce` on the session **only** if they still
   need `driving_projection()` — they do, so they are joins and stay.
-- [ ] `MplCanvas` connects `plot_ndim_changed` → the existing clear-and-set,
+- [x] `MplCanvas` connects `plot_ndim_changed` → the existing clear-and-set,
   and `orientation_changed` → `self._needs_axes_reset = True`, consumed at the
   top of `_do_update_plot` exactly as step C's run-removal reset is.
-- [ ] `roi/window.py` connects `intent.changed`.
+- [x] `roi/window.py` connects `intent.changed`.
 
 ### Deleted
 
@@ -551,6 +551,22 @@ Connect to exactly one: connecting to both double-handles.
 connections), `MplCanvas._last_2d_intent` and the `spec_changed` diff, the
 `replace(self._intent, ...)` calls, and `ViewIntent`'s frozen `with_*`
 constructors.
+
+### The decision the plan had not predicted
+
+`project()` needed a `plot_ndim` override. The mixed-rank path built a
+throwaway intent with `dataclasses.replace(intent, plot_ndim=len(shape))` — a
+key that cannot fill the session plot still plots on its own terms — and a
+mutable model cannot supply a throwaway. Mutating the live intent instead
+would have been a silent global side effect. The override says what the call
+actually means, "project at this rank", and `test_plot_request_wiring` reads
+better for it: the test had the same `replace` and now expresses the same
+thing in one call.
+
+`tests/fixtures/view.py` gained `apply_projection(intent, projection)` for the
+same reason: 9 test sites said `session.set_view_intent(intent_from_projection(p))`,
+which no longer exists. The helper drives the production mutators, so setting
+a test view now exercises the emission matrix on the way in.
 
 ### The honest trade
 
@@ -561,29 +577,35 @@ reset happens on *every slider tick*, but it is a trade and not a pure win.
 
 ### Exit criteria
 
-- [ ] `rg "cube_view_changed" nbs_viewer/ tests/` returns nothing
-- [ ] `rg "_last_2d_intent" nbs_viewer/` returns nothing
-- [ ] Bug 12 closed: a slider step keeps the same image artist and colorbar,
+- [x] `rg "cube_view_changed" nbs_viewer/ tests/` returns nothing
+- [x] `rg "_last_2d_intent" nbs_viewer/` returns nothing
+- [x] Bug 12 closed: a slider step keeps the same image artist and colorbar,
   asserted under a real `QApplication`
-- [ ] An orientation change still resets the 2-D axes
-- [ ] `PlotRequest` and `Projection` are still frozen; `rg "@dataclass\(frozen=True\)" nbs_viewer/models/plot/` still matches both
+- [x] An orientation change still resets the 2-D axes
+- [x] `PlotRequest` and `Projection` are still frozen; `rg "@dataclass\(frozen=True\)" nbs_viewer/models/plot/` still matches both
 
 ### Tests
 
-`test_view_intent_session.py::test_move_view_axis_off_the_ends_is_a_no_op`
-asserts `session.view_intent is intent`, which **inverts** under mutation —
-with one live object that identity is trivially true and the test becomes
-vacuous. It must assert that no signal fired instead. Name this in the diff
-rather than letting it pass silently.
+Suite 362 → 374. `tests/test_view_intent_signals.py` (10) covers the emission
+matrix, that no-op mutations are silent, that `changed` fires last, that a
+projection already handed out survives a later mutation, and that an invalid
+mutation leaves the intent untouched and silent.
 
-`test_view_spec.py:472` and `test_plot_request_wiring.py:51` call
-`dataclasses.replace` on an intent and need rewriting to the mutators. Those
-three are the whole test cost; the ~40 `ViewIntent(...)` construction sites
-are unaffected.
+`test_move_view_axis_off_the_ends_is_a_no_op` asserted
+`session.view_intent is intent`, which **inverted** as predicted — with one
+live object that identity is trivially true, so the test passed while
+asserting nothing. It now asserts no signal fired and no field moved. Two
+session-level tests were added: that the intent's `changed` rewrites held
+requests *before* scheduling the refetch, and that leaving 2-D invalidates
+region state while entering it does not.
 
-New: per-signal emission tests for the matrix above, and a headless test that
-a reduce change emits `changed` but **not** `orientation_changed`. Plus a
-scratch script for bug 12, since the suite cannot build a `QWidget`.
+The predicted test cost was three edits. Actual: those three plus 9
+`set_view_intent` call sites, absorbed by the `apply_projection` fixture. The
+~40 `ViewIntent(...)` construction sites were unaffected, as predicted.
+
+Three scratch scripts under a real `QApplication`: bug 12's reproduction now
+shows the same artist and colorbar across a slider step, an orientation change
+still resets, and step C's line and image regressions still pass.
 
 ---
 
