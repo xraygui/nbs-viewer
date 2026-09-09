@@ -199,6 +199,24 @@ class CatalogRun(QObject):
         # print("Getting Default Selection")
         return ([], [], [])
 
+    def scanFinished(self) -> bool:
+        """
+        Return whether this run has stopped acquiring.
+
+        Default True: a run with no notion of progress -- a stored catalog
+        run, an in-memory run, a synthetic one -- is finished by definition.
+        Sources that stream (``BlueskyRun``, ``KafkaRun``) override this.
+
+        Freezing reads this: a snapshot of a run that is still growing would
+        not be a stable reference, which is the whole point of a frozen run.
+
+        Returns
+        -------
+        bool
+            True when no more data is expected.
+        """
+        return True
+
     def getDimensions(self, key: str) -> int:
         """
         Get number of dimensions for a key.

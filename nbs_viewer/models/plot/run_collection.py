@@ -33,8 +33,15 @@ from qtpy.QtCore import QObject, Signal
 from nbs_viewer.models.catalog.base import CatalogRun
 from nbs_viewer.utils import print_debug
 
-from .combinedRunSource import CombinedRunSource, CombinationMethod, CombineError
-from .frozenRunSource import FrozenRunSource
+from nbs_viewer.models.data.combined import (
+    REQUESTED,
+    CombinationMethod,
+    CombinedRun,
+    CombineError,
+    Source,
+)
+from nbs_viewer.models.data.frozen import FreezeError, FrozenRun
+
 from .runSource import RunSource
 
 
@@ -406,23 +413,39 @@ class RunCollection(QObject):
     # Combine and freeze
     # ------------------------------------------------------------------
 
-    def validate_combine(self, runs: List[RunSource]) -> None:
+    def validate_combine(
+        self,
+        runs: List[RunSource],
+        method: CombinationMethod = CombinationMethod.AVERAGE,
+    ) -> None:
         """
-        Check whether runs can be combined.
+        Check whether runs can be combined under ``method``.
+
+        AVERAGE and SUM combine *the same measurement* across runs, so they
+        need a key in common and matching shapes. An EXPRESSION does not:
+        its sources deliberately play different roles -- a live run divided
+        by a frozen reference's ``i0`` shares no key with it by design -- so
+        only the run count is checked. Applying the shared-key rule to
+        expressions is what forced frozen runs to inherit their parent's
+        whole key space.
 
         Parameters
         ----------
         runs : list of RunSource
             Candidate source runs.
+        method : CombinationMethod, optional
+            How the runs will be combined, by default AVERAGE.
 
         Raises
         ------
         CombineError
-            If fewer than two runs are given, they share no keys, shapes
-            disagree, or shape data cannot be read.
+            If fewer than two runs are given, or -- for AVERAGE and SUM --
+            they share no keys, shapes disagree, or shapes cannot be read.
         """
         if len(runs) < 2:
             raise CombineError("Please select at least 2 runs to combine")
+        if method == CombinationMethod.EXPRESSION:
+            return
 
         try:
             common_keys = set(runs[0].available_keys)
@@ -442,7 +465,7 @@ class RunCollection(QObject):
                     test_key = key
                     break
             if test_key is None:
-                test_key = list(common_keys)[0]
+                test_key = sorted(common_keys)[0]
 
             shapes = []
             for run in runs:
@@ -467,94 +490,90 @@ class RunCollection(QObject):
                 f"Error checking run compatibility: {str(e)}"
             ) from e
 
-    def make_combined(
-        self,
-        runs: List[RunSource],
-        method: CombinationMethod = CombinationMethod.AVERAGE,
-        expression: Optional[str] = None,
-    ) -> CombinedRunSource:
-        """
-        Build a :class:`CombinedRunSource` after validating ``runs``.
-
-        Does not add the result to this collection.
-
-        Parameters
-        ----------
-        runs : list of RunSource
-            Source runs to combine.
-        method : CombinationMethod, optional
-            Combination method, by default AVERAGE.
-        expression : str, optional
-            Expression used when method is EXPRESSION.
-
-        Returns
-        -------
-        CombinedRunSource
-            Combined run model.
-
-        Raises
-        ------
-        CombineError
-            If the runs fail ``validate_combine``.
-        """
-        self.validate_combine(runs)
-        return CombinedRunSource(
-            runs=runs, method=method, expression=expression
-        )
-
     def combine(
         self,
         runs: List[RunSource],
         method: Optional[CombinationMethod] = None,
         expression: Optional[str] = None,
-    ) -> CombinedRunSource:
+        *,
+        sources: Optional[List[Source]] = None,
+    ) -> RunSource:
         """
         Build a combined run and add it to this collection.
+
+        Pass ``runs`` for the ordinary case, where every source supplies the
+        key being plotted. Pass ``sources`` to bind individual sources to a
+        fixed key -- ``[(run_a, REQUESTED), (frozen_i0, "i0")]`` with an
+        expression is how one run normalizes another.
 
         Parameters
         ----------
         runs : list of RunSource
-            Source runs to combine.
+            Source runs, all bound to the requested key. Ignored when
+            ``sources`` is given.
         method : CombinationMethod, optional
             Combination method, by default AVERAGE.
         expression : str, optional
-            Expression used when method is EXPRESSION.
+            Expression evaluated over ``runlist``; required for EXPRESSION.
+        sources : list of (CatalogRun, binding), optional
+            Explicit per-source key bindings.
 
         Returns
         -------
-        CombinedRunSource
-            The combined run that was added.
+        RunSource
+            The wrapped combined run that was added.
 
         Raises
         ------
         CombineError
-            If the runs fail :meth:`validate_combine`.
+            If the runs fail :meth:`validate_combine`, or the bindings are
+            unusable.
         """
         if method is None:
             method = CombinationMethod.AVERAGE
-        combined = self.make_combined(runs, method=method, expression=expression)
-        self.add_runs([combined])
-        return combined
+        if sources is None:
+            self.validate_combine(runs, method)
+            sources = [(run.run, REQUESTED) for run in runs]
+        combined = CombinedRun(
+            sources, method=method, expression=expression
+        )
+        wrapped = self.wrap(combined)
+        self.add_runs([wrapped])
+        return wrapped
 
-    def make_frozen(
+    def freeze(
         self, items: Iterable[Tuple[RunSource, str]]
-    ) -> List[FrozenRunSource]:
+    ) -> List[RunSource]:
         """
-        Build frozen sources for explicit ``(run, ykey)`` pairs.
+        Capture explicit ``(run, ykey)`` pairs as immutable frozen runs.
 
-        Does not add the results to this collection. Callers resolve Y keys
+        Does not add the results to this collection; callers resolve Y keys
         from the session selection (see :meth:`PlotSession.freeze_runs`).
+        A run that is still acquiring is skipped rather than captured -- a
+        snapshot of it would not be a stable reference.
 
         Parameters
         ----------
         items : iterable of (RunSource, str)
-            Catalog-backed run and Y key to freeze.
+            Source run and the Y key to freeze.
 
         Returns
         -------
-        list of FrozenRunSource
-            Frozen run models.
+        list of RunSource
+            Wrapped frozen runs, one per pair that could be captured.
+
+        Raises
+        ------
+        FreezeError
+            If no pair could be captured and at least one was refused.
         """
-        return [
-            FrozenRunSource(source.run, key) for source, key in items
-        ]
+        frozen: List[RunSource] = []
+        refusals: List[str] = []
+        for source, key in items:
+            try:
+                frozen.append(self.wrap(FrozenRun(source.run, key)))
+            except FreezeError as exc:
+                refusals.append(str(exc))
+        if not frozen and refusals:
+            raise FreezeError("; ".join(refusals))
+        return frozen

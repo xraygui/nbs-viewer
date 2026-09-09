@@ -9,12 +9,12 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.combinedRunSource import (
+from nbs_viewer.models.data.combined import (
     CombinationMethod,
+    CombinedRun,
     CombineError,
-    CombinedRunSource,
 )
-from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
+from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.runSource import RunSource
@@ -59,11 +59,11 @@ def test_combine_runs_adds_one_combined_entry(qapp):
         [first, second], method=CombinationMethod.SUM
     )
 
-    assert isinstance(combined, CombinedRunSource)
+    assert isinstance(combined.run, CombinedRun)
     assert combined in session.collection.available_models
     assert len(session.collection.available_models) == before + 1
-    assert combined.combination_method == CombinationMethod.SUM
-    assert set(combined.source_runs) == {first, second}
+    assert combined.run.combination_method == CombinationMethod.SUM
+    assert combined.run.source_runs == [first.run, second.run]
     assert run_list.rowCount() == len(session.collection.available_models)
 
 
@@ -112,7 +112,7 @@ def test_freeze_runs_adds_frozen_entries_for_selected_y(qapp):
     frozen = session.freeze_runs([first, second])
 
     assert len(frozen) == 3
-    assert all(isinstance(item, FrozenRunSource) for item in frozen)
+    assert all(isinstance(item.run, FrozenRun) for item in frozen)
     assert len(session.collection.available_models) == before + 3
     assert {item.display_name for item in frozen} == {
         "det of 1",
@@ -134,7 +134,7 @@ def test_freeze_runs_noop_without_selected_y(qapp):
 
 def test_views_do_not_construct_combined_or_frozen_run_models():
     views_root = Path(__file__).resolve().parents[1] / "nbs_viewer" / "views"
-    forbidden = {"CombinedRunSource", "FrozenRunSource"}
+    forbidden = {"CombinedRun", "FrozenRun"}
     hits = []
     for path in views_root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))

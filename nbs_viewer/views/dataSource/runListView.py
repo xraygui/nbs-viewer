@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
-from ...models.plot.combinedRunSource import CombinationMethod, CombineError
+from ...models.data.combined import CombinationMethod, CombineError
 from ...models.plot.runSource import RunSource
 from .run_list_item_model import RunListItemModel
 from ..plot.metadataView import FullMetadataBrowser

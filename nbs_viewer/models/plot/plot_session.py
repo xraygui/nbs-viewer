@@ -30,7 +30,6 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     aggregate_tiled_fetch_label,
 )
 
-from .frozenRunSource import FrozenRunSource
 from .plot_request import (
     TraceKey,
     build_plot_request,
@@ -190,12 +189,12 @@ class PlotSession(QObject):
         self.request_plot_update.emit()
 
 
-    def freeze_runs(self, runs: List[RunSource]) -> List[FrozenRunSource]:
+    def freeze_runs(self, runs: List[RunSource]) -> List[RunSource]:
         """
-        Freeze the selected Y keys of each run and add the results.
+        Capture the selected Y keys of each run as immutable frozen runs.
 
-        A join: the frozen sources come from the collection's factory,
-        but which Y keys to freeze is the selection's answer.
+        A join: the capture is the collection's, but which Y keys to freeze
+        is the selection's answer.
 
         Parameters
         ----------
@@ -204,7 +203,7 @@ class PlotSession(QObject):
 
         Returns
         -------
-        list of FrozenRunSource
+        list of RunSource
             Frozen runs that were added.
         """
         to_freeze = []
@@ -212,7 +211,7 @@ class PlotSession(QObject):
             sel = self._selection.selection_for(model.uid)
             for key in sel.y:
                 to_freeze.append((model, key))
-        frozen_runs = self._collection.make_frozen(to_freeze)
+        frozen_runs = self._collection.freeze(to_freeze)
         if frozen_runs:
             self._collection.add_runs(frozen_runs)
         return frozen_runs

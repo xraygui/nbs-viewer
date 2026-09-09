@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from nbs_viewer.models.plot.combinedRunSource import (
+from nbs_viewer.models.data.combined import (
     CombinationMethod,
-    CombinedRunSource,
+    CombinedRun,
 )
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
 )
-from nbs_viewer.models.plot.frozenRunSource import FrozenRunSource
+from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -90,11 +90,11 @@ def test_combine_runs_on_catalog_selected_runs(qapp, app_model):
         method=CombinationMethod.SUM,
     )
 
-    assert isinstance(combined, CombinedRunSource)
+    assert isinstance(combined.run, CombinedRun)
     assert combined in session.session.collection.available_models
     assert len(session.session.collection.available_models) == before + 1
-    assert combined.combination_method == CombinationMethod.SUM
-    assert set(combined.source_runs) == {first, second}
+    assert combined.run.combination_method == CombinationMethod.SUM
+    assert combined.run.source_runs == [first.run, second.run]
 
     bundle = session.fetch_bundle(["time"], ["y"], run=combined)
     assert bundle.y.shape == (100,)
@@ -112,7 +112,7 @@ def test_freeze_runs_on_catalog_selected_runs(qapp, app_model):
     frozen = session.session.freeze_runs([first, second])
 
     assert len(frozen) == 2
-    assert all(isinstance(item, FrozenRunSource) for item in frozen)
+    assert all(isinstance(item.run, FrozenRun) for item in frozen)
     assert len(session.session.collection.available_models) == before + 2
     assert {item.display_name for item in frozen} == {"y of 0", "y of 1"}
 
