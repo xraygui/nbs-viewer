@@ -68,7 +68,7 @@ def _add_roi(session, trace, profile_storage_axis):
     _, x1 = _cell_x_bounds_mesh(frame, n_cols - 2, 0)
     y0, _ = _cell_y_bounds_mesh(frame, 1, 0)
     _, y1 = _cell_y_bounds_mesh(frame, n_rows - 2, 0)
-    entry_id = session.roi_set.add(
+    entry_id = session.region.roi_set.add(
         RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
         operation=RoiOperation(
             profile_storage_axis=profile_storage_axis,
@@ -76,7 +76,7 @@ def _add_roi(session, trace, profile_storage_axis):
             span_full_profile_axis=True,
             label="roi",
         ),
-        view_fingerprint=session.resolve_current_view_fingerprint(),
+        view_fingerprint=session.region.resolve_current_view_fingerprint(),
     )
     return entry_id, frame
 
@@ -127,7 +127,7 @@ def test_every_eligible_profile_axis_previews_on_a_cube(
     sizes = {0: N_Y, 1: N_X, 2: N_Z}
     for storage_axis in eligible:
         entry_id, frame = _add_roi(session, trace, storage_axis)
-        bundle = session.preview_roi_profile(
+        bundle = session.region.preview_roi_profile(
             entry_id,
             parent_trace=trace,
             parent_frame=frame,
@@ -135,7 +135,7 @@ def test_every_eligible_profile_axis_previews_on_a_cube(
         )
         assert bundle.y.ndim == 1
         assert bundle.y.shape == (sizes[storage_axis],)
-        session.roi_set.remove(entry_id)
+        session.region.roi_set.remove(entry_id)
 
 
 def test_a_cube_profile_along_the_slider_axis_reads_every_slab(qapp):
@@ -149,7 +149,7 @@ def test_a_cube_profile_along_the_slider_axis_reads_every_slab(qapp):
     session, _run, trace = _session("detector_cube", depth_on_slider=True)
     entry_id, frame = _add_roi(session, trace, 2)
 
-    bundle = session.preview_roi_profile(
+    bundle = session.region.preview_roi_profile(
         entry_id,
         parent_trace=trace,
         parent_frame=frame,

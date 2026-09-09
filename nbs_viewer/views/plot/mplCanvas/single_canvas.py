@@ -20,7 +20,7 @@ from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from nbs_viewer.models.plot.view_spec import Projection
 from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
-from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle, view_fingerprint_from_bundle
+from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
 from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiSetModel
 from nbs_viewer.models.plot.view_spec import ViewCrop
@@ -163,7 +163,6 @@ class MplCanvas(FigureCanvasQTAgg):
         self._crop_selector = None
         self._crop_overlay = None
         self._crop_draw_enabled = False
-        self._last_2d_view_crop = None
 
         self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.aspect_ratio = width / height
@@ -177,20 +176,25 @@ class MplCanvas(FigureCanvasQTAgg):
         intent.orientation_changed.connect(self._on_orientation_changed)
         self.plot_model.run_removed.connect(self._on_run_removed)
         self.plot_model.request_plot_update.connect(self.updatePlot)
-        self.plot_model.view_crop_changed.connect(self._on_plot_view_crop_changed)
-        self.plot_model.region_invalidation_requested.connect(
+        self.plot_model.region.view_crop_changed.connect(
+            self._on_plot_view_crop_changed
+        )
+        self.plot_model.region.view_crop_changed.connect(
+            self._on_crop_needs_axes_reset
+        )
+        self.plot_model.region.region_invalidation_requested.connect(
             self._on_region_invalidation_requested
         )
-        self.plot_model.roi_draw_enabled_changed.connect(
+        self.plot_model.region.roi_draw_enabled_changed.connect(
             self._apply_roi_draw_enabled
         )
-        self.plot_model.ellipse_circle_locked_changed.connect(
+        self.plot_model.region.ellipse_circle_locked_changed.connect(
             self.set_ellipse_circle_locked
         )
-        self.plot_model.roi_live_region_sync_requested.connect(
+        self.plot_model.region.roi_live_region_sync_requested.connect(
             self._sync_live_roi_region
         )
-        roi_set = self.plot_model.roi_set
+        roi_set = self.plot_model.region.roi_set
         roi_set.entries_changed.connect(self._on_roi_set_changed)
         roi_set.entry_changed.connect(self._on_roi_entry_changed)
         roi_set.selection_changed.connect(self._on_roi_selection_changed)
@@ -302,7 +306,7 @@ class MplCanvas(FigureCanvasQTAgg):
 
     @property
     def _view_crop(self):
-        return self.plot_model.view_crop
+        return self.plot_model.region.view_crop
 
     def _canvas_is_2d(self):
         """
@@ -350,7 +354,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Return the attached ROI set model, if any.
         """
-        return self.plot_model.roi_set
+        return self.plot_model.region.roi_set
 
     def get_single_visible_2d_model(self):
         """
@@ -420,7 +424,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Return whether interactive ROI drawing is active.
         """
-        return self.plot_model.is_roi_draw_enabled()
+        return self.plot_model.region.is_roi_draw_enabled()
 
     def is_crop_draw_enabled(self):
         """
@@ -473,13 +477,13 @@ class MplCanvas(FigureCanvasQTAgg):
         -------
         ViewCrop or None
         """
-        return self.plot_model.view_crop
+        return self.plot_model.region.view_crop
 
     def _on_plot_view_crop_changed(self, crop):
         self.view_crop_changed.emit(crop)
         model = self.get_single_visible_2d_model()
         if model is not None and (
-            crop is None or self.plot_model.crop_applies_to(model.trace_key)
+            crop is None or self.plot_model.region.crop_applies_to(model.trace_key)
         ):
             self.plot_data(model)
         else:
@@ -490,7 +494,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         ROI set owned by the plot session model.
         """
-        return self.plot_model.roi_set
+        return self.plot_model.region.roi_set
 
     def _sync_live_roi_region(self):
         if not self._roi_draw_enabled:
@@ -545,6 +549,17 @@ class MplCanvas(FigureCanvasQTAgg):
         msg.setWindowTitle("Invalid Plot Configuration")
         msg.exec_()
         return False
+
+    def _on_crop_needs_axes_reset(self, _crop):
+        """
+        Note that a crop change must tear the 2-D axes down before the paint.
+
+        A crop really does move the plane's extent, so unlike a slider step
+        this always warrants the reset. It replaces `_last_2d_view_crop` and
+        its diff: the controller owns the crop and announces it, so the
+        canvas no longer keeps a copy to compare against.
+        """
+        self._needs_axes_reset = True
 
     def _on_plot_ndim_changed(self, plot_ndim):
         """
@@ -824,12 +839,12 @@ class MplCanvas(FigureCanvasQTAgg):
         if bundle.render_mode == "line":
             self._ensure_sibling_lines_on_axes(except_key=model_key)
         self._sync_roi_display()
-        self.plot_model.sync_region_state_with_view()
+        self.plot_model.region.sync_region_state_with_view()
         self.plot_view_updated.emit()
         self.draw()
 
     def _on_region_invalidation_requested(self, _reason: str):
-        self.plot_model.set_roi_draw_enabled(False)
+        self.plot_model.region.set_roi_draw_enabled(False)
         self.clear_crop_draft(paint=False)
         self.set_crop_draw_enabled(False)
 
@@ -980,18 +995,13 @@ class MplCanvas(FigureCanvasQTAgg):
         return artist
 
     def _prepare_2d_axes(self, plot_key):
-        crop = self._view_crop
-        crop_key = crop.storage_bbox if crop is not None else None
-        crop_changed = crop_key != self._last_2d_view_crop
         if (
             self._last_2d_plot_key != plot_key
             or self._active_render_mode not in ("image", "mesh")
             or self.currentDim != 2
-            or crop_changed
         ):
             self._reset_plot_axes()
         self._last_2d_plot_key = plot_key
-        self._last_2d_view_crop = crop_key
 
     def _reset_plot_axes(self):
         remove_2d_artists(self.axes, self._colorbar_state, self.fig)
@@ -1026,7 +1036,7 @@ class MplCanvas(FigureCanvasQTAgg):
             region = region.normalized()
         self._roi_set.set_or_replace_single(
             region,
-            view_fingerprint=self.current_view_fingerprint(),
+            view_fingerprint=self.plot_model.region.resolve_current_view_fingerprint(),
         )
         if self._roi_selector is not None:
             spec = roi_type_for_region(region)
@@ -1035,18 +1045,6 @@ class MplCanvas(FigureCanvasQTAgg):
 
     def _handle_plot_error(self, error_msg):
         print(f"[MplCanvas] Plot error: {error_msg}")
-
-    def current_view_fingerprint(self):
-        """
-        Return a fingerprint for the active 2D plot coordinate frame.
-        """
-        bundle = self.get_active_plot_bundle()
-        if bundle is None:
-            return None
-        try:
-            return view_fingerprint_from_bundle(bundle)
-        except ValueError:
-            return None
 
     def get_roi_view_fingerprint(self):
         """
@@ -1074,7 +1072,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         Enable or disable interactive ROI rectangle drawing.
         """
-        self.plot_model.set_roi_draw_enabled(enabled)
+        self.plot_model.region.set_roi_draw_enabled(enabled)
 
     def _apply_roi_draw_enabled(self, enabled: bool):
         """
@@ -1106,7 +1104,7 @@ class MplCanvas(FigureCanvasQTAgg):
         """
         enabled = bool(enabled)
         if enabled and self._roi_draw_enabled:
-            self.plot_model.set_roi_draw_enabled(False)
+            self.plot_model.region.set_roi_draw_enabled(False)
         if enabled == self._crop_draw_enabled:
             return
         self._crop_draw_enabled = enabled
@@ -1200,7 +1198,7 @@ class MplCanvas(FigureCanvasQTAgg):
             return
         self._roi_set.set_or_replace_single(
             region,
-            view_fingerprint=self.current_view_fingerprint(),
+            view_fingerprint=self.plot_model.region.resolve_current_view_fingerprint(),
         )
 
     def _set_crop_draft_region(self, region: RectRegion, update_overlay=None):

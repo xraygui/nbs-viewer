@@ -124,10 +124,10 @@ def test_cube_view_and_crop_without_canvas(qapp):
     assert plot_model.dimension == 2
 
     crop = ViewCrop(storage_bbox=(0, 2, 0, 3), plot_y_axis=0, plot_x_axis=1)
-    plot_model.set_view_crop(crop, ("x", "y", "uid"))
-    assert plot_model.view_crop is crop
-    plot_model.clear_view_crop()
-    assert plot_model.view_crop is None
+    plot_model.region.set_view_crop(crop, ("x", "y", "uid"))
+    assert plot_model.region.view_crop is crop
+    plot_model.region.set_view_crop(None)
+    assert plot_model.region.view_crop is None
 
 
 def _image_session(qapp):
@@ -162,21 +162,21 @@ def test_apply_view_crop_from_region(qapp):
     plot_model, run_model, plot_data = _image_session(qapp)
 
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
-    crop = plot_model.apply_view_crop_from_region(region)
+    crop = plot_model.region.apply_view_crop_from_region(region)
 
-    assert plot_model.view_crop is crop
+    assert plot_model.region.view_crop is crop
     assert crop.storage_bbox == (1, 3, 2, 4)
-    assert plot_model.crop_applies_to(plot_data.trace_key)
+    assert plot_model.region.crop_applies_to(plot_data.trace_key)
 
 
 def test_apply_view_crop_from_region_rejects_second_crop(qapp):
     plot_model, _run_model, _plot_data = _image_session(qapp)
 
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
-    plot_model.apply_view_crop_from_region(region)
+    plot_model.region.apply_view_crop_from_region(region)
 
     with pytest.raises(ValueError, match="Clear the current crop"):
-        plot_model.apply_view_crop_from_region(region)
+        plot_model.region.apply_view_crop_from_region(region)
 
 
 def test_default_selection_on_first_run(qapp):

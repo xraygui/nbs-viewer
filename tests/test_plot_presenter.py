@@ -56,7 +56,7 @@ def test_catalog_selection_path_adds_run_without_canvas(qapp):
     presenter = manager.get_presenter("main")
     assert len(presenter.session.available_models) == 1
     assert presenter.session is not None
-    assert presenter.session.roi_set is not None
+    assert presenter.session.region.roi_set is not None
     assert presenter.session is presenter.session
 
 

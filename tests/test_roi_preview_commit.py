@@ -53,7 +53,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
     _, y1 = _cell_y_bounds_mesh(frame, 28, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
-    entry_id = plot_model.roi_set.add(
+    entry_id = plot_model.region.roi_set.add(
         region,
         operation=RoiOperation(
             profile_storage_axis=profile_storage_axis,
@@ -63,7 +63,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
         ),
     )
     if stale:
-        plot_model.roi_set.set_stale(entry_id, True)
+        plot_model.region.roi_set.set_stale(entry_id, True)
 
     return plot_model, plot_data, entry_id, frame, region
 
@@ -71,7 +71,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
 def test_preview_roi_profile_returns_1d_bundle(qapp):
     plot_model, plot_data, entry_id, frame, _region = _setup_plot_with_roi()
 
-    bundle = plot_model.preview_roi_profile(
+    bundle = plot_model.region.preview_roi_profile(
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
@@ -87,14 +87,14 @@ def test_commit_roi_profile_registers_synthetic_keys(qapp):
     plot_model, plot_data, entry_id, frame, region = _setup_plot_with_roi()
     run_model = plot_data.run
 
-    first = plot_model.commit_roi_profile(
+    first = plot_model.region.commit_roi_profile(
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
         axis_names=("en_energy", "pixel"),
     )
-    second_id = plot_model.roi_set.add(
+    second_id = plot_model.region.roi_set.add(
         RectRegion(
             x0=region.x0 + 1.0,
             x1=region.x1 + 1.0,
@@ -108,7 +108,7 @@ def test_commit_roi_profile_registers_synthetic_keys(qapp):
             label="second roi",
         ),
     )
-    second = plot_model.commit_roi_profile(
+    second = plot_model.region.commit_roi_profile(
         second_id,
         parent_trace=plot_data,
         parent_frame=frame,
@@ -131,7 +131,7 @@ def test_preview_rejects_stale_roi(qapp):
     )
 
     with pytest.raises(ValueError, match="stale"):
-        plot_model.preview_roi_profile(
+        plot_model.region.preview_roi_profile(
             entry_id,
             parent_trace=plot_data,
             parent_frame=frame,
@@ -145,7 +145,7 @@ def test_commit_rejects_local_profile(qapp):
     )
 
     with pytest.raises(ValueError, match="Select a profile along"):
-        plot_model.commit_roi_profile(
+        plot_model.region.commit_roi_profile(
             entry_id,
             parent_trace=plot_data,
             parent_frame=frame,
@@ -198,7 +198,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     assert frame.row_reversed
 
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
-    entry_id = plot_model.roi_set.add(
+    entry_id = plot_model.region.roi_set.add(
         roi,
         operation=RoiOperation(
             profile_storage_axis=0,
@@ -207,7 +207,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
         ),
     )
 
-    profile = plot_model.preview_roi_profile(entry_id)
+    profile = plot_model.region.preview_roi_profile(entry_id)
 
     a, b, c = vppem_factors()
     mask = compile_with_mask_mode(frame, roi, "inside").mask

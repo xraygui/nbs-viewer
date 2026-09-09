@@ -87,13 +87,13 @@ class RegionControlWidget(QWidget):
         self.apply_crop_button.clicked.connect(self._on_apply_crop_requested)
         self.roi_window_button.clicked.connect(self._on_roi_window_requested)
         self.canvas.crop_region_changed.connect(self._on_crop_region_changed)
-        self.plot_model.view_crop_changed.connect(self._on_view_crop_changed)
+        self.plot_model.region.view_crop_changed.connect(self._on_view_crop_changed)
         self.canvas.plot_view_updated.connect(self._on_plot_view_updated)
-        self.plot_model.region_status_changed.connect(self.set_status)
-        self.plot_model.region_invalidation_requested.connect(
+        self.plot_model.region.region_status_changed.connect(self.set_status)
+        self.plot_model.region.region_invalidation_requested.connect(
             self._on_region_invalidation_requested
         )
-        self.plot_model.roi_draw_enabled_changed.connect(
+        self.plot_model.region.roi_draw_enabled_changed.connect(
             self._on_roi_draw_enabled_changed
         )
 
@@ -199,8 +199,8 @@ class RegionControlWidget(QWidget):
             self.canvas.set_crop_draw_enabled(False)
 
     def _on_crop_draw_toggled(self, enabled: bool):
-        if enabled and self.plot_model.is_roi_draw_enabled():
-            self.plot_model.set_roi_draw_enabled(False)
+        if enabled and self.plot_model.region.is_roi_draw_enabled():
+            self.plot_model.region.set_roi_draw_enabled(False)
         self.canvas.set_crop_draw_enabled(enabled)
 
     def _on_clear_crop_draft_requested(self):
@@ -208,12 +208,12 @@ class RegionControlWidget(QWidget):
         self.clear_crop_corners()
         self.set_crop_draw_checked(False)
         self.canvas.set_crop_draw_enabled(False)
-        if self.plot_model.view_crop is None:
+        if self.plot_model.region.view_crop is None:
             self.set_status("")
         self._update_panel_buttons()
 
     def _on_clear_crop_requested(self):
-        self.plot_model.clear_view_crop()
+        self.plot_model.region.set_view_crop(None)
         self.set_status("Crop cleared")
         self._update_panel_buttons()
 
@@ -223,7 +223,7 @@ class RegionControlWidget(QWidget):
             self.set_status("Draw a crop region before applying crop")
             return
         try:
-            self.plot_model.apply_view_crop_from_region(region)
+            self.plot_model.region.apply_view_crop_from_region(region)
         except ValueError as exc:
             self.set_status(str(exc))
             return
@@ -231,7 +231,7 @@ class RegionControlWidget(QWidget):
         self.set_crop_draw_checked(False)
         self.canvas.clear_crop_draft(paint=False)
         self.clear_crop_corners()
-        self.set_status(self.plot_model.crop_status_text())
+        self.set_status(self.plot_model.region.crop_status_text())
         self._update_panel_buttons()
 
     def _on_crop_region_changed(self, region):
@@ -245,7 +245,7 @@ class RegionControlWidget(QWidget):
         height = region.y1 - region.y0
         if width == 0.0 or height == 0.0:
             self.set_status("Crop region has zero width or height")
-        elif self.plot_model.view_crop is None:
+        elif self.plot_model.region.view_crop is None:
             self.set_status("")
 
     def _on_view_crop_changed(self, _crop):
@@ -268,12 +268,12 @@ class RegionControlWidget(QWidget):
         has_crop_draft = self.canvas.get_crop_region() is not None
         self.set_apply_crop_enabled(region_active and has_crop_draft)
         self.set_clear_crop_enabled(
-            region_active and self.plot_model.view_crop is not None
+            region_active and self.plot_model.region.view_crop is not None
         )
         self.set_roi_window_enabled(region_active)
         if (
-            self.plot_model.view_crop is not None
+            self.plot_model.region.view_crop is not None
             and not self.crop_draw_checkbox.isChecked()
             and not has_crop_draft
         ):
-            self.set_status(self.plot_model.crop_status_text())
+            self.set_status(self.plot_model.region.crop_status_text())

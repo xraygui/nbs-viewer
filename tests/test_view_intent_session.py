@@ -200,7 +200,7 @@ def test_leaving_two_d_invalidates_region_state():
     session, run = _session()
     session.set_selected_keys(["time"], ["image"], [])
     reasons = []
-    session.region_invalidation_requested.connect(reasons.append)
+    session.region.region_invalidation_requested.connect(reasons.append)
 
     session.view_intent.set_plot_ndim(2)
     assert reasons == []

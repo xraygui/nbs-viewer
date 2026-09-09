@@ -69,7 +69,7 @@ def _wired_image_scan_with_roi(
     y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
     _, y1 = _cell_y_bounds_mesh(frame, 28, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
-    entry_id = session.session.roi_set.add(
+    entry_id = session.session.region.roi_set.add(
         region,
         operation=RoiOperation(
             profile_storage_axis=profile_storage_axis,
@@ -79,7 +79,7 @@ def _wired_image_scan_with_roi(
         ),
     )
     if stale:
-        session.session.roi_set.set_stale(entry_id, True)
+        session.session.region.roi_set.set_stale(entry_id, True)
 
     return session, run_model, plot_data, parent_spec, entry_id, frame, region
 
@@ -89,7 +89,7 @@ def test_preview_roi_profile_on_catalog_selected_run(qapp, app_model):
         _wired_image_scan_with_roi(app_model)
     )
 
-    bundle = session.session.preview_roi_profile(
+    bundle = session.session.region.preview_roi_profile(
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
@@ -106,7 +106,7 @@ def test_commit_roi_profile_registers_frozen_spectrum(qapp, app_model):
         _wired_image_scan_with_roi(app_model)
     )
 
-    frozen = session.session.commit_roi_profile(
+    frozen = session.session.region.commit_roi_profile(
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
@@ -124,7 +124,7 @@ def test_committed_synthetic_key_fetchable_via_fetch_bundle(qapp, app_model):
         _wired_image_scan_with_roi(app_model)
     )
 
-    frozen = session.session.commit_roi_profile(
+    frozen = session.session.region.commit_roi_profile(
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
@@ -145,7 +145,7 @@ def test_preview_rejects_stale_roi_on_wired_session(qapp, app_model):
     )
 
     with pytest.raises(ValueError, match="stale"):
-        session.session.preview_roi_profile(
+        session.session.region.preview_roi_profile(
             entry_id,
             parent_trace=plot_data,
                 parent_frame=frame,
@@ -159,7 +159,7 @@ def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
     )
 
     with pytest.raises(ValueError, match="Select a profile along"):
-        session.session.commit_roi_profile(
+        session.session.region.commit_roi_profile(
             entry_id,
             parent_trace=plot_data,
                 parent_frame=frame,

@@ -265,8 +265,8 @@ class RoiWindow(QDialog):
         self.plot_model.view_intent.changed.connect(
             self._on_view_context_changed
         )
-        self.plot_model.view_crop_changed.connect(self._on_view_context_changed)
-        self.plot_model.roi_draw_enabled_changed.connect(self._on_model_roi_draw_changed)
+        self.plot_model.region.view_crop_changed.connect(self._on_view_context_changed)
+        self.plot_model.region.roi_draw_enabled_changed.connect(self._on_model_roi_draw_changed)
         self.finished.connect(self._on_finished)
 
         self.refresh_entry_list()
@@ -279,7 +279,7 @@ class RoiWindow(QDialog):
         """
         ROI set owned by the plot session.
         """
-        return self.plot_model.roi_set
+        return self.plot_model.region.roi_set
 
     @classmethod
     def open_or_raise(cls, presenter, parent=None, dimension_control=None):
@@ -354,22 +354,22 @@ class RoiWindow(QDialog):
         self.set_context(source)
 
         parent_spec = trace.request.view if trace is not None else None
-        parent_frame = self.plot_model.resolve_parent_frame(trace)
+        parent_frame = self.plot_model.region.resolve_parent_frame(trace)
         self.set_profile_context(
             parent_spec,
             self._dimension_axis_names(),
             parent_frame,
         )
-        if self.plot_model.is_roi_draw_enabled() != self.draw_button.isChecked():
-            self.set_draw_checked(self.plot_model.is_roi_draw_enabled())
+        if self.plot_model.region.is_roi_draw_enabled() != self.draw_button.isChecked():
+            self.set_draw_checked(self.plot_model.region.is_roi_draw_enabled())
 
     def _on_finished(self):
         self._cancel_preview_worker()
         self._cancel_commit_worker()
         self._save_all_queue.clear()
         self._disconnect_trace_signals()
-        self.plot_model.set_roi_draw_enabled(False)
-        self.plot_model.set_ellipse_circle_locked(False)
+        self.plot_model.region.set_roi_draw_enabled(False)
+        self.plot_model.region.set_ellipse_circle_locked(False)
         self.set_draw_checked(False)
 
     def _on_view_context_changed(self, *_args):
@@ -380,7 +380,7 @@ class RoiWindow(QDialog):
         self._schedule_preview()
 
     def _on_draw_toggled(self, enabled: bool):
-        self.plot_model.set_roi_draw_enabled(enabled)
+        self.plot_model.region.set_roi_draw_enabled(enabled)
 
     def _on_model_roi_draw_changed(self, enabled: bool):
         self.set_draw_checked(enabled)
@@ -388,7 +388,7 @@ class RoiWindow(QDialog):
             self._schedule_preview()
 
     def _on_clear_clicked(self):
-        self.plot_model.set_roi_draw_enabled(False)
+        self.plot_model.region.set_roi_draw_enabled(False)
         self.set_draw_checked(False)
         self.roi_set.clear()
         self.set_status("Cleared all ROIs")
@@ -441,10 +441,10 @@ class RoiWindow(QDialog):
         if trace is None:
             raise ValueError("Select a single 2D dataset")
 
-        request = self.plot_model.build_roi_profile_request(
+        request = self.plot_model.region.build_roi_profile_request(
             entry,
             trace=trace,
-            parent_frame=self.plot_model.resolve_parent_frame(trace),
+            parent_frame=self.plot_model.region.resolve_parent_frame(trace),
             span_full_override=span_full_override,
             default_profile_axis=self.get_profile_storage_axis(),
         )
@@ -454,7 +454,7 @@ class RoiWindow(QDialog):
             request,
             generation,
             self,
-            cached_plane=self.plot_model.cached_parent_bundle_for_preview(
+            cached_plane=self.plot_model.region.cached_parent_bundle_for_preview(
                 trace
             ),
         )
@@ -465,11 +465,11 @@ class RoiWindow(QDialog):
             self.show_preview_message("Preview disabled")
             return
 
-        if self.plot_model.is_roi_draw_enabled():
-            self.plot_model.request_roi_live_region_sync()
+        if self.plot_model.region.is_roi_draw_enabled():
+            self.plot_model.region.request_roi_live_region_sync()
 
         try:
-            entry = self.plot_model.resolve_roi_entry()
+            entry = self.plot_model.region.resolve_roi_entry()
         except ValueError as exc:
             self.show_preview_message(str(exc))
             self.set_status("")
@@ -569,7 +569,7 @@ class RoiWindow(QDialog):
             return
 
         try:
-            entry = self.plot_model.resolve_roi_entry(entry_id)
+            entry = self.plot_model.region.resolve_roi_entry(entry_id)
         except ValueError as exc:
             self.set_status(str(exc))
             self._save_all_queue.clear()
@@ -582,10 +582,10 @@ class RoiWindow(QDialog):
 
         default_axis = self.get_profile_storage_axis()
         try:
-            span_full, request = self.plot_model.prepare_roi_commit(
+            span_full, request = self.plot_model.region.prepare_roi_commit(
                 entry,
                 trace=trace,
-                parent_frame=self.plot_model.resolve_parent_frame(trace),
+                parent_frame=self.plot_model.region.resolve_parent_frame(trace),
                 axis_names=self._dimension_axis_names(),
                 default_profile_axis=default_axis,
             )
@@ -631,7 +631,7 @@ class RoiWindow(QDialog):
             return
 
         try:
-            frozen = self.plot_model.finalize_roi_commit(
+            frozen = self.plot_model.region.finalize_roi_commit(
                 entry,
                 bundle,
                 request,
@@ -666,7 +666,7 @@ class RoiWindow(QDialog):
         if selected is not None:
             profile_axis = selected
         try:
-            self.plot_model.apply_expanded_roi_profile_span(profile_axis)
+            self.plot_model.region.apply_expanded_roi_profile_span(profile_axis)
         except ValueError as exc:
             self.set_status(str(exc))
             return
@@ -717,7 +717,7 @@ class RoiWindow(QDialog):
             self.set_status(f"ROI type {region_type!r} is not available")
             return
         self.set_draw_checked(True)
-        self.plot_model.set_roi_draw_enabled(True)
+        self.plot_model.region.set_roi_draw_enabled(True)
         entry = self.roi_set.get(entry_id)
         label = entry.display_label if entry is not None else "ROI"
         kind = region_type or "rect"
@@ -782,7 +782,7 @@ class RoiWindow(QDialog):
             self._shape_options = DescribeOptionsWidget(self)
             self._shape_options._bound_type_id = None
             self._shape_options.clear_summary()
-            self.plot_model.set_ellipse_circle_locked(False)
+            self.plot_model.region.set_ellipse_circle_locked(False)
         else:
             self._shape_options = spec.create_options_widget(self)
             self._shape_options._bound_type_id = spec.type_id
@@ -797,17 +797,17 @@ class RoiWindow(QDialog):
                 self._shape_options.circle_lock_changed.connect(
                     self._on_ellipse_circle_lock_changed
                 )
-                self.plot_model.set_ellipse_circle_locked(
+                self.plot_model.region.set_ellipse_circle_locked(
                     self._shape_options.is_circle_locked()
                 )
             else:
-                self.plot_model.set_ellipse_circle_locked(False)
+                self.plot_model.region.set_ellipse_circle_locked(False)
         self._shape_options.region_edited.connect(self._on_shape_region_edited)
         self._shape_layout.addWidget(self._shape_options)
         self._update_controls_minimum_sizes()
 
     def _on_ellipse_circle_lock_changed(self, locked: bool):
-        self.plot_model.set_ellipse_circle_locked(locked)
+        self.plot_model.region.set_ellipse_circle_locked(locked)
 
     def _on_preview_checkbox_toggled(self, enabled: bool):
         if enabled:
