@@ -1083,7 +1083,10 @@ template.
   `remove_run`/`remove_uids`, `set_run_visible`/`set_uids_visible`~~ — moved
   to step H, which is where those methods stop existing
 - [x] ~~Delete `cached_parent_bundle_for_preview`~~ — moved to step D
-- [ ] Delete `RunSource.get_plot_data` (broken, no live callers)
+- [x] ~~Delete `RunSource.get_plot_data` (broken, no live callers)~~ —
+  moved to step E as **port, then delete**. It has no live callers, but it
+  is where cross-run normalization is written; deleting it outright would
+  discard the feature
 - [ ] Resolve `DisplayManager` versus `AppModel` (open question 6)
 - [ ] Re-check the ownership guard's `allowed` set. It stays non-empty by
   decision — the entry is `ImageGridCanvas`, deferred to its rewrite — so
