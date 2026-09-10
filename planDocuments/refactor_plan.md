@@ -286,6 +286,12 @@ them.
   cancels). **Steps 2 and 9–12 are live and independent**: CI and the
   ownership guard, the data-layer contract, the `ChunkCache` split, the
   logging sweep, repo hygiene. They can run in parallel with everything here.
+- **[`module_organization_plan.md`](module_organization_plan.md)** — the
+  follow-on pass, drafted 2026-09-10 and not started: reorganising
+  `models/plot` so a reader holds fewer modules open at once. It deliberately
+  **replaces invariant 10** for its own steps, since a reorganisation deletes
+  nothing; its measure is the reader's working set instead. It picks up
+  `run_source` from the review.
 - **[`headless_testing_plan.md`](headless_testing_plan.md)** — test tiers.
   Phases 0–2 done, 3–4 open. **The constraint it records is lifted**
   (`9a567db`): the suite ran on `QCoreApplication`, where constructing a

@@ -330,8 +330,11 @@ a plan of its own — `headless_testing_plan.md` phases 3–4 is its home.
    deletion. Bug 5 rides along, since both are about what belongs in a key
    list.
 6. **Decide about `RunSource`.** Make the case on reasons-to-change, not line
-   count, and only then split. If the answer is no, say so in the sizes table
-   and stop treating 250 as a target it failed.
+   count, and only then split. **Now measured**, in
+   [`module_organization_plan.md`](module_organization_plan.md): the class
+   splits 512 / 569 raw lines with a six-member interface between the halves,
+   and the fetch half holds all fifteen of its free-function imports. The case
+   is made on coupling rather than size, and it is that plan's step 1.
 7. **`ImageGridCanvas` rewrite**, which unblocks `ViewIntent.fan_out`, the
    ownership guard's last exemption, and the last live half of problem
    statement item 7 — three deferrals for one piece of work.
