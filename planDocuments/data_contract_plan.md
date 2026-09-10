@@ -13,8 +13,9 @@ changes what that plan should do (see **Kept in mind**, below).
 **Absorbs** `structural_remediation_plan.md` step 9, "Enforceable data-layer
 contract", never started.
 
-**Status:** drafted 2026-09-10, revised the same day to adopt `xarray` rather
-than a bespoke type, and not started. Numbers measured at `1da46e9`.
+**Status:** drafted 2026-09-10 and revised twice the same day — to adopt
+`xarray` rather than a bespoke type, and to settle coordinates onto the array.
+Not started. Numbers measured at `74a7d6d`.
 
 ---
 
@@ -156,6 +157,62 @@ Both belong in a module-level `xr.set_options(...)` at the pipeline boundary
 plus explicit per-call flags, and both need a test that fails if the setting is
 removed. A default that silently changes an answer is exactly what this
 codebase's last thirteen bugs were made of.
+
+### Coordinates, and why fly-scan data settles it
+
+A `DataArray` can carry dimension *names* alone, or names plus coordinate
+*values*. The pipeline works today on names alone — `_aligned_norm` matches a
+norm array to `y` by axis name — so names looked sufficient.
+
+They are not, and the case that proves it is one this codebase does not yet
+handle. **Fly-scanned data**, raised by the maintainer as a coming
+requirement: instead of a scan stepping and reading every detector at each
+step, each detector produces a raw timestream sampled as fast as it can go.
+Different keys then have different lengths *and different time values*, and
+plotting them together needs interpolation onto a common base, binning, or
+each array plotted against its own axis.
+
+With that data, two keys whose axis is named `time` no longer share that axis.
+Measured on staggered 1000-point timestreams of equal length:
+
+```
+dims only, no coordinates  ->  det / i0 returns (1000,)   divided at mismatched times, silently
+coordinates + exact join   ->  AlignmentError              caught
+```
+
+Equal length is what makes it dangerous: a length mismatch already raises, so
+the failure only appears when two detectors run at the same rate out of phase
+— which is the normal case, not the exotic one. This is bug 6's family again:
+a name that does not mean what the consumer assumes.
+
+The cost was measured, and it is not a reason to hesitate:
+
+| 5M points | build |
+|---|---:|
+| bare dimension, no coordinate | 0.03 ms |
+| non-indexed coordinate | 6.0 ms |
+| **indexed dimension coordinate** | **6.4 ms** |
+| divide of two indexed 5M arrays under `exact` | 32 ms |
+
+(An earlier measurement of 2566 ms for the indexed case was `tracemalloc`'s
+allocation-tracking overhead, not xarray. Re-measured without it.) The real
+cost is memory — the index holds roughly one more copy of the coordinate
+array, ~40 MB per 5M float64 axis — which should be checked against a real
+camera run during step 2, not assumed either way.
+
+`arithmetic_join="exact"` still catches a plain length mismatch on a bare
+dimension, so leaving a placeholder axis uncoordinated loses nothing: the
+guard is strongest where there is real information and degrades to a shape
+check where there is not.
+
+Two further things fall out, and they are the fly-scan feature rather than
+this plan's business — recorded so the decision is not re-litigated later.
+`i0.interp(time=t1)` and `det.groupby_bins("time", edges).mean()` are one call
+each; both were run. Interpolation and binning across mismatched time bases is
+most of what fly-scan plotting needs, and it arrives with the coordinates.
+
+**Not to be implemented now.** The decision this settles is only that
+coordinates go on the array.
 
 ### What xarray does not carry: provenance
 
@@ -395,12 +452,9 @@ should be re-derived after this lands rather than executed as written.
    in `.attrs`. The honest options are a field on `FetchPlan` set after the
    load, or re-derivation at pack time.
 
-4. **Do coordinates go on the `DataArray`, or only dimension names?**
-   Coordinates make `y / norm` align by value, which is what makes
-   `arithmetic_join="exact"` a real guard rather than a shape check. But the
-   pipeline also carries non-uniform mesh coordinates and placeholder
-   `arange` axes, and attaching those as indexes has a cost. Measure before
-   deciding.
+4. ~~**Do coordinates go on the `DataArray`, or only dimension names?**~~
+   **Settled: coordinates go on, indexed, wherever real ones exist.** See
+   *Coordinates, and why fly-scan data settles it* below.
 
 5. **Does `PlotBundle` eventually become a `DataArray` plus render payload?**
    It already carries `y`, `axis_names`, `render_mode`, `row_reversed`,
@@ -416,3 +470,4 @@ should be re-derived after this lands rather than executed as written.
 |------|--------|
 | 2026-09-10 | Drafted as a standalone plan at the maintainer's direction, after the module reorganization discussion established that moving functions could not fix `run_source` on its own. Written from the data layer because that is where the logic starts: the protocol already exists on both sources, spelled in three pieces, so `RunSource` performs one dispatch five times. Absorbs `structural_remediation_plan.md` step 9. |
 | 2026-09-10 | Revised to adopt `xarray.DataArray` instead of the bespoke `AxisArray` the first draft invented. The maintainer asked whether that type was re-deriving xarray; checked, and it largely was. xarray is already a guaranteed transitive dependency through `bluesky-widgets → bluesky-live`, and `xr.DataArray` raises on exactly the dims/rank and coordinate-length mismatches the bespoke constructor was designed to catch — including bug 6. `DataArray` rather than `Dataset` on the maintainer's reason: norms are toggled and swapped constantly, so they must not travel with the data. Two library defaults recorded as required settings, both measured: `skipna=True` erases step 3's deliberate `sum` / `nansum` distinction, and `arithmetic_join="inner"` silently drops rows. Step 5 added from a defect found while drafting: step 7 cached the *normalized* block, so toggling a norm re-reads the whole detector array. |
+| 2026-09-10 | Open question 4 settled: coordinates go on the `DataArray`, indexed, wherever real ones exist. The maintainer raised fly-scanned data — each detector a raw timestream on its own time base — as a coming requirement, and it is decisive rather than merely suggestive: two equal-length keys both naming a `time` axis divide silently at mismatched timestamps under names alone, and raise under coordinates plus `arithmetic_join="exact"`. Cost measured at 6.4 ms against 6.0 ms per 5M points, so time is not the consideration; index memory is, and is left to be checked against a real camera run in step 2. Fly-scan support itself remains out of scope. |
