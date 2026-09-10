@@ -345,9 +345,10 @@ Two measurable forms, both recorded before and after every step:
 The contract cannot be enforced while a backend returns more axis names than
 the array has dimensions: `xr.DataArray` would raise on real data.
 
-- [ ] Fix **bug 6**: `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)`
-  where `MemoryRun` and `KafkaRun` use `range(1, ndim)`, producing `ndim + 1`
-  names for every key of rank ≥ 2.
+- [ ] Fix **bug 6**: `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)`,
+  producing `ndim + 1` names for every key of rank ≥ 2. The fix is
+  `range(1, ndim)` — see *What inference should produce*, below, which
+  justifies it against real data rather than against the other backends.
 - [ ] Fix **bug 7**: `BlueskyRun.getRunKeys` ends `ykeys[1] = all_keys`, so
   rank-3 camera keys are reported as rank 1.
 - [ ] Fix **bug 15**: with no X key selected, `analyze_dimensions` overrides a
@@ -359,6 +360,80 @@ the array has dimensions: `xr.DataArray` would raise on real data.
 
 This is also the review's number-one finding, and this plan gives it a reason
 beyond *it is wrong*: the contract cannot be enforced until it holds.
+
+#### What inference should produce
+
+`_resolve_dims` prefers tiled's own `dims` and only infers when they are
+absent, so the question is what the inferred names should be *for a run that
+would have had them*. Two real runs the maintainer supplied answer it.
+
+**UCAL labels its dims**, so inference never runs there — which makes it the
+ground truth:
+
+```
+tes_mca_spectrum  shape=(72, 800)          dims=('time', 'tes_mca_energies')
+nexafs_sc         shape=(72,)              dims=('time',)
+en_energy         shape=(72,)              dims=('time',)
+```
+
+**VPPEM has no dims at all**, so inference must serve it:
+
+```
+PCOEdge_image          shape=(201, 2160, 2560)   no dims
+sampleVoltage_VSource  shape=(201,)              no dims
+```
+
+So the rule is: **the leading axis of anything in a stream's `data` is the
+event axis, named `time`; remaining axes are detector-internal and get
+placeholders.** That is `range(1, ndim)`:
+
+| key | shape | current | proposed | UCAL's real dims |
+|---|---|---|---|---|
+| `PCOEdge_image` | (201, 2160, 2560) | `('time','dim_0','dim_1','dim_2')` | `('time','dim_1','dim_2')` | — |
+| `tes_mca_spectrum` | (72, 800) | `('time','dim_0','dim_1')` | `('time','dim_1')` | `('time','tes_mca_energies')` |
+| `nexafs_sc` | (72,) | `('time',)` | `('time',)` | `('time',)` |
+
+The proposal reproduces the labelled case exactly where it can and degrades to
+a placeholder only where the name is genuinely unknown. That, rather than
+consistency with `MemoryRun`, is the argument.
+
+#### UCAL confirms bug 15's model in production data
+
+`en_energy` is the scanned motor. Its dims are `('time',)` — it is a **key on
+the event axis**, not a name *of* it — and `start['hints']['dimensions']` is
+`[[['en_energy'], 'primary']]`, naming which coordinate to plot against.
+
+That is exactly the separation this plan proposes: dimensions are static, and
+the X selection picks a coordinate. `analyze_dimensions` renaming the event
+axis to `en_energy` or `sampleVoltage_VSource` contradicts UCAL's own
+metadata. Bug 15 is not a modelling preference; it disagrees with the data.
+
+#### Two things this step must *not* change
+
+Both are real decisions that would be hidden inside a one-character fix.
+
+- **The genericity of `dim_N`.** `PCOEdge_image` becomes
+  `('time','dim_1','dim_2')`, and so does any other camera — with `dim_1`
+  meaning 2160 on one and 512 on another. Under xarray that is a loud size
+  conflict when the sizes differ and a *silent false alignment* when they
+  coincide. Per-key names (`PCOEdge_image_dim_1`) would remove the hazard —
+  but they would also break **flat-field normalization**, dividing a detector
+  image by a reference image of the same shape, which is a real operation that
+  depends on the two sharing axis names. Genuine trade-off, no obvious winner,
+  its own decision.
+- **The `has_time_key` guard.** By Bluesky's data model everything in a
+  stream's `data` is stacked over events, so axis 0 is the event axis whether
+  or not `time` happens to be present as a key. The guard may be unnecessary,
+  but removing it changes behaviour for streams without `time`.
+
+#### The test
+
+Against the real shapes — `(201, 2160, 2560)`, `(201,)`, `(72, 800)`, `(72,)`
+— asserting `len(dims) == len(shape)` and that the leading name is `time`.
+Plus one that pins inference against ground truth: for a UCAL-shaped key, the
+inferred dims must agree with the tiled dims on every axis whose name is
+knowable. No `MemoryRun` fixture can carry either, because `MemoryRun` is
+already correct.
 
 ### Step 2 — declare xarray; the sources return `DataArray`
 
@@ -546,3 +621,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Revised to adopt `xarray.DataArray` instead of the bespoke `AxisArray` the first draft invented. The maintainer asked whether that type was re-deriving xarray; checked, and it largely was. xarray is already a guaranteed transitive dependency through `bluesky-widgets → bluesky-live`, and `xr.DataArray` raises on exactly the dims/rank and coordinate-length mismatches the bespoke constructor was designed to catch — including bug 6. `DataArray` rather than `Dataset` on the maintainer's reason: norms are toggled and swapped constantly, so they must not travel with the data. Two library defaults recorded as required settings, both measured: `skipna=True` erases step 3's deliberate `sum` / `nansum` distinction, and `arithmetic_join="inner"` silently drops rows. Step 5 added from a defect found while drafting: step 7 cached the *normalized* block, so toggling a norm re-reads the whole detector array. |
 | 2026-09-10 | Open question 4 settled: coordinates go on the `DataArray`, indexed, wherever real ones exist. The maintainer raised fly-scanned data — each detector a raw timestream on its own time base — as a coming requirement, and it is decisive rather than merely suggestive: two equal-length keys both naming a `time` axis divide silently at mismatched timestamps under names alone, and raise under coordinates plus `arithmetic_join="exact"`. Cost measured at 6.4 ms against 6.0 ms per 5M points, so time is not the consideration; index memory is, and is left to be checked against a real camera run in step 2. Fly-scan support itself remains out of scope. |
 | 2026-09-10 | Open questions 1 and 2 settled together on the maintainer's suggestion that `describe` return `KeyInfo`, so there is one way to ask for key metadata rather than four. Checking it showed why the call currently needs `xkeys`: `describe_axes` renames a key's event axis to whichever X key is selected, conflating the axis's identity with the coordinate being plotted against it. xarray separates those natively — several non-dimension coordinates on one dimension, with `swap_dims` choosing the plot axis — so `describe(key)` becomes static and selection-free, which is what `KeyInfo` was documented to be. Bug 15 found while confirming it: with no X key selected the motor fallback overrides a key's correct declared dims and can produce duplicate axis names, which xarray warns about rather than rejecting. |
+| 2026-09-10 | Step 1's bug 6 fix re-justified against two real runs the maintainer supplied, rather than against the other backends. UCAL labels its dims and is therefore ground truth: `nexafs_sc` is `('time',)` and `tes_mca_spectrum` is `('time','tes_mca_energies')`, so inference's job is to reproduce that where it can — which `range(1, ndim)` does and `range(0, ndim)` does not. The same run confirms bug 15 in production data: `en_energy` is the scanned motor and its dims are `('time',)`, a key on the event axis rather than a name of it, with `start['hints']['dimensions']` naming which coordinate to plot against. Two decisions explicitly excluded from the step: whether placeholder axis names should be per-key (it would fix a false-alignment hazard but break flat-field normalization) and whether the `has_time_key` guard is needed. |
