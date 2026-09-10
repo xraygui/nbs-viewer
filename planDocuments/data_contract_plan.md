@@ -127,12 +127,85 @@ that ecosystem in a way a bespoke type never is.
 So the contract is:
 
 ```python
-def describe(key, xkeys=()) -> Dict[str, int]        # axis name -> length; reads nothing
-def load(key, slice_info=None) -> xr.DataArray       # dims named, coords attached
+def describe(key) -> KeyInfo                     # static facts; reads nothing
+def load(key, slice_info=None) -> xr.DataArray   # dims named, coords attached
 ```
 
-`shape` is `tuple(spec.values())` and `names` is `tuple(spec)`. Both derived,
-so the eight and six current readers are served without a type.
+`KeyInfo` survives and gains the axes, which is what collapses the several
+current ways of asking for key metadata into one:
+
+```python
+@dataclass(frozen=True)
+class KeyInfo:
+    name: str
+    label: str
+    axes: Mapping[str, int]      # axis name -> length; new
+    synthetic: bool
+    hinted: bool
+    render_hint: Optional[str]
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return tuple(self.axes.values())
+```
+
+`shape` stays available as a derived property, so its readers are untouched.
+`key_table()` becomes `{key: describe(key)}` — one implementation rather than a
+parallel one — and `describe_axes`, `get_shape` and `get_plot_hints` all fold
+into it. **Four ways to ask for key metadata become one.**
+
+### `describe` takes no `xkeys`, and the reason is a bug
+
+`describe_axes(ykey, xkeys)` takes the X selection today because the selection
+changes the answer. Measured on the VPPEM fixture:
+
+```
+describe_axes("PCOEdge_image", [])                        -> ('sampleVoltage_VSource', 'dim_1', 'dim_2')
+describe_axes("PCOEdge_image", ["time"])                  -> ('time',                  'dim_1', 'dim_2')
+describe_axes("PCOEdge_image", ["i0"])                    -> ('i0',                    'dim_1', 'dim_2')
+```
+
+Selecting `i0` as X renames the event axis to `i0`. That is not a dimension
+name — the axis is still the event axis — it is *what we are plotting against*.
+Two different facts are being carried in one field, which is why the call needs
+the selection and why `KeyInfo` could not hold the answer.
+
+**xarray separates them natively.** Dimensions are static; a dimension may
+carry any number of *non-dimension coordinates*, and `swap_dims` chooses which
+one is the plot axis. Verified:
+
+```python
+det.dims     -> ('time', 'dim_1', 'dim_2')
+det.coords   -> ['time', 'voltage', 'i0']     # all three on the event axis
+det.indexes  -> ['time']
+det.swap_dims({"time": "i0"}).dims -> ('i0', 'dim_1', 'dim_2')
+```
+
+So the X selection stops being a describe-time parameter and becomes a
+coordinate choice at plot time. `describe(key)` is static, selection-free, and
+cacheable — which is what `KeyInfo` was documented to be all along.
+
+### Bug 15, found while settling this
+
+With **no** X key selected, `analyze_dimensions` falls back to the run's
+declared motors and assigns them to axes positionally, overriding the key's own
+correct dimension names:
+
+```
+run.get_dims("detector_cube", [])   -> ('time',  'pixel', 'dim_2')   the key's own dims
+describe_axes("detector_cube", [])  -> ('pixel', 'pixel', 'dim_2')   wrong, and duplicated
+describe_axes("detector_cube", ["en_energy"]) -> ('time', 'pixel', 'dim_2')   correct again
+```
+
+No X key selected is the *initial* state, so this is reachable by opening a
+run. And duplicate dimension names are not caught by the contract: xarray
+constructs the array and warns — *"most xarray functionality is likely to fail
+silently if you do not [rename]"* — rather than raising. Taking dimension names
+from the key's own metadata, which is already correct, removes the fallback
+that causes it.
+
+This joins step 1: it is a third case of a backend-or-analysis layer disagreeing
+with a key's own declared dimensions, alongside bugs 6 and 7.
 
 ### `DataArray`, not `Dataset`
 
@@ -277,6 +350,9 @@ the array has dimensions: `xr.DataArray` would raise on real data.
   names for every key of rank ≥ 2.
 - [ ] Fix **bug 7**: `BlueskyRun.getRunKeys` ends `ykeys[1] = all_keys`, so
   rank-3 camera keys are reported as rank 1.
+- [ ] Fix **bug 15**: with no X key selected, `analyze_dimensions` overrides a
+  key's own declared dimension names with a positional guess from the run's
+  motors, and can produce duplicate axis names.
 - [ ] Both need a test against the backend method directly — no `MemoryRun`
   fixture can reproduce either, because `MemoryRun` is the correct one.
 - [ ] Facts: backends producing `len(names) != ndim`, **1 → 0**.
@@ -436,16 +512,14 @@ should be re-derived after this lands rather than executed as written.
 
 ## Open questions
 
-1. **Does `describe` need `xkeys`?** Today `describe_axes(ykey, xkeys)` takes
-   them because catalog X keys can name a dimension. If the metadata call is
-   to be simple — for the key table and the sliders — it may want a key-only
-   form with an X-aware variant beside it. Worth checking what the sliders
-   actually vary.
+1. ~~**Does `describe` need `xkeys`?**~~ **Settled: no.** The X selection
+   chooses a coordinate, not a dimension name; see *`describe` takes no
+   `xkeys`* above.
 
-2. **Does `KeyInfo` survive?** Its fields are `name`, `label`, `shape`,
-   `synthetic`, `hinted`, `render_hint`. `shape` becomes derived from
-   `describe`; `hinted` is bug 4's unresolved flag; `render_hint` is a plot
-   concept on a run-level record. It may reduce to two or three fields.
+2. ~~**Does `KeyInfo` survive?**~~ **Settled: yes, and `describe` returns it.**
+   It gains `axes` and keeps `shape` as a derived property. What remains open
+   inside it is `hinted`, which is bug 4's unresolved flag, and `render_hint`,
+   which is a plot concept on a run-level record — neither blocks the contract.
 
 3. **Where does `render_mode` finally live?** It is classified once, on the
    loaded plane, before the reduce — so it has to travel, and it cannot ride
@@ -471,3 +545,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Drafted as a standalone plan at the maintainer's direction, after the module reorganization discussion established that moving functions could not fix `run_source` on its own. Written from the data layer because that is where the logic starts: the protocol already exists on both sources, spelled in three pieces, so `RunSource` performs one dispatch five times. Absorbs `structural_remediation_plan.md` step 9. |
 | 2026-09-10 | Revised to adopt `xarray.DataArray` instead of the bespoke `AxisArray` the first draft invented. The maintainer asked whether that type was re-deriving xarray; checked, and it largely was. xarray is already a guaranteed transitive dependency through `bluesky-widgets → bluesky-live`, and `xr.DataArray` raises on exactly the dims/rank and coordinate-length mismatches the bespoke constructor was designed to catch — including bug 6. `DataArray` rather than `Dataset` on the maintainer's reason: norms are toggled and swapped constantly, so they must not travel with the data. Two library defaults recorded as required settings, both measured: `skipna=True` erases step 3's deliberate `sum` / `nansum` distinction, and `arithmetic_join="inner"` silently drops rows. Step 5 added from a defect found while drafting: step 7 cached the *normalized* block, so toggling a norm re-reads the whole detector array. |
 | 2026-09-10 | Open question 4 settled: coordinates go on the `DataArray`, indexed, wherever real ones exist. The maintainer raised fly-scanned data — each detector a raw timestream on its own time base — as a coming requirement, and it is decisive rather than merely suggestive: two equal-length keys both naming a `time` axis divide silently at mismatched timestamps under names alone, and raise under coordinates plus `arithmetic_join="exact"`. Cost measured at 6.4 ms against 6.0 ms per 5M points, so time is not the consideration; index memory is, and is left to be checked against a real camera run in step 2. Fly-scan support itself remains out of scope. |
+| 2026-09-10 | Open questions 1 and 2 settled together on the maintainer's suggestion that `describe` return `KeyInfo`, so there is one way to ask for key metadata rather than four. Checking it showed why the call currently needs `xkeys`: `describe_axes` renames a key's event axis to whichever X key is selected, conflating the axis's identity with the coordinate being plotted against it. xarray separates those natively — several non-dimension coordinates on one dimension, with `swap_dims` choosing the plot axis — so `describe(key)` becomes static and selection-free, which is what `KeyInfo` was documented to be. Bug 15 found while confirming it: with no X key selected the motor fallback overrides a key's correct declared dims and can produce duplicate axis names, which xarray warns about rather than rejecting. |
