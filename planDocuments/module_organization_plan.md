@@ -5,9 +5,14 @@ Follows [`refactor_plan.md`](refactor_plan.md), which completed 2026-09-10,
 and its [`post_refactor_review.md`](post_refactor_review.md), which named
 `run_source` and package size as what remains.
 
-**Status:** drafted 2026-09-10, not started. Shape and re-export policy
-settled with the maintainer; the open decisions are listed at the end and are
-what to discuss next.
+**Status:** drafted 2026-09-10, not started, and **superseded in part**.
+Discussing step 1 established that `run_source` cannot be fixed by moving
+functions — the pipeline's intermediate value has no name, so every stage
+re-derives it from loose parameters. That became
+[`data_contract_plan.md`](data_contract_plan.md), which runs first and takes
+this plan's step 1 with it. Re-derive the rest of this document afterwards
+rather than executing it as written; the data-contract plan's **Kept in mind**
+section lists what changes.
 
 ## The goal, and how it differs from the last plan
 

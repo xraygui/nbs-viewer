@@ -286,6 +286,12 @@ them.
   cancels). **Steps 2 and 9–12 are live and independent**: CI and the
   ownership guard, the data-layer contract, the `ChunkCache` split, the
   logging sweep, repo hygiene. They can run in parallel with everything here.
+- **[`data_contract_plan.md`](data_contract_plan.md)** — drafted 2026-09-10,
+  not started: what a data source returns, and why `RunSource` is a different
+  object from `CatalogRun`. It is the `RunSource` refactor, written from the
+  data layer because that is where its logic starts. **Absorbs
+  `structural_remediation_plan.md` step 9** and closes bugs 6 and 7 as its
+  precondition rather than as a favour. Runs before the module reorganization.
 - **[`module_organization_plan.md`](module_organization_plan.md)** — the
   follow-on pass, drafted 2026-09-10 and not started: reorganising
   `models/plot` so a reader holds fewer modules open at once. It deliberately
