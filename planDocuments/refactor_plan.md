@@ -219,6 +219,12 @@ buttons.
 
 ## After this refactor
 
+**The refactor is complete. Read
+[`post_refactor_review.md`](post_refactor_review.md) first** — it measures the
+tree against this plan's own diagnosis, invariants and size targets, ranks
+what is still wrong, and says what to do next. The thread below is the one
+this plan named in advance, and the review confirms it.
+
 One thread is deliberately deferred rather than folded into a step.
 
 **Widget-level testing — the next piece of work once the tree stops moving.**
