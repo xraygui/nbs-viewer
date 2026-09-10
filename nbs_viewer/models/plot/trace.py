@@ -182,6 +182,13 @@ class Trace(QObject):
         by a different request. A canvas that has lost its artist but still
         holds a matching bundle asks for a redraw, not a refetch.
 
+        This deliberately compares whole requests rather than their
+        :class:`FetchPlan`s. A transform edit leaves the plan identical, so a
+        plan comparison would suppress the rebuild as well as the read and
+        the trace would keep serving the old transform. What makes the
+        rebuild cheap is that ``RunSource`` holds the loaded block: this
+        returns True, the fetch runs, and no database read happens.
+
         Returns
         -------
         bool

@@ -11,7 +11,6 @@ from nbs_viewer.models.plot.view_spec import (
 )
 from nbs_viewer.models.plot.plot_bundle import (
     reduce_cached_plane,
-    reduce_to_plot_plane,
 )
 from nbs_viewer.models.plot.plot_geometry import (
     orient_for_display,
@@ -26,7 +25,10 @@ from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.view_spec import Projection
 
-from tests.fixtures.display_plane import display_frame
+from tests.fixtures.display_plane import (
+    display_frame,
+    roi_profile_from_block,
+)
 
 
 def _plane_request(parent: Projection) -> PlotRequest:
@@ -347,13 +349,12 @@ def test_roi_profile_along_dim1_matches_plane_means():
         plan.reversed_axes_for(axis_arrays, "image"),
         {1: 0, 2: 1, 3: 2},
     )
-    profile, _, names = reduce_to_plot_plane(
+    profile, _, names = roi_profile_from_block(
         y_roi,
         axis_arrays,
         ["en_energy", "dim_0", "dim_1", "dim_2"],
         request,
-        region_frame=plan.region_frame,
-        plot_plane_storage_axes=plan.plane_axes,
+        plan,
     )
     manual = np.array(
         [

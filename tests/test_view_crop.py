@@ -8,7 +8,6 @@ from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
 )
-from nbs_viewer.models.plot.plot_bundle import reduce_to_plot_plane
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
@@ -19,7 +18,11 @@ from nbs_viewer.models.plot.plot_request import (
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
 
-from tests.fixtures.display_plane import display_bundle, display_frame
+from tests.fixtures.display_plane import (
+    display_bundle,
+    display_frame,
+    roi_profile_from_block,
+)
 
 
 def _make_full_frame(y_count=5, x_count=6):
@@ -185,13 +188,12 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
         plan.reversed_axes_for(axes, "image"),
         {0: 0, 1: 1, 2: 2, 3: 3},
     )
-    out, _, _ = reduce_to_plot_plane(
+    out, _, _ = roi_profile_from_block(
         y_load,
         axes,
         ["e", "s", "dim_0", "dim_1"],
         request,
-        region_frame=plan.region_frame,
-        plot_plane_storage_axes=plan.plane_axes,
+        plan,
     )
     assert out.ndim == 1
     assert out.size == e_count

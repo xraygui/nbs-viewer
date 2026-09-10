@@ -7,9 +7,20 @@ Pure numpy logic with no Qt or matplotlib dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Mapping, Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - annotation only
+    from .plot_request import PlotRequest
 
 RenderMode = Literal["line", "image", "mesh"]
 
@@ -553,3 +564,68 @@ def get_render_mode_hint(plot_hints: dict, ykey: str) -> Optional[str]:
                 if mode in ("image", "mesh"):
                     return mode
     return None
+
+
+def build_plot_bundle(
+    y: np.ndarray,
+    coords: Sequence[np.ndarray],
+    names: Sequence[str],
+    request: "PlotRequest",
+    *,
+    render_mode_hint: Optional[str] = None,
+    label: str = "",
+    row_reversed: bool = False,
+    col_reversed: bool = False,
+):
+    """
+    Pack plot-plane arrays into a :class:`PlotBundle`.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Plot-plane data.
+    coords : sequence of np.ndarray
+        Plot-plane coordinate arrays.
+    names : sequence of str
+        Plot-plane axis names.
+    request : PlotRequest
+        Used to detect ROI profile output.
+    render_mode_hint : str, optional
+        Explicit ``image`` / ``mesh`` hint for 2-D data.
+    label : str, optional
+        Display name for a 1-D ROI profile.
+    row_reversed : bool
+        Whether the caller reversed the plot Y axis to reach display order.
+    col_reversed : bool
+        Whether the caller reversed the plot X axis.
+
+    Returns
+    -------
+    PlotBundle
+        Prepared payload for the view layer.
+
+    Raises
+    ------
+    ValueError
+        If ``y`` is missing, an ROI profile is empty, or ``y.ndim`` is not
+        1 or 2.
+    """
+    if request.region is not None:
+        if not np.isfinite(y).any():
+            raise ValueError("ROI profile is empty after reduction")
+        display_label = label or (names[0] if names else "profile")
+        return prepare_1d_bundle(y, coords, [display_label])
+    if y is None:
+        raise ValueError(f"Plot data for {request.ykey!r} is missing")
+    if y.ndim == 1:
+        return prepare_1d_bundle(y, coords, names)
+    if y.ndim == 2:
+        return prepare_2d_bundle(
+            y,
+            coords,
+            names,
+            render_mode_hint=render_mode_hint,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
+        )
+    raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")

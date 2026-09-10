@@ -81,3 +81,54 @@ def display_frame(
     return frame_from_bundle(
         display_bundle(y, row_axis, col_axis, axis_names, render_mode)
     )
+
+
+def roi_profile_from_block(
+    y,
+    axis_arrays,
+    axis_names,
+    request,
+    plan,
+):
+    """
+    Reduce an oriented block to an ROI profile, with no transform.
+
+    What ``RunSource.get_plot_bundle`` runs between the load and the pack for
+    a request that carries a region. The production path calls the two halves
+    itself so it can transform in between; with an empty transform the
+    composition ``materialize_view`` performs is the same answer, so a test
+    about fetch geometry can use it directly.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Loaded, oriented block.
+    axis_arrays : sequence of np.ndarray
+        Per-storage-axis coordinate arrays.
+    axis_names : sequence of str
+        Name per storage axis.
+    request : PlotRequest
+        ROI profile request.
+    plan : FetchPlan
+        Plan the block was loaded with.
+
+    Returns
+    -------
+    tuple
+        ``(profile, coords, names)``.
+    """
+    from nbs_viewer.models.plot.plot_bundle import materialize_view
+    from nbs_viewer.models.plot.view_spec import profile_view_spec
+
+    return materialize_view(
+        y,
+        axis_arrays,
+        axis_names,
+        profile_view_spec(
+            request.view, request.profile_axis, request.spatial_reduce
+        ),
+        region=request.region,
+        mask_mode=request.mask_mode,
+        region_frame=plan.region_frame,
+        plot_plane_storage_axes=plan.plane_axes,
+    )

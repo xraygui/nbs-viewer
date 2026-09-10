@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.region_mesh import (
     _cell_x_bounds_mesh,
     _cell_y_bounds_mesh,
@@ -179,3 +179,59 @@ def test_the_runtime_test_catalog_offers_a_cube():
     assert "image_cube" in run.available_keys
     assert len(run.get_shape("image")) == 2
     assert len(run.get_shape("image_cube")) == 3
+
+
+@pytest.mark.parametrize("profile_storage_axis", [0, 1, 2])
+def test_one_roi_is_transformed_the_same_way_along_every_axis(
+    qapp, profile_storage_axis
+):
+    """
+    Bug 13: the transform used to reach only two of a cube's three axes.
+
+    An ROI drawn along a plane axis was served by masking the cached plane,
+    which the transform had already run on; an ROI along the slider axis was
+    served by a load whose request carried ``transform=""``. Same cube, same
+    ROI, ``y = y * 2``: the plane axes doubled and the slider axis did not.
+
+    The expectation is hand-computed from the plane the user is looking at.
+    Every slab of the fixture is the drawn plane plus a constant offset, so
+    the whole stack is known once the plane is, and doubling it and summing
+    the mask is the whole of what "sum the ROI of what I see" means.
+    """
+    session, _run, trace = _session("detector_cube", depth_on_slider=True)
+    plane = trace.last_bundle.y.copy()
+
+    entry_id, frame = _add_roi(session, trace, profile_storage_axis)
+    region = session.region.roi_set.get(entry_id).region
+    mask = compile_with_mask_mode(frame, region, "inside").mask
+    assert mask.any()
+
+    plain = session.region.preview_roi_profile(
+        entry_id,
+        parent_trace=trace,
+        parent_frame=frame,
+        cached_plane=trace.last_bundle,
+    )
+
+    session.set_transform({"enabled": True, "text": "y * 2"})
+    trace.get_plot_bundle()
+    doubled = session.region.preview_roi_profile(
+        entry_id,
+        parent_trace=trace,
+        parent_frame=frame,
+        cached_plane=trace.last_bundle,
+    )
+
+    np.testing.assert_allclose(doubled.y, 2.0 * plain.y)
+
+    if profile_storage_axis == 2:
+        # The slider axis is the one that was wrong, so state its answer
+        # outright rather than only relative to the untransformed run.
+        slab_offset = float(N_Y * N_X)
+        expected = np.array(
+            [
+                float(np.sum(2.0 * (plane + k * slab_offset)[mask]))
+                for k in range(N_Z)
+            ]
+        )
+        np.testing.assert_allclose(doubled.y, expected)

@@ -11,21 +11,23 @@ from .key_info import AxisLayout, KeyInfo, RunIdentity
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
-    build_plot_bundle,
+    mask_to_profile,
+    materialize_view,
+    reduce_before_mask,
     reduce_cached_plane,
-    reduce_loaded_array,
-    reduce_to_plot_plane,
     slice_info_for_key,
 )
 from .plot_geometry import (
     PlotBundle,
+    build_plot_bundle,
     classify_render_mode,
     display_flips,
     get_render_mode_hint,
     orient_for_display,
 )
-from .plot_request import PlotRequest, plan_fetch
+from .plot_request import FetchPlan, PlotRequest, plan_fetch
 from .plot_view_frame import PlotViewFrame, frame_for_plane
+from .view_spec import profile_view_spec
 from nbs_viewer.utils import print_debug
 
 
@@ -56,6 +58,11 @@ class RunSource(QObject):
         self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
         self._dynamic = False
         self._key_table: Optional[Dict[str, KeyInfo]] = None
+        # One loaded block, kept so a transform edit -- or an ROI moved
+        # inside a box already read -- re-runs only the tail of the
+        # pipeline. One entry, not a map: it covers the transform-edit case
+        # and the still-on-this-plane case, and it cannot grow.
+        self._block: Optional[Tuple] = None
         self._update_available_keys()
         self._connect_run()
 
@@ -131,6 +138,7 @@ class RunSource(QObject):
     def _invalidate_key_table(self) -> None:
         """Drop the cached key table so the next access rebuilds it."""
         self._key_table = None
+        self._block = None
 
     def _build_key_table(self) -> Dict[str, KeyInfo]:
         """
@@ -563,6 +571,7 @@ class RunSource(QObject):
     def _on_data_changed(self) -> None:
         """Handle data changes from RunData service."""
         print_debug("RunSource._on_data_changed", f"Data changed for {self.uid}", "run")
+        self._block = None
         self._update_available_keys()
         self.data_changed.emit()
 
@@ -704,26 +713,58 @@ class RunSource(QObject):
             render_mode_hint=hint,
         )
 
-    def _normalized_y(
+    @staticmethod
+    def _loaded_axis_names(
+        slice_info: Sequence, storage_names: Sequence[str]
+    ) -> List[str]:
+        """
+        Names of the axes an array loaded on ``slice_info`` still has.
+
+        Integer items index a dimension away, so the loaded array is missing
+        those axes while the storage names still list them.
+
+        Parameters
+        ----------
+        slice_info : sequence
+            Per-storage-axis slice or index used for the load.
+        storage_names : sequence of str
+            Name per storage axis.
+
+        Returns
+        -------
+        list of str
+            Name per tensor axis of the loaded array.
+        """
+        return [
+            name
+            for name, item in zip(storage_names, slice_info)
+            if not isinstance(item, int)
+        ]
+
+    def _normalized_block(
         self,
         y: np.ndarray,
-        y_plot_names: Sequence[str],
         request: PlotRequest,
         slice_info: tuple,
         y_storage_names: Sequence[str],
         reversed_names: Sequence[str] = (),
     ) -> np.ndarray:
         """
-        Load and reduce each norm key, then divide into ``y``.
+        Divide each norm key into the oriented block, element by element.
+
+        Normalization runs here -- immediately after the orientation and
+        before any SUM or MEAN -- because that is the physically right
+        order: a flat field divides per pixel and only then is summed.
+        Running it after the projection reduce forced every norm array to be
+        reduced the same way ``y`` had been, which is the only thing the
+        per-key reduction helper deleted in step 7 existed for.
 
         Parameters
         ----------
         y : np.ndarray
-            Plot-plane y array, in display order.
-        y_plot_names : sequence of str
-            Names of the plot-plane axes of ``y``.
+            Loaded block, in display order.
         request : PlotRequest
-            Supplies norm keys, x keys, and the y view roles.
+            Supplies norm keys and x keys.
         slice_info : tuple
             Load slice used for the y key.
         y_storage_names : sequence of str
@@ -736,20 +777,21 @@ class RunSource(QObject):
         Returns
         -------
         np.ndarray
-            Normalized y array.
+            Normalized block.
         """
         if not request.norm_keys:
             return y
         xkeys = list(request.xkeys)
-        roles = request.view.roles
         reversed_names = set(reversed_names)
-        reduced = []
+        block_names = self._loaded_axis_names(slice_info, y_storage_names)
+        norms = []
         for norm_key in request.norm_keys:
             layout = self.describe_axes(norm_key, xkeys)
             norm_names = list(layout.names)
+            frozen = self._frozen_entry(norm_key) is not None
             key_slice = (
                 slice_info
-                if self._frozen_entry(norm_key) is not None
+                if frozen
                 else slice_info_for_key(slice_info, y_storage_names, norm_names)
             )
             arr = self.read(norm_key, key_slice)
@@ -763,64 +805,156 @@ class RunSource(QObject):
                 ],
                 self._storage_to_tensor(key_slice),
             )
-            if self._frozen_entry(norm_key) is not None:
-                reduced.append((arr, list(norm_names)))
+            names = (
+                list(norm_names)
+                if frozen
+                else self._loaded_axis_names(key_slice, norm_names)
+            )
+            norms.append((arr, names))
+        return apply_normalization(y, block_names, norms)
+
+    @staticmethod
+    def _contained_window(
+        cached: Sequence, wanted: Sequence
+    ) -> Optional[List[Optional[Tuple[int, Optional[int]]]]]:
+        """
+        Locate a wanted load inside one already performed.
+
+        The containment half of the fetch comparison: shrinking a crop, or
+        moving an ROI inside a box already read, asks for a sub-block of what
+        is in memory and needs no round trip.
+
+        Parameters
+        ----------
+        cached : sequence
+            Per-storage-axis load items of the block held.
+        wanted : sequence
+            Per-storage-axis load items now wanted.
+
+        Returns
+        -------
+        list or None
+            None when the wanted load is not contained. Otherwise one entry
+            per storage axis: None for an axis needing no narrowing, else
+            ``(start, stop)`` offsets into the cached block, ``stop`` None
+            meaning "to the end".
+        """
+        if len(cached) != len(wanted):
+            return None
+        windows: List[Optional[Tuple[int, Optional[int]]]] = []
+        for have, want in zip(cached, wanted):
+            if isinstance(have, int) or isinstance(want, int):
+                if have != want:
+                    return None
+                windows.append(None)
                 continue
-            reduced.append(
-                reduce_loaded_array(
-                    arr, list(norm_names), y_storage_names, roles
+            have_start = 0 if have.start is None else int(have.start)
+            have_stop = None if have.stop is None else int(have.stop)
+            want_start = 0 if want.start is None else int(want.start)
+            want_stop = None if want.stop is None else int(want.stop)
+            if want_start < have_start:
+                return None
+            if have_stop is not None and (
+                want_stop is None or want_stop > have_stop
+            ):
+                return None
+            if want_start == have_start and want_stop == have_stop:
+                windows.append(None)
+                continue
+            windows.append(
+                (
+                    want_start - have_start,
+                    None if want_stop is None else want_stop - have_start,
                 )
             )
-        return apply_normalization(y, y_plot_names, reduced)
+        return windows
 
-    def get_plot_bundle(
-        self,
-        request: PlotRequest,
-        *,
-        cached_plane: Optional[PlotBundle] = None,
-        label: str = "",
-    ) -> PlotBundle:
+    @staticmethod
+    def _block_cache_key(request: PlotRequest) -> Tuple:
         """
-        Load, orient, reduce, normalize, transform, and pack one plot request.
+        What, besides the load slices, decides the contents of a block.
 
-        The request is the whole description: the projection, the crop, and
-        for an ROI the region, the profile axis and the spatial reduce. What
-        the plot plane's coordinate frame is, and which storage indices to
-        read, are both derived from it here.
+        Returns
+        -------
+        tuple
+            Y key, x keys and norm keys. The uid is implied by the run.
+        """
+        return (request.ykey, request.xkeys, request.norm_keys)
 
-        Storage-to-display reorientation happens immediately after the load,
-        so every later step -- ROI masking above all -- sees display-ordered
-        data and the renderer never reorders anything again.
+    def _block_for_plan(
+        self, cache_key: Tuple, plan: FetchPlan
+    ) -> Optional[Tuple]:
+        """
+        Serve an oriented, normalized block from memory if one covers it.
+
+        Parameters
+        ----------
+        cache_key : tuple
+            Key from :meth:`_block_cache_key`.
+        plan : FetchPlan
+            Plan the caller is about to execute.
+
+        Returns
+        -------
+        tuple or None
+            ``(y, axis_arrays, axis_names, render_hint, reversed_axes)``
+            narrowed to ``plan``, or None when a read is needed.
+        """
+        if self._block is None:
+            return None
+        held_key, held_plan, y, axes, names, hint, reversed_axes = self._block
+        if held_key != cache_key or held_plan.plane_axes != plan.plane_axes:
+            return None
+        windows = self._contained_window(held_plan.slice_info, plan.slice_info)
+        if windows is None:
+            return None
+
+        tensor_axes = self._storage_to_tensor(held_plan.slice_info)
+        axes = list(axes)
+        for storage_axis, window in enumerate(windows):
+            if window is None:
+                continue
+            tensor_axis = tensor_axes[storage_axis]
+            length = y.shape[tensor_axis]
+            start, stop = window
+            stop = length if stop is None else stop
+            if storage_axis in reversed_axes:
+                # The block was flipped along this axis at load, so the
+                # storage window sits at the mirrored position in it.
+                lo, hi = length - stop, length - start
+            else:
+                lo, hi = start, stop
+            index = [slice(None)] * y.ndim
+            index[tensor_axis] = slice(lo, hi)
+            y = y[tuple(index)]
+            if storage_axis < len(axes):
+                axes[storage_axis] = np.asarray(axes[storage_axis])[lo:hi]
+        return y, axes, list(names), hint, reversed_axes
+
+    def _load_block(
+        self, request: PlotRequest, plan: FetchPlan
+    ) -> Tuple:
+        """
+        Read, orient and normalize the block a plan asks for.
+
+        The stages that depend only on the fetch plan, so that the ones that
+        do not -- reduce, transform, mask -- can be re-run without a read.
 
         Parameters
         ----------
         request : PlotRequest
-            Frozen plot description.
-        cached_plane : PlotBundle, optional
-            Plot plane already in memory for ``request.view``. Used only to
-            skip the database read for an ROI profile that runs along an axis
-            the plane already shows; ignored otherwise.
-        label : str
-            Optional display label for 1D ROI output.
+            Request being served.
+        plan : FetchPlan
+            Load slices for it.
 
         Returns
         -------
-        PlotBundle
-            Prepared plot payload for the view layer.
+        tuple
+            ``(y, axis_arrays, axis_names, render_hint, reversed_axes)``.
         """
-        xkeys = list(request.xkeys)
-        ykey = request.ykey
-
-        if (
-            cached_plane is not None
-            and request.region is not None
-            and cached_plane.ndim == 2
-            and request.profile_axis in (request.plane_axes or ())
-        ):
-            return reduce_cached_plane(cached_plane, request, label=label)
-
-        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
         slice_info = plan.slice_info
+        ykey = request.ykey
+        xkeys = list(request.xkeys)
 
         t0 = ttime.time()
         storage_axes, storage_names, _extra = self.load_axes(
@@ -845,40 +979,144 @@ class RunSource(QObject):
             for axis in reversed_axes
             if axis < len(storage_names)
         ]
+
+        t0 = ttime.time()
+        y = self._normalized_block(
+            y, request, slice_info, storage_names, reversed_names
+        )
+        t_norm = ttime.time() - t0
+
+        print_debug(
+            "RunSource._load_block",
+            f"{ykey} shape={getattr(y, 'shape', None)} "
+            f"load={t_load:.4f}s norm={t_norm:.4f}s",
+            category="plots",
+        )
+        return y, storage_axes, storage_names, render_hint, reversed_axes
+
+    def get_plot_bundle(
+        self,
+        request: PlotRequest,
+        *,
+        cached_plane: Optional[PlotBundle] = None,
+        label: str = "",
+    ) -> PlotBundle:
+        """
+        Load, orient, normalize, reduce, transform, mask and pack a request.
+
+        The request is the whole description: the projection, the crop, and
+        for an ROI the region, the profile axis and the spatial reduce. What
+        the plot plane's coordinate frame is, and which storage indices to
+        read, are both derived from it here.
+
+        The stage order is the content of the pipeline:
+
+        - Storage-to-display reorientation happens immediately after the
+          load, so every later step sees display-ordered data and the
+          renderer never reorders anything again.
+        - Normalization happens next, on the whole block, so a norm key is
+          divided in per element before anything is summed.
+        - The transform runs on the finished plot plane, *before* the ROI
+          mask. The user already sees ``f(y)`` on the image and draws the ROI
+          on what they see, so summing the ROI must sum what they see.
+
+        Load, orient and normalize depend only on the fetch plan, so their
+        result is held: editing a transform, or moving an ROI inside a box
+        already read, re-runs only the tail.
+
+        Parameters
+        ----------
+        request : PlotRequest
+            Frozen plot description.
+        cached_plane : PlotBundle, optional
+            Plot plane already in memory for ``request.view``. Used to skip
+            rebuilding the plane an in-plane ROI profile reduces; ignored
+            otherwise.
+        label : str
+            Optional display label for 1D ROI output.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared plot payload for the view layer.
+        """
+        plane_axes = request.plane_axes
+
+        # An ROI whose profile runs along an axis the plane already shows is
+        # a reduction of the finished plane, so it is served by masking that
+        # plane -- from memory when the caller has one, otherwise by building
+        # it here. One implementation of masking a 2-D plane, and what it
+        # masks is f(y), which is what the ROI was drawn on.
+        if request.region is not None and request.profile_axis in (
+            plane_axes or ()
+        ):
+            plane = cached_plane
+            if plane is None or plane.ndim != 2:
+                plane = self.get_plot_bundle(request.plane_request)
+            return reduce_cached_plane(plane, request, label=label)
+
+        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
+        cache_key = self._block_cache_key(request)
+        block = self._block_for_plan(cache_key, plan)
+        if block is None:
+            block = self._load_block(request, plan)
+            self._block = (cache_key, plan) + block
+        y, storage_axes, storage_names, render_hint, reversed_axes = block
+
         plane_axes = plan.plane_axes or ()
         row_reversed = bool(plane_axes and plane_axes[0] in reversed_axes)
         col_reversed = bool(plane_axes and plane_axes[1] in reversed_axes)
 
         t0 = ttime.time()
-        y, coords, names = reduce_to_plot_plane(
-            y,
-            storage_axes,
-            storage_names,
-            request,
-            region_frame=plan.region_frame,
-            plot_plane_storage_axes=plan.plane_axes,
-        )
-        t_materialize = ttime.time() - t0
-
-        t0 = ttime.time()
-        y = self._normalized_y(
-            y, names, request, slice_info, storage_names, reversed_names
-        )
-        t_norm = ttime.time() - t0
-
-        t0 = ttime.time()
-        coords, y = apply_transform(coords, y, request.transform)
-        t_transform = ttime.time() - t0
+        if request.region is None:
+            y, coords, names = materialize_view(
+                y, storage_axes, storage_names, request.view
+            )
+            coords, y = apply_transform(coords, y, request.transform)
+        else:
+            # Off-plane profile: the plane the user sees is one slice of the
+            # block, so reduce to that stack, transform it, and only then
+            # mask. The profile axis is read in full by plan_fetch.
+            spec = profile_view_spec(
+                request.view, request.profile_axis, request.spatial_reduce
+            )
+            y, arrays, remaining = reduce_before_mask(
+                y,
+                storage_axes,
+                spec,
+                plot_plane_storage_axes=plan.plane_axes,
+            )
+            # The transform is handed the plane's own two coordinate arrays,
+            # in plot order, so ``x`` means the same thing here as it does
+            # when the plane itself is drawn. Its coordinates are discarded:
+            # the profile's x axis is the profile axis, which
+            # ``mask_to_profile`` resolves.
+            _plane_coords, y = apply_transform(
+                [arrays[remaining.index(axis)] for axis in plan.plane_axes],
+                y,
+                request.transform,
+            )
+            y, coords, names = mask_to_profile(
+                y,
+                arrays,
+                remaining,
+                storage_names,
+                spec,
+                request.region,
+                request.mask_mode,
+                plan.region_frame,
+                plot_plane_storage_axes=plan.plane_axes,
+            )
+        t_reduce = ttime.time() - t0
 
         print_debug(
             "RunSource.get_plot_bundle",
-            f"{ykey} shape={getattr(y, 'shape', None)} "
-            f"load={t_load:.4f}s materialize={t_materialize:.4f}s "
-            f"norm={t_norm:.4f}s transform={t_transform:.4f}s",
+            f"{request.ykey} shape={getattr(y, 'shape', None)} "
+            f"cached={self._block is not None} reduce={t_reduce:.4f}s",
             category="plots",
         )
 
-        frozen = self._frozen_entry(ykey)
+        frozen = self._frozen_entry(request.ykey)
         if frozen is not None and y.ndim == 1:
             names = [label or frozen.label]
         return build_plot_bundle(

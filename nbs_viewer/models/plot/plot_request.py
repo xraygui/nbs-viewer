@@ -239,6 +239,30 @@ class PlotRequest:
         """
         return 1 if self.region is not None else self.view.plot_ndim
 
+    @property
+    def plane_request(self) -> "PlotRequest":
+        """
+        The request for the plane this one reduces, without the ROI.
+
+        An ROI profile *is* its parent plane plus four reduction parameters,
+        so dropping them recovers the plane -- transform included, which is
+        what makes masking the finished plane the same answer as the profile.
+
+        Returns
+        -------
+        PlotRequest
+            ``self`` when there is no region, else the parent plane request.
+        """
+        if self.region is None:
+            return self
+        return replace(
+            self,
+            region=None,
+            mask_mode="inside",
+            profile_axis=None,
+            spatial_reduce="sum",
+        )
+
     def trace_key(self, fan_out_index: Optional[int] = None) -> TraceKey:
         """
         Return the object-identity subset of this request.
@@ -485,13 +509,16 @@ def roi_profile_request(
                 parent_spec=parent.view,
             ),
         )
+    # The transform is inherited, not cleared. An ROI is drawn on what the
+    # user sees, and what they see is f(y): clearing it here was why the same
+    # ROI on a cube came back transformed along the two plane axes and
+    # untransformed along the slider axis.
     return replace(
         parent,
         region=region,
         mask_mode=mask_mode,
         profile_axis=int(profile_axis),
         spatial_reduce=spatial_reduce,
-        transform="",
     )
 
 

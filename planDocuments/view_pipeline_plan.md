@@ -5,10 +5,11 @@ How a plot request becomes storage indices, and how those indices become a
 half is [`session_and_traces_plan.md`](session_and_traces_plan.md), which
 owns who holds what.
 
-**Status:** steps 1–6 landed on branch `mesh-transpose-removal`
-(2026-09-08/09). Step 7 not started; **re-derived 2026-09-09** against the
-tree, which closed one of its carried defects, dropped two of its three moves,
-and found bug 13.
+**Status:** steps 1–7 landed on branch `mesh-transpose-removal`
+(2026-09-08/09). Step 7 was re-derived against the tree before it started,
+which closed one of its carried defects, dropped two of its three moves, and
+found bug 13; the outcome, two deviations and a third ROI-path divergence are
+recorded under the step.
 
 **Replaces** — deleted in the same commit that added this file:
 
@@ -705,7 +706,7 @@ confirmed by running them against that tree.
 `with_index`, which already existed, so it constructs nothing; `Projection` is
 imported for real, so the category cannot recur silently. Suite 350 → 361.
 
-### Step 7 — Where the post-load stages run
+### Step 7 — Where the post-load stages run ✅ 2026-09-09
 
 **Re-derived 2026-09-09 against the tree, before starting.** The step was
 titled `plot_bundle.py` and read as three moves plus three carried defects. One
@@ -826,22 +827,22 @@ the only thing pinning the choice.
 
 #### Do
 
-- [ ] Split `reduce_to_plot_plane` into the projection reduce and the mask /
+- [x] Split `reduce_to_plot_plane` into the projection reduce and the mask /
   profile reduce, so the stages can be ordered independently.
-- [ ] Run `apply_normalization` immediately after `orient_for_display`, on the
+- [x] Run `apply_normalization` immediately after `orient_for_display`, on the
   oriented block, aligned by storage name.
-- [ ] Run `apply_transform` on the plot plane, **before** the mask.
-- [ ] `roi_profile_request` inherits the parent's `transform` rather than
+- [x] Run `apply_transform` on the plot plane, **before** the mask.
+- [x] `roi_profile_request` inherits the parent's `transform` rather than
   setting `""`.
-- [ ] The in-plane ROI case on the load path goes through
+- [x] The in-plane ROI case on the load path goes through
   `reduce_cached_plane` — one implementation of masking a 2-D plane. The
   off-plane case keeps the N-D path, which is what it exists for.
-- [ ] `Trace.needs_fetch` compares `FetchPlan`s rather than whole requests.
-- [ ] `RunSource` holds **one** `(FetchPlan, oriented+normalized block)` entry,
+- [x] `Trace.needs_fetch` compares `FetchPlan`s rather than whole requests.
+- [x] `RunSource` holds **one** `(FetchPlan, oriented+normalized block)` entry,
   so a transform edit re-runs only transform → mask → pack. One entry, not a
   map: it covers the transform-edit case and the ROI-on-the-current-plane case,
   which are the only two that matter, and it cannot grow.
-- [ ] Move `build_plot_bundle` to `plot_geometry.py`.
+- [x] Move `build_plot_bundle` to `plot_geometry.py`.
 
 #### Deletes
 
@@ -853,19 +854,19 @@ the sizes note in the session sub-plan).
 
 #### Exit criteria
 
-- [ ] Bug 13 closed: the same ROI on a 3-D cube gives consistent answers along a
+- [x] Bug 13 closed: the same ROI on a 3-D cube gives consistent answers along a
   plane axis and along the slider axis with a transform enabled, asserted
   against a hand-computed profile
-- [ ] Bug 8 closed: a transform change causes **zero** `RunSource.read` calls
+- [x] Bug 8 closed: a transform change causes **zero** `RunSource.read` calls
   and still changes the drawn values
-- [ ] A crop shrink inside an already-loaded box, and an ROI moved inside one,
+- [x] A crop shrink inside an already-loaded box, and an ROI moved inside one,
   also cause zero reads — the containment half of the same comparison
-- [ ] A norm key that varies along a reduced axis is divided per element before
+- [x] A norm key that varies along a reduced axis is divided per element before
   the reduce, asserted against known arrays. This test does not exist and is
   what pins the order decision
-- [ ] `rg "reduce_loaded_array|_roles_for_key" nbs_viewer/` returns nothing
-- [ ] `build_plot_bundle` is in `plot_geometry.py`
-- [ ] `Projection` gains no reduce method and `view_spec.py` imports no
+- [x] `rg "reduce_loaded_array|_roles_for_key" nbs_viewer/` returns nothing
+- [x] `build_plot_bundle` is in `plot_geometry.py`
+- [x] `Projection` gains no reduce method and `view_spec.py` imports no
   `region_mesh`
 
 #### Found while auditing, and fixed separately
@@ -895,6 +896,134 @@ This does **not** discharge step 7's own normalization test. That one is about
 *order* — a norm key varying along a reduced axis — and no fixture change can
 substitute for it.
 
+#### Outcome
+
+**Not behaviour-preserving.** Closes bugs 8 and 13, and a third divergence
+the step had not predicted.
+
+Landed, in the order the pipeline now runs:
+
+```
+load → orient → normalize → reduce-to-plane → transform → mask → pack
+```
+
+- `RunSource._load_block` is the head of it — read, orient, normalize —
+  because those three stages depend only on the fetch plan.
+  `_normalized_block` divides each norm key into the whole oriented block by
+  axis name, before any SUM or MEAN.
+- `reduce_before_mask` and `mask_to_profile` are the two halves the ROI
+  reduce split into. `materialize_view` still composes them back to back,
+  which is right wherever no transform runs in between; the load path calls
+  them itself so it can transform between them.
+- An ROI whose profile runs along a plane axis is served by
+  `reduce_cached_plane` on *both* paths. When no cached plane is handed in,
+  `get_plot_bundle` builds one from `request.plane_request` and masks that.
+- `RunSource` holds one `(cache key, FetchPlan, oriented+normalized block)`
+  entry. The comparison is containment, not equality: `_contained_window`
+  locates a wanted load inside one already performed and mirrors the window
+  on any axis the block was flipped along.
+
+Deleted: `reduce_loaded_array`, `_roles_for_key`, `reduce_to_plot_plane`,
+`_materialize_roi_profile` (dissolved into the two halves), the load path's
+own in-plane ROI reduce, and `roi_profile_request`'s `transform=""`.
+
+Measured across `models/plot/`: **4802 → 4881 code lines (+79)**; 10069 →
+10313 raw. `plot_bundle.py` 537 → 453 code (864 → 760 raw), so it did not
+reach the "under ~700 file lines" the step predicted — `build_plot_bundle`
+was 66 lines of it, not 165. `runSource.py` 472 → 586 code: the block cache
+is the growth, and it is what closes bug 8. The step buys behaviour, not
+size, and the honest number says so. Suite 423 → 430.
+
+#### Deviations from the step as written
+
+- **`Trace.needs_fetch` still compares whole requests.** The step's own
+  findings say why it must: a plan comparison "would stop the refetch *and*
+  the recompute, leaving the trace serving the old transform", and
+  `needs_fetch` is exactly the gate the canvas uses to decide whether to
+  rebuild a bundle. Comparing plans there would have left bug 8's second exit
+  criterion — "and still changes the drawn values" — failing. The comparison
+  moved to where it saves the work instead: `RunSource` compares plans, so
+  the fetch runs and reads nothing. `needs_fetch`'s docstring now says this
+  outright so it is not "fixed" back later.
+- **`reduce_to_plot_plane` was deleted rather than split.** It was a
+  four-line wrapper choosing between `materialize_view` and a profile spec;
+  what needed splitting was `_materialize_roi_profile` underneath it. Its
+  three test call sites moved to `roi_profile_from_block` in
+  `tests/fixtures/display_plane.py`, documented as the transform-free
+  composition.
+
+#### Findings
+
+**A third divergence between the two ROI paths: they disagreed about
+length.** With the same in-plane ROI, the cached path returned a profile
+spanning the whole plot axis with NaN outside the ROI, and the load path
+returned only the columns the ROI's bounding box covered — `(16,)` against
+`(2,)` on a 12×16 plane. Neither is wrong on its own, but a live 2-D display
+always has a cached plane, so the load path was the one nobody was looking
+at. Routing both through `reduce_cached_plane` settles it on the length the
+user already sees. The cost is that an in-plane ROI with no cached plane now
+loads the whole plane rather than the ROI's bounding box; the block cache
+makes that a hit in the case that matters, and it is the price of one
+implementation.
+
+**`x` means the plane's two coordinate arrays, on every path.** An off-plane
+profile reduces a *stack* of planes, so the block the transform runs on has a
+third axis, and handing its coordinates to the transform as well would make
+`x` mean something different depending on which way the profile is cut. The
+load path passes `[arrays[plot_y], arrays[plot_x]]` in plot order and
+discards what comes back, because the profile's own x axis is the profile
+axis. `test_the_off_plane_transform_sees_the_planes_own_coordinates` pins it
+with `y * len(x)`.
+
+**Global reduces are empty in every case the tree can reach.** The split
+between `reduce_before_mask` and `mask_to_profile` only has anything to do
+for a projection with a SUM/MEAN axis beyond the plot plane, which needs a
+rank-4 key. It was still worth splitting rather than transforming the raw
+block: on a rank-4 key, transforming before the global reduce would compute
+`f(y)` and then sum it, when what the user sees on the image is `f(sum y)`.
+
+**The containment comparison had to know about the flip.** The held block is
+display-ordered, so a storage window `[start, stop)` sits at
+`[n - stop, n - start)` in it. Both cache tests assert against a second, cold
+`RunSource` rather than against a hand-derived slice, so the mirroring is
+checked by construction rather than by argument.
+
+#### Tests
+
+Seven added, and each was confirmed to fail against `1eebfe1`:
+
+- `test_one_roi_is_transformed_the_same_way_along_every_axis` (three cases)
+  in `test_cube_roi_profile.py` closes bug 13. The slider-axis case is
+  asserted against a profile hand-computed from the drawn plane: every slab
+  of the fixture is that plane plus a constant, so doubling it and summing
+  the compiled mask is the whole of "sum the ROI of what I see". It failed at
+  10808 / 32312 / 53816 against the expected 21616 / 64624 / 107632.
+- `test_a_transform_change_reads_nothing_and_still_changes_the_values`
+  closes bug 8: zero `RunSource.read` calls, values doubled.
+- `test_a_crop_inside_an_already_loaded_box_reads_nothing` and
+  `test_an_roi_moved_inside_a_loaded_box_reads_nothing` are the containment
+  half, each checked against a cold run.
+- `test_a_norm_key_varying_along_a_reduced_axis_divides_before_the_reduce`
+  is the test that pins the order decision, and the step existed partly to
+  add it: `i0` varies along the voltage axis and the view sums that axis
+  away, so per-element and post-reduce division differ by 90%.
+- `test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached` is
+  what caught the length divergence above.
+- `test_the_off_plane_transform_sees_the_planes_own_coordinates`.
+
+Two tests were removed with the function they covered
+(`reduce_loaded_array`).
+
+`RunSource` is not a widget, but the ROI window, the preview canvas and the
+crop controls all sit on top of the stages this step reordered, so the whole
+sequence was driven from a scratch script under a real `QApplication`: plane,
+transform edit (rebuild asked for, zero reads, values doubled), ROI preview
+following the transform, commit matching the preview, crop, crop clear and a
+tighter crop — with the widened plane and the tighter crop both compared
+against a cold `RunSource`. Thirteen checks, every one with a value on both
+sides; the step-6 follow-up's vacuous `else: True` is the reason that is
+spelled out.
+
 ---
 
 ## Interlock with the other sub-plan
@@ -920,3 +1049,4 @@ plan, not here.
 | 2026-09-09 | Step 6 landed. Adopted rather than deleted, but not on the plan's justification: mixed-rank bugs 2 and 3 were already closed by steps 3–4, and the live defect was that the orientation policy had two implementations, one of them in a widget. `ViewIntent.axis_order` reshaped from a rank-bound permutation to dimension names plus `xkey`, which was the decision the step had omitted; `ViewIntent.crop` dropped because a crop is trace state. `DimensionControl` no longer owns a spec. |
 | 2026-09-09 | Step 7 re-derived before starting. Its `_materialize_roi_profile` bullet was already fixed in `c0b9434`; `reduce_to_plot_plane` → `request.view.apply` and the norm/transform move to `runSource.py` are dropped with reasons; `build_plot_bundle` → `plot_geometry.py` survives. The step is now one decision about stage order — the plot plane is finished before the ROI mask, because `apply_transform` already runs on the plane and the user draws on what they see — which closes bug 8 and the newly recorded **bug 13**, where the same ROI on a 3-D cube is transformed along two axes and untransformed along the third. Normalization moves ahead of the projection reduce, which deletes `reduce_loaded_array` and `_roles_for_key`; no existing test discriminates the two orders, so the step must add the one that does. |
 | 2026-09-08 | Step 5 landed (`e0d2ef1`). `cube_view.py` deleted; spec helpers to `view_spec.py`, materialize to `plot_bundle.py`; `ViewSpec` renamed `Projection`. The step had named no destination for the file's contents — the split and the reasoning are recorded under the step. Two deviations recorded honestly: `materialize_view` takes a `Projection` rather than a `PlotRequest`, and `build_plot_request` / `view_spec_from_legacy` were renamed rather than deleted. The `_materialize_roi_profile` trailing-axes assumption moves to step 7. |
+| 2026-09-09 | Step 7 landed. The pipeline is `load → orient → normalize → reduce-to-plane → transform → mask → pack`; bugs 8 and 13 are closed, and a third divergence the step had not predicted — the two ROI paths disagreed about profile *length* — is closed with them. Two deviations recorded: `Trace.needs_fetch` still compares whole requests, because the step's own finding says a plan comparison would suppress the rebuild as well as the read, so the plan comparison moved into `RunSource`'s block cache instead; and `reduce_to_plot_plane` was deleted rather than split, the split belonging to `_materialize_roi_profile` underneath it. `models/plot/` grew 79 code lines: the block cache is the growth and it is what closes bug 8. |

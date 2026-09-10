@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
@@ -11,10 +13,10 @@ from nbs_viewer.models.plot.view_spec import (
 from nbs_viewer.models.plot.plot_bundle import (
     apply_normalization,
     apply_transform,
-    reduce_loaded_array,
     slice_info_for_key,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest
+from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.runSource import RunSource
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
@@ -23,6 +25,7 @@ from nbs_viewer.models.sources.fixtures import (
     voltage_axis,
     vppem_factors,
 )
+from tests.fixtures.catalog_recipes import image_scan_run
 
 
 VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
@@ -56,30 +59,6 @@ def test_slice_info_for_key_by_name():
     y_names = ["voltage", "dim_1", "dim_2"]
     got = slice_info_for_key(slice_info, y_names, ["voltage"])
     assert got == (4,)
-
-
-def test_reduce_loaded_array_mean_on_matching_dims():
-    arr = np.arange(12.0).reshape(3, 4)
-    reduced, names = reduce_loaded_array(
-        arr,
-        ["time", "dim_1"],
-        ["time", "dim_1", "dim_2"],
-        (DimRole.PLOT_X, DimRole.MEAN, DimRole.MEAN),
-    )
-    np.testing.assert_allclose(reduced, arr.mean(axis=1))
-    assert names == ["time"]
-
-
-def test_reduce_loaded_array_skips_index():
-    arr = np.array([2.0, 4.0, 6.0])
-    reduced, names = reduce_loaded_array(
-        arr[1],
-        ["time"],
-        ["time", "dim_1", "dim_2"],
-        (DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-    )
-    np.testing.assert_allclose(reduced, 4.0)
-    assert names == []
 
 
 def test_apply_normalization_rank1_onto_rank2():
@@ -340,3 +319,217 @@ def test_sum_role_matches_closed_form(qapp):
         )
     )
     np.testing.assert_allclose(bundle.y, a * b.sum() * c.sum())
+
+
+def _count_reads(run):
+    """
+    Record every ``RunSource.read`` call, returning the list they land in.
+    """
+    calls = []
+    original = run.read
+
+    def counted(key, slice_info=None):
+        calls.append((key, slice_info))
+        return original(key, slice_info)
+
+    run.read = counted
+    return calls
+
+
+def _image_request(run, ykey="detector_image", **kwargs):
+    view = Projection(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0),
+        **kwargs,
+    )
+    return PlotRequest(
+        uid=run.uid,
+        xkeys=("en_energy",),
+        ykey=ykey,
+        norm_keys=(),
+        view=view,
+    )
+
+
+def test_a_transform_change_reads_nothing_and_still_changes_the_values():
+    """
+    Bug 8: editing a transform used to go all the way back to the database.
+
+    Load, orient and normalize depend only on the fetch plan, and a transform
+    change leaves the plan identical, so the block already in memory serves
+    the new request and only the tail re-runs.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    request = _image_request(run)
+    plain = run.get_plot_bundle(request).y.copy()
+
+    calls = _count_reads(run)
+    doubled = run.get_plot_bundle(replace(request, transform="y * 2"))
+
+    assert calls == []
+    np.testing.assert_allclose(doubled.y, 2.0 * plain)
+
+
+def test_a_crop_inside_an_already_loaded_box_reads_nothing():
+    """
+    The containment half of the comparison: a crop shrink is a sub-block.
+
+    Checked against a run with an empty cache rather than against a
+    hand-derived slice, because the interesting part is the mirroring -- the
+    held block is display-ordered, so a storage window has to be reflected
+    before it can be taken out of it.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    run.get_plot_bundle(_image_request(run))
+
+    cropped = _image_request(
+        run,
+        crop=ViewCrop(storage_bbox=(2, 8, 3, 11), plot_y_axis=0, plot_x_axis=1),
+    )
+    calls = _count_reads(run)
+    from_cache = run.get_plot_bundle(cropped)
+    assert calls == []
+    assert from_cache.y.shape == (6, 8)
+
+    fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    np.testing.assert_allclose(
+        from_cache.y, fresh.get_plot_bundle(cropped).y
+    )
+
+
+def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
+    """
+    Same comparison, reached the other way.
+
+    An off-plane profile narrows the load to the ROI's bounding box, so
+    dragging the ROI inwards asks for a sub-block of what was just read.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16, n_z=3))
+    view = Projection(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X, DimRole.INDEX),
+        indices=(0, 0, 0),
+    )
+    parent = PlotRequest(
+        uid=run.uid,
+        xkeys=("en_energy",),
+        ykey="detector_cube",
+        norm_keys=(),
+        view=view,
+    )
+    wide = replace(
+        parent,
+        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        profile_axis=2,
+    )
+    inner = replace(wide, region=RectRegion(x0=0.9, x1=2.1, y0=3.5, y1=7.5))
+
+    run.get_plot_bundle(wide)
+    calls = _count_reads(run)
+    from_cache = run.get_plot_bundle(inner)
+    assert calls == []
+
+    fresh = RunSource(image_scan_run(1, n_y=12, n_x=16, n_z=3))
+    np.testing.assert_allclose(from_cache.y, fresh.get_plot_bundle(inner).y)
+
+
+def test_a_norm_key_varying_along_a_reduced_axis_divides_before_the_reduce():
+    """
+    The test that pins the normalization order, and nothing else did.
+
+    ``i0`` varies along the voltage axis and the view sums that axis away, so
+    the two orders give different answers: dividing per element and then
+    summing is not summing and then dividing by a summed norm. Per element is
+    the physically right one -- a flat field divides each pixel, and only
+    then is the result reduced.
+    """
+    run = _model()
+    a, b, c = vppem_factors()
+    i0 = np.linspace(2.0, 3.0, a.size)
+    view = Projection(
+        ndim=3,
+        plot_ndim=1,
+        roles=(DimRole.SUM, DimRole.INDEX, DimRole.PLOT_X),
+        indices=(0, 2, 0),
+    )
+    request = _request(
+        run,
+        "PCOEdge_image",
+        ["sampleVoltage_VSource"],
+        view,
+        norm_keys=("i0",),
+    )
+
+    bundle = run.get_plot_bundle(request)
+
+    per_element = float(np.sum(a / i0)) * b[2] * c
+    after_reduce = float(np.sum(a)) / float(np.sum(i0)) * b[2] * c
+    np.testing.assert_allclose(bundle.y, per_element)
+    assert not np.allclose(per_element, after_reduce)
+
+
+def test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached():
+    """
+    There is one implementation of masking a 2-D plane, so it is one answer.
+
+    The load path used to mask an N-D block for an in-plane profile while the
+    cached path masked the finished plane. Now the load path builds the plane
+    and hands it to the same reduction, so the transform is on it either way.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    parent = replace(_image_request(run), transform="y * 2")
+    plane = run.get_plot_bundle(parent)
+
+    roi = replace(
+        parent,
+        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        profile_axis=1,
+    )
+    from_cache = run.get_plot_bundle(roi, cached_plane=plane)
+
+    fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    from_load = fresh.get_plot_bundle(roi)
+
+    np.testing.assert_allclose(from_load.y, from_cache.y)
+    np.testing.assert_allclose(from_load.x_line, from_cache.x_line)
+
+
+def test_the_off_plane_transform_sees_the_planes_own_coordinates():
+    """
+    ``x`` means the plane's two coordinate arrays, whichever way it is cut.
+
+    An off-plane profile reduces a stack of planes, so the block the
+    transform runs on carries a third axis. Handing its coordinates to the
+    transform as well would make ``x`` mean something different depending on
+    which way the profile runs, and the whole point of running the transform
+    before the mask is that the ROI reduces what the plane already shows.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16, n_z=3))
+    view = Projection(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X, DimRole.INDEX),
+        indices=(0, 0, 0),
+    )
+    parent = PlotRequest(
+        uid=run.uid,
+        xkeys=("en_energy",),
+        ykey="detector_cube",
+        norm_keys=(),
+        view=view,
+        transform="y * len(x)",
+    )
+    assert run.get_plot_bundle(parent).ndim == 2
+
+    roi = replace(
+        parent,
+        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        profile_axis=2,
+    )
+    scaled = run.get_plot_bundle(roi)
+    plain = run.get_plot_bundle(replace(roi, transform=""))
+
+    np.testing.assert_allclose(scaled.y, 2.0 * plain.y)
