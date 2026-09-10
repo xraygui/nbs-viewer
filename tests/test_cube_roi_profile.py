@@ -23,7 +23,7 @@ from nbs_viewer.models.plot.region_mesh import (
     _cell_y_bounds_mesh,
 )
 from nbs_viewer.models.plot.roi_set import RoiOperation
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.view_spec import eligible_profile_axes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session

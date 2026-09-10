@@ -9,15 +9,12 @@ from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
     eligible_profile_axes,
-    profile_storage_axis,
     profile_view_spec,
 )
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh
-
-
 
 
 def test_materialize_view_sum_over_axis():

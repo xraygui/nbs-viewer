@@ -18,7 +18,7 @@ from nbs_viewer.models.plot.plot_request import (
     plan_fetch,
     roi_profile_request,
 )
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,

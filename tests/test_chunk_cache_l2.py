@@ -205,7 +205,6 @@ def test_flip_energy_slices_uses_seeded_l1_tiles():
 
 
 def test_bulk_slab_seed_writes_zarr_without_tile_l1():
-    from nbs_viewer.models.cache.tile_indices import total_tile_count
 
     shape = (8, 1, 16, 16)
     data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
@@ -279,58 +278,6 @@ def test_phase4_expanded_roi_fetches_cold_gap_only():
     accessor = _FakeAccessor(data, ((1,), (1,), (8, 8), (8, 8)))
     run = _FakeRun("uid-p4", "det", accessor)
     cache, _l2 = _make_cache(l2_chunks=(1, 1, 4, 4))
-
-    warm_slice = (0, 0, slice(0, 8), slice(0, 4))
-    cold_slice = (0, 0, slice(0, 8), slice(0, 8))
-    cache.get_data(run, "det", warm_slice)
-    cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
-
-    read_slices = []
-    original_read = accessor.read
-
-    def counting_read(slice=None):
-        read_slices.append(slice)
-        return original_read(slice=slice)
-
-    accessor.read = counting_read
-    expanded = cache.get_data(run, "det", cold_slice)
-    assert expanded.shape == (8, 8)
-    np.testing.assert_array_equal(expanded, data[cold_slice])
-    assert read_slices
-    assert read_slices[0][3] == slice(4, 8)
-    assert read_slices[0][3] != slice(0, 8)
-
-
-def test_phase3_identical_view_hits_l2_after_background_materialize():
-    data = np.arange(256, dtype=np.float32).reshape(1, 1, 16, 16)
-    accessor = _FakeAccessor(data, ((1,), (1,), (8, 8), (8, 8)))
-    run = _FakeRun("uid-p3", "det", accessor)
-    cache, _l2 = _make_cache(l2_chunks=(1, 1, 4, 4))
-
-    slice_info = (0, 0, slice(0, 8), slice(0, 8))
-    cache.get_data(run, "det", slice_info)
-    cache.wait_for_background_materialize(run.start["uid"], "det", timeout=10)
-
-    read_count = 0
-    original_read = accessor.read
-
-    def counting_read(slice=None):
-        nonlocal read_count
-        read_count += 1
-        return original_read(slice=slice)
-
-    accessor.read = counting_read
-    repeat = cache.get_data(run, "det", slice_info)
-    assert repeat.shape == (8, 8)
-    assert read_count == 0
-
-
-def test_phase4_expanded_roi_fetches_cold_gap_only():
-    shape = (1, 1, 16, 16)
-    data = np.arange(256, dtype=np.float32).reshape(shape)
-    accessor = _FakeAccessor(data, ((1,), (1,), (8, 8), (8, 8)))
-    run = _FakeRun("uid-p4", "det", accessor)
-    cache, l2 = _make_cache(l2_chunks=(1, 1, 4, 4))
 
     warm_slice = (0, 0, slice(0, 8), slice(0, 4))
     cold_slice = (0, 0, slice(0, 8), slice(0, 8))

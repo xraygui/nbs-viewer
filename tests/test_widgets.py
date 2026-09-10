@@ -28,7 +28,7 @@ import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 
 from nbs_viewer.models.plot.presenter import PlotPresenter
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
 
 

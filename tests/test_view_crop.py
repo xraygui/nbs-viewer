@@ -4,10 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
@@ -16,7 +13,6 @@ from nbs_viewer.models.plot.plot_request import (
     roi_profile_request,
 )
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
 
 from tests.fixtures.display_plane import (
     display_bundle,
@@ -97,7 +93,7 @@ def test_storage_bbox_inverts_row_flip_for_bottom_roi():
 
 
 def test_cropped_fetch_matches_full_plane_slice():
-    e_count, s_count, y_count, x_count = 4, 3, 5, 6
+    e_count, y_count, x_count = 4, 5, 6
     y = (
         np.arange(e_count)[:, None, None, None] * 1000
         + np.arange(y_count)[None, None, :, None] * 10

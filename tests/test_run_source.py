@@ -1,17 +1,13 @@
-"""Tests for the RunSource surface on RunSource."""
+"""Tests for the RunSource key-access surface."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, Projection
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -20,8 +16,7 @@ from nbs_viewer.models.plot.key_info import KeyInfo
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import Projection
-from nbs_viewer.models.plot.runSource import RunSource, RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_UID,
     make_vppem_run,

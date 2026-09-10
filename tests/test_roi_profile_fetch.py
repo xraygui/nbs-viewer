@@ -23,7 +23,6 @@ from nbs_viewer.models.plot.plot_request import (
 )
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.display_plane import (
     display_frame,

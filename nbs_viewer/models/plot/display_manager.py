@@ -2,9 +2,10 @@ from typing import Dict, List, Optional, Union
 from qtpy.QtCore import QObject, Signal
 from ...models.data.base import CatalogRun
 from ...models.plot.plot_session import PlotSession
-from ...models.plot.runSource import RunSource
+from ...models.plot.run_source import RunSource
 from ...utils import print_debug
 from .presenter import PlotPresenter
+
 
 class DisplayManager(QObject):
     """

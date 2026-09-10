@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
-from .plot.displayManager import DisplayManager
+from .plot.display_manager import DisplayManager
 
 
 class ConfigModel(QObject):
@@ -649,10 +649,23 @@ class CatalogManagerModel(QObject):
         self.run_deselected.emit(run)
 
 
-class AppModel(QObject):
-    """Top-level application model that owns persistent state."""
+#: The display a catalog selection is routed to. The catalog browser lives
+#: only in the main tab, so this is the display the user clicked in. An
+#: ``_active_display_id`` field, a setter and a signal used to generalise it,
+#: and none of the three ever had a caller -- the value was always "main".
+#: Routing a selection into whichever plot tab is frontmost would be a
+#: feature, and belongs in a change that also wires the tab bar to it.
+CATALOG_DISPLAY_ID = "main"
 
-    active_display_changed = Signal(str)
+
+class AppModel(QObject):
+    """
+    Top-level application model that owns persistent state.
+
+    The long-lived root: a :class:`ConfigModel`, a :class:`DisplayManager`
+    and a :class:`CatalogManagerModel`, plus the one thing no single child
+    can do -- routing a catalog selection into a display.
+    """
 
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
@@ -660,26 +673,11 @@ class AppModel(QObject):
         self.display_manager = DisplayManager()
         self.catalogs = CatalogManagerModel(self.config)
 
-        self._active_display_id = "main"
-
         self.catalogs.run_selected.connect(self._on_run_selected)
         self.catalogs.run_deselected.connect(self._on_run_deselected)
 
-    def set_active_display(self, display_id: str) -> None:
-        self._active_display_id = display_id
-        self.active_display_changed.emit(display_id)
-
-    def get_active_display(self) -> str:
-        return self._active_display_id
-
     def _on_run_selected(self, run) -> None:
-        self.display_manager.add_run_to_display(run, self._active_display_id)
+        self.display_manager.add_run_to_display(run, CATALOG_DISPLAY_ID)
 
     def _on_run_deselected(self, run) -> None:
-        self.display_manager.remove_run_from_display(run, self._active_display_id)
-
-    def new_display(self, widget_type: Optional[str] = None) -> str:
-        return self.display_manager.register_display(widget_type)
-
-    def close_display(self, display_id: str) -> None:
-        self.display_manager.remove_display(display_id)
+        self.display_manager.remove_run_from_display(run, CATALOG_DISPLAY_ID)

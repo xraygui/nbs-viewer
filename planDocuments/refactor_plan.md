@@ -4,8 +4,10 @@ The single entry point for the model-layer refactor. This document holds the
 goal, the invariants, and the order of work. **Detail lives in the sub-plans**
 — keep this file short enough to read before every session.
 
-**Status:** in progress on branch `mesh-transpose-removal` off `image_viewing`.
-Suite green at 351 tests.
+**Status:** **complete** on branch `mesh-transpose-removal` off `image_viewing`.
+All thirteen steps landed 2026-09-08/10; suite green at 431 tests. What the
+refactor achieved against its own targets, and what it did not, is in
+[`post_refactor_review.md`](post_refactor_review.md).
 
 ## The diagnosis, in one sentence
 
@@ -73,8 +75,8 @@ They interleave; the order below is the merged sequence.
 | D | `RegionController` — crop and ROI are one child | session & traces | ✅ `aba26a3` |
 | H | `RunCollection` / `Selection` become models | session & traces | ✅ `85e653b` |
 | E | `FrozenRun` / `CombinedRun` become data sources | session & traces | ✅ `766f983` |
-| 7 | Where the post-load stages run | view pipeline | next |
-| F | Final deletions and renames | session & traces | last |
+| 7 | Where the post-load stages run | view pipeline | ✅ `f5a72b3` |
+| F | Final deletions and renames | session & traces | ✅ |
 
 Step 3 could not be sliced: the fetch narrowing and the ROI mask were wrong
 in ways that cancelled, so fixing one alone made things worse. It landed as
@@ -163,11 +165,11 @@ Recorded regardless of whether the step that fixes them lands.
 | 5 | Unlinked mode double-lists synthetic keys — `available_keys` is catalog plus frozen, so a frozen spectrum gets a catalog row with an X checkbox it should not have. | open |
 | 6 | `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)` where `MemoryRun` uses `range(1, ndim)`, so every dimension receives the previous dimension's `axes` hint when `getAxisHints` is non-empty. Masked by name-list truncation. | open |
 | 7 | `BlueskyRun.getRunKeys` ends with `ykeys[1] = all_keys`, so rank-3 camera keys are reported as rank 1 and the two backends disagree about the grouping. | open — own commit |
-| 8 | `Trace.needs_fetch` compares whole requests, so changing a transform triggers a database read. | open — moved to step 7. Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
+| 8 | `Trace.needs_fetch` compares whole requests, so changing a transform triggers a database read. | ✅ step 7 (`f5a72b3`) — `RunSource` holds one `(FetchPlan, oriented+normalized block)` entry, so a transform edit re-runs only the tail and reads nothing. `needs_fetch` still compares whole requests by decision: comparing plans there would suppress the rebuild as well as the read. Prior history: Step 3 sent it to step 4 expecting `cached_plane` to carry it; that was the wrong plane. `cached_plane` is a *packed, post-transform* bundle that `reduce_cached_plane` can only mask down to an ROI profile. Re-applying a transform needs the array as it stood *before* `apply_transform`, which nothing keeps, plus a `needs_fetch` that compares `FetchPlan`s rather than whole requests. Both belong with the step that moves the transform stage. |
 | 9 | `RunListView` passed its item model where `DisplayControlWidget` expects a presenter, so constructing any `RunListView` raised `AttributeError`. No test could reach it — the suite cannot build a `QWidget`. | ✅ step A (`5330b81`) |
 | 10 | `widgets/kafkaViewerTab.py:68` calls `PlotWidget(run_list_model, plot_model)` against a `(presenter, panel, ...)` signature; raises `TypeError`, so the Kafka tab cannot open. Same class as bug 9. | open — `widgets/` is out of scope (invariant 6) |
 | 12 | ✅ Every reduce-slider tick on a 3-D dataset destroys the image artist, the colorbar and any live ROI or crop selector, then rebuilds them. `MplCanvas._prepare_2d_axes` diffs the whole `ViewIntent` against `_last_2d_intent`, so a `reduce_indices` change resets the axes even though the plot plane's coordinate frame did not move. Reproduced under a real `QApplication` with a 4x5x6 cube. | ✅ step G (`63a73f0`) |
-| 13 | The two ROI reduce paths disagree about the transform, so one drawn ROI on a 3-D cube gives a transformed answer along the two plane axes and an untransformed one along the slider axis. `roi_profile_request` sets `transform=""` and the load path honours it; the cached path masks a plane the transform already ran on. Reproduced on a 12x16x3 cube with `y = y * 2`: plane-axis profiles 16212 → 32424 and 12352 → 24704, slider-axis profile 96936 → 96936. Silent wrong answer. | open — step 7 |
+| 13 | The two ROI reduce paths disagree about the transform, so one drawn ROI on a 3-D cube gives a transformed answer along the two plane axes and an untransformed one along the slider axis. `roi_profile_request` sets `transform=""` and the load path honours it; the cached path masks a plane the transform already ran on. Reproduced on a 12x16x3 cube with `y = y * 2`: plane-axis profiles 16212 → 32424 and 12352 → 24704, slider-axis profile 96936 → 96936. Silent wrong answer. | ✅ step 7 (`f5a72b3`) — the transform moved ahead of the mask and `roi_profile_request` inherits it. A third divergence surfaced with it: the two paths also disagreed about profile *length*. |
 | 11 | Deselecting a key left its label in the legend. `PlotSession._dispose_plot_data` popped the trace and called `plot_data.clear()`, so the artist left the axes but the trace was gone from the map before `_do_update_plot` iterated it — the canvas removal branch never ran, and only the *add* path rebuilt the legend. Hiding and removing runs looked fine because both have their own `updateLegend` calls. | ✅ `6d2b3ef` — `_do_update_plot` rebuilds the legend before painting |
 
 Fixed during this refactor: `RunModel.get_plot_data` raised; normalizing an
@@ -206,9 +208,14 @@ buttons.
    enumerating INDEX values along one reduce axis. **Deferred to the
    `ImageGridCanvas` rewrite** (see step C) — designing it against today's
    bypass would retrofit an API onto code that is about to be replaced.
-6. **`DisplayManager` is nearly `AppModel`.** The remaining difference is
-   catalog creation and selection, which `CatalogSwitcher` reaches around to
-   get. Worth resolving when step F touches the presenter.
+6. ~~**`DisplayManager` is nearly `AppModel`.**~~ **Closed in step F, and the
+   premise was wrong.** They are not near-duplicates; the question looked open
+   because `AppModel`'s entire public surface was dead. `new_display` and
+   `close_display` forwarded to `DisplayManager` with zero callers, and
+   `set_active_display` / `get_active_display` / `active_display_changed` had
+   zero callers too, so `_active_display_id` was permanently `"main"`.
+   Deleting them leaves exactly invariant 7's shape. `PlotPresenter` was left
+   alone by decision and carries to the review.
 
 ## After this refactor
 
@@ -306,3 +313,5 @@ them.
 | 2026-09-09 | Step G landed (`63a73f0`). `ViewIntent` is a `QObject` with three signals derived from consumers, not fields; `cube_view_changed` and `MplCanvas._last_2d_intent` are gone. Bug 12 closed and verified both ways under a real `QApplication`. `Projection` and `PlotRequest` stay frozen. One decision the plan had not predicted: `project()` needed a `plot_ndim` override, because the mixed-rank path built a throwaway intent that a mutable model cannot supply. Suite 362 → 374; `view_spec.py` 1018 → 777 with 445 new lines in `view_intent.py`. |
 | 2026-09-09 | Step D landed (`aba26a3`). Crop and ROI are one child, `RegionController`, handed out as `session.region` with no delegating methods — 110 references retargeted instead. Two things the plan had not predicted: `cached_parent_bundle_for_preview` was deleted rather than moved, because `_refresh_held_requests` is now wired to every view-change signal and its equality check can no longer fail; and the three-way crop collapse turned out to be one method, since guarding `set_view_crop` on real change is what makes `clear_view_crop` redundant. `MplCanvas.current_view_fingerprint` and `_last_2d_view_crop` deleted. `plot_session.py` 2045 → 1263. Suite 380 → 389. |
 | 2026-09-09 | Widget testing partly unblocked (`9a567db`). The `QCoreApplication` fixture, not pytest, was what made `QWidget` construction impossible — a widget under one aborts the process rather than failing a test. `qapp` is now an autouse `QApplication` on the offscreen platform; 389 existing tests unaffected. Three mutation-checked widget tests landed. `headless_testing_plan.md` phases 3–4 keep the harness question; the enabler is done. |
+| 2026-09-09 | Step 7 landed (`f5a72b3`), closing bugs 8 and 13. The pipeline is `load → orient → normalize → reduce-to-plane → transform → mask → pack`. A third divergence surfaced with them — the two ROI paths disagreed about profile *length* — and both now go through `reduce_cached_plane`. Two deviations recorded in the sub-plan; `models/plot/` grew 79 code lines, the block cache being the growth and the thing that closes bug 8. |
+| 2026-09-10 | Step F landed and the refactor is complete. Open question 6 closed on a wrong premise: `AppModel` and `DisplayManager` are not near-duplicates — `AppModel`'s whole public surface was dead code. `models/plot/` is snake_case and pinned by a test; six steps of rename debris cleared, which also surfaced two tests that never ran. `flake8 --select=F811,F821` is empty across the tree. Seven of nine objects met their code-line targets. Next is [`post_refactor_review.md`](post_refactor_review.md), not another step. |

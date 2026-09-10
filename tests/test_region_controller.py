@@ -12,13 +12,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
 
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.region_controller import RegionController
-from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_spec import DimRole, ViewCrop
+from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.view_spec import ViewCrop
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

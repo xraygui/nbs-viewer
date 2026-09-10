@@ -18,7 +18,7 @@ from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.roi_set import RoiOperation
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

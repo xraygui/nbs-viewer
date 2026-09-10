@@ -4,9 +4,11 @@ Who owns what. Sub-plan of [`refactor_plan.md`](refactor_plan.md); the other
 half is [`view_pipeline_plan.md`](view_pipeline_plan.md), which owns how a
 request becomes a bundle.
 
-**Status:** steps A, B, C, G, D, H and E landed; **F** remains. The sequence is re-derived 2026-09-09 from the object-boundary question rather than taken
-from the original step order; the target ownership tree below was rewritten in
-the same pass. Everything marked done is verified against the tree.
+**Status:** complete. Steps A, B, C, G, D, H, E and F all landed. The
+sequence was re-derived 2026-09-09 from the object-boundary question rather
+than taken from the original step order; the target ownership tree below was
+rewritten in the same pass. Everything marked done is verified against the
+tree, and step F records the final counts against the size table.
 
 **Replaces** `model_core_refactor_plan.md` (steps 4–8) and
 `plot_session_list_adapter_plan.md` (P2–P3), both deleted 2026-09-08 and
@@ -1129,13 +1131,14 @@ normalize-by-reference through `PlotDisplay` and the run-list view.
 
 ---
 
-## Step F — Final deletions and renames
+## Step F — Final deletions and renames ✅ 2026-09-10
 
 **Last.** Shrunk: steps G, D and H absorb most of what it used to hold.
 
 ### Do
 
-- [ ] `runSource.py` → `run_source.py`
+- [x] `runSource.py` → `run_source.py` (and `displayManager.py` →
+  `display_manager.py`, which the camelCase exit criterion also covers)
 - [x] ~~Delete remaining aliases~~ — done in step A
 - [x] ~~Collapse near-duplicate APIs: `add_run`/`add_runs`,
   `remove_run`/`remove_uids`, `set_run_visible`/`set_uids_visible`~~ — moved
@@ -1145,16 +1148,135 @@ normalize-by-reference through `PlotDisplay` and the run-list view.
   moved to step E as **port, then delete**. It has no live callers, but it
   is where cross-run normalization is written; deleting it outright would
   discard the feature
-- [ ] Resolve `DisplayManager` versus `AppModel` (open question 6)
-- [ ] Re-check the ownership guard's `allowed` set. It stays non-empty by
+- [x] Resolve `DisplayManager` versus `AppModel` (open question 6)
+- [x] Re-check the ownership guard's `allowed` set. It stays non-empty by
   decision — the entry is `ImageGridCanvas`, deferred to its rewrite — so
   record that rather than closing it
 
 ### Exit criteria
 
-- [ ] No camelCase filenames under `models/plot/`
-- [ ] No compatibility aliases anywhere
-- [ ] Record final file and line counts against the targets above
+- [x] No camelCase filenames under `models/plot/`
+- [x] No compatibility aliases anywhere
+- [x] Record final file and line counts against the targets above
+
+### Outcome ✅ 2026-09-10
+
+**Behaviour-preserving.** Renames, dead-code deletion, and the rename debris
+six earlier steps left behind.
+
+#### Open question 6 resolved: there was nothing to merge
+
+`DisplayManager` and `AppModel` are not near-duplicates. Measuring the
+consumers showed why the question looked open: **`AppModel`'s entire public
+surface was dead.** `new_display` and `close_display` forwarded to
+`DisplayManager` and had zero callers; `set_active_display`,
+`get_active_display` and the `active_display_changed` signal had zero callers
+too, which meant `_active_display_id` was permanently `"main"`. What is left
+after deleting them is exactly invariant 7's description — three children plus
+the one join no child can make, routing a catalog selection into a display.
+
+The routing target is now the module constant `CATALOG_DISPLAY_ID = "main"`,
+which is what the code already did. The comment on it says what the deleted
+generalization was for: sending a selection to whichever plot tab is frontmost
+is a *feature*, and belongs in a change that also wires the tab bar to it.
+
+#### Rename debris
+
+Six steps of renaming left duplicate imports of the renamed symbol in eight
+test modules — `Projection` imported twice after `ViewSpec` became
+`Projection`, `RunSource, RunSource` on one line after `RunModel` became
+`RunSource`. Merged, so `flake8 --select=F811` is now empty across the tree.
+
+Two of the F811s were not rename debris and are worth recording separately:
+
+- **Two tests in `test_chunk_cache_l2.py` never ran.** Each was defined twice
+  and the second definition shadowed the first. Both pairs were compared
+  before deleting: one is byte-identical, the other differs only in an unused
+  local's name. Nothing was lost, but a shadowed test reports nothing, and
+  the file's count is unchanged at 13 because the surviving copies now run.
+- **`region_controller.py` imported `profile_storage_axis` and never used
+  it**, shadowed by a parameter of the same name in `_commit_span_full`.
+  Deleting the import removes both findings.
+
+`flake8 --select=F821` is also empty now. That matters because of the step 6
+follow-up: an F821 count *rise* was dismissed as pre-existing noise and it was
+a runtime `NameError` that shipped. The three remaining were annotation-only
+under `from __future__ import annotations` — `Tuple` in `region_controller`,
+`MaskMode` and `PlotViewFrame` in `view_spec` — and they are now imported for
+real (the latter two under `TYPE_CHECKING`, which is what keeps `view_spec`
+from importing `region`). With the baseline at zero there is no longer a pile
+for a real one to hide in.
+
+#### Deleted
+
+`AppModel.new_display`, `AppModel.close_display`,
+`AppModel.set_active_display`, `AppModel.get_active_display`,
+`AppModel.active_display_changed`, `AppModel._active_display_id`; two
+shadowed test functions; twenty-two unused imports across `models/plot/` and
+`tests/`; one stale unpacked local (`s_count` in `test_view_crop.py`, naming
+a length the array never had).
+
+#### Final counts against the target table
+
+Measured in **code lines** — the correction step H made to this table — with
+the public surface alongside, since that is what the tree was reorganised
+around.
+
+| Object | File | Code | Target | Public | Signals |
+|---|---:|---:|---:|---:|---:|
+| `PlotSession` | 715 | **370** | 450 | 17 | 4 |
+| `RunSource` | 1193 | **586** | 250 | 24 | 4 |
+| `RegionController` | 952 | **455** | 450 | 28 | 6 |
+| `RunCollection` | 579 | **284** | 320 | 21 | 5 |
+| `Selection` | 313 | **125** | 220 | 9 | 1 |
+| `ViewIntent` | 445 | **189** | 250 | 11 | 3 |
+| `Trace` | 454 | **203** | 150 | 21 | 3 |
+| `TraceSet` | 136 | **49** | 150 | 7 | 2 |
+| `RunListItemModel` | 186 | **92** | 150 | 6 | 0 |
+
+Seven of nine are under target. The two that are not:
+
+- **`RunSource`, 586 against 250.** The target was set against "uniform key
+  access" and the row's own job column then had "plus `get_plot_bundle`"
+  appended without the number moving. `get_plot_bundle` is the whole fetch
+  orchestration — plan, load, orient, normalize, reduce, transform, mask,
+  pack — and view-pipeline step 7 added a block cache to it. The target was
+  never costed for that. It is the one object the refactor did not shrink.
+- **`Trace`, 203 against 150, with 21 public members** for "request identity
+  plus cached bundle". Under budget on nothing except intent.
+
+Both go into the post-refactor review rather than being explained away here.
+
+#### Exit criteria
+
+- [x] No camelCase filenames under `models/plot/` — and pinned by
+  `test_plot_model_modules_are_snake_case`, so it cannot drift back. Seven
+  camelCase modules remain under `models/cache/` and `models/sources/`,
+  which this refactor never touched; they are repo hygiene and go to the
+  review.
+- [x] No compatibility aliases anywhere. The one import-through that
+  remained — `PlotPresenter` reachable from `display_manager` because that
+  module imports it — is now imported from `presenter` by the two test
+  modules that used it.
+- [x] Final counts recorded above.
+- [x] Ownership guard `allowed` re-checked and **stays non-empty by
+  decision**: `image_grid_canvas.py:444` is still the only view that
+  constructs a `Trace`, and it is deferred to the grid rewrite. Recorded,
+  not closed.
+
+#### Left alone on the maintainer's instruction
+
+`PlotPresenter` is untouched, including its two signals — `roi_region_changed`
+and `crop_region_changed` — which are never emitted and never connected. The
+object is now an id, a `PlotSession` and one forward
+(`status_changed` → `session.cache_status_changed`, one consumer), and every
+view that takes it assigns `self.plot_model = presenter.session` on the next
+line. Whether that earns an object goes to the review with the numbers
+attached.
+
+One `F841` also stands by decision: `test_plot_key_selection.py` builds a
+`RunListItemModel` and drops it, which is either a construction check worth
+asserting or a leftover, and guessing which would change what the test means.
 
 ---
 
@@ -1172,3 +1294,4 @@ normalize-by-reference through `PlotDisplay` and the run-list view.
 | 2026-09-09 | Step E rewritten before starting, from intent the plan had never recorded. `FrozenRunSource` is a *cross-run* immutable reference — one run pinned as the normalization input for a set of others — and composes with `CombinedRunSource`'s `EXPRESSION` method through `runlist`; it is not a legacy duplicate of `FrozenSpectrum`, and an earlier suggestion to delete it was withdrawn. The whole composition turns out to be written already, entirely inside the dead `get_plot_data` API, so step F's entry for that method becomes "port, then delete". The key-space hack is traced to `validate_combine` applying the AVERAGE precondition to the EXPRESSION case, so the fix is a method-aware check plus per-source key bindings on the combination, rather than a source that substitutes keys silently. `FrozenSpectrum` already captures data and axes and is adopted as `FrozenRun`'s primitive. Maintainer decisions recorded: `norm_keys` is **not** widened to carry a uid; a snapshot met by a growing dynamic run truncates to the shorter; and an unfinished run cannot be frozen — which needs `scanFinished` promoted to `CatalogRun`, since it exists only on `BlueskyRun` and `KafkaRun` and has no callers. |
 | 2026-09-09 | Step H landed (`85e653b`). `RunCollection` and `Selection` are `QObject`s again, owning the signals for the state they hold. Two things the plan had not predicted are recorded in the step: `Selection` is constructed *with* the collection, because resolving a selection needs the run's own keys — which turns three cross-object couplings into internal wiring and kills the last self-signals; and both mutators guard on real change, which is load-bearing now that several signals land on the selection that previously could not. Visibility stopped rebuilding the trace set, and `drop_traces_for_uid` — the only way to observe the old coupling — was found to have no production caller and deleted. The self-signal criterion came in better than written: the cache-progress pair it expected to defer was `run_added`/`run_removed`, which now belong to the collection. The file-line target is still unmet and the sizes table is corrected to measure code lines. |
 | 2026-09-09 | Step D landed (`aba26a3`), rewritten from its original text: no delegating methods, and crop merged into the ROI child. Two unpredicted decisions are recorded in the step — `cached_parent_bundle_for_preview` deleted rather than moved (its equality check is now structurally unreachable, which also closes step F's entry for it), and the crop collapse reduced to deleting `clear_view_crop` once `set_view_crop` guards on real change. Two exit criteria are honestly unmet: `plot_session.py` is 1263 rather than under 900, and two rather than three self-signals are gone; both remainders are step H's content. |
+| 2026-09-10 | Step F landed, and with it the plan. Open question 6 turned out to have nothing to merge: `AppModel`'s entire public surface — `new_display`, `close_display`, `set_active_display`, `get_active_display` and `active_display_changed` — had zero callers, so `_active_display_id` was permanently `"main"`; deleting it leaves exactly invariant 7's three children plus one join. `runSource.py` and `displayManager.py` renamed, and the rule pinned by a test. Six steps of renaming had left duplicate imports in eight test modules; clearing them also surfaced two tests in `test_chunk_cache_l2.py` that never ran because each was defined twice. `flake8 --select=F811,F821` is now empty across the tree, which removes the pile the step 6 follow-up's runtime `NameError` hid in. Seven of nine objects came in under their code-line targets; `RunSource` (586 vs 250) and `Trace` (203 vs 150) did not, and both go to the post-refactor review. `PlotPresenter` left entirely alone on the maintainer's instruction. |

@@ -23,7 +23,7 @@ signal.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal
 
@@ -49,7 +49,6 @@ from .view_spec import (
     default_profile_label,
     is_plot_plane_storage_axis,
     scan_profile_storage_axis,
-    profile_storage_axis,
 )
 
 if TYPE_CHECKING:  # pragma: no cover

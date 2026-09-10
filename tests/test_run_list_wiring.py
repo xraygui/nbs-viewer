@@ -8,10 +8,7 @@ from nbs_viewer.models.data.combined import (
     CombinationMethod,
     CombinedRun,
 )
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, Projection
 from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
@@ -20,7 +17,6 @@ from nbs_viewer.models.plot.frozen_spectrum import (
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.session import HeadlessSession
 

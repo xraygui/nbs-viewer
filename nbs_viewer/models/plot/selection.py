@@ -104,7 +104,6 @@ class KeySelection:
         )
 
 
-
 class Selection(QObject):
     """
     Session default key selection plus full per-uid overrides.

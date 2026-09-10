@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 
 from nbs_viewer.models.cache.chunk_cache_progress import ChunkCacheProgress
-from nbs_viewer.models.plot.displayManager import PlotPresenter
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.display_manager import PlotPresenter
+from nbs_viewer.models.plot.run_source import RunSource
 from tests.fixtures.catalog_recipes import line_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

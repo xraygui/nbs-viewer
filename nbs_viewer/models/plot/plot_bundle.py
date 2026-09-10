@@ -19,7 +19,6 @@ from .region import RegionDefinition, compile_with_mask_mode
 from .view_spec import (
     DimRole,
     PlotAxisName,
-    SpatialReduce,
     Projection,
     profile_storage_axis,
     profile_view_spec,
@@ -28,7 +27,6 @@ from .view_spec import (
 
 SliceItem = Union[int, slice]
 MaskMode = Literal["inside", "outside"]
-
 
 
 def _plane_axis_arrays(

@@ -7,9 +7,7 @@ from dataclasses import replace
 import numpy as np
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -17,9 +15,7 @@ from nbs_viewer.models.plot.plot_bundle import (
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.runSource import RunSource
-from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import ViewCrop, Projection
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.sources.fixtures import (
     make_vppem_run,
     voltage_axis,

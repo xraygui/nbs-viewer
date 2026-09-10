@@ -1,6 +1,5 @@
 """Headless tests for ViewIntent, Projection, ViewCrop, and PlotRequest."""
 
-import numpy as np
 import pytest
 
 from tests.fixtures.view import intent_from_projection
@@ -8,16 +7,12 @@ from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
+    ViewCrop,
+    plot_axis_names,
     spec_from_slice_info,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    ViewCrop,
-    Projection,
-    plot_axis_names,
-)
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
 
@@ -39,7 +34,6 @@ def test_projection_without_names_uses_trailing_axes():
                 else (DimRole.PLOT_Y, DimRole.PLOT_X)
             )
             assert view.roles == expected
-
 
 
 def test_view_spec_rejects_ndim_below_plot_ndim():
@@ -427,9 +421,6 @@ def test_spec_from_slice_info_roundtrip():
     spec = spec_from_slice_info(legacy, plot_ndim=1)
     assert spec.roles[0] == DimRole.INDEX
     assert spec.roles[-1] == DimRole.PLOT_X
-
-
-
 
 
 def test_swap_rows_exchanges_roles():

@@ -36,7 +36,7 @@ from .plot_request import (
 )
 from .region_controller import RegionController
 from .run_collection import RunCollection
-from .runSource import RunSource
+from .run_source import RunSource
 from .selection import Selection
 from .trace import Trace
 from .trace_set import TraceSet
@@ -187,7 +187,6 @@ class PlotSession(QObject):
         self.frozen_spectra_changed.emit()
         self.rebuild()
         self.request_plot_update.emit()
-
 
     def freeze_runs(self, runs: List[RunSource]) -> List[RunSource]:
         """

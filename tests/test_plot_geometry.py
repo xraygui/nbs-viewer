@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.plot_geometry import (
-    PlotBundle,
     classify_render_mode,
     display_flips,
     get_render_mode_hint,

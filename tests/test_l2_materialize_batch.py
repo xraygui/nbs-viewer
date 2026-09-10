@@ -1,4 +1,3 @@
-import numpy as np
 
 from nbs_viewer.models.cache.tile_indices import (
     tile_fully_in_fetch_slice,

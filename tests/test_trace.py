@@ -15,7 +15,7 @@ from pathlib import Path
 
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.plot_session import PlotSession
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.sources.testSource import create_test_catalog
 

@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
@@ -19,7 +18,7 @@ from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_session import PlotSession
 from tests.fixtures.view import apply_projection
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.view_spec import ViewCrop
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
 from tests.fixtures.display_plane import display_bundle
@@ -196,6 +195,26 @@ def test_default_selection_on_first_run(qapp):
     x_keys, y_keys, _ = plot_model.selection.get_selected_keys()
     assert x_keys == ["time"]
     assert y_keys == ["det"]
+
+
+def test_plot_model_modules_are_snake_case():
+    """
+    The naming the refactor settled on, pinned so it cannot drift back.
+
+    ``models/plot/`` was the package the refactor rewrote, so it is the one
+    held to the rule. The camelCase modules still under ``models/cache/``
+    and ``models/sources/`` are untouched by it and are repo hygiene, not
+    this guard's business.
+    """
+    plot_root = (
+        Path(__file__).resolve().parents[1] / "nbs_viewer" / "models" / "plot"
+    )
+    offenders = [
+        path.name
+        for path in plot_root.glob("*.py")
+        if path.stem != path.stem.lower()
+    ]
+    assert offenders == []
 
 
 def test_views_do_not_construct_traces_except_image_grid():

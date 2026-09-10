@@ -11,10 +11,7 @@ onto storage slices.
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view_spec import DimRole, Projection
 from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
@@ -27,7 +24,6 @@ from nbs_viewer.models.plot.region import (
     RectRegion,
     compile_with_mask_mode,
 )
-from nbs_viewer.models.plot.view_spec import Projection
 
 from tests.fixtures.display_plane import (
     display_frame,

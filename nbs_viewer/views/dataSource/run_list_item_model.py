@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 
-from ...models.plot.runSource import RunSource
+from ...models.plot.run_source import RunSource
 
 if TYPE_CHECKING:
     from ...models.plot.run_collection import RunCollection

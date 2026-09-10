@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 from nbs_viewer.models.app_model import AppModel
 from nbs_viewer.models.catalog.memory import MemoryCatalog
@@ -10,7 +10,7 @@ from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_geometry import PlotBundle
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.presenter import PlotPresenter
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 
 from .catalog_recipes import build_catalog
 

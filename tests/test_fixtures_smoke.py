@@ -11,7 +11,7 @@ from nbs_viewer.models.plot.view_spec import (
 )
 
 from nbs_viewer.models.plot.plot_session import PlotSession
-from nbs_viewer.models.plot.runSource import RunSource
+from nbs_viewer.models.plot.run_source import RunSource
 
 from tests.fixtures.catalog_recipes import (
     RECIPE_NAMES,

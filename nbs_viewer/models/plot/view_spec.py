@@ -15,7 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import List, Literal, Optional, Sequence, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - annotation only
+    from .plot_view_frame import PlotViewFrame
+    from .region import MaskMode
 
 
 SliceItem = Union[int, slice]
