@@ -28,13 +28,24 @@ def _session(ykey="image", xkey="x", include_nd=False):
 
 
 def test_driving_axes_picks_the_highest_rank_visible_key():
+    """
+    Both halves must survive the tie-break, not just the first candidate.
+
+    ``y`` is 1-D and comes first, so ``image`` wins on rank and replaces it.
+    That replacement is a separate assignment from the initial one, and it
+    used to build a shorter tuple -- which nothing noticed, because this test
+    unpacked the shorter one and ``driving_projection`` is what actually reads
+    the fourth element.
+    """
     session, run = _session()
     session.selection.set_selected_keys(["x"], ["y", "image"], [])
     driving = session.driving_axes()
     assert driving is not None
-    _run_model, ykey, layout = driving
+    _run_model, ykey, layout, names = driving
     assert ykey == "image"
     assert layout.shape == (100, 32)
+    assert len(names) == len(layout.shape)
+    assert session.driving_projection() is not None
 
 
 def test_driving_axes_is_none_without_a_multidimensional_key():
