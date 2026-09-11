@@ -15,7 +15,7 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1–4 landed 2026-09-10, steps 5 and 6 on 2026-09-11**; step 7 not started. Numbers measured at
+1–4 landed 2026-09-10, steps 5–7 on 2026-09-11**; all seven are done. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -1545,17 +1545,62 @@ Suite 490 → 491.
 deleting the `cached_plane` route, which only a cache that no longer evicts
 between traces would allow; and the per-trace transform of open question 6.
 
-### Step 7 — `CatalogRun`'s public surface
+### Step 7 — `CatalogRun`'s public surface ✅ 2026-09-11
 
-- [ ] Delete `getDimensions` and `analyze_slice_request` — **zero callers
-  anywhere**, including inside the data layer.
-- [ ] `getData`, `get_dimension_axes` and `analyze_dimensions` become
-  internals of `load` / `describe`.
-- [ ] **Hold `get_hinted_keys`.** It also has zero callers, but it is bug 4's
-  intended backing and master-plan open question 4 asks whether it produces
-  the set "Show All Keys" meant. Deleting it forecloses that answer.
-- [ ] Facts: public surface 23 → ~19; **the contract `RunSource` depends on,
-  8 → 5**.
+- [x] Delete `getDimensions` and `analyze_slice_request` — **zero callers
+  anywhere**, including inside the data layer. Re-checked before deleting.
+- [x] ~~`getData`, `get_dimension_axes` and `analyze_dimensions` become
+  internals of `load` / `describe`.~~ `analyze_dimensions` only — see *Held*,
+  below, for the other two.
+- [x] **Hold `get_hinted_keys`.** Confirmed by the maintainer, and not only as
+  a way of keeping a question open: it addressed a real problem — detectors
+  that produce many raw keys that are usually irrelevant but sometimes
+  useful for debugging — and it will be made to work.
+- [x] Facts: public surface 31 → 27.
+
+#### Outcome
+
+Deleted from `CatalogRun`: `getDimensions`, `analyze_slice_request`, and
+`get_dimension_ui_info`, which the plan did not list — its only caller was
+one test asserting that it agreed with `plot_axis_names`, and the dimension
+controls it was written for no longer call it. 132 raw lines; `base.py`
+466 → 408 code lines.
+
+`analyze_dimensions` became `_analyze_dimensions`. Its two callers are both in
+`CatalogRun` — `plot_axis_names` and `get_dimension_axes`. The bug-15 tests
+that called it directly now call `plot_axis_names`, which is the same
+analysis plus `KeyInfo.from_dims` validation, still on the backend with no
+`RunSource` involved — which is what step 1 required. A duplicate name now
+fails them twice over: it raises in validation before the test's own
+assertion runs. Mutation: making `plot_axis_names` ignore the X selection
+fails the rename test, and seven others.
+
+Public surface, counting methods, properties and signals: **31 → 27**. The
+original "23 → ~19" counted differently; the change is the same four.
+
+#### Held, and why
+
+- **`get_hinted_keys`** — the maintainer's call, above.
+- **`get_dimension_axes`** — it is the plot layer's coordinate source:
+  `CatalogKey` → `RunSource.load_axes` → the fetch. Step 4 kept `load_axes` as
+  the boundary until `load` attaches the per-event motors as non-dimension
+  coordinates and the X selection becomes `swap_dims`. It goes internal with
+  that work, not before it.
+- **`getData`** — it is the hook every backend implements, and other runs
+  read through it: `CombinedRun` from its sources, `FrozenRun` from its
+  parent. Catalogs are loaded through the `nbs_viewer.catalog_models`
+  entry-point group, so a backend can live in another package, and renaming
+  the hook would break every one of those. `RunSource` does not call it; the
+  plot layer reads through `load`.
+
+#### The contract `RunSource` depends on, re-measured
+
+The plan's "8 → 5" was for this step. Re-measured, the plot layer —
+`RunSource`, `CatalogKey`, `RunFetch` — uses four `CatalogRun` data methods:
+`describe`, `load`, `plot_axis_names`, `get_dimension_axes`. Plus
+`available_keys`, `set_dynamic`, three signals, and five identity fields.
+This step changes none of them: the reduction already happened in steps 2
+and 3. The next is `get_dimension_axes`, with the `swap_dims` work: **4 → 3**.
 
 ---
 
@@ -1654,3 +1699,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Regression from step 4b, found by the maintainer and fixed: an in-plane ROI profile on a row-reversed image summed the mirror-image rows. `mask_to_profile` flips the mask to meet a storage-ordered block, but `reduce_cached_plane` handed it the displayed plane, so the mask was flipped twice. It now turns the plane back to storage order first, and the in-plane branch pairs its frame-derived coordinates to match. The ground-truth test had only covered the off-plane route; the in-plane route has a four-orientation one now. |
 | 2026-09-11 | Step 6 re-derived before starting, at the maintainer's direction. Its "mechanical once step 4 lands" held for the move itself -- the seam is now four members wide, not six -- but its sketch predated steps 4, 4b and 5 and showed one route where the code has two. Two decisions recorded: the block cache stays on the run as it is, since the maintainer wants a cache that serves many consumers to live on the run and declined making it multi-entry, and the chunk cache already absorbs the re-reads its eviction causes on tiled runs; and clearing it on key-table invalidation stays too, since that costs at most another read. |
 | 2026-09-11 | Step 6 done. The fetch orchestration left `RunSource` for `RunFetch`, which `RunSource` owns and hands out as `fetch`; `Trace` calls it directly, so there is no forwarding method. `run_source.py` 420 → 200 code lines, `run_fetch.py` 237, and none of the five fetch-side modules is imported by `run_source.py` any more. Found while verifying: a data change clears the cache twice, directly and through the key table, so a mutation of either site alone survives; the direct clear stays, and the ordering test is pinned by removing both. |
+| 2026-09-11 | Step 7 done. `getDimensions` and `analyze_slice_request` deleted as planned, and `get_dimension_ui_info` with them -- its only caller was a test; `analyze_dimensions` became private, its bug-15 tests moving to `plot_axis_names`, which is the same analysis plus validation. `CatalogRun`'s public surface 31 → 27, `base.py` 466 → 408 code lines. Three held: `get_hinted_keys` on the maintainer's word (it filters detectors' many raw keys and will be made to work); `get_dimension_axes` until the `swap_dims` work replaces `load_axes`; and `getData`, the hook every backend implements, which catalogs loaded through the `nbs_viewer.catalog_models` entry points may implement in other packages. The plan's "contract `RunSource` depends on, 8 → 5" re-measured: that reduction happened in steps 2 and 3, and the plot layer uses four `CatalogRun` data methods now. |

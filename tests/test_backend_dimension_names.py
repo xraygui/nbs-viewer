@@ -4,7 +4,7 @@ Every axis of a key gets exactly one name, and it is the key's own.
 Three defects of one kind: a layer below the pipeline answering a question
 about a key's dimensions with something other than what the key declares.
 ``BlueskyRun`` named one more axis than the array has (bug 6) and reported
-every key as rank 1 (bug 7); ``CatalogRun.analyze_dimensions`` overrode a
+every key as rank 1 (bug 7); ``CatalogRun._analyze_dimensions`` overrode a
 key's declared names with a positional guess from the run's motors, which
 could name two axes the same thing (bug 15).
 
@@ -220,7 +220,7 @@ def test_with_no_x_key_selected_a_key_keeps_its_declared_dimensions(ykey):
     """
     No X key selected is the state of a freshly opened run (bug 15).
 
-    ``analyze_dimensions`` fell back to the run's declared motors and assigned
+    ``_analyze_dimensions`` fell back to the run's declared motors and assigned
     them positionally, overriding names the key already declares correctly.
     UCAL settles that this is wrong rather than merely unwanted: ``en_energy``
     is the scanned motor and its dims are ``('time',)``, a key *on* the event
@@ -231,7 +231,7 @@ def test_with_no_x_key_selected_a_key_keeps_its_declared_dimensions(ykey):
     run = _ucal_shaped_run()
     declared, _ = run.get_dims(ykey, [])
 
-    analyzed = run.analyze_dimensions(ykey, [])["ordered_dims"]
+    analyzed = run.plot_axis_names(ykey, [])
 
     assert tuple(analyzed) == declared
     assert analyzed[0] == "time"
@@ -248,7 +248,7 @@ def test_a_declared_cube_keeps_its_own_names_with_nothing_selected():
     run = image_scan_run(0)
     declared, _ = run.get_dims("detector_cube", [])
 
-    analyzed = run.analyze_dimensions("detector_cube", [])["ordered_dims"]
+    analyzed = run.plot_axis_names("detector_cube", [])
 
     assert tuple(analyzed) == declared == ("time", "pixel", "dim_2")
 
@@ -266,9 +266,11 @@ def test_no_two_axes_of_one_key_are_given_the_same_name():
     """
     run = image_scan_run(0)
 
+    # Through the public call a duplicate now also raises, in
+    # ``KeyInfo.from_dims``; either way this fails.
     for xkeys in ([], ["pixel"], ["en_energy"], ["time"], ["row"]):
         for ykey in ("detector_cube", "detector_image"):
-            names = run.analyze_dimensions(ykey, xkeys)["ordered_dims"]
+            names = run.plot_axis_names(ykey, xkeys)
             assert len(set(names)) == len(names), (ykey, xkeys, names)
 
 
@@ -283,7 +285,7 @@ def test_a_motor_that_names_no_existing_axis_still_renames_the_event_axis():
     """
     run = image_scan_run(0)
 
-    names = run.analyze_dimensions("detector_cube", ["row"])["ordered_dims"]
+    names = run.plot_axis_names("detector_cube", ["row"])
 
     assert tuple(names) == ("row", "pixel", "dim_2")
     assert np.shape(run.getData("detector_cube"))[0] == len(run.getData("row"))

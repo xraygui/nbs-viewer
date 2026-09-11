@@ -141,8 +141,7 @@ def test_describe_and_plot_axis_names_answer_different_questions(qapp):
     They used to be one call, which is why it needed the selection passed in
     and why the answer could not be cached. Here ``PCOEdge_image`` keeps the
     dimensions it declares whatever is selected, while the plot axis names
-    rename the event axis after whatever is being plotted against it -- still
-    agreeing with what the dimension controls read before.
+    rename the event axis after whatever is being plotted against it.
     """
     model = RunSource(make_vppem_run())
     xkeys = ["sampleVoltage_VSource"]
@@ -152,13 +151,11 @@ def test_describe_and_plot_axis_names_answer_different_questions(qapp):
     assert info.dims == ("time", "dim_1", "dim_2")
     assert model.describe("PCOEdge_image").dims == info.dims
 
-    run_shape, run_names, _placeholders, run_associated = (
-        model.run.get_dimension_ui_info("PCOEdge_image", xkeys)
+    assert model.plot_axis_names("PCOEdge_image", xkeys) == (
+        "sampleVoltage_VSource",
+        "dim_1",
+        "dim_2",
     )
-    assert info.shape == run_shape
-    assert list(model.plot_axis_names("PCOEdge_image", xkeys)) == run_names
-    assert run_names == ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    assert run_associated == {}
 
 
 def test_load_axes_matches_catalog_dimension_axes(qapp):

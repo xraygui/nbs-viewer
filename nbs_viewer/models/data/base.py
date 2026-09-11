@@ -367,7 +367,7 @@ class CatalogRun(QObject):
         tuple of str
             One name per storage axis.
         """
-        dim_info = self.analyze_dimensions(key, list(xkeys))
+        dim_info = self._analyze_dimensions(key, list(xkeys))
         # Validated rather than trimmed. A consumer used to pad or truncate
         # this list until it matched the rank, which is what let bug 6 go
         # unnoticed: a backend naming one axis too many looked exactly like a
@@ -476,22 +476,6 @@ class CatalogRun(QObject):
             True when no more data is expected.
         """
         return True
-
-    def getDimensions(self, key: str) -> int:
-        """
-        Get number of dimensions for a key.
-
-        Parameters
-        ----------
-        key : str
-            The key to get dimensions for
-
-        Returns
-        -------
-        int
-            Number of dimensions
-        """
-        return len(self.getShape(key))
 
     def getAvailableKeys(self):
         """
@@ -678,92 +662,8 @@ class CatalogRun(QObject):
         """Get the display name of the run."""
         return str(self)
 
-    def analyze_slice_request(
-        self, keys: List[str], slice_info: Optional[tuple] = None
-    ) -> Dict[str, Any]:
-        """
-        Analyze shapes and determine appropriate slicing for each key.
-
-        Parameters
-        ----------
-        keys : List[str]
-            List of keys to analyze
-        slice_info : tuple
-            The requested slice information, e.g. (slice(None), 0, slice(None))
-
-        Returns
-        -------
-        Dict[str, Any]
-            {
-                'plot_dims': int,  # Number of non-integer slice dimensions
-                'keys': {
-                    key_name: {
-                        'shape': tuple,  # Original shape of the data
-                        'getData_slice': tuple,  # Slice to pass to getData
-                        'effective_shape': tuple,  # Shape with broadcasting
-                        'output_shape': tuple  # Final shape after slicing
-                    }
-                    for key_name in keys
-                }
-            }
-        """
-        # Calculate plot dimensions from slice_info
-        if slice_info is not None:
-            plot_dims = sum(1 for s in slice_info if isinstance(s, slice))
-        else:
-            plot_dims = max(len(self.getShape(key)) for key in keys)
-
-        result = {"plot_dims": plot_dims, "keys": {}}
-
-        # Process each key
-        for key in keys:
-            shape = self.getShape(key)
-            key_info = {"shape": shape}
-
-            if slice_info is not None:
-                # Generate getData slice - only include indices up to the data's dimensionality
-                getData_slice = tuple(
-                    s for i, s in enumerate(slice_info) if i < len(shape)
-                )
-                key_info["effective_slice"] = getData_slice
-
-                # Calculate effective shape (with broadcasting)
-                """
-                if len(shape) == 1:
-                    effective_shape = shape + (1,) * (max(0, plot_dims - 1))
-                else:
-                    effective_shape = shape
-                key_info["effective_shape"] = effective_shape
-                """
-
-                # Calculate output shape
-                # First get shape after getData slice
-                sliced_shape = tuple(
-                    1 if isinstance(s, int) else dim
-                    for s, dim in zip(getData_slice, shape)
-                )
-                # Then add broadcasting dimensions if needed
-                if len(shape) == 1 and plot_dims > 1:
-                    output_shape = sliced_shape + (1,) * (plot_dims - 1)
-                else:
-                    output_shape = sliced_shape
-                key_info["output_shape"] = output_shape
-
-            else:
-                # No slicing
-                key_info.update(
-                    {
-                        "effective_slice": None,
-                        "output_shape": shape,
-                    }
-                )
-
-            result["keys"][key] = key_info
-
-        return result
-
-    # @time_function(function_name="CatalogRun.analyze_dimensions")
-    def analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
+    # @time_function(function_name="CatalogRun._analyze_dimensions")
+    def _analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
         """
         Analyze dimensions for a given y-key and set of x-keys, synthesizing information
         from both data shapes and metadata.
@@ -941,48 +841,13 @@ class CatalogRun(QObject):
             del result["dim_metadata"][old_dim]
         return result
 
-    def get_dimension_ui_info(
-        self, ykey: str, xkeys: List[str]
-    ) -> Tuple[Tuple[int, ...], List[str], List[np.ndarray], Dict[str, Dict[str, Any]]]:
-        """
-        Return shape and placeholder axis coordinates for dimension UI.
-
-        Uses :meth:`analyze_dimensions` only; does not call :meth:`getData` or
-        :meth:`getAxis`. Plot workers load real axis values when rendering.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key.
-        xkeys : list of str
-            X axis keys.
-
-        Returns
-        -------
-        tuple
-            ``(shape, dimension_names, axis_arrays, associated_data)`` with
-            index placeholders per dimension and empty associated data.
-        """
-        dim_info = self.analyze_dimensions(ykey, xkeys)
-        shape = tuple(dim_info["effective_shape"])
-        dim_names = list(dim_info["ordered_dims"])
-        ndim = len(shape)
-        if len(dim_names) < ndim:
-            dim_names = dim_names + [
-                f"dim_{i}" for i in range(len(dim_names), ndim)
-            ]
-        elif len(dim_names) > ndim:
-            dim_names = dim_names[:ndim]
-        axis_arrays = [np.arange(s, dtype=float) for s in shape]
-        return shape, dim_names, axis_arrays, {}
-
     def get_dimension_axes(
         self, ykey: str, xkeys: List[str], slice_info: Optional[tuple] = None
     ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
         """
         Get axis data for each dimension of the data.
 
-        This function uses analyze_dimensions to determine the dimensions and their
+        This function uses _analyze_dimensions to determine the dimensions and their
         types, then generates appropriate axis data for each:
         - For motor dimensions: uses the motor position data
         - For dimensions with axis hints: uses the specified axis data
@@ -1007,7 +872,7 @@ class CatalogRun(QObject):
                 - names: List[str] - names of the associated axes
         """
         # First get dimension analysis
-        dim_info = self.analyze_dimensions(ykey, xkeys)
+        dim_info = self._analyze_dimensions(ykey, xkeys)
 
         # Initialize output lists
         axis_arrays = []
