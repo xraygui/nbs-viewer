@@ -13,9 +13,9 @@ changes what that plan should do (see **Kept in mind**, below).
 **Absorbs** `structural_remediation_plan.md` step 9, "Enforceable data-layer
 contract", never started.
 
-**Status:** drafted 2026-09-10 and revised twice the same day — to adopt
-`xarray` rather than a bespoke type, and to settle coordinates onto the array.
-Not started. Numbers measured at `74a7d6d`.
+**Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
+rather than a bespoke type, and to settle coordinates onto the array. **Step 1
+landed 2026-09-10**; steps 2–7 not started. Numbers measured at `74a7d6d`.
 
 ---
 
@@ -340,23 +340,71 @@ Two measurable forms, both recorded before and after every step:
 
 ## Steps
 
-### Step 1 — make the backends agree
+### Step 1 — make the backends agree ✅ 2026-09-10
 
 The contract cannot be enforced while a backend returns more axis names than
 the array has dimensions: `xr.DataArray` would raise on real data.
 
-- [ ] Fix **bug 6**: `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)`,
+- [x] Fix **bug 6**: `BlueskyRun._infer_dims_from_shape` uses `range(0, ndim)`,
   producing `ndim + 1` names for every key of rank ≥ 2. The fix is
   `range(1, ndim)` — see *What inference should produce*, below, which
   justifies it against real data rather than against the other backends.
-- [ ] Fix **bug 7**: `BlueskyRun.getRunKeys` ends `ykeys[1] = all_keys`, so
+- [x] Fix **bug 7**: `BlueskyRun.getRunKeys` ends `ykeys[1] = all_keys`, so
   rank-3 camera keys are reported as rank 1.
-- [ ] Fix **bug 15**: with no X key selected, `analyze_dimensions` overrides a
+- [x] Fix **bug 15**: with no X key selected, `analyze_dimensions` overrides a
   key's own declared dimension names with a positional guess from the run's
   motors, and can produce duplicate axis names.
-- [ ] Both need a test against the backend method directly — no `MemoryRun`
+- [x] Both need a test against the backend method directly — no `MemoryRun`
   fixture can reproduce either, because `MemoryRun` is the correct one.
-- [ ] Facts: backends producing `len(names) != ndim`, **1 → 0**.
+- [x] Facts: backends producing `len(names) != ndim`, **1 → 0**. Confirmed
+  against all three: `MemoryRun` and `KafkaRun` already used `range(1, ndim)`.
+
+#### Outcome
+
+Four edits across two files, 12 tests in `tests/test_backend_dimension_names.py`.
+Each fix was reverted individually with the tests in place to confirm the test
+fails without it; all four do.
+
+- **Bug 6** is the one-character fix, with the docstring rewritten to state the
+  rule and name UCAL as its justification.
+- **Bug 7** groups the remaining keys by `len(getShape(key))`, as `MemoryRun`
+  does. This costs nothing in practice: `getShape` is cached and
+  `RunSource._build_key_table` already asks for every one of these shapes
+  moments later, so the work moves earlier rather than being added. A key whose
+  shape cannot be read keeps the old rank-1 answer and stays in the table.
+- **Bug 15** needed *two* edits, not one, because it has two triggers. The plan
+  predicted the motors fallback; the second was found while reproducing it.
+
+#### Deviation: bug 15 has a second trigger, reachable by selecting a motor
+
+The plan described bug 15 as the no-X-key case. It is also reachable *with* a
+selection:
+
+```
+describe_axes("detector_cube", [])         -> ('pixel', 'pixel', 'dim_2')
+describe_axes("detector_cube", ["pixel"])  -> ('pixel', 'pixel', 'dim_2')
+```
+
+`pixel` is both a selectable motor and a real dimension of the cube, so the
+final "replace a dimension with its single associated axis" step renames the
+event axis onto a name already in use. Removing the motors fallback fixes the
+first line only.
+
+The second edit is a de-duplication guard: a dimension is not replaced by a
+name another dimension of the same key already holds. That is deliberately the
+conservative half. The full fix — dimensions are static and the X selection
+picks a *coordinate* — is step 2's coordinate work, and doing it here would
+change every axis label in the application. So `["row"]` still renames the
+event axis to `row`, and a test pins that, because the guard must not disable
+the behaviour it guards.
+
+#### Deviation: `KafkaRun` has bug 7 too, and is deliberately left alone
+
+`KafkaRun.getRunKeys` also files every key under `ykeys[1]`. It is not fixed
+here because `KafkaRun.getShape` calls `getData` — listing keys would
+materialize every buffered array on a live stream, where a key may have no
+events yet. Same defect, different cost; it needs a cheap shape source first,
+and the Kafka tab cannot currently open at all (bug 10).
 
 This is also the review's number-one finding, and this plan gives it a reason
 beyond *it is wrong*: the contract cannot be enforced until it holds.
@@ -622,3 +670,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Open question 4 settled: coordinates go on the `DataArray`, indexed, wherever real ones exist. The maintainer raised fly-scanned data — each detector a raw timestream on its own time base — as a coming requirement, and it is decisive rather than merely suggestive: two equal-length keys both naming a `time` axis divide silently at mismatched timestamps under names alone, and raise under coordinates plus `arithmetic_join="exact"`. Cost measured at 6.4 ms against 6.0 ms per 5M points, so time is not the consideration; index memory is, and is left to be checked against a real camera run in step 2. Fly-scan support itself remains out of scope. |
 | 2026-09-10 | Open questions 1 and 2 settled together on the maintainer's suggestion that `describe` return `KeyInfo`, so there is one way to ask for key metadata rather than four. Checking it showed why the call currently needs `xkeys`: `describe_axes` renames a key's event axis to whichever X key is selected, conflating the axis's identity with the coordinate being plotted against it. xarray separates those natively — several non-dimension coordinates on one dimension, with `swap_dims` choosing the plot axis — so `describe(key)` becomes static and selection-free, which is what `KeyInfo` was documented to be. Bug 15 found while confirming it: with no X key selected the motor fallback overrides a key's correct declared dims and can produce duplicate axis names, which xarray warns about rather than rejecting. |
 | 2026-09-10 | Step 1's bug 6 fix re-justified against two real runs the maintainer supplied, rather than against the other backends. UCAL labels its dims and is therefore ground truth: `nexafs_sc` is `('time',)` and `tes_mca_spectrum` is `('time','tes_mca_energies')`, so inference's job is to reproduce that where it can — which `range(1, ndim)` does and `range(0, ndim)` does not. The same run confirms bug 15 in production data: `en_energy` is the scanned motor and its dims are `('time',)`, a key on the event axis rather than a name of it, with `start['hints']['dimensions']` naming which coordinate to plot against. Two decisions explicitly excluded from the step: whether placeholder axis names should be per-key (it would fix a false-alignment hazard but break flat-field normalization) and whether the `has_time_key` guard is needed. |
+| 2026-09-10 | Step 1 done. Bugs 6, 7 and 15 fixed, with a test per fix verified to fail without it. Two deviations recorded: bug 15 turned out to have a second trigger — selecting a motor whose name is also a real dimension of the key produces the same duplicate — so it took a de-duplication guard as well as removing the motors fallback, with the full separation of dimension from plot coordinate left to step 2; and `KafkaRun` shares bug 7 but is left alone because its `getShape` calls `getData`, which would materialize every buffered array on a live stream. |

@@ -511,8 +511,23 @@ class BlueskyRun(CatalogRun):
             if len(xkeys[i + 1]) == 0:
                 xkeys.pop(i + 1)
 
-        # All remaining keys go to ykeys[1] initially
-        ykeys[1] = all_keys
+        # Remaining keys are grouped by their own rank, as ``MemoryRun`` does.
+        # Assigning all of them to ``ykeys[1]`` reported a rank-3 camera key as
+        # rank 1, and the model layer trusts this number. ``getShape`` is cached
+        # and the key table asks for every one of these shapes moments later, so
+        # the cost is paid once either way. A key whose shape cannot be read
+        # keeps the old answer rather than dropping out of the table.
+        for key in all_keys:
+            try:
+                ndim = len(self.getShape(key))
+            except Exception as e:
+                print_debug(
+                    "BlueskyRun.getRunKeys",
+                    f"Could not get shape for {key}, treating as rank 1: {e}",
+                    category="catalog",
+                )
+                ndim = 1
+            ykeys.setdefault(max(ndim, 1), []).append(key)
         # print(f"xkeys: {xkeys}")
         # print(f"ykeys: {ykeys}")
         print_debug(
@@ -660,8 +675,16 @@ class BlueskyRun(CatalogRun):
         """
         Infer dimension names when Tiled structure metadata has no dims.
 
-        Stacked Bluesky primary arrays typically use a leading event axis named
-        ``time`` when a ``time`` data key exists in the stream.
+        Every array in a stream's ``data`` is stacked over events, so axis 0 is
+        the event axis and is named ``time``; the remaining axes are
+        detector-internal and can only be given placeholders. Inference runs
+        only when Tiled supplied no ``dims``, so its job is to reproduce what a
+        labelled run would have said. A UCAL run that labels its dims is the
+        ground truth: ``nexafs_sc`` (72,) is ``('time',)`` and
+        ``tes_mca_spectrum`` (72, 800) is ``('time', 'tes_mca_energies')``.
+        This produces ``('time',)`` and ``('time', 'dim_1')`` -- the same rank
+        with the same leading name, degrading to a placeholder only where the
+        name is genuinely unknowable without Tiled's metadata.
 
         Parameters
         ----------
@@ -693,7 +716,7 @@ class BlueskyRun(CatalogRun):
         if has_time_key:
             if ndim == 1:
                 return ("time",)
-            return ("time",) + tuple(f"dim_{i}" for i in range(0, ndim))
+            return ("time",) + tuple(f"dim_{i}" for i in range(1, ndim))
 
         return tuple(f"dim_{i}" for i in range(ndim))
 

@@ -562,8 +562,16 @@ class CatalogRun(QObject):
             start_doc = {}
             dimensions = []
 
-        if not xkeys:
-            xkeys = start_doc.get("motors", [])
+        # No X key selected is the initial state of a freshly opened run, and
+        # falling back to the run's declared motors here overrode the key's own
+        # declared dimension names with a positional guess. A scanned motor is a
+        # key *on* the event axis, not a name *of* it -- a UCAL run labels
+        # ``en_energy`` with dims ``('time',)`` while naming it in
+        # ``start['hints']['dimensions']`` as what to plot against -- so the
+        # fallback contradicted the beamline's own metadata, and could rename
+        # the event axis after a motor that was already a real dimension of the
+        # key, producing duplicate axis names. With nothing selected, the key's
+        # own dimensions stand.
 
         # Initialize dimension tracking
         ordered_dims = []
@@ -644,10 +652,20 @@ class CatalogRun(QObject):
         result["dim_metadata"] = dim_metadata
 
         # Final step: Replace dimensions with their single associated axis when appropriate
+        # A dimension is only replaced by a name no other dimension of this key
+        # already uses. ``detector_cube`` is ``('time', 'pixel', 'dim_2')`` and
+        # ``pixel`` is also a selectable motor, so renaming the event axis after
+        # it produced ``('pixel', 'pixel', 'dim_2')`` -- two axes with one name,
+        # which normalization aligns by. Keeping the axis's own name where the
+        # motor's name is taken is the conservative half of the fix; the other
+        # half, separating "which axis this is" from "what we plot it against",
+        # belongs with the coordinate work.
         dims_to_replace = []
         for dim, associated in result["associated_axes"].items():
             if len(associated) == 1:
                 motor = associated[0]
+                if motor in ordered_dims and motor != dim:
+                    continue
                 dims_to_replace.append((dim, motor))
 
         for old_dim, new_dim in dims_to_replace:
