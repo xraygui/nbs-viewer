@@ -885,6 +885,40 @@ class RunSource(QObject):
         return data, orientation
 
     def _load_block(
+        self, request: PlotRequest, axes: PlotAxes
+    ) -> Tuple[xr.DataArray, PlaneOrientation, FetchPlan]:
+        """
+        Return the block a request needs, from memory or by reading it.
+
+        The one accessor. Planning the fetch, asking the cache and reading are
+        three steps that always happen together and in this order, so they are
+        one call rather than four lines repeated at the call site. The plan
+        comes back with the block because it is not free to make -- an ROI
+        plan compiles the region against the parent plane -- and the mask
+        stage needs the frame it produced.
+
+        Parameters
+        ----------
+        request : PlotRequest
+            Request being served.
+        axes : PlotAxes
+            Named view of the Y key.
+
+        Returns
+        -------
+        tuple
+            ``(data, orientation, plan)``.
+        """
+        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
+        cache_key = self._block_cache_key(request)
+        block = self._block_for_plan(cache_key, plan, axes)
+        if block is None:
+            block = self._read_block(request, plan, axes)
+            self._block = (cache_key, plan) + block
+        data, orientation = block
+        return data, orientation, plan
+
+    def _read_block(
         self, request: PlotRequest, plan: FetchPlan, axes: PlotAxes
     ) -> Tuple[xr.DataArray, PlaneOrientation]:
         """
@@ -958,7 +992,7 @@ class RunSource(QObject):
         t_norm = ttime.time() - t0
 
         print_debug(
-            "RunSource._load_block",
+            "RunSource._read_block",
             f"{ykey} shape={data.shape} "
             f"load={t_load:.4f}s norm={t_norm:.4f}s",
             category="plots",
@@ -1027,13 +1061,7 @@ class RunSource(QObject):
             return reduce_cached_plane(plane, request, label=label)
 
         axes = self._view_by_name(request)
-        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
-        cache_key = self._block_cache_key(request)
-        block = self._block_for_plan(cache_key, plan, axes)
-        if block is None:
-            block = self._load_block(request, plan, axes)
-            self._block = (cache_key, plan) + block
-        data, orientation = block
+        data, orientation, plan = self._load_block(request, axes)
 
         t0 = ttime.time()
         if request.region is None:
