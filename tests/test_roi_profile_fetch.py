@@ -21,9 +21,14 @@ from nbs_viewer.models.plot.plot_request import (
     roi_profile_request,
 )
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.region import (
+    PolygonRegion,
+    RectRegion,
+    compile_with_mask_mode,
+)
 
 from tests.fixtures.display_plane import (
+    display_bundle,
     display_frame,
     roi_profile_from_block,
 )
@@ -157,6 +162,79 @@ def test_cached_plane_profile_with_4d_parent_spec():
     assert bundle.render_mode == "line"
     assert bundle.y.shape == (10,)
     assert np.isfinite(bundle.y).any()
+
+
+# A right triangle: a rectangle fills its own bounding box, so its mask is
+# invariant under reversal and cannot tell the two orders apart.
+_TRIANGLE = PolygonRegion(vertices=((1.0, 0.4), (5.4, 0.4), (1.0, 4.6)))
+
+
+def _display_profile(bundle, region, along):
+    """
+    Mask the displayed plane directly, one value and coordinate per bin.
+
+    Shares nothing with the code under test but the mask compiler: the plane
+    is what the user sees and the mask is compiled on the frame they drew
+    on, so no orientation is involved at all.
+    """
+    frame = frame_from_bundle(bundle)
+    mask = compile_with_mask_mode(frame, region, "inside").mask
+    shown = np.where(mask, np.asarray(bundle.y), np.nan)
+    left, right, bottom, top = frame.extent
+    ny, nx = frame.shape
+    if along == "plot_x":
+        values = np.nansum(shown, axis=0)
+        values[~mask.any(axis=0)] = np.nan
+        coords = left + (np.arange(nx) + 0.5) * (right - left) / nx
+    else:
+        values = np.nansum(shown, axis=1)
+        values[~mask.any(axis=1)] = np.nan
+        coords = top - (np.arange(ny) + 0.5) * (top - bottom) / ny
+    return coords, values
+
+
+@pytest.mark.parametrize("along", ["plot_x", "plot_y"])
+@pytest.mark.parametrize(
+    "row_descending,col_descending",
+    [(False, False), (True, False), (False, True), (True, True)],
+    ids=["both ascending", "row descending", "col descending", "both descending"],
+)
+def test_an_in_plane_profile_masks_the_cells_the_user_drew_on(
+    along, row_descending, col_descending
+):
+    """
+    Ground truth for the in-plane route, in every orientation.
+
+    The cached plane is display-ordered, while the masking stage works in
+    storage order and turns the mask round to meet it. Handing it the plane
+    as displayed turned the mask twice: an ROI drawn low on a row-reversed
+    image summed the mirror-image rows at the top. The off-plane route had a
+    four-orientation ground-truth test; this one was only ever compared with
+    itself.
+    """
+    ny, nx = 7, 8
+    storage = (np.arange(ny)[:, None] * 10 + np.arange(nx)[None, :]).astype(
+        float
+    )
+    rows = np.arange(ny, dtype=float)
+    cols = np.arange(nx, dtype=float)
+    if row_descending:
+        rows = rows[::-1].copy()
+    if col_descending:
+        cols = cols[::-1].copy()
+    plane = display_bundle(storage, rows, cols, ("y", "x"))
+    request = _profile_request(
+        _PLANE_2D, _TRIANGLE, profile_axis=1 if along == "plot_x" else 0
+    )
+
+    got = reduce_cached_plane(plane, request)
+    coords, values = _display_profile(plane, _TRIANGLE, along)
+
+    # Pair by coordinate: the order a 1-D profile comes out in is not the
+    # point, which value sits at which coordinate is.
+    want, have = np.argsort(coords), np.argsort(got.x_line)
+    np.testing.assert_allclose(got.x_line[have], coords[want])
+    np.testing.assert_allclose(got.y[have], values[want])
 
 
 def test_cached_plane_refuses_an_off_plane_profile():

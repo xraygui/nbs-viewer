@@ -1110,6 +1110,38 @@ all**, so nothing packed a plane whose column coordinate descends. It now has
 a four-orientation test of its own, plus one for a mesh, which is never
 reordered.
 
+#### Regression, found by the maintainer and fixed 2026-09-11
+
+An ROI profile *across the image it was drawn on* — "Along x" or "Along y",
+the ROI window's live preview — summed the mirror-image rows of any
+row-reversed image. The maintainer's screenshot showed an ROI over a bright
+band at the bottom of the image coming back as the dark band at the top.
+
+The cause was this step. `mask_to_profile` gained the mask flip on the
+assumption that its input is in storage order, which is true of the
+off-plane route through the block. But an in-plane profile goes through
+`reduce_cached_plane`, which hands it the *displayed* plane — already
+flipped — so the mask was flipped twice. Measured on VPPEM, whose rows
+reverse: the profile along x came back 814.63, 931.01, … where masking the
+displayed plane gives 229.77, 262.59, ….
+
+Nothing caught it because the four-orientation ground-truth test above only
+exercises an off-plane profile, and the one in-plane test compared the
+in-plane route with itself — both halves go through `reduce_cached_plane`.
+
+The fix keeps the one rule instead of adding a second: the stages work in
+storage order. `reduce_cached_plane` turns the displayed plane back before
+masking it, coordinates included, and `mask_to_profile`'s in-plane branch
+reverses the frame's bin coordinates along a reversed axis so each value is
+paired with the right coordinate. Both functions now say in their docstrings
+which order the data has to be in.
+
+Tests: a four-orientation ground-truth test for the in-plane route along
+both axes, against the mask applied directly to the displayed plane, and an
+end-to-end VPPEM test through `get_plot_bundle` with a cached plane. Three
+mutations — rows not turned back, columns not turned back, coordinates left
+in display order — fail 6, 4 and 4 of them, and no existing test.
+
 #### What deliberately does *not* move
 
 `PlotViewFrame.row_reversed` / `col_reversed` / `storage_bbox` stay. They are
@@ -1492,3 +1524,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | The names ride on the request. The maintainer asked why `PlotAxes` travelled beside the plan when `PlotRequest` and `FetchPlan` existed; it is the request's view plus one fact neither held, a dimension name per storage axis -- which the session already computed to choose the projection and then dropped, so the Y key's names were derived three times. `PlotRequest.dims` carries them from where they are first known, `FetchPlan.dims` names the plan's own indices, and `PlotAxes` survives only as a derivation of the request for the stages that need roles by name. `_view_by_name` and four `axes` parameters deleted. When the names cannot be resolved the session now falls back to the key's static dimensions rather than to none. |
 | 2026-09-11 | Transform-after-ROI recorded as open question 6, a known gap deferred by the maintainer. The rule is settled -- the transform runs before the ROI reduction, and a transform after one is done by freezing the ROI -- but the transform is session-global, so a frozen spectrum gets it applied a second time (measured: 4× raw under `y * 2`), and two different transforms at once cannot be expressed. |
 | 2026-09-11 | Step 5 done. The block cache holds the block as read and its norm arrays beside it, keyed by norm key; `_load_block` returns them apart and `get_plot_bundle` divides, so toggling a normalization reads at most the norm key and never the block. The plot plane left the cache identity as well -- a leftover from when the load flipped it -- so swapping the drawn axes reads nothing; the identity is now `(ykey, xkeys, dims)`. Found while doing it and fixed in the step, because it corrupts exactly what the step holds: `apply_transform` handed the interpreter the held block's own arrays, so an in-place clip such as `y[y > t] = t` wrote into every later fetch. |
+| 2026-09-11 | Regression from step 4b, found by the maintainer and fixed: an in-plane ROI profile on a row-reversed image summed the mirror-image rows. `mask_to_profile` flips the mask to meet a storage-ordered block, but `reduce_cached_plane` handed it the displayed plane, so the mask was flipped twice. It now turns the plane back to storage order first, and the in-plane branch pairs its frame-derived coordinates to match. The ground-truth test had only covered the off-plane route; the in-plane route has a four-orientation one now. |

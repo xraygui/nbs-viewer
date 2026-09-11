@@ -79,8 +79,9 @@ def reduce_cached_plane(
 
     The one genuine optimisation in the fetch path: when the profile runs
     along an axis the plane already shows, the answer is in memory and no
-    database read is needed. The plane is display-ordered, so the mask
-    compiled on its frame applies directly.
+    database read is needed. The plane is display-ordered and the masking
+    stage works in the order the source stored the data, so the plane is
+    turned back before it is masked.
 
     Parameters
     ----------
@@ -117,8 +118,19 @@ def reduce_cached_plane(
         indices=(0, 0),
     )
     arrays, names = _plane_axis_arrays(plane, frame)
+    values = np.asarray(plane.y)
+    # ``mask_to_profile`` turns the display-ordered mask round to meet a
+    # storage-ordered block, so the plane turns back first, coordinates with
+    # it. Handed over as displayed, the mask was turned twice and an ROI drawn
+    # low on a row-reversed image summed the mirror-image rows at the top.
+    if frame.row_reversed:
+        values = values[::-1, :]
+        arrays[frame.plot_y_dim] = arrays[frame.plot_y_dim][::-1]
+    if frame.col_reversed:
+        values = values[:, ::-1]
+        arrays[frame.plot_x_dim] = arrays[frame.plot_x_dim][::-1]
     data = xr.DataArray(
-        np.asarray(plane.y),
+        values,
         dims=list(names),
         coords={name: array for name, array in zip(names, arrays)},
     )
@@ -528,7 +540,9 @@ def mask_to_profile(
     Parameters
     ----------
     data : xarray.DataArray
-        Output of :func:`reduce_before_mask`, transformed.
+        Output of :func:`reduce_before_mask`, transformed, in the order the
+        source stored it -- *not* display order. The mask is compiled on the
+        display-ordered frame and turned round to meet it.
     axes : PlotAxes
         Named 1-D profile view.
     region : RegionDefinition
@@ -600,6 +614,15 @@ def mask_to_profile(
         coords = _profile_coords(
             region_frame, plot_axis, int(profile.sizes[profile_dim])
         )
+        # Those run in display order and the profile in storage order, so
+        # along a reversed axis they pair up only once turned round.
+        flipped = (
+            region_frame.row_reversed
+            if plot_axis == "plot_y"
+            else region_frame.col_reversed
+        )
+        if flipped:
+            coords = coords[::-1]
         name = (
             region_frame.plot_x_name
             if plot_axis == "plot_x"

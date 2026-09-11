@@ -272,6 +272,41 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     np.testing.assert_allclose(bundle.y, expected, rtol=1e-9)
 
 
+@pytest.mark.parametrize("along", ["plot_x", "plot_y"])
+def test_an_in_plane_roi_profile_masks_the_display_plane(along):
+    """
+    The route the ROI window's live preview takes: a profile across the
+    image it was drawn on, from the plane the canvas already holds.
+
+    On VPPEM, whose rows are reversed for display, it summed the
+    mirror-image rows -- an ROI over a bright band at the bottom of the image
+    came back as the dark band at the top.
+    """
+    model = RunSource(make_vppem_run())
+    parent_req = build_plot_request(
+        uid=VPPEM_UID,
+        xkeys=["sampleVoltage_VSource"],
+        ykey="PCOEdge_image",
+        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES,
+    )
+    plane = model.get_plot_bundle(parent_req)
+    assert plane.row_reversed
+    roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
+
+    bundle = model.get_plot_bundle(
+        roi_profile_request(parent_req, roi, profile_axis=along),
+        cached_plane=plane,
+    )
+
+    mask = compile_with_mask_mode(frame_from_bundle(plane), roi, "inside").mask
+    shown = np.where(mask, np.asarray(plane.y), np.nan)
+    across = 0 if along == "plot_x" else 1
+    expected = np.nansum(shown, axis=across)[mask.any(axis=across)]
+    got = bundle.y[np.isfinite(bundle.y)]
+    np.testing.assert_allclose(np.sort(got), np.sort(expected), rtol=1e-9)
+
+
 def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
     """
     A flat field shares the detector axes with the image, so it must be
