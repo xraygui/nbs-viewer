@@ -717,23 +717,26 @@ def get_plot_bundle(self, request, *, cached_plane=None, label=""):
     if <in-plane ROI>:
         return reduce_cached_plane(plane, request, label=label)
 
-    plan  = plan_fetch(request, plane_frame=self._plane_frame(request))
-    block = self._block_for_plan(request, plan) or self._load_block(request, plan)
+    view = self._view_by_name(request)
+    plan = plan_fetch(request, plane_frame=self._plane_frame(request))
+    data, orientation = self._block_for_plan(request, plan) or self._load_block(
+        request, plan, view
+    )
 
     if request.region is None:
-        plane = reduce_to_plane(block, request.view)
-        plane = apply_transform(plane, request.transform)
+        data = reduce_to_plane(data, view)
+        data = apply_transform(data, view, request.transform)
     else:
-        spec  = request.view.to_profile(request.profile_axis, request.spatial_reduce)
-        plane = reduce_before_mask(block, spec)
-        plane = apply_transform(plane, request.transform)
-        plane = mask_to_profile(plane, spec, request, plan.region_frame)
+        profile = view.to_profile(request.profile_axis, request.spatial_reduce)
+        data = reduce_before_mask(data, profile)
+        data = apply_transform(data, profile, request.transform)
+        data = mask_to_profile(data, profile, request, plan.region_frame)
 
-    return build_plot_bundle(plane, request, label=label)
+    return build_plot_bundle(data, view, orientation, request, label=label)
 ```
 
 Orchestration only, one altitude, no array indices. Every stage is
-`PlotArray -> PlotArray`.
+`DataArray -> DataArray` under a description.
 
 #### From the bottom: what the middle value has to carry
 
@@ -748,37 +751,55 @@ and survive the pipeline — which is what step 1 guaranteed and step 2
 enforces. `da.dims` *is* `remaining`; `da.get_axis_num(name)` *is*
 `_reduce_axis_index`; alignment by name *is* `_aligned_norm`.
 
-What xarray does **not** carry is the four display facts it drops silently
-through `.sum()`, arithmetic and `where()`:
+What xarray does **not** carry is four display facts it drops silently
+through `.sum()`, arithmetic and `where()`. The first draft of this design put
+all four on a wrapper type, `PlotArray`, that every stage took and returned.
+The maintainer asked which stages actually *read* each one, and whether any of
+them only matter at the pack. Audited:
 
-| fact | who needs it |
-|---|---|
-| `render_mode` | the orientation decision, and the pack |
-| `reversed_dims` | `PlotBundle.row_reversed` / `col_reversed`, and reversing a norm the same way |
-| `plane_dims` | the transform's `x`, the ROI mask, the pack |
-| `storage_names` | turning `Projection.roles[i]` — indexed by storage axis — into `roles[name]` |
+| fact | load | normalize | reduce | transform | mask | **pack** | cache |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| `render_mode` | ✓ decides the flips | – | – | – | – | ✓ | ✓ |
+| reversal | ✓ performs them | ✓ flips norms to match | – | – | – | ✓ | ✓ mirrors the window |
+| plane dims | – | – | – | ✓ | ✓ | ✓ | – |
+| storage names | ✓ | ✓ | ✓ | – | ✓ | ✓ | – |
 
-So the middle value is a thin frozen wrapper:
+**No stage between normalize and pack reads `render_mode` or the reversal.**
+They would have been on the transformed value for one reason only: to get from
+the load to the pack. That is a wrapper earning its place by being convenient,
+which is the thing to avoid.
 
-```python
-@dataclass(frozen=True)
-class PlotArray:
-    data: xr.DataArray                 # display order, dims named, coords attached
-    storage_names: Tuple[str, ...]     # name per storage axis, full rank
-    plane_dims: Optional[Tuple[str, str]] = None
-    render_mode: Optional[str] = None
-    reversed_dims: FrozenSet[str] = frozenset()
+And the other two go the other way. Plane dims and storage names are pure
+functions of the *request* — `request.view.plot_axis_order()` and
+`plot_axis_names(ykey, xkeys)` — known before any load happens. Putting them
+on a value the load produces says they were discovered by reading data, which
+is false.
 
-    def replace(self, data) -> "PlotArray": ...
-```
+So `PlotArray` does not exist. Three things travel, and they are three
+different kinds of thing:
 
-**This answers the plan's own test.** It asked whether any bespoke type
+1. **`xr.DataArray` — the data.** This is the pipeline's middle value, and
+   adopting xarray *is* naming it. The stages take and return it bare.
+2. **A named view — the description.** `Projection` re-expressed over
+   dimension names: role per dim, the full plot order, the plane's two dims,
+   and the profile dim. Derived **once**, from the request, before any load.
+   This is what reduce, transform and mask take alongside the array.
+3. **A plane orientation — the provenance.** `render_mode`, `row_reversed`,
+   `col_reversed`. Produced by the load, held in a local by `get_plot_bundle`
+   and in the block cache, and handed to exactly one consumer: the pack.
+
+Reversal needs only two booleans, not a set of dim names:
+`FetchPlan.reversed_axes_for` returns a subset of `plane_axes` and nothing
+else, so a flip only ever applies to the plot plane's two axes. That is a
+simplification the first draft missed.
+
+**This answers the plan's own test** — it asked whether any bespoke type
 survives step 4, and said that if none did, `AxisArray` was re-derivation with
-nothing to show for it. The answer is: one survives, and it is a fifth the
-size. `AxisArray` was going to hold the array, the names, the coordinates, the
-shape and the rank validation — xarray took all of that. What is left is
-exactly the provenance xarray drops, which is the one thing the bespoke type
-was *not* originally proposed for.
+nothing to show for it. The verdict: **no wrapper around the data survives**.
+`AxisArray` was to hold the array, its names, its coordinates, its shape and
+its rank validation, and xarray took every one of those. What is left are two
+small *description* types that were never what `AxisArray` was for — one
+derived from the request, one recorded by the load.
 
 #### Measured, not assumed
 
@@ -815,9 +836,11 @@ rather than inferred from a shape collision.
 | orient | `orient_for_display(y, arrays, reversed_axes, storage_to_tensor)` | `data.isel({dim: slice(None, None, -1)})` — the coordinate follows |
 | normalize | `apply_normalization` + `_aligned_norm`, 35 lines | `data / norm`, once per norm |
 | reduce | `_materialize_without_region`, ~45 lines of index juggling | `.sum(dim=…, skipna=False)`, `.mean(dim=…)`, `.transpose(*order)` |
-| transform | `apply_transform(xlist, y, text) -> (coords, y)` | `block.replace(data.copy(data=result))` |
+| transform | `apply_transform(xlist, y, text) -> (coords, y)` | `apply_transform(data, view, text)` |
 | mask | 9 parameters, manual mask transpose and reshape | `data.where(mask)`, dims named |
-| pack | `build_plot_bundle(y, coords, names, request, …)` | `build_plot_bundle(block, request, label=…)` |
+| pack | `build_plot_bundle(y, coords, names, request, …)` | `build_plot_bundle(data, view, orientation, request, label=…)` |
+
+Only the pack takes the orientation, which is the audit above made structural.
 
 `Projection` gains two pure derivations — a description deriving another
 description, which is what view-pipeline step 7's criterion was narrowed to
