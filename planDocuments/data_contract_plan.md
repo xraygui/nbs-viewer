@@ -1398,25 +1398,107 @@ the alignment error from the load, and now gets it from the divide, through
 
 ### Step 6 — the fetch orchestration leaves `RunSource`
 
-Mechanical once step 4 lands, because the signatures are already right. The
-seam was measured before this plan existed: 512 raw lines of key access
-against 569 of fetch, with a six-member interface.
+Re-derived 2026-09-11, after steps 4b and 5, at the maintainer's direction.
+The original said *mechanical once step 4 lands, because the signatures are
+already right*. That holds for the move itself. It did not hold for the
+sketch, and one decision had to be made first.
 
-- [ ] `get_plot_bundle` should read as a pipeline and nothing else:
+#### The seam, re-measured
+
+Nine methods are fetch: `_plane_frame`, `_render_hint`, `_norm_array`,
+`_contained_window`, `_held_windows`, `_narrowed`, `_load_block`,
+`_read_block` and `get_plot_bundle` — **205 of `RunSource`'s 420 code
+lines**. They reach the rest of the class through **four members** — `read`,
+`load_axes`, `describe`, `plot_axis_names` — plus the block cache. The
+measurement this plan started from found six; steps 3 to 5 narrowed it.
+
+They are also the only users of 19 of the module's imported names: fourteen
+free functions, `FetchPlan`, `PlotBundle`, `PlotRequest`, `PlotViewFrame` and
+`time`. Moving them takes five project modules out of `run_source.py`'s
+imports — `plot_bundle`, `plot_geometry`, `plot_request`, `plot_view_frame`
+and `data.array_contract` — which is the original's "working set 5 → 0",
+still true.
+
+`Trace` is the only caller of `get_plot_bundle`, at two sites.
+
+#### What the old sketch got wrong
+
+It predated three steps and was not implementable as written:
+
+- `request.plan_fetch(...)` — step 4 kept `plan_fetch` a function, because it
+  needs the parent plane's frame, which only the source can build.
+- `normalize(block, self._norms(request, plan))` — since step 5 the load
+  returns the norms with the block.
+- `reduce_to_plane(block, request.view)`, `transform(plane, text)` — the
+  stages take a `PlotAxes`, which is `request.axes` since the names moved onto
+  the request.
+- The ROI branch reduced to the plane and then masked. For an off-plane
+  profile the transform has to run *between* `reduce_before_mask` and the
+  mask, or the ROI does not sum what the user sees.
+- It had one route. The code has two: an in-plane profile is served from the
+  plane by `reduce_cached_plane`, from the caller's `cached_plane` when there
+  is one.
+
+#### Decided: the block cache stays on the run, as it is
+
+Considered: moving it onto `Trace`, because it holds one entry per run and two
+traces on one run evict each other — measured, a transform edit with both
+visible calls `RunSource.read` for both keys. **Rejected by the maintainer:**
+a cache that can serve many consumers — traces, ROIs, projections — belongs on
+the run, not locked onto each trace. Making it multi-entry was declined too,
+for now.
+
+The eviction is cheaper than a read count suggests. On tiled runs
+`BlueskyRun` reads N-D keys through the catalog-wide `ChunkCache`, whose
+tiles sit in an in-memory zarr store, so a re-read costs slab assembly and
+labelling rather than a fetch. `MemoryRun`, `KafkaRun` and frozen spectra hold
+their data in memory already.
+
+**Clearing it on key-table invalidation stays**, also the maintainer's call:
+it costs at most another read.
+
+#### The move
+
+- [ ] The nine methods and `_block` move into one fetch object, constructed
+  and owned by `RunSource` and handed the source for its four members.
+  `RunSource` exposes it as one attribute and keeps no `get_plot_bundle` of
+  its own: `Trace`'s two call sites go to the fetch object directly, so there
+  is no forwarding method to count against the split.
+- [ ] `RunSource` clears the cache by a **direct call**, in `_on_data_changed`
+  before it emits `data_changed` and in `_invalidate_key_table`. `Trace`
+  refetches on `data_changed`, so a cache that cleared itself by subscribing
+  to the same signal would depend on connection order to be cleared first.
+- [ ] Both routes stay. `cached_plane` still earns its place: it serves an
+  in-plane profile when another trace on the run has evicted the plane.
+- [ ] `get_plot_bundle` moves as it is, which already reads as a pipeline:
 
 ```python
 def get_plot_bundle(self, request, *, cached_plane=None, label=""):
-    plan  = request.plan_fetch(plane_frame=self._plane_frame(request))
-    block = self.load_block(plan)
-    block = normalize(block, self._norms(request, plan))
-    plane = reduce_to_plane(block, request.view)
-    plane = transform(plane, request.transform)
-    if request.region is not None:
-        plane = mask_to_profile(plane, request, plan.region_frame)
-    return build_plot_bundle(plane, label=label)
+    if <in-plane ROI profile>:
+        plane = cached_plane or self.get_plot_bundle(request.plane_request)
+        return reduce_cached_plane(plane, request, label=label)
+
+    data, norms, plan = self._load_block(request)
+    data = apply_normalization(data, norms)
+    if request.region is None:
+        data = reduce_to_plane(data, request.axes)
+        data = apply_transform(data, request.axes, request.transform)
+    else:
+        profile = request.profile_axes
+        data = reduce_before_mask(data, profile)
+        data = apply_transform(data, profile, request.transform)
+        data = mask_to_profile(
+            data, profile, request.region, request.mask_mode, plan.region_frame
+        )
+    return build_plot_bundle(data, request, ...)
 ```
 
-- [ ] Facts: `run_source.py` 586 → ~250 code lines; its working set 5 → 0.
+- [ ] Facts: `run_source.py` 420 → ~215 code lines; fetch-side project
+  imports in `run_source.py` **5 → 0**; `RunSource` members −9 +1.
+
+**Not in this step**, each its own decision: a multi-entry block cache;
+deleting the `cached_plane` route, which only a cache that no longer evicts
+between traces would allow; and the per-trace transform of open question 6.
 
 ### Step 7 — `CatalogRun`'s public surface
 
@@ -1525,3 +1607,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Transform-after-ROI recorded as open question 6, a known gap deferred by the maintainer. The rule is settled -- the transform runs before the ROI reduction, and a transform after one is done by freezing the ROI -- but the transform is session-global, so a frozen spectrum gets it applied a second time (measured: 4× raw under `y * 2`), and two different transforms at once cannot be expressed. |
 | 2026-09-11 | Step 5 done. The block cache holds the block as read and its norm arrays beside it, keyed by norm key; `_load_block` returns them apart and `get_plot_bundle` divides, so toggling a normalization reads at most the norm key and never the block. The plot plane left the cache identity as well -- a leftover from when the load flipped it -- so swapping the drawn axes reads nothing; the identity is now `(ykey, xkeys, dims)`. Found while doing it and fixed in the step, because it corrupts exactly what the step holds: `apply_transform` handed the interpreter the held block's own arrays, so an in-place clip such as `y[y > t] = t` wrote into every later fetch. |
 | 2026-09-11 | Regression from step 4b, found by the maintainer and fixed: an in-plane ROI profile on a row-reversed image summed the mirror-image rows. `mask_to_profile` flips the mask to meet a storage-ordered block, but `reduce_cached_plane` handed it the displayed plane, so the mask was flipped twice. It now turns the plane back to storage order first, and the in-plane branch pairs its frame-derived coordinates to match. The ground-truth test had only covered the off-plane route; the in-plane route has a four-orientation one now. |
+| 2026-09-11 | Step 6 re-derived before starting, at the maintainer's direction. Its "mechanical once step 4 lands" held for the move itself -- the seam is now four members wide, not six -- but its sketch predated steps 4, 4b and 5 and showed one route where the code has two. Two decisions recorded: the block cache stays on the run as it is, since the maintainer wants a cache that serves many consumers to live on the run and declined making it multi-entry, and the chunk cache already absorbs the re-reads its eviction causes on tiled runs; and clearing it on key-table invalidation stays too, since that costs at most another read. |
