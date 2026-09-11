@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_spec import DimRole, Projection
-from nbs_viewer.models.plot.plot_geometry import orient_for_display
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
     plan_fetch,
@@ -27,6 +26,7 @@ from nbs_viewer.models.plot.region import (
 
 from tests.fixtures.display_plane import (
     display_frame,
+    orient_block,
     oriented_plane,
     roi_profile_from_block,
 )
@@ -145,8 +145,8 @@ def test_roi_profile_matches_ground_truth_in_every_orientation(
         row_axis[plan.slice_info[2]],
         col_axis[plan.slice_info[3]],
     ]
-    loaded, axis_arrays = orient_for_display(
-        loaded, axis_arrays, plan.reversed_axes_for(axis_arrays, "image"), {0: 0, 1: 1, 2: 2, 3: 3}
+    loaded, axis_arrays = orient_block(
+        loaded, axis_arrays, plan.reversed_axes_for(axis_arrays, "image")
     )
     profile, _, _ = roi_profile_from_block(
         loaded,
@@ -270,8 +270,11 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
         row_axis[plan.slice_info[2]],
         col_axis[plan.slice_info[3]],
     ]
-    loaded, axis_arrays = orient_for_display(
-        loaded, axis_arrays, plan.reversed_axes_for(axis_arrays, "image"), {0: 0, 2: 1, 3: 2}
+    loaded, axis_arrays = orient_block(
+        loaded,
+        axis_arrays,
+        plan.reversed_axes_for(axis_arrays, "image"),
+        {0: 0, 2: 1, 3: 2},
     )
     profile, _, _ = roi_profile_from_block(
         loaded,

@@ -16,8 +16,8 @@ from nbs_viewer.models.plot.plot_bundle import materialize_view
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
-    profile_view_spec,
 )
+from tests.fixtures.display_plane import labelled_block, profile_axes
 
 
 def _tes_like_mesh_bundle():
@@ -89,18 +89,29 @@ def test_profile_along_en_energy_sums_over_tes_band():
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    row_axis = np.nanmean(bundle.mesh_y, axis=1)
-    col_axis = np.nanmean(bundle.mesh_x, axis=0)
-    profile, coords, names = materialize_view(
-        y,
-        [row_axis, col_axis],
-        ["en_energy", "tes_mca_energies"],
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+    # Cell centres, not the edge grids. ``mesh_y`` and ``mesh_x`` carry
+    # ``n + 1`` edges per axis; passing those as coordinates used to go
+    # unnoticed because nothing compared them against the array, and the
+    # profile's own coordinates come from the frame rather than from here.
+    row_edges = np.nanmean(bundle.mesh_y, axis=1)
+    col_edges = np.nanmean(bundle.mesh_x, axis=0)
+    row_axis = 0.5 * (row_edges[:-1] + row_edges[1:])
+    col_axis = 0.5 * (col_edges[:-1] + col_edges[1:])
+    names = ["en_energy", "tes_mca_energies"]
+    out = materialize_view(
+        labelled_block(y, [row_axis, col_axis], names),
+        profile_axes(
+            parent,
+            names,
+            0,
+            "sum",
+            plane_axes=(frame.plot_y_dim, frame.plot_x_dim),
+        ),
         region=region,
         region_frame=frame,
-        plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
     )
-    assert names == ["en_energy"]
+    profile = out.values
+    assert out.dims == ("en_energy",)
     assert profile.shape == (bundle.y.shape[0],)
     assert np.isfinite(profile).any()
     expected = np.array(
@@ -269,15 +280,15 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0),
     )
-    profile, _coords, _names = materialize_view(
-        cube,
-        [np.arange(n_stack, dtype=float), row_axis, col_axis],
-        ["stack", "row", "col"],
-        profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="sum"),
+    names = ["stack", "row", "col"]
+    profile = materialize_view(
+        labelled_block(
+            cube, [np.arange(n_stack, dtype=float), row_axis, col_axis], names
+        ),
+        profile_axes(parent, names, 0, "sum", plane_axes=(1, 2)),
         region=region,
         region_frame=frame,
-        plot_plane_storage_axes=(1, 2),
-    )
+    ).values
 
     expected = np.array(
         [np.nansum(np.where(compiled.mask, cube[i], np.nan)) for i in range(n_stack)]

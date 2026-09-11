@@ -13,7 +13,6 @@ from nbs_viewer.models.plot.plot_bundle import (
     reduce_cached_plane,
 )
 from nbs_viewer.models.plot.plot_geometry import (
-    orient_for_display,
     prepare_2d_bundle,
 )
 from nbs_viewer.models.plot.plot_request import (
@@ -26,6 +25,7 @@ from nbs_viewer.models.plot.region import RectRegion
 
 from tests.fixtures.display_plane import (
     display_frame,
+    orient_block,
     roi_profile_from_block,
 )
 
@@ -336,13 +336,15 @@ def test_roi_profile_along_dim1_matches_plane_means():
 
     plan = plan_fetch(request, plane_frame=frame)
     fetch_slice = plan.slice_info
+    # Sliced with the block, as ``load_axes`` returns them: a coordinate that
+    # still spans the full axis does not describe a narrowed load.
     axis_arrays = [
-        np.arange(e_count, dtype=float),
-        np.arange(d0_count, dtype=float),
-        np.arange(y_count, dtype=float),
-        np.arange(x_count, dtype=float),
+        np.arange(count, dtype=float)[item]
+        for count, item in zip(
+            (e_count, d0_count, y_count, x_count), fetch_slice
+        )
     ]
-    y_roi, axis_arrays = orient_for_display(
+    y_roi, axis_arrays = orient_block(
         y_full[fetch_slice],
         axis_arrays,
         plan.reversed_axes_for(axis_arrays, "image"),

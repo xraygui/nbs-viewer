@@ -10,8 +10,11 @@ from __future__ import annotations
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import xarray as xr
 from asteval import Interpreter
 
+from ..data.array_contract import REDUCE_SKIPNA
+from .plot_axes import PlotAxes
 from .plot_geometry import PlotBundle, prepare_1d_bundle
 from .plot_request import PlotRequest
 from .plot_view_frame import PlotViewFrame, frame_from_bundle
@@ -20,9 +23,6 @@ from .view_spec import (
     DimRole,
     PlotAxisName,
     Projection,
-    profile_storage_axis,
-    profile_view_spec,
-    storage_axis_to_plot_axis,
 )
 
 SliceItem = Union[int, slice]
@@ -116,22 +116,30 @@ def reduce_cached_plane(
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    axis_arrays, axis_names = _plane_axis_arrays(plane, frame)
-    y, coords, names = materialize_view(
-        plane.y,
-        axis_arrays,
-        axis_names,
-        profile_view_spec(
-            plane_view, bundle_profile_axis, request.spatial_reduce
-        ),
+    arrays, names = _plane_axis_arrays(plane, frame)
+    data = xr.DataArray(
+        np.asarray(plane.y),
+        dims=list(names),
+        coords={name: array for name, array in zip(names, arrays)},
+    )
+    axes = PlotAxes.of(plane_view, names).to_profile(
+        bundle_profile_axis, request.spatial_reduce
+    )
+    profile = materialize_view(
+        data,
+        axes,
         region=request.region,
         mask_mode=request.mask_mode,
         region_frame=frame,
-        plot_plane_storage_axes=(frame.plot_y_dim, frame.plot_x_dim),
     )
-    if not np.isfinite(y).any():
+    if not np.isfinite(profile.values).any():
         raise ValueError("ROI profile is empty after reduction")
-    return prepare_1d_bundle(y, coords, [label or names[0]])
+    profile_dim = profile.dims[0]
+    return prepare_1d_bundle(
+        profile.values,
+        [np.asarray(profile.coords[profile_dim].values)],
+        [label or str(profile_dim)],
+    )
 
 
 def slice_info_for_key(
@@ -166,147 +174,154 @@ def slice_info_for_key(
     return tuple(items)
 
 
-def _aligned_norm(
-    arr: np.ndarray,
-    arr_names: Sequence[str],
-    y: np.ndarray,
-    y_names: Sequence[str],
-) -> np.ndarray:
-    """
-    Broadcast a reduced norm array onto ``y`` using axis names.
-    """
-    arr = np.asarray(arr, dtype=float)
-    if arr.ndim == 0:
-        return arr
-    if arr.shape == y.shape:
-        return arr
-    y_name_list = list(y_names)[: y.ndim]
-    names = list(arr_names)[: arr.ndim]
-    present = [name for name in y_name_list if name in names]
-    if len(present) != arr.ndim:
-        raise ValueError(
-            f"cannot broadcast norm axes {names} onto plot axes {y_name_list}"
-        )
-    perm = [names.index(name) for name in present]
-    if perm != list(range(arr.ndim)):
-        arr = np.transpose(arr, perm)
-    out = arr
-    for i, name in enumerate(y_name_list):
-        if name not in names:
-            out = np.expand_dims(out, axis=i)
-    return out
-
-
 def apply_normalization(
-    y: np.ndarray,
-    y_axis_names: Sequence[str],
-    norms: Sequence[Tuple[np.ndarray, Sequence[str]]],
-) -> np.ndarray:
+    data: xr.DataArray,
+    norms: Sequence[xr.DataArray],
+) -> xr.DataArray:
     """
-    Divide ``y`` by the product of reduced normalization arrays.
+    Divide ``data`` by each normalization array.
 
-    Each norm is already reduced according to *its* dimensions. Remaining
-    axes are aligned to ``y`` by name, then by equal shape.
+    Alignment is xarray's: shared dimensions match by name, and under
+    ``arithmetic_join="exact"`` their coordinates must agree exactly or the
+    divide raises. This replaces a hand-written broadcaster that matched by
+    name and *fell back to matching by shape*, which is a coincidence rather
+    than a reason.
+
+    A dimension the data does not have is rejected rather than broadcast. That
+    is the one thing xarray would do too quietly: a norm array whose dimension
+    is unknown to ``data`` produces an outer product -- ``(5, 3) / (5,)``
+    becoming ``(5, 3, 5)`` -- instead of an error. A caller with a norm that
+    lives on one of ``data``'s axes must say which.
 
     Parameters
     ----------
-    y : np.ndarray
-        Plot-plane y array.
-    y_axis_names : sequence of str
-        Names of the plot-plane axes of ``y``.
-    norms : sequence of tuple
-        ``(array, axis_names)`` for each reduced normalization key.
+    data : xarray.DataArray
+        Loaded, oriented block.
+    norms : sequence of xarray.DataArray
+        Normalization arrays, each on a subset of ``data``'s dimensions.
 
     Returns
     -------
-    np.ndarray
-        Normalized y array.
+    xarray.DataArray
+        Normalized block.
+
+    Raises
+    ------
+    ValueError
+        If a norm carries a dimension ``data`` does not have.
     """
-    out = np.asarray(y, dtype=float)
-    for arr, names in norms:
-        aligned = _aligned_norm(arr, names, out, y_axis_names)
-        out = out / aligned
+    out = data.astype(float)
+    for norm in norms:
+        unknown = [dim for dim in norm.dims if dim not in out.dims]
+        if unknown:
+            raise ValueError(
+                f"cannot broadcast norm axes {list(norm.dims)} onto plot axes "
+                f"{list(out.dims)}"
+            )
+        out = out / norm
     return out
 
 
 def apply_transform(
-    xlist: Sequence[np.ndarray],
-    y: np.ndarray,
+    data: xr.DataArray,
+    axes: PlotAxes,
     transform_text: str,
-) -> Tuple[List[np.ndarray], np.ndarray]:
+) -> xr.DataArray:
     """
-    Apply a user expression to ``y`` (and optionally ``x``).
+    Apply a user expression to the displayed values.
 
-    The interpreter is created per call. An empty string is a no-op.
+    ``y`` is the array and ``x`` the coordinate arrays of the dimensions the
+    user is looking at -- the plot plane, or for a profile the plane the ROI
+    was drawn on, so ``x`` means the same thing either way. An expression may
+    rebind either; an empty string is a no-op.
 
     Parameters
     ----------
-    xlist : sequence of np.ndarray
-        Plot-plane coordinate arrays.
-    y : np.ndarray
-        Plot-plane data.
+    data : xarray.DataArray
+        Values to transform.
+    axes : PlotAxes
+        Named view, for the displayed dimensions.
     transform_text : str
         Expression. ``x`` and ``y`` are injected into the symbol table.
 
     Returns
     -------
-    tuple
-        ``(xlist, y)`` after the expression, or the inputs when empty.
+    xarray.DataArray
+        Transformed array, keeping its dimensions and coordinates.
+
+    Raises
+    ------
+    ValueError
+        If the expression changes the array's shape, which would leave every
+        coordinate describing something else.
     """
-    coords = [np.asarray(axis) for axis in xlist]
     if not transform_text:
-        return coords, y
+        return data
+    display = [dim for dim in axes.display_dims if dim in data.coords]
+    coords = [np.asarray(data.coords[dim].values) for dim in display]
+    # Snapshotted, because ``x`` is handed to the interpreter as this very
+    # list: an expression assigning ``x[0]`` rebinds an element in place, so
+    # comparing against the list afterwards would compare it with itself.
+    before = [np.array(axis, copy=True) for axis in coords]
+
     interp = Interpreter()
-    interp.symtable["y"] = y
+    interp.symtable["y"] = data.values
     interp.symtable["x"] = coords
     result = interp(transform_text)
-    if result is not None:
-        y = result
-    else:
-        y = interp.symtable.get("y", y)
-    return coords, y
-
-
-def _spatial_reduce_storage_axes(
-    spec: Projection,
-    plot_plane_storage_axes: Optional[Tuple[int, int]],
-) -> frozenset[int]:
-    """
-    Return storage axes reduced within the ROI on the parent plot plane.
-    """
-    if spec.plot_ndim != 1:
-        return frozenset()
-    profile_axis = profile_storage_axis(spec)
-    if plot_plane_storage_axes is not None:
-        return frozenset(
-            storage_axis
-            for storage_axis in plot_plane_storage_axes
-            if spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
-        )
-    order = spec.axis_order
-    if len(order) < 2:
-        return frozenset()
-    plot_plane = {order[-2], order[-1]}
-    return frozenset(
-        storage_axis
-        for storage_axis in plot_plane
-        if storage_axis != profile_axis
-        and spec.roles[storage_axis] in (DimRole.SUM, DimRole.MEAN)
+    values = np.asarray(
+        result if result is not None else interp.symtable.get("y", data.values)
     )
+    if values.shape != data.shape:
+        raise ValueError(
+            f"transform changed the shape from {data.shape} to {values.shape}; "
+            "the coordinates would no longer describe the values"
+        )
+    out = data.copy(data=values)
+
+    # An expression may rewrite x as well as y -- rescaling an energy axis, for
+    # instance -- so the coordinates are read back rather than assumed.
+    updated = interp.symtable.get("x", coords)
+    for dim, original, after in zip(display, before, updated):
+        after = np.asarray(after)
+        if after.shape == original.shape and not np.array_equal(after, original):
+            out = out.assign_coords({dim: after})
+    return out
 
 
-def _global_reduce_storage_axes(
-    spec: Projection,
-    spatial_storage_axes: frozenset[int],
-) -> frozenset[int]:
+def _spatial_dims(axes: PlotAxes) -> Tuple[str, ...]:
     """
-    Return SUM/MEAN storage axes reduced before ROI masking.
+    Return the plane dimensions the ROI reduces over, by name.
+
+    These are the plot plane's own axes carrying a SUM or MEAN role: the ROI
+    collapses the plane it was drawn on, leaving the profile axis.
+
+    Parameters
+    ----------
+    axes : PlotAxes
+        Named profile view.
+
+    Returns
+    -------
+    tuple of str
+        Dimension names reduced inside the mask.
     """
-    return frozenset(
-        storage_axis
-        for storage_axis, role in enumerate(spec.roles)
-        if role in (DimRole.SUM, DimRole.MEAN)
-        and storage_axis not in spatial_storage_axes
+    if axes.spec.plot_ndim != 1:
+        return ()
+    reducing = (DimRole.SUM, DimRole.MEAN)
+    if axes.plane is not None:
+        return tuple(
+            dim for dim in axes.plane if axes.role(dim) in reducing
+        )
+    # No parent plane recorded: the plane is the projection's own trailing
+    # pair, minus the profile axis it was rearranged to end on. Only reachable
+    # from a caller that builds a profile view without naming its parent.
+    order = axes.order
+    if len(order) < 2:
+        return ()
+    return tuple(
+        dim
+        for dim in order[-2:]
+        if dim != axes.profile and axes.role(dim) in reducing
     )
 
 
@@ -366,106 +381,83 @@ def _coord_for_profile_index(
     return float(index)
 
 
-def _reduce_axis_index(
-    remaining: Sequence[int],
-    storage_axis: int,
-) -> int:
+def reduce_to_plane(data: xr.DataArray, axes: PlotAxes) -> xr.DataArray:
     """
-    Return the tensor axis index for a storage dimension.
+    Collapse the reduced axes and transpose what is left into plot order.
+
+    This was forty-five lines of index juggling: a ``remaining`` list tracking
+    which storage axis each tensor axis came from, parallel lists of
+    coordinates, names and roles deleted in step with it, and a permutation
+    built by position. Every one of those answered "which axis is this now?",
+    which a named array answers itself.
+
+    Parameters
+    ----------
+    data : xarray.DataArray
+        Loaded, oriented, normalized block.
+    axes : PlotAxes
+        Named view describing the output.
+
+    Returns
+    -------
+    xarray.DataArray
+        Reduced array in plot order: slice axes first, then Y, then X.
+
+    Raises
+    ------
+    ValueError
+        If the array carries a dimension the view does not name.
     """
-    return list(remaining).index(storage_axis)
-
-
-def _materialize_without_region(
-    y: np.ndarray,
-    axis_arrays: Sequence[np.ndarray],
-    axis_names: Sequence[str],
-    spec: Projection,
-) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
-    """
-    Apply a projection without ROI masking.
-    """
-    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
-    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
-    names = [axis_names[i] for i in remaining]
-    roles = [spec.roles[i] for i in remaining]
-
-    for j in range(len(remaining) - 1, -1, -1):
-        role = roles[j]
-        if role == DimRole.SUM:
-            y = np.sum(y, axis=j)
-            del arrays[j], names[j], roles[j], remaining[j]
-        elif role == DimRole.MEAN:
-            y = np.mean(y, axis=j)
-            del arrays[j], names[j], roles[j], remaining[j]
-
-    non_plot = [
-        j for j, role in enumerate(roles) if role not in (DimRole.PLOT_X, DimRole.PLOT_Y)
-    ]
-    y_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_Y]
-    x_positions = [j for j, role in enumerate(roles) if role == DimRole.PLOT_X]
-
-    if spec.plot_ndim == 1:
-        perm = non_plot + x_positions
-    else:
-        perm = non_plot + y_positions + x_positions
-
-    if len(perm) != y.ndim:
+    unknown = [dim for dim in data.dims if dim not in axes.names]
+    if unknown:
         raise ValueError(
-            f"transpose rank {len(perm)} does not match data ndim {y.ndim}"
+            f"array dimensions {unknown} are not named by the view {axes.names}"
         )
-
-    if perm != list(range(y.ndim)):
-        y = np.transpose(y, perm)
-        arrays = [arrays[p] for p in perm]
-        names = [names[p] for p in perm]
-
-    if spec.plot_ndim == 1:
-        arrays = arrays[-1:]
-        names = names[-1:]
-    elif spec.plot_ndim == 2:
-        arrays = arrays[-2:]
-        names = names[-2:]
-
-    return y, arrays, names
+    for role, reduce_name in ((DimRole.SUM, "sum"), (DimRole.MEAN, "mean")):
+        dims = [dim for dim in data.dims if axes.role(dim) is role]
+        if dims:
+            # skipna=False keeps this the plain reduce it has always been.
+            # The NaN-aware one belongs to the masked ROI reduce and nowhere
+            # else; xarray's default would erase the distinction.
+            data = getattr(data, reduce_name)(dim=dims, skipna=REDUCE_SKIPNA)
+    order = tuple(dim for dim in axes.order if dim in data.dims)
+    if order != data.dims:
+        data = data.transpose(*order)
+    return data
 
 
-def _reduce_along_axis(y: np.ndarray, axis: int, role: DimRole) -> np.ndarray:
+def _reduce_dim(
+    data: xr.DataArray, dim: str, role: DimRole
+) -> xr.DataArray:
     """
-    Collapse one tensor axis using the spec role semantics.
+    Collapse one dimension using the view's role semantics.
     """
-    if role == DimRole.SUM:
-        return np.sum(y, axis=axis)
-    if role == DimRole.MEAN:
-        return np.mean(y, axis=axis)
-    raise ValueError(f"cannot reduce axis with role {role!r}")
+    if role is DimRole.SUM:
+        return data.sum(dim=dim, skipna=REDUCE_SKIPNA)
+    if role is DimRole.MEAN:
+        return data.mean(dim=dim, skipna=REDUCE_SKIPNA)
+    raise ValueError(f"cannot reduce dimension with role {role!r}")
 
 
-def _masked_reduce_along_axes(
-    y: np.ndarray,
-    axes: Tuple[int, ...],
-    role: DimRole,
-) -> np.ndarray:
+def _masked_reduce(
+    data: xr.DataArray, dims: Sequence[str], role: DimRole
+) -> xr.DataArray:
     """
-    Collapse tensor axes after ROI masking with NaN-aware reducers.
+    Collapse masked dimensions, NaN-aware, keeping empty bins as NaN.
     """
-    if role == DimRole.SUM:
-        profile = np.nansum(y, axis=axes)
-    elif role == DimRole.MEAN:
-        profile = np.nanmean(y, axis=axes)
+    if role is DimRole.SUM:
+        profile = data.sum(dim=list(dims), skipna=True)
+    elif role is DimRole.MEAN:
+        profile = data.mean(dim=list(dims), skipna=True)
     else:
         raise ValueError(f"unexpected spatial reduce role {role!r}")
-    empty_bins = np.isnan(y).all(axis=axes)
-    return np.where(empty_bins, np.nan, profile)
+    empty = data.isnull().all(dim=list(dims))
+    return profile.where(~empty)
 
 
 def reduce_before_mask(
-    y: np.ndarray,
-    axis_arrays: Sequence[np.ndarray],
-    spec: Projection,
-    *,
-    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
-) -> Tuple[np.ndarray, List[np.ndarray], List[int]]:
+    data: xr.DataArray, axes: PlotAxes
+) -> xr.DataArray:
     """
     Collapse every axis the ROI mask does not span.
 
@@ -477,62 +469,44 @@ def reduce_before_mask(
 
     Parameters
     ----------
-    y : np.ndarray
+    data : xarray.DataArray
         Loaded, oriented, normalized block.
-    axis_arrays : sequence of np.ndarray
-        Per-storage-axis coordinate arrays.
-    spec : Projection
-        1-D profile output spec, from :func:`profile_view_spec`.
-    plot_plane_storage_axes : tuple of int, optional
-        Parent plot Y and plot X storage axes.
+    axes : PlotAxes
+        Named 1-D profile view, from :meth:`PlotAxes.to_profile`.
 
     Returns
     -------
-    tuple
-        ``(y, arrays, remaining)``. ``remaining`` names the storage axis
-        behind each tensor axis of ``y``, and ``arrays`` its coordinates.
+    xarray.DataArray
+        The plane, or the stack of planes, the mask will be applied to.
 
     Raises
     ------
     ValueError
-        If ``spec`` is not a profile spec or spans no spatial reduce axis.
+        If ``axes`` is not a profile view or spans no spatial reduce axis.
     """
-    if spec.plot_ndim != 1:
+    if axes.spec.plot_ndim != 1:
         raise ValueError("ROI profile materialization requires plot_ndim=1")
-
-    spatial_storage_axes = _spatial_reduce_storage_axes(
-        spec, plot_plane_storage_axes
-    )
-    if not spatial_storage_axes:
+    spatial = _spatial_dims(axes)
+    if not spatial:
         raise ValueError("expected at least one spatial reduce axis")
-    global_storage_axes = _global_reduce_storage_axes(
-        spec, spatial_storage_axes
-    )
 
-    remaining = [i for i in range(spec.ndim) if spec.roles[i] != DimRole.INDEX]
-    arrays = [np.asarray(axis_arrays[i]) for i in remaining]
-    roles = [spec.roles[i] for i in remaining]
-
-    for j in range(len(remaining) - 1, -1, -1):
-        if remaining[j] in global_storage_axes:
-            y = _reduce_along_axis(y, j, roles[j])
-            del arrays[j], roles[j], remaining[j]
-
-    return y, arrays, remaining
+    for dim in [
+        dim
+        for dim in data.dims
+        if dim not in spatial
+        and axes.role(dim) in (DimRole.SUM, DimRole.MEAN)
+    ]:
+        data = _reduce_dim(data, dim, axes.role(dim))
+    return data
 
 
 def mask_to_profile(
-    y: np.ndarray,
-    arrays: Sequence[np.ndarray],
-    remaining: Sequence[int],
-    axis_names: Sequence[str],
-    spec: Projection,
+    data: xr.DataArray,
+    axes: PlotAxes,
     region: RegionDefinition,
     mask_mode: MaskMode,
     region_frame: PlotViewFrame,
-    *,
-    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
-) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+) -> xr.DataArray:
     """
     Mask a finished plot plane, or stack of them, down to a 1-D profile.
 
@@ -540,219 +514,141 @@ def mask_to_profile(
     already been applied to: an ROI is drawn on what is displayed, so summing
     it must sum what is displayed.
 
+    The mask is built as a named 2-D array, so xarray broadcasts it onto
+    whichever axes of ``data`` the plane landed on. That replaced a hand
+    transpose and reshape, which existed because the plane is not always the
+    trailing pair -- profiling along a cube's slider axis leaves it at the
+    *leading* axes, since the slider can outrank both plane axes.
+
     Parameters
     ----------
-    y : np.ndarray
+    data : xarray.DataArray
         Output of :func:`reduce_before_mask`, transformed.
-    arrays : sequence of np.ndarray
-        Coordinate array per surviving tensor axis.
-    remaining : sequence of int
-        Storage axis behind each tensor axis of ``y``.
-    axis_names : sequence of str
-        Full per-storage-axis names of the y key.
-    spec : Projection
-        1-D profile output spec.
+    axes : PlotAxes
+        Named 1-D profile view.
     region : RegionDefinition
         ROI in data coordinates on the plot plane.
     mask_mode : str
         ``inside`` or ``outside`` the ROI.
     region_frame : PlotViewFrame
         Display frame of the block the plane axes actually hold.
-    plot_plane_storage_axes : tuple of int, optional
-        Parent plot Y and plot X storage axes.
 
     Returns
     -------
-    tuple
-        ``(profile, [coords], [axis_name])``.
+    xarray.DataArray
+        1-D profile, with the profile axis's own coordinates on it.
 
     Raises
     ------
     ValueError
-        If the plane is missing from ``y``, its shape disagrees with
+        If the plane is missing from ``data``, its shape disagrees with
         ``region_frame``, or the ROI covers no cells.
     """
-    profile_axis_idx = profile_storage_axis(spec)
-    remaining = list(remaining)
-    arrays = list(arrays)
-
-    if y.ndim < 2:
-        raise ValueError(
-            f"expected at least 2D plot plane before ROI reduction, got {y.shape}"
-        )
-
-    # The ROI plane is wherever its two storage axes landed, which is not
-    # always the trailing pair: profiling along a slider axis of a cube
-    # leaves the plane at the *leading* axes, because ``remaining`` is in
-    # ascending storage order and the slider axis can outrank both plane
-    # axes. Locate the plane instead of assuming it.
-    plane_storage = (
-        plot_plane_storage_axes
-        if plot_plane_storage_axes is not None
-        else (region_frame.plot_y_dim, region_frame.plot_x_dim)
+    plane = axes.plane or (
+        region_frame.axis_names[region_frame.plot_y_dim],
+        region_frame.axis_names[region_frame.plot_x_dim],
     )
-    try:
-        plane_tensor = tuple(
-            _reduce_axis_index(remaining, storage_axis)
-            for storage_axis in plane_storage
-        )
-    except ValueError:
+    missing = [dim for dim in plane if dim not in data.dims]
+    if missing:
         raise ValueError(
-            f"plot plane axes {plane_storage} are not present in the "
-            f"fetched array for spec {spec}"
-        ) from None
-    plane_shape = tuple(y.shape[axis] for axis in plane_tensor)
+            f"plot plane axes {plane} are not present in the fetched array "
+            f"{data.dims}"
+        )
+    plane_shape = tuple(data.sizes[dim] for dim in plane)
     if plane_shape != region_frame.shape:
         raise ValueError(
             f"plot plane shape {plane_shape} does not match region frame "
             f"{region_frame.shape}"
         )
 
-    compiled = compile_with_mask_mode(
-        region_frame,
-        region,
-        mask_mode,
-    )
+    compiled = compile_with_mask_mode(region_frame, region, mask_mode)
     if compiled.pixel_count == 0:
         raise ValueError("ROI does not cover any cells")
 
-    y = np.asarray(y, dtype=float)
-    # ``plane_tensor`` is (display row, display column). When storage order
-    # disagrees with display order the mask is transposed to match rather
-    # than reshaped blindly -- the axes it broadcasts over are named, never
-    # inferred from position.
-    plane_mask = compiled.mask
-    if plane_tensor[0] > plane_tensor[1]:
-        plane_mask = plane_mask.T
-        mask_axes = (plane_tensor[1], plane_tensor[0])
-    else:
-        mask_axes = plane_tensor
-    mask_shape = [1] * y.ndim
-    mask_shape[mask_axes[0]] = plane_mask.shape[0]
-    mask_shape[mask_axes[1]] = plane_mask.shape[1]
-    mask = plane_mask.reshape(mask_shape)
-    y = np.where(mask, y, np.nan)
+    data = data.astype(float)
+    data = data.where(xr.DataArray(compiled.mask, dims=list(plane)))
 
-    spatial_storage_axes = _spatial_reduce_storage_axes(
-        spec, plot_plane_storage_axes
-    )
-    spatial_tensor_axes = tuple(
-        _reduce_axis_index(remaining, storage_axis)
-        for storage_axis in sorted(spatial_storage_axes)
-    )
-    spatial_roles = {spec.roles[storage_axis] for storage_axis in spatial_storage_axes}
-    if len(spatial_roles) != 1:
+    spatial = _spatial_dims(axes)
+    roles = {axes.role(dim) for dim in spatial}
+    if len(roles) != 1:
         raise ValueError("mixed spatial reduce roles are not supported")
-    spatial_role = next(iter(spatial_roles))
-    profile = _masked_reduce_along_axes(y, spatial_tensor_axes, spatial_role)
+    profile = _masked_reduce(data, spatial, next(iter(roles)))
 
-    if plot_plane_storage_axes is not None:
-        on_plot_plane = profile_axis_idx in plot_plane_storage_axes
-    else:
-        on_plot_plane = profile_axis_idx in (
-            region_frame.plot_x_dim,
-            region_frame.plot_y_dim,
-        )
-    if on_plot_plane:
-        if plot_plane_storage_axes is not None:
-            plot_y_storage, plot_x_storage = plot_plane_storage_axes
-            profile_axis = (
-                "plot_x"
-                if profile_axis_idx == plot_x_storage
-                else "plot_y"
-            )
-        else:
-            profile_axis = storage_axis_to_plot_axis(
-                region_frame, profile_axis_idx
-            )
+    profile_dim = axes.profile
+    if profile_dim is None:
+        raise ValueError("profile view has no profile dimension")
+    if profile_dim in plane:
+        # The profile runs along the plane itself, so its coordinates come
+        # from the frame the mask was compiled on rather than from the axis
+        # array: on a mesh those are cell centres the frame alone knows.
+        plot_axis = "plot_y" if profile_dim == plane[0] else "plot_x"
         coords = _profile_coords(
-            region_frame, profile_axis, int(profile.shape[-1])
+            region_frame, plot_axis, int(profile.sizes[profile_dim])
         )
-        axis_name = (
+        name = (
             region_frame.plot_x_name
-            if profile_axis == "plot_x"
+            if plot_axis == "plot_x"
             else region_frame.plot_y_name
         )
-    else:
-        profile_axis_index = _reduce_axis_index(remaining, profile_axis_idx)
-        coords = np.asarray(arrays[profile_axis_index], dtype=float)
-        if coords.shape != profile.shape:
-            raise ValueError(
-                f"profile coordinate length {coords.shape} does not match "
-                f"profile shape {profile.shape}"
-            )
-        axis_name = axis_names[profile_axis_idx]
-
-    return np.asarray(profile, dtype=float).reshape(-1), [coords], [axis_name]
+        profile = profile.assign_coords({profile_dim: coords})
+        if name != profile_dim:
+            profile = profile.rename({profile_dim: name})
+    return profile
 
 
 def materialize_view(
-    y: np.ndarray,
-    axis_arrays: Sequence[np.ndarray],
-    axis_names: Sequence[str],
-    spec: Projection,
+    data: xr.DataArray,
+    axes: PlotAxes,
     *,
     region: Optional[RegionDefinition] = None,
     mask_mode: MaskMode = "inside",
     region_frame: Optional[PlotViewFrame] = None,
-    plot_plane_storage_axes: Optional[Tuple[int, int]] = None,
-) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+) -> xr.DataArray:
     """
-    Reduce and transpose loaded data to match a projection.
+    Reduce and transpose loaded data to match a view.
 
     With a region this composes :func:`reduce_before_mask` and
-    :func:`mask_to_profile` back to back, which is right wherever no
-    transform runs between them: the cached-plane path masks a plane the
-    transform has already been applied to. The load path calls the two
-    stages itself so it can transform in between.
+    :func:`mask_to_profile` back to back, which is right wherever no transform
+    runs between them: the cached-plane path masks a plane the transform has
+    already been applied to. The load path calls the two stages itself so it
+    can transform in between.
 
     Parameters
     ----------
-    y : np.ndarray
-        Array loaded with :meth:`Projection.base_slice` for ``spec``.
-    axis_arrays : sequence of np.ndarray
-        Per-storage-axis coordinate arrays (full length along each axis).
-    axis_names : sequence of str
-        Names per storage axis.
-    spec : Projection
-        Projection describing the output view.
+    data : xarray.DataArray
+        Loaded, oriented block.
+    axes : PlotAxes
+        Named view describing the output.
     region : RegionDefinition, optional
-        ROI in data coordinates on the parent 2D plot plane.
+        ROI in data coordinates on the plot plane.
     mask_mode : str
         ``inside`` or ``outside`` the ROI when reducing masked data.
     region_frame : PlotViewFrame, optional
-        Parent 2D view frame required when ``region`` is set.
-    plot_plane_storage_axes : tuple of int, optional
-        Parent plot Y and plot X storage axis indices for stack profiles.
+        View frame required when ``region`` is set.
 
     Returns
     -------
-    tuple
-        ``(y, axis_arrays, axis_names)`` oriented for plot_geometry.
+    xarray.DataArray
+        Reduced array in plot order.
+
+    Raises
+    ------
+    ValueError
+        If a region is given without a frame, or with a 2-D output view.
     """
     if region is None:
-        return _materialize_without_region(y, axis_arrays, axis_names, spec)
+        return reduce_to_plane(data, axes)
     if region_frame is None:
         raise ValueError("region_frame is required when region is set")
-    if spec.plot_ndim != 1:
+    if axes.spec.plot_ndim != 1:
         raise ValueError(
             f"ROI materialization always reduces to a profile, got "
-            f"plot_ndim {spec.plot_ndim}"
+            f"plot_ndim {axes.spec.plot_ndim}"
         )
-    y, arrays, remaining = reduce_before_mask(
-        y,
-        axis_arrays,
-        spec,
-        plot_plane_storage_axes=plot_plane_storage_axes,
-    )
     return mask_to_profile(
-        y,
-        arrays,
-        remaining,
-        axis_names,
-        spec,
+        reduce_before_mask(data, axes),
+        axes,
         region,
         mask_mode,
         region_frame,
-        plot_plane_storage_axes=plot_plane_storage_axes,
     )

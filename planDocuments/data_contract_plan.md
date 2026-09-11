@@ -15,7 +15,7 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1–3 landed 2026-09-10**; steps 4–7 not started. Numbers measured at
+1–4 landed 2026-09-10**; steps 5–7 not started. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -693,11 +693,10 @@ event's value, and matching by name raises because a 6-long norm cannot
 broadcast onto a 3-long plot axis. So the branch is load-bearing and correct
 — it simply had nothing pinning it. It does now, and all four mutations fail.
 
-### Step 4 — the pipeline stages take and return a labelled array
+### Step 4 — the pipeline stages take and return a labelled array ✅ 2026-09-10
 
-**Designed 2026-09-10, not yet implemented.** This is the step the plan was
-written for, so it is designed in full first rather than discovered while
-editing.
+Designed in full before editing, at the maintainer's direction, because this
+is the step the plan was written for.
 
 #### The complaint, in the maintainer's words
 
@@ -852,18 +851,127 @@ allow:
 
 #### Scope
 
-- [ ] New `PlotArray`; the stages take and return it.
-- [ ] Fold in the type-level moves while the signatures are open:
-  `plan_fetch` → `PlotRequest.plan_fetch(plane_frame=None)`,
-  `profile_view_spec` → `Projection.to_profile(axis, reduce)`.
-- [ ] Narrow view-pipeline step 7's exit criterion — "`Projection` gains no
+- [x] `PlotAxes` and `PlaneOrientation`; the stages take and return a bare
+  `xr.DataArray`.
+- [x] `profile_view_spec` → `PlotAxes.to_profile(axis, reduce)`. **Not**
+  `plan_fetch` → `PlotRequest.plan_fetch`: see the deviation below.
+- [x] Narrow view-pipeline step 7's exit criterion — "`Projection` gains no
   reduce method" — to what it meant: a *describing* type may derive another
-  description but may not apply itself to data.
-- [ ] Deletes `_storage_to_tensor`, `_loaded_axis_names`,
+  description but may not apply itself to data. `PlotAxes` derives `PlotAxes`
+  and touches no array.
+- [x] Deletes `_storage_to_tensor`, `_loaded_axis_names`,
   `_loaded_plane_shape`, `_reduce_axis_index`, `_aligned_norm`,
-  `orient_for_display`, `apply_normalization`, and the `remaining` parameter.
-- [ ] Facts: parameter slots **74 → target**, recorded honestly whatever it
-  lands at.
+  `orient_for_display`, `_materialize_without_region`,
+  `_spatial_reduce_storage_axes`, `_global_reduce_storage_axes`,
+  `_normalized_block`, and the `remaining` parameter.
+- [x] Facts: parameter slots **78 → 47**.
+
+#### Outcome
+
+| | before | after |
+|---|---:|---:|
+| parameter slots that are pieces of one concept | 78 | 47 |
+| — storage→tensor map | 4 | **0** |
+| — per-axis names | 12 | 5 |
+| — per-axis coordinates | 18 | 11 |
+| — the plot plane | 11 | 5 |
+| — which axes reversed | 8 | 4 |
+| `run_source.py` code lines | 586 | 468 |
+| `plot_bundle.py` code lines | 452 | 320 |
+| `plot_geometry.py` code lines | 277 | 263 |
+| new: `plot_axes.py` | — | 62 |
+
+(The earlier count of 74 was measured by hand; re-counting the same seven
+concept groups by script gives 78 for the same commit. The script is in the
+step's history and the two numbers are the same measurement, not a change.)
+
+Net across the four files: **1315 → 1113 code lines**, with the deepest part
+of the fetch path down by a third.
+
+`get_plot_bundle` now reads as a pipeline and nothing else, which is what the
+step existed to achieve:
+
+```python
+axes = self._view_by_name(request)
+plan = plan_fetch(request, plane_frame=self._plane_frame(request))
+block = self._block_for_plan(cache_key, plan, axes) or self._load_block(...)
+data, orientation = block
+
+if request.region is None:
+    data = reduce_to_plane(data, axes)
+    data = apply_transform(data, axes, request.transform)
+else:
+    profile = axes.to_profile(request.profile_axis, request.spatial_reduce)
+    data = reduce_before_mask(data, profile)
+    data = apply_transform(data, profile, request.transform)
+    data = mask_to_profile(data, profile, request.region,
+                           request.mask_mode, plan.region_frame)
+return build_plot_bundle(data, orientation, request, label=label)
+```
+
+#### Deviation: `plan_fetch` stayed a function
+
+The plan wanted it as `PlotRequest.plan_fetch(plane_frame=None)`. It was left
+alone: it is the one derivation that *cannot* be a pure method of the request,
+because it needs the parent plane's frame, which only the source can build —
+it reads coordinates. A method that must be handed the thing it depends on is
+a function with extra ceremony. `profile_view_spec` did move, onto `PlotAxes`
+rather than `Projection`, because the profile view needs the parent plane by
+name and only `PlotAxes` knows it.
+
+#### Deviation: normalization does not yet get the coordinate guard
+
+Norm arrays are labelled but **carry no coordinates**, so they align by
+dimension name and position, exactly as the hand-written aligner did. Giving
+them coordinates would activate the `arithmetic_join="exact"` check that step
+2's fly-scan argument was all about — and would change behaviour, since it can
+raise where the current code broadcasts. That is its own step, not a rider on
+this one. It is the single most valuable thing left in this plan.
+
+What *is* closed here is the hazard the conversion created: a synthetic norm's
+only dimension is named after its ROI label, which is foreign to the block, and
+xarray would have broadcast it into a new axis rather than dividing element by
+element. `_norm_arrays` renames it onto the block's leading dimensions, which
+is the same rule the old shape-matching fallback implemented by accident.
+
+#### Verification: seven mutations, three gaps found
+
+Every rewritten stage was reverted individually with the suite in place.
+
+| mutation | result before | after |
+|---|---|---|
+| load skips the display reversal | 10 fail | — |
+| a norm is not reversed with the block | 1 fail | — |
+| a frozen norm keeps its own dim name | 1 fail | — |
+| normalization does nothing | 9 fail | — |
+| `reduce_to_plane` uses `skipna=True` | **survives** | 1 fail |
+| `reduce_to_plane` skips the transpose | **survives** | 1 fail |
+| the ROI mask is built transposed | **survives** | survives *by design* |
+
+The first two survivors were real gaps, both pre-existing: nothing held the
+sum/nansum distinction step 3 established, and nothing held the plot-order
+transpose. Both now have tests.
+
+The third survives because it *should*: a mask labelled with the plane's
+dimension names lands on those axes wherever they are, so building it the
+other way round gives the same answer. That is the property that deleted the
+hand transpose and reshape, and it now has a test of its own rather than being
+an unexamined pass.
+
+#### Two inconsistent test fixtures, found by construction
+
+`xr.DataArray` rejects a coordinate whose length disagrees with its axis, and
+two fixtures had been quietly wrong:
+
+- `test_materialize_stack_profile_4d` built a block whose stack axis
+  broadcast to length **1** while passing a length-3 coordinate for it. "Sum
+  over the stack" was summing one slab. The array is now genuinely 4-D.
+- A mesh test passed `mesh_y` / `mesh_x` row and column means as coordinates.
+  Those are **edge** grids, `n + 1` long. Nothing read them, so nothing
+  noticed.
+
+Neither changes production behaviour. Both are the contract doing on test data
+what it was adopted to do on real data.
 
 **Explicitly not in this step**, both because they are separable and because
 each is its own risk:
@@ -1028,3 +1136,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Step 1 done. Bugs 6, 7 and 15 fixed, with a test per fix verified to fail without it. Two deviations recorded: bug 15 turned out to have a second trigger — selecting a motor whose name is also a real dimension of the key produces the same duplicate — so it took a de-duplication guard as well as removing the motors fallback, with the full separation of dimension from plot coordinate left to step 2; and `KafkaRun` shares bug 7 but is left alone because its `getShape` calls `getData`, which would materialize every buffered array on a live stream. |
 | 2026-09-10 | Step 2 done. Both sources answer `describe` / `load`; `KeyInfo` moved down to `models/data` and was rebuilt around one `{axis name: length}` mapping, which makes bug 6's and bug 15's shapes unrepresentable rather than merely absent. `AxisLayout`, `_truncate_dim_names`, `_frozen_axis_names` and `RunSource.get_plot_hints` deleted. Four deviations recorded: `skipna` has no global option and no call site until step 4; the synthetic-key *convention* moved down rather than `FrozenSpectrum` itself, since the class holds a `PlotBundle` and moving it would have relocated the upward import rather than closed it; `read` asks `load` for no coordinates, since each costs a read of its own key that bare values gain nothing from; and `describe_axes` split into a static `describe` plus `plot_axis_names` rather than collapsing, because the default axis-order rule locates the X key's storage axis by name and stops working without the rename. |
 | 2026-09-10 | Step 3 done. Branches asking "is this key frozen?" went 7 to 1: three dispatched to a method and now go through `RunSource._source`, while four only wanted a fact and read it off `KeyInfo` instead. `CatalogKey` binds a run and a key name so both sources answer the same key-free protocol — an adapter whose body is delegation, which earns its place by being the boundary rather than a layer in front of one. Three of the rewritten branches turned out to be reachable but untested, found by reverting each one with the suite in place rather than by trusting it green; the frozen-norm branch in particular is load-bearing, and dividing a cube's line plot by a frozen stack spectrum is the case that shows why. |
+| 2026-09-10 | Step 4 done. The middle value is a bare `xr.DataArray`; `PlotAxes` names the projection over dimension names once, before any load, and `PlaneOrientation` carries the three display facts from the load to the pack without entering a stage. Parameter slots that are pieces of one concept went 78 to 47, with the storage-to-tensor group to zero; the four files went 1315 to 1113 code lines. Seven mutations run: four bit immediately, two found pre-existing gaps (nothing held the sum/nansum distinction, nothing held the plot-order transpose), and one survives by design because a named mask aligns regardless of how it was built. Building the arrays as `DataArray`s also caught two inconsistent test fixtures -- a stack axis that broadcast to length 1 under a length-3 coordinate, and mesh edge grids passed as cell coordinates. Normalization deliberately stops short of coordinates, so the exact-join guard is not yet active on it; that is the most valuable thing left in this plan. |

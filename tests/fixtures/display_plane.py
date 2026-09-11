@@ -15,10 +15,55 @@ import numpy as np
 from nbs_viewer.models.plot.plot_geometry import (
     PlotBundle,
     display_flips,
-    orient_for_display,
     prepare_2d_bundle,
 )
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
+
+
+def orient_block(
+    y: np.ndarray,
+    axis_arrays: Sequence[np.ndarray],
+    reversed_axes: Sequence[int],
+    storage_to_tensor: dict | None = None,
+) -> Tuple[np.ndarray, list]:
+    """
+    Reverse a loaded block along the given axes, coordinates with it.
+
+    The production path does this with one ``isel`` per flipped dimension on a
+    labelled array, where the coordinate follows the data because they are the
+    same object -- and where an axis the load indexed away simply is not among
+    its dimensions. A test that builds a block by hand has plain numpy, so it
+    flips the two in step and says which array axis each storage axis became.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Loaded block.
+    axis_arrays : sequence of np.ndarray
+        Coordinate array per *storage* axis.
+    reversed_axes : sequence of int
+        Storage axes whose order must reverse.
+    storage_to_tensor : dict, optional
+        Array axis per storage axis. Identity when omitted, which is right
+        for a load that kept every axis.
+
+    Returns
+    -------
+    tuple
+        ``(y, axis_arrays)`` in display order.
+    """
+    arrays = [np.asarray(axis) for axis in axis_arrays]
+    for storage_axis in reversed_axes:
+        tensor_axis = (
+            storage_axis
+            if storage_to_tensor is None
+            else storage_to_tensor.get(storage_axis)
+        )
+        if tensor_axis is None:
+            continue
+        y = np.flip(y, axis=tensor_axis)
+        arrays[storage_axis] = arrays[storage_axis][::-1]
+    return y, arrays
 
 
 def oriented_plane(
@@ -36,11 +81,10 @@ def oriented_plane(
         ``(y, row_axis, col_axis, (row_reversed, col_reversed))``.
     """
     row_reversed, col_reversed = display_flips(row_axis, col_axis, render_mode)
-    reversed_axes = [
-        axis for axis, flip in enumerate((row_reversed, col_reversed)) if flip
-    ]
-    y, (row_axis, col_axis) = orient_for_display(
-        y, [row_axis, col_axis], reversed_axes, {0: 0, 1: 1}
+    y, (row_axis, col_axis) = orient_block(
+        y,
+        [row_axis, col_axis],
+        [axis for axis, flip in enumerate((row_reversed, col_reversed)) if flip],
     )
     return y, row_axis, col_axis, (row_reversed, col_reversed)
 
@@ -117,18 +161,127 @@ def roi_profile_from_block(
     tuple
         ``(profile, coords, names)``.
     """
-    from nbs_viewer.models.plot.plot_bundle import materialize_view
-    from nbs_viewer.models.plot.view_spec import profile_view_spec
+    import xarray as xr
 
-    return materialize_view(
-        y,
-        axis_arrays,
+    from nbs_viewer.models.plot.plot_axes import PlotAxes
+    from nbs_viewer.models.plot.plot_bundle import materialize_view
+
+    axis_names = list(axis_names)
+    # The block is what the plan loaded, so an axis the slice indexed away is
+    # not one of its dimensions -- the same rule ``RunSource._load_block``
+    # applies. ``axis_names`` and ``axis_arrays`` stay per *storage* axis.
+    surviving = [
+        axis
+        for axis, item in enumerate(plan.slice_info)
+        if not isinstance(item, (int, np.integer))
+    ]
+    data = xr.DataArray(
+        np.asarray(y),
+        dims=[axis_names[axis] for axis in surviving],
+        coords={
+            axis_names[axis]: np.asarray(axis_arrays[axis])
+            for axis in surviving
+        },
+    )
+    axes = PlotAxes.of(
+        request.view,
         axis_names,
-        profile_view_spec(
-            request.view, request.profile_axis, request.spatial_reduce
+        plane=(
+            None
+            if plan.plane_axes is None
+            else (
+                axis_names[plan.plane_axes[0]],
+                axis_names[plan.plane_axes[1]],
+            )
         ),
+    ).to_profile(request.profile_axis, request.spatial_reduce)
+    profile = materialize_view(
+        data,
+        axes,
         region=request.region,
         mask_mode=request.mask_mode,
         region_frame=plan.region_frame,
-        plot_plane_storage_axes=plan.plane_axes,
+    )
+    dim = profile.dims[0]
+    return (
+        profile.values,
+        [np.asarray(profile.coords[dim].values)],
+        [str(dim)],
+    )
+
+
+def labelled_block(y, axis_arrays, axis_names):
+    """
+    Build the labelled array the load boundary produces.
+
+    ``RunSource._load_block`` names the loaded array's dimensions and attaches
+    the coordinates it read, and everything downstream addresses it by name. A
+    test that builds a block by hand has to do the same, so it is doing it
+    once here rather than in every test body.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Loaded, oriented block.
+    axis_arrays : sequence of np.ndarray
+        Coordinate array per axis.
+    axis_names : sequence of str
+        Name per axis.
+
+    Returns
+    -------
+    xarray.DataArray
+        Labelled block.
+    """
+    import xarray as xr
+
+    names = list(axis_names)
+    return xr.DataArray(
+        np.asarray(y),
+        dims=names,
+        coords={
+            name: np.asarray(array)
+            for name, array in zip(names, axis_arrays)
+        },
+    )
+
+
+def profile_axes(
+    parent,
+    axis_names,
+    profile_storage_axis,
+    spatial_reduce="sum",
+    plane_axes=None,
+):
+    """
+    Name a parent view and derive the ROI profile view from it.
+
+    Parameters
+    ----------
+    parent : Projection
+        Parent 2-D view.
+    axis_names : sequence of str
+        Name per storage axis.
+    profile_storage_axis : int
+        Storage axis the profile runs along.
+    spatial_reduce : str, optional
+        ``sum`` or ``mean`` within the ROI.
+    plane_axes : tuple of int, optional
+        Parent plot plane storage axes, when it is not the parent's own.
+
+    Returns
+    -------
+    PlotAxes
+        Named profile view.
+    """
+    from nbs_viewer.models.plot.plot_axes import PlotAxes
+
+    names = list(axis_names)
+    plane = (
+        None
+        if plane_axes is None
+        else (names[plane_axes[0]], names[plane_axes[1]])
+    )
+    return PlotAxes.of(parent, names, plane=plane).to_profile(
+        profile_storage_axis, spatial_reduce
     )

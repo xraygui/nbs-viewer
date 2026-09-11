@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 
+from tests.fixtures.display_plane import orient_block
 from nbs_viewer.models.plot.plot_geometry import (
     classify_render_mode,
     display_flips,
     is_uniform_1d,
-    orient_for_display,
     prepare_2d_bundle,
     prepare_1d_bundle,
 )
@@ -26,8 +26,8 @@ def _packed_for_display(y, row_axis, col_axis, axis_names, render_mode):
         for axis, flip in enumerate((row_reversed, col_reversed))
         if flip
     ]
-    y, (row_axis, col_axis) = orient_for_display(
-        y, [row_axis, col_axis], reversed_axes, {0: 0, 1: 1}
+    y, (row_axis, col_axis) = orient_block(
+        y, [row_axis, col_axis], reversed_axes
     )
     return prepare_2d_bundle(
         y,

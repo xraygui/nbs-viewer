@@ -11,7 +11,6 @@ from typing import (
     TYPE_CHECKING,
     List,
     Literal,
-    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -20,9 +19,66 @@ from typing import (
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - annotation only
+    import xarray as xr
+
     from .plot_request import PlotRequest
 
 RenderMode = Literal["line", "image", "mesh"]
+
+
+@dataclass(frozen=True)
+class PlaneOrientation:
+    """
+    How the loaded plot plane ended up facing, recorded where it was decided.
+
+    Three facts xarray cannot carry -- ``.attrs`` is dropped silently by
+    ``.sum()``, by arithmetic and by ``where()``, which are three of the
+    pipeline's own stages. They are produced by the load, where the
+    coordinates are still visible, and read by exactly one consumer: the step
+    that packs a :class:`PlotBundle`. No stage in between looks at them, which
+    is why they ride alongside the array rather than on it.
+
+    Reversal is two booleans rather than a set of dimension names because a
+    flip only ever applies to the plot plane's two axes:
+    ``FetchPlan.reversed_axes_for`` returns a subset of ``plane_axes`` and
+    nothing else.
+
+    Parameters
+    ----------
+    render_mode : str or None
+        ``image`` or ``mesh``, classified from the loaded plane's coordinates
+        before any reduction -- the orientation decision depends on it. None
+        when there is no plane to classify.
+    row_reversed : bool
+        Whether display rows are the reverse of storage order.
+    col_reversed : bool
+        Same for display columns.
+    """
+
+    render_mode: Optional[str] = None
+    row_reversed: bool = False
+    col_reversed: bool = False
+
+    def reversed_dims(
+        self, plane: Optional[Sequence[str]]
+    ) -> Tuple[str, ...]:
+        """
+        Return the plane dimensions that were flipped.
+
+        Parameters
+        ----------
+        plane : sequence of str or None
+            The plot plane's ``(row, column)`` dimension names.
+
+        Returns
+        -------
+        tuple of str
+            Flipped dimension names, empty when nothing was flipped.
+        """
+        if not plane:
+            return ()
+        flips = (self.row_reversed, self.col_reversed)
+        return tuple(dim for dim, flip in zip(plane, flips) if flip)
 
 
 @dataclass
@@ -182,49 +238,6 @@ def display_flips(
         bool(row.size >= 2 and row[1] > row[0]),
         bool(col.size >= 2 and col[1] < col[0]),
     )
-
-
-def orient_for_display(
-    y: np.ndarray,
-    axis_arrays: Sequence[np.ndarray],
-    reversed_storage_axes: Sequence[int],
-    storage_to_tensor: Mapping[int, int],
-) -> Tuple[np.ndarray, List[np.ndarray]]:
-    """
-    Reverse loaded axes so the plot plane is in display order.
-
-    Called once, immediately after the load, so that everything downstream --
-    ROI masking above all -- works on display-ordered data. ``axis_arrays`` is
-    indexed by storage axis while ``y`` is indexed by tensor axis, because
-    INDEX axes are dropped by the load; ``storage_to_tensor`` bridges the two.
-
-    Parameters
-    ----------
-    y : np.ndarray
-        Loaded array, in storage order.
-    axis_arrays : sequence of np.ndarray
-        Coordinate array per storage axis. May be empty for an array whose
-        coordinates the caller does not track, such as a normalization key.
-    reversed_storage_axes : sequence of int
-        Storage axes whose order must reverse.
-    storage_to_tensor : mapping
-        Tensor axis of ``y`` for each storage axis present in it.
-
-    Returns
-    -------
-    tuple
-        ``(y, axis_arrays)`` in display order along the reversed axes.
-    """
-    out = np.asarray(y)
-    arrays = list(axis_arrays)
-    for storage_axis in reversed_storage_axes:
-        tensor_axis = storage_to_tensor.get(storage_axis)
-        if tensor_axis is None:
-            continue
-        out = np.flip(out, axis=tensor_axis)
-        if storage_axis < len(arrays):
-            arrays[storage_axis] = np.asarray(arrays[storage_axis])[::-1]
-    return out, arrays
 
 
 def _extent_from_uniform_1d(
@@ -535,37 +548,30 @@ def prepare_2d_bundle(
 
 
 def build_plot_bundle(
-    y: np.ndarray,
-    coords: Sequence[np.ndarray],
-    names: Sequence[str],
+    data: "xr.DataArray",
+    orientation: PlaneOrientation,
     request: "PlotRequest",
     *,
-    render_mode_hint: Optional[str] = None,
     label: str = "",
-    row_reversed: bool = False,
-    col_reversed: bool = False,
 ):
     """
-    Pack plot-plane arrays into a :class:`PlotBundle`.
+    Pack a finished labelled array into a :class:`PlotBundle`.
+
+    The array's trailing dimensions are the plot axes and carry their own
+    coordinates, so the names and coordinate arrays are read off it rather
+    than passed alongside. The orientation is the one thing it cannot carry:
+    xarray drops ``attrs`` through the reduce, the divide and the mask.
 
     Parameters
     ----------
-    y : np.ndarray
-        Plot-plane data.
-    coords : sequence of np.ndarray
-        Plot-plane coordinate arrays.
-    names : sequence of str
-        Plot-plane axis names.
+    data : xarray.DataArray
+        Reduced, transformed array in plot order.
+    orientation : PlaneOrientation
+        Render mode and axis reversal recorded at the load.
     request : PlotRequest
         Used to detect ROI profile output.
-    render_mode_hint : str, optional
-        Explicit ``image`` / ``mesh`` hint for 2-D data.
     label : str, optional
         Display name for a 1-D ROI profile.
-    row_reversed : bool
-        Whether the caller reversed the plot Y axis to reach display order.
-    col_reversed : bool
-        Whether the caller reversed the plot X axis.
 
     Returns
     -------
@@ -575,16 +581,23 @@ def build_plot_bundle(
     Raises
     ------
     ValueError
-        If ``y`` is missing, an ROI profile is empty, or ``y.ndim`` is not
-        1 or 2.
+        If an ROI profile is empty, or the output is neither 1-D nor 2-D.
     """
+    y = np.asarray(data.values)
+    names = [str(dim) for dim in data.dims[-2:]] if y.ndim >= 2 else [
+        str(dim) for dim in data.dims
+    ]
+    coords = [
+        np.asarray(data.coords[dim].values)
+        if dim in data.coords
+        else np.arange(data.sizes[dim], dtype=float)
+        for dim in names
+    ]
     if request.region is not None:
         if not np.isfinite(y).any():
             raise ValueError("ROI profile is empty after reduction")
         display_label = label or (names[0] if names else "profile")
         return prepare_1d_bundle(y, coords, [display_label])
-    if y is None:
-        raise ValueError(f"Plot data for {request.ykey!r} is missing")
     if y.ndim == 1:
         return prepare_1d_bundle(y, coords, names)
     if y.ndim == 2:
@@ -592,8 +605,8 @@ def build_plot_bundle(
             y,
             coords,
             names,
-            render_mode_hint=render_mode_hint,
-            row_reversed=row_reversed,
-            col_reversed=col_reversed,
+            render_mode_hint=orientation.render_mode,
+            row_reversed=orientation.row_reversed,
+            col_reversed=orientation.col_reversed,
         )
     raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")

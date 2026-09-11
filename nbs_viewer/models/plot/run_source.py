@@ -11,25 +11,26 @@ from ..data.key_info import KeyInfo
 from ..data.key_source import CatalogKey
 from .frozen_spectrum import FrozenSpectrum
 from .run_identity import RunIdentity
+from .plot_axes import PlotAxes
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
     mask_to_profile,
-    materialize_view,
     reduce_before_mask,
     reduce_cached_plane,
+    reduce_to_plane,
     slice_info_for_key,
 )
 from .plot_geometry import (
+    PlaneOrientation,
     PlotBundle,
     build_plot_bundle,
     classify_render_mode,
     display_flips,
-    orient_for_display,
 )
+from ..data.array_contract import labelled_array
 from .plot_request import FetchPlan, PlotRequest, plan_fetch
 from .plot_view_frame import PlotViewFrame, frame_for_plane
-from .view_spec import profile_view_spec
 from nbs_viewer.utils import print_debug
 
 
@@ -607,32 +608,6 @@ class RunSource(QObject):
             col_reversed=col_reversed,
         )
 
-    def _storage_to_tensor(self, slice_info: Sequence) -> Dict[int, int]:
-        """
-        Map storage axis to tensor axis for an array loaded with a slice.
-
-        Integer items index a dimension away, so the loaded array is missing
-        those axes while coordinate arrays and roles remain storage-indexed.
-
-        Parameters
-        ----------
-        slice_info : sequence
-            Per-storage-axis slice or index used for the load.
-
-        Returns
-        -------
-        dict
-            Tensor axis of the loaded array, per surviving storage axis.
-        """
-        return {
-            storage_axis: tensor_axis
-            for tensor_axis, storage_axis in enumerate(
-                axis
-                for axis, item in enumerate(slice_info)
-                if not isinstance(item, int)
-            )
-        }
-
     def _render_hint(self, ykey: str) -> Optional[str]:
         """
         Return the declared render mode for a key, if any.
@@ -657,143 +632,140 @@ class RunSource(QObject):
     def _plane_render_mode(
         self,
         ykey: str,
-        axis_arrays: Sequence[np.ndarray],
-        plane_axes: Optional[Tuple[int, int]],
-        plane_shape: Optional[Tuple[int, int]],
+        data: xr.DataArray,
+        axes: PlotAxes,
     ) -> Optional[str]:
         """
         Classify the render mode of the loaded plot plane.
 
         Classified before any reduction, because the orientation decision
         depends on it and orientation happens immediately after the load. The
-        answer is passed on as an explicit hint so the packing step does not
-        classify a second time.
+        answer is recorded on the :class:`PlaneOrientation` so the packing
+        step does not classify a second time.
 
         Parameters
         ----------
         ykey : str
             Y data key, for the plot-hint lookup.
-        axis_arrays : sequence of np.ndarray
-            Coordinate array per storage axis.
-        plane_axes : tuple of int, optional
-            Storage axes of the plot plane.
-        plane_shape : tuple of int, optional
-            Shape of the loaded plane, when it is present in the array.
+        data : xarray.DataArray
+            Loaded block, before orientation.
+        axes : PlotAxes
+            Named view, for the plane's dimension names.
 
         Returns
         -------
         str or None
-            ``image`` or ``mesh``, or the bare hint when there is no plane.
+            ``image`` or ``mesh``, or the bare hint when the plane is not in
+            the loaded array.
         """
         hint = self._render_hint(ykey)
-        if plane_axes is None or plane_shape is None:
+        plane = axes.plane
+        if plane is None or any(dim not in data.dims for dim in plane):
             return hint
-        row_axis, col_axis = plane_axes
         return classify_render_mode(
-            plane_shape,
-            [axis_arrays[row_axis], axis_arrays[col_axis]],
+            tuple(data.sizes[dim] for dim in plane),
+            [np.asarray(data.coords[dim].values) for dim in plane],
             render_mode_hint=hint,
         )
 
-    @staticmethod
-    def _loaded_axis_names(
-        slice_info: Sequence, storage_names: Sequence[str]
-    ) -> List[str]:
+    def _view_by_name(self, request: PlotRequest) -> PlotAxes:
         """
-        Names of the axes an array loaded on ``slice_info`` still has.
+        Name the request's projection, once, before anything is read.
 
-        Integer items index a dimension away, so the loaded array is missing
-        those axes while the storage names still list them.
+        Every stage after the load takes this and never sees a storage axis
+        index again. It is derived from the request alone: which dimension
+        plays which role, and what order they end up in, are decided by the
+        view and the X selection rather than by anything the data turns out
+        to be.
 
         Parameters
         ----------
-        slice_info : sequence
-            Per-storage-axis slice or index used for the load.
-        storage_names : sequence of str
-            Name per storage axis.
-
-        Returns
-        -------
-        list of str
-            Name per tensor axis of the loaded array.
-        """
-        return [
-            name
-            for name, item in zip(storage_names, slice_info)
-            if not isinstance(item, int)
-        ]
-
-    def _normalized_block(
-        self,
-        y: np.ndarray,
-        request: PlotRequest,
-        slice_info: tuple,
-        y_storage_names: Sequence[str],
-        reversed_names: Sequence[str] = (),
-    ) -> np.ndarray:
-        """
-        Divide each norm key into the oriented block, element by element.
-
-        Normalization runs here -- immediately after the orientation and
-        before any SUM or MEAN -- because that is the physically right
-        order: a flat field divides per pixel and only then is summed.
-        Running it after the projection reduce forced every norm array to be
-        reduced the same way ``y`` had been, which is the only thing the
-        per-key reduction helper deleted in step 7 existed for.
-
-        Parameters
-        ----------
-        y : np.ndarray
-            Loaded block, in display order.
         request : PlotRequest
-            Supplies norm keys and x keys.
-        slice_info : tuple
-            Load slice used for the y key.
-        y_storage_names : sequence of str
-            Full storage names of the y key.
-        reversed_names : sequence of str
-            Names of the storage axes reversed to reach display order. A norm
-            key sharing one of them must be reversed the same way, or it would
-            be divided into ``y`` upside down.
+            Frozen plot description.
 
         Returns
         -------
-        np.ndarray
-            Normalized block.
+        PlotAxes
+            The projection, by dimension name.
+        """
+        return PlotAxes.of(
+            request.view,
+            self.plot_axis_names(request.ykey, request.xkeys),
+        )
+
+    def _norm_arrays(
+        self,
+        request: PlotRequest,
+        plan: FetchPlan,
+        axes: PlotAxes,
+        data: xr.DataArray,
+        orientation: PlaneOrientation,
+    ) -> List[xr.DataArray]:
+        """
+        Read each normalization key, labelled and oriented to match the block.
+
+        Normalization runs immediately after the orientation and before any
+        SUM or MEAN, because that is the physically right order: a flat field
+        divides per pixel and only then is summed.
+
+        A catalog norm shares axis *names* with the block, so it takes the
+        block's slice on the axes it has and is flipped the same way -- a norm
+        divided into an image upside down is a silent wrong answer. A frozen
+        synthetic norm shares no name with anything: it is a per-event
+        quantity that took the block's own slice, so its axes correspond in
+        order to the block's leading axes and are named after them. Without
+        that renaming xarray would broadcast it into a *new* dimension instead
+        of dividing element by element -- the hand-written aligner this
+        replaced fell back to matching by shape, which is the same rule stated
+        as a coincidence.
+
+        Parameters
+        ----------
+        request : PlotRequest
+            Supplies norm keys and X keys.
+        plan : FetchPlan
+            Load slices used for the Y key.
+        axes : PlotAxes
+            Named view of the Y key.
+        data : xarray.DataArray
+            The oriented block, for its dimension names.
+        orientation : PlaneOrientation
+            Which plane axes were flipped.
+
+        Returns
+        -------
+        list of xarray.DataArray
+            One labelled array per normalization key.
         """
         if not request.norm_keys:
-            return y
+            return []
+        slice_info = plan.slice_info
         xkeys = list(request.xkeys)
-        reversed_names = set(reversed_names)
-        block_names = self._loaded_axis_names(slice_info, y_storage_names)
-        norms = []
+        reversed_dims = set(orientation.reversed_dims(axes.plane))
+        norms: List[xr.DataArray] = []
         for norm_key in request.norm_keys:
+            if self.describe(norm_key).synthetic:
+                values = self.read(norm_key, slice_info)
+                norms.append(
+                    xr.DataArray(values, dims=list(data.dims[: values.ndim]))
+                )
+                continue
             norm_names = list(self.plot_axis_names(norm_key, xkeys))
-            # A fact off the description, not a second lookup of the source.
-            frozen = self.describe(norm_key).synthetic
-            key_slice = (
-                slice_info
-                if frozen
-                else slice_info_for_key(slice_info, y_storage_names, norm_names)
+            key_slice = slice_info_for_key(
+                slice_info, list(axes.names), norm_names
             )
-            arr = self.read(norm_key, key_slice)
-            arr, _ = orient_for_display(
-                arr,
-                (),
-                [
-                    axis
-                    for axis, name in enumerate(norm_names)
-                    if name in reversed_names
-                ],
-                self._storage_to_tensor(key_slice),
-            )
-            names = (
-                list(norm_names)
-                if frozen
-                else self._loaded_axis_names(key_slice, norm_names)
-            )
-            norms.append((arr, names))
-        return apply_normalization(y, block_names, norms)
+            values = self.read(norm_key, key_slice)
+            dims = [
+                name
+                for name, item in zip(norm_names, key_slice)
+                if not isinstance(item, (int, np.integer))
+            ]
+            norm = xr.DataArray(values, dims=dims)
+            for dim in dims:
+                if dim in reversed_dims:
+                    norm = norm.isel({dim: slice(None, None, -1)})
+            norms.append(norm)
+        return norms
 
     @staticmethod
     def _contained_window(
@@ -864,8 +836,8 @@ class RunSource(QObject):
         return (request.ykey, request.xkeys, request.norm_keys)
 
     def _block_for_plan(
-        self, cache_key: Tuple, plan: FetchPlan
-    ) -> Optional[Tuple]:
+        self, cache_key: Tuple, plan: FetchPlan, axes: PlotAxes
+    ) -> Optional[Tuple[xr.DataArray, PlaneOrientation]]:
         """
         Serve an oriented, normalized block from memory if one covers it.
 
@@ -875,52 +847,54 @@ class RunSource(QObject):
             Key from :meth:`_block_cache_key`.
         plan : FetchPlan
             Plan the caller is about to execute.
+        axes : PlotAxes
+            Named view, for mapping a storage axis to its dimension.
 
         Returns
         -------
         tuple or None
-            ``(y, axis_arrays, axis_names, render_hint, reversed_axes)``
-            narrowed to ``plan``, or None when a read is needed.
+            ``(data, orientation)`` narrowed to ``plan``, or None when a read
+            is needed.
         """
         if self._block is None:
             return None
-        held_key, held_plan, y, axes, names, hint, reversed_axes = self._block
+        held_key, held_plan, data, orientation = self._block
         if held_key != cache_key or held_plan.plane_axes != plan.plane_axes:
             return None
         windows = self._contained_window(held_plan.slice_info, plan.slice_info)
         if windows is None:
             return None
 
-        tensor_axes = self._storage_to_tensor(held_plan.slice_info)
-        axes = list(axes)
+        reversed_dims = set(orientation.reversed_dims(axes.plane))
         for storage_axis, window in enumerate(windows):
             if window is None:
                 continue
-            tensor_axis = tensor_axes[storage_axis]
-            length = y.shape[tensor_axis]
+            dim = axes.names[storage_axis]
+            if dim not in data.dims:
+                continue
+            length = data.sizes[dim]
             start, stop = window
             stop = length if stop is None else stop
-            if storage_axis in reversed_axes:
+            if dim in reversed_dims:
                 # The block was flipped along this axis at load, so the
                 # storage window sits at the mirrored position in it.
                 lo, hi = length - stop, length - start
             else:
                 lo, hi = start, stop
-            index = [slice(None)] * y.ndim
-            index[tensor_axis] = slice(lo, hi)
-            y = y[tuple(index)]
-            if storage_axis < len(axes):
-                axes[storage_axis] = np.asarray(axes[storage_axis])[lo:hi]
-        return y, axes, list(names), hint, reversed_axes
+            data = data.isel({dim: slice(lo, hi)})
+        return data, orientation
 
     def _load_block(
-        self, request: PlotRequest, plan: FetchPlan
-    ) -> Tuple:
+        self, request: PlotRequest, plan: FetchPlan, axes: PlotAxes
+    ) -> Tuple[xr.DataArray, PlaneOrientation]:
         """
-        Read, orient and normalize the block a plan asks for.
+        Read, label, orient and normalize the block a plan asks for.
 
         The stages that depend only on the fetch plan, so that the ones that
         do not -- reduce, transform, mask -- can be re-run without a read.
+
+        This is also the boundary where storage axis indices stop. Everything
+        it returns is addressed by dimension name.
 
         Parameters
         ----------
@@ -928,53 +902,68 @@ class RunSource(QObject):
             Request being served.
         plan : FetchPlan
             Load slices for it.
+        axes : PlotAxes
+            Named view of the Y key.
 
         Returns
         -------
         tuple
-            ``(y, axis_arrays, axis_names, render_hint, reversed_axes)``.
+            ``(data, orientation)``.
         """
         slice_info = plan.slice_info
         ykey = request.ykey
-        xkeys = list(request.xkeys)
 
         t0 = ttime.time()
-        storage_axes, storage_names, _extra = self.load_axes(
-            ykey, xkeys, slice_info
+        storage_coords, _names, _extra = self.load_axes(
+            ykey, list(request.xkeys), slice_info
         )
-        y = self.read(ykey, slice_info)
+        values = self.read(ykey, slice_info)
         t_load = ttime.time() - t0
 
-        tensor_axes = self._storage_to_tensor(slice_info)
-        render_hint = self._plane_render_mode(
-            ykey,
-            storage_axes,
-            plan.plane_axes,
-            self._loaded_plane_shape(y, plan.plane_axes, tensor_axes),
-        )
-        reversed_axes = plan.reversed_axes_for(storage_axes, render_hint)
-        y, storage_axes = orient_for_display(
-            y, storage_axes, reversed_axes, tensor_axes
-        )
-        reversed_names = [
-            storage_names[axis]
-            for axis in reversed_axes
-            if axis < len(storage_names)
+        surviving = [
+            axis
+            for axis, item in enumerate(slice_info)
+            if not isinstance(item, (int, np.integer))
         ]
+        data = labelled_array(
+            values,
+            [axes.names[axis] for axis in surviving],
+            coords={
+                axes.names[axis]: np.asarray(storage_coords[axis])
+                for axis in surviving
+            },
+            name=ykey,
+        )
+
+        render_mode = self._plane_render_mode(ykey, data, axes)
+        reversed_axes = plan.reversed_axes_for(storage_coords, render_mode)
+        plane_axes = plan.plane_axes or ()
+        orientation = PlaneOrientation(
+            render_mode=render_mode,
+            row_reversed=bool(plane_axes and plane_axes[0] in reversed_axes),
+            col_reversed=bool(plane_axes and plane_axes[1] in reversed_axes),
+        )
+        # One reversal per flipped axis, and the coordinate follows the data
+        # because they are the same object. This replaced a flip of the array
+        # by tensor axis plus a separate flip of a coordinate list by storage
+        # axis, with a map between the two.
+        for dim in orientation.reversed_dims(axes.plane):
+            if dim in data.dims:
+                data = data.isel({dim: slice(None, None, -1)})
 
         t0 = ttime.time()
-        y = self._normalized_block(
-            y, request, slice_info, storage_names, reversed_names
+        data = apply_normalization(
+            data, self._norm_arrays(request, plan, axes, data, orientation)
         )
         t_norm = ttime.time() - t0
 
         print_debug(
             "RunSource._load_block",
-            f"{ykey} shape={getattr(y, 'shape', None)} "
+            f"{ykey} shape={data.shape} "
             f"load={t_load:.4f}s norm={t_norm:.4f}s",
             category="plots",
         )
-        return y, storage_axes, storage_names, render_hint, reversed_axes
+        return data, orientation
 
     def get_plot_bundle(
         self,
@@ -1037,110 +1026,50 @@ class RunSource(QObject):
                 plane = self.get_plot_bundle(request.plane_request)
             return reduce_cached_plane(plane, request, label=label)
 
+        axes = self._view_by_name(request)
         plan = plan_fetch(request, plane_frame=self._plane_frame(request))
         cache_key = self._block_cache_key(request)
-        block = self._block_for_plan(cache_key, plan)
+        block = self._block_for_plan(cache_key, plan, axes)
         if block is None:
-            block = self._load_block(request, plan)
+            block = self._load_block(request, plan, axes)
             self._block = (cache_key, plan) + block
-        y, storage_axes, storage_names, render_hint, reversed_axes = block
-
-        plane_axes = plan.plane_axes or ()
-        row_reversed = bool(plane_axes and plane_axes[0] in reversed_axes)
-        col_reversed = bool(plane_axes and plane_axes[1] in reversed_axes)
+        data, orientation = block
 
         t0 = ttime.time()
         if request.region is None:
-            y, coords, names = materialize_view(
-                y, storage_axes, storage_names, request.view
-            )
-            coords, y = apply_transform(coords, y, request.transform)
+            data = reduce_to_plane(data, axes)
+            data = apply_transform(data, axes, request.transform)
         else:
             # Off-plane profile: the plane the user sees is one slice of the
             # block, so reduce to that stack, transform it, and only then
-            # mask. The profile axis is read in full by plan_fetch.
-            spec = profile_view_spec(
-                request.view, request.profile_axis, request.spatial_reduce
+            # mask. The profile axis is read in full by plan_fetch. The
+            # transform sees the plane's own coordinates either way, so ``x``
+            # means the same thing here as when the plane itself is drawn.
+            profile = axes.to_profile(
+                request.profile_axis, request.spatial_reduce
             )
-            y, arrays, remaining = reduce_before_mask(
-                y,
-                storage_axes,
-                spec,
-                plot_plane_storage_axes=plan.plane_axes,
-            )
-            # The transform is handed the plane's own two coordinate arrays,
-            # in plot order, so ``x`` means the same thing here as it does
-            # when the plane itself is drawn. Its coordinates are discarded:
-            # the profile's x axis is the profile axis, which
-            # ``mask_to_profile`` resolves.
-            _plane_coords, y = apply_transform(
-                [arrays[remaining.index(axis)] for axis in plan.plane_axes],
-                y,
-                request.transform,
-            )
-            y, coords, names = mask_to_profile(
-                y,
-                arrays,
-                remaining,
-                storage_names,
-                spec,
+            data = reduce_before_mask(data, profile)
+            data = apply_transform(data, profile, request.transform)
+            data = mask_to_profile(
+                data,
+                profile,
                 request.region,
                 request.mask_mode,
                 plan.region_frame,
-                plot_plane_storage_axes=plan.plane_axes,
             )
         t_reduce = ttime.time() - t0
 
         print_debug(
             "RunSource.get_plot_bundle",
-            f"{request.ykey} shape={getattr(y, 'shape', None)} "
+            f"{request.ykey} shape={data.shape} "
             f"cached={self._block is not None} reduce={t_reduce:.4f}s",
             category="plots",
         )
 
         info = self.describe(request.ykey)
-        if info.synthetic and y.ndim == 1:
-            names = [label or info.label]
-        return build_plot_bundle(
-            y,
-            coords,
-            names,
-            request,
-            render_mode_hint=render_hint,
-            label=label,
-            row_reversed=row_reversed,
-            col_reversed=col_reversed,
-        )
-
-    @staticmethod
-    def _loaded_plane_shape(
-        y: np.ndarray,
-        plane_axes: Optional[Tuple[int, int]],
-        tensor_axes: Mapping[int, int],
-    ) -> Optional[Tuple[int, int]]:
-        """
-        Return the shape of the plot plane inside a loaded array.
-
-        Parameters
-        ----------
-        y : np.ndarray
-            Loaded array.
-        plane_axes : tuple of int, optional
-            Storage axes of the plot plane.
-        tensor_axes : mapping
-            Storage-to-tensor axis map for ``y``.
-
-        Returns
-        -------
-        tuple of int or None
-            ``(rows, columns)``, or None when the plane is not in ``y``.
-        """
-        if plane_axes is None:
-            return None
-        row_axis, col_axis = plane_axes
-        if row_axis not in tensor_axes or col_axis not in tensor_axes:
-            return None
-        return (y.shape[tensor_axes[row_axis]], y.shape[tensor_axes[col_axis]])
+        if info.synthetic and data.ndim == 1:
+            data = data.rename({data.dims[0]: label or info.label})
+        return build_plot_bundle(data, orientation, request, label=label)
 
     @property
     def dynamic_update(self) -> bool:

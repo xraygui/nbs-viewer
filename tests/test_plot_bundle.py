@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
@@ -21,7 +22,11 @@ from nbs_viewer.models.sources.fixtures import (
     voltage_axis,
     vppem_factors,
 )
+import xarray as xr
+
+from nbs_viewer.models.plot.plot_axes import PlotAxes
 from tests.fixtures.catalog_recipes import image_scan_run
+from tests.fixtures.display_plane import labelled_block
 
 
 VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
@@ -57,29 +62,81 @@ def test_slice_info_for_key_by_name():
     assert got == (4,)
 
 
+def _line_axes(names):
+    """Name a 1-D view over the given dimension names."""
+    return PlotAxes.of(
+        ViewIntent(plot_ndim=1).project(len(names)), list(names)
+    )
+
+
 def test_apply_normalization_rank1_onto_rank2():
+    """A norm broadcasts onto the axis it names, and only that one."""
     y = np.arange(12.0).reshape(3, 4)
     norm = np.array([2.0, 3.0, 4.0])
     out = apply_normalization(
-        y,
-        ["voltage", "dim_2"],
-        [(norm, ["voltage"])],
+        labelled_block(y, [np.arange(3.0), np.arange(4.0)], ["voltage", "dim_2"]),
+        [xr.DataArray(norm, dims=["voltage"])],
     )
-    np.testing.assert_allclose(out, y / norm[:, None])
+    np.testing.assert_allclose(out.values, y / norm[:, None])
+    assert out.dims == ("voltage", "dim_2")
+
+
+def test_apply_normalization_refuses_an_axis_the_data_does_not_have():
+    """
+    Without this, xarray broadcasts into a *new* dimension.
+
+    Measured: a (3, 4) array divided by a 3-long array named something the
+    data does not have returns (3, 4, 3), silently. The hand-written aligner
+    this replaced raised instead, and so does this.
+    """
+    data = labelled_block(
+        np.ones((3, 4)), [np.arange(3.0), np.arange(4.0)], ["voltage", "dim_2"]
+    )
+    with pytest.raises(ValueError, match="cannot broadcast norm axes"):
+        apply_normalization(data, [xr.DataArray(np.ones(3), dims=["roi"])])
 
 
 def test_apply_transform_expression():
-    x = [np.array([1.0, 2.0, 3.0])]
-    y = np.array([10.0, 20.0, 30.0])
-    coords, out = apply_transform(x, y, "y = y / 10")
-    np.testing.assert_allclose(out, [1.0, 2.0, 3.0])
-    np.testing.assert_allclose(coords[0], [1.0, 2.0, 3.0])
+    """An expression rebinds y, and the coordinates come back unchanged."""
+    data = labelled_block(
+        np.array([10.0, 20.0, 30.0]), [np.array([1.0, 2.0, 3.0])], ["x"]
+    )
+    out = apply_transform(data, _line_axes(["x"]), "y = y / 10")
+    np.testing.assert_allclose(out.values, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(out.coords["x"].values, [1.0, 2.0, 3.0])
+
+
+def test_apply_transform_can_rewrite_the_coordinates_too():
+    """
+    ``x`` is writable, and the rewritten axis lands on the array.
+
+    It used to be returned as a second value the caller threaded onward. Now
+    it is read back out of the symbol table and assigned, so a transform that
+    rescales an axis keeps the values and the axis together.
+    """
+    data = labelled_block(
+        np.array([1.0, 2.0]), [np.array([0.0, 1.0])], ["x"]
+    )
+    out = apply_transform(data, _line_axes(["x"]), "x[0] = x[0] * 2 + 1")
+    np.testing.assert_allclose(out.coords["x"].values, [1.0, 3.0])
+    np.testing.assert_allclose(out.values, [1.0, 2.0])
+
+
+def test_apply_transform_rejects_a_change_of_shape():
+    """
+    A shorter answer would leave every coordinate describing something else.
+    """
+    data = labelled_block(
+        np.array([1.0, 2.0, 3.0]), [np.arange(3.0)], ["x"]
+    )
+    with pytest.raises(ValueError, match="changed the shape"):
+        apply_transform(data, _line_axes(["x"]), "y = y[:2]")
 
 
 def test_apply_transform_empty_is_noop():
-    y = np.array([1.0, 2.0])
-    coords, out = apply_transform([np.array([0.0, 1.0])], y, "")
-    np.testing.assert_allclose(out, y)
+    data = labelled_block(np.array([1.0, 2.0]), [np.array([0.0, 1.0])], ["x"])
+    out = apply_transform(data, _line_axes(["x"]), "")
+    np.testing.assert_allclose(out.values, [1.0, 2.0])
 
 
 def test_1d_stats_line(qapp):
