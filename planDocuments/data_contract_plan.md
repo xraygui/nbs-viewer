@@ -15,7 +15,8 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1–4 landed 2026-09-10, steps 5–7 on 2026-09-11**; all seven are done. Numbers measured at
+1–4 landed 2026-09-10, steps 5–7 on 2026-09-11**; step 8, added
+afterwards, not started. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -1602,6 +1603,108 @@ The plan's "8 → 5" was for this step. Re-measured, the plot layer —
 This step changes none of them: the reduction already happened in steps 2
 and 3. The next is `get_dimension_axes`, with the `swap_dims` work: **4 → 3**.
 
+### Step 8 — the X selection becomes a coordinate choice
+
+Added 2026-09-11, after steps 1–7, at the maintainer's direction. The plan's
+own end state — `describe(key)` is static, and the X selection is *a
+coordinate choice at plot time* — was deferred by step 4 and never given a
+step. It is what is left of *`describe` takes no `xkeys`*: `describe` no
+longer takes the selection, but `plot_axis_names` still carries it, by
+renaming the event axis after an analysis.
+
+#### What happens today
+
+Four pieces answer *what are this key's axes called, and what are their
+coordinates, under this X selection*:
+
+| piece | raw lines | what it does |
+|---|---:|---|
+| `CatalogRun._analyze_dimensions` | 177 | orders the key's dims — `time` first, then any selected X key that is also a dim, then the rest; records axis hints; collects the selected motors on the event axis; renames the event axis after the one motor when no other axis holds its name |
+| `get_dimension_axes`, three sources | 158 | reads one coordinate array per axis — the motor or independent key, an axis-hint key path through `getAxis`, or an index placeholder — and returns refused motors as `associated_data` |
+| `RunSource.load_axes`, `_stack_spectrum_dimension_axes` | 91 | the union, including the one case that needs both sources: a frozen Y against the catalog's X keys |
+| `plot_axis_names`, four classes | 112 | the names alone |
+
+The grid-mapping branch of `get_dimension_axes` — motor dimensions, reshaped
+to a grid — is **dead**: `_analyze_dimensions` never assigns the `motor`
+type, so `grid_mapping` is always empty. That `swap_dims` is one-to-one is
+therefore not a limitation.
+
+#### Bug 16, found while scoping this
+
+The ordering rule mislabels axes. Selecting as X a key that names a key's
+*second* detector axis moves that name ahead of the first:
+
+```
+storage dims (time, a, b), shape (3, 4, 5)
+plot_axis_names(cube, [])    -> ('time', 'a', 'b')
+plot_axis_names(cube, ['a']) -> ('time', 'a', 'b')
+plot_axis_names(cube, ['b']) -> ('time', 'b', 'a')    storage axis 1, length 4, labelled b
+```
+
+`KeyInfo.from_dims` checks the count and uniqueness of names, not their
+order, so nothing downstream sees it. Reproduced against a faked run; no
+shipped fixture, and no real run seen so far, has a second detector axis
+that is also a selectable key. Bugs 6 and 15's family again: a name that
+does not mean what its consumer assumes.
+
+#### The step
+
+- [ ] **A fixture first.** No fixture declares plot-hint axes, so the
+  axis-hint coordinate path — implemented by every backend — is verified by
+  nothing today. A fixture that declares them, and a test on the
+  coordinates they produce, land before the path moves. So does a test that
+  pins bug 16.
+- [ ] **Coordinates at the load.** `load` already attaches a same-named 1-D
+  key as a dimension's coordinate; it takes the axis-hint source as well.
+  Hints are key paths, so every coordinate is still a data key, and
+  `describe` records which key supplies each axis's coordinate — a static
+  fact, so the dimension sliders and the ROI frame can read those 1-D keys
+  without loading the detector array.
+- [ ] **One rule for the X selection, at plot time.** The X key's own
+  dimension is `describe(xkey).dims[0]` — `time`, for a motor. Attach the X
+  key there as a coordinate and `swap_dims` so that dimension carries its
+  name. Refuse when the name is already a dimension of the key, or the
+  lengths differ; a refused X stays on the array as a non-dimension
+  coordinate, which is what `associated_data` carries today. The rule lives
+  in the plot layer, and `describe` and `load` stay selection-free.
+- [ ] **Names from the rule.** `PlotRequest.dims` becomes a pure function of
+  `describe(ykey)` and `describe(xkey)` — no analysis and no read. The names
+  match today's wherever today's are right, so `ViewIntent`, which finds the
+  X key's axis and stores manual arrangements by name, and most tests do not
+  change. Where today's are wrong — bug 16 — they stop being wrong.
+- [ ] **The consumers move.** `PlotSession` (2: `driving_axes`,
+  `_build_plot_request`), the dimension controls (2: the names, and the
+  slider readouts that call `load_axes`), `RunFetch` (4: `_read_block`,
+  `_norm_array` twice, `_plane_frame`), `CatalogKey` (1), and the image grid
+  (2 — one-line changes; the grid stays deferred).
+- [ ] **The union's one case survives.** A frozen stack spectrum plotted
+  against a catalog X key stays `RunSource`'s business: the rule attaches a
+  catalog key to a frozen array's event axis.
+- [ ] Deletes `_analyze_dimensions`, `get_dimension_axes` on all three
+  sources, `RunSource.load_axes` and `_stack_spectrum_dimension_axes`, and
+  `plot_axis_names` on the sources — up to ~540 raw lines, less what the
+  rule and the coordinate map add.
+- [ ] Facts: `CatalogRun` data methods the plot layer uses, **4 → 2** —
+  `describe` and `load`; bug 16 closed by construction, since dimensions are
+  never reordered.
+
+#### Deliberately different from the plan's first description
+
+Step 2 said `load` would attach *every per-event motor* as a non-dimension
+coordinate, so that `swap_dims` could choose among them. Only the selected X
+key is attached: each coordinate costs a read of its key on every load, and
+nothing reads the others.
+
+#### Size
+
+About step 4's: the data layer, the fetch and three views. It changes how
+every axis is named and where every coordinate comes from, which is why
+step 4 declined to do it alongside the stages.
+
+**Not in this step:** fly-scan support — interpolation and binning across
+mismatched time bases — which this turns into a coordinate operation rather
+than a rename; and open question 5.
+
 ---
 
 ## Kept in mind: what this does to the module reorganization
@@ -1700,3 +1803,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Step 6 re-derived before starting, at the maintainer's direction. Its "mechanical once step 4 lands" held for the move itself -- the seam is now four members wide, not six -- but its sketch predated steps 4, 4b and 5 and showed one route where the code has two. Two decisions recorded: the block cache stays on the run as it is, since the maintainer wants a cache that serves many consumers to live on the run and declined making it multi-entry, and the chunk cache already absorbs the re-reads its eviction causes on tiled runs; and clearing it on key-table invalidation stays too, since that costs at most another read. |
 | 2026-09-11 | Step 6 done. The fetch orchestration left `RunSource` for `RunFetch`, which `RunSource` owns and hands out as `fetch`; `Trace` calls it directly, so there is no forwarding method. `run_source.py` 420 → 200 code lines, `run_fetch.py` 237, and none of the five fetch-side modules is imported by `run_source.py` any more. Found while verifying: a data change clears the cache twice, directly and through the key table, so a mutation of either site alone survives; the direct clear stays, and the ordering test is pinned by removing both. |
 | 2026-09-11 | Step 7 done. `getDimensions` and `analyze_slice_request` deleted as planned, and `get_dimension_ui_info` with them -- its only caller was a test; `analyze_dimensions` became private, its bug-15 tests moving to `plot_axis_names`, which is the same analysis plus validation. `CatalogRun`'s public surface 31 → 27, `base.py` 466 → 408 code lines. Three held: `get_hinted_keys` on the maintainer's word (it filters detectors' many raw keys and will be made to work); `get_dimension_axes` until the `swap_dims` work replaces `load_axes`; and `getData`, the hook every backend implements, which catalogs loaded through the `nbs_viewer.catalog_models` entry points may implement in other packages. The plan's "contract `RunSource` depends on, 8 → 5" re-measured: that reduction happened in steps 2 and 3, and the plot layer uses four `CatalogRun` data methods now. |
+| 2026-09-11 | Step 8 added: the X selection becomes a coordinate choice -- the plan's own end state, which step 4 deferred and no later step picked up. Scoping it found the grid-mapping branch of `get_dimension_axes` dead; the axis-hint coordinate path implemented by every backend and exercised by no fixture; and bug 16, `_analyze_dimensions` reordering a key's axis names when the selected X key names a detector axis other than the first. The rule goes in the plot layer, as "a coordinate choice at plot time" already said; `describe` gains which key supplies each axis's coordinate, so coordinates can be read without the detector array; and only the selected X key is attached, not every per-event motor. |
