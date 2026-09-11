@@ -9,27 +9,20 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
+import xarray as xr
+
+from ..data.array_contract import labelled_array, surviving_dims
+from ..data.key_info import KeyInfo
+from ..data.synthetic_keys import SYNTHETIC_KEY_PREFIX, is_synthetic_key
 from .plot_geometry import PlotBundle
 from .plot_request import PlotRequest
 
-SYNTHETIC_KEY_PREFIX = "__roi__/"
-
-
-def is_synthetic_key(key: str) -> bool:
-    """
-    Return whether a run display key identifies a frozen synthetic spectrum.
-
-    Parameters
-    ----------
-    key : str
-        Run display key name.
-
-    Returns
-    -------
-    bool
-        True for keys with the synthetic prefix.
-    """
-    return isinstance(key, str) and key.startswith(SYNTHETIC_KEY_PREFIX)
+__all__ = [
+    "SYNTHETIC_KEY_PREFIX",
+    "is_synthetic_key",
+    "FrozenSpectrum",
+    "copy_plot_bundle",
+]
 
 
 def _normalize_slice_info(
@@ -210,6 +203,77 @@ class FrozenSpectrum:
             Sliced or full storage array.
         """
         return _apply_slice_info(self.bundle.y, slice_info)
+
+    def describe(self) -> KeyInfo:
+        """
+        Return static facts about this synthetic key.
+
+        The same contract a catalog run answers, so the two sources can be
+        asked the same question rather than dispatched between. A 1-D frozen
+        spectrum names its single axis after its label, which is what the
+        dimension controls have always shown for it.
+
+        Returns
+        -------
+        KeyInfo
+            Name, label, ``{axis name: length}``, no render hint.
+        """
+        shape = self.get_shape()
+        ndim = len(shape)
+        names = list(self.bundle.axis_names) if self.bundle.axis_names else []
+        if self.label and ndim == 1:
+            names = [self.label]
+        while len(names) < ndim:
+            names.append(f"dim_{len(names)}")
+        return KeyInfo.from_dims(
+            self.key,
+            names[:ndim],
+            shape,
+            label=self.label,
+            synthetic=True,
+            hinted=False,
+        )
+
+    def load(
+        self, slice_info: Optional[tuple] = None, *, coords: bool = True
+    ) -> xr.DataArray:
+        """
+        Return the frozen payload with its dimensions named and coordinates on.
+
+        The coordinates are the ones the reduction produced and stored, so a
+        frozen profile carries the axis it was measured against rather than an
+        index range. They are matched to dimensions by storage position:
+        :func:`_storage_axes_from_bundle` returns one array per storage axis,
+        and for a mesh it reports those axes under swapped names, which is a
+        separate question from which axis each array belongs to.
+
+        Parameters
+        ----------
+        slice_info : tuple, optional
+            Per-axis slice tuple, same convention as catalog ``getData``.
+        coords : bool, optional
+            Attach coordinates, as on a catalog run.
+
+        Returns
+        -------
+        xarray.DataArray
+            Labelled frozen array.
+        """
+        storage_dims = self.describe().dims
+        values = self.get_data(slice_info)
+        dims = surviving_dims(storage_dims, slice_info)
+        if not coords:
+            return labelled_array(values, dims, name=self.key)
+        axis_arrays, _names = _storage_axes_from_bundle(self.bundle)
+        items = _normalize_slice_info(slice_info, len(storage_dims))
+        coords = {}
+        for axis, (name, item) in enumerate(zip(storage_dims, items)):
+            if name not in dims or axis >= len(axis_arrays):
+                continue
+            coord = _slice_axis_array(axis_arrays[axis], item)
+            if coord.shape[0] == values.shape[dims.index(name)]:
+                coords[name] = coord
+        return labelled_array(values, dims, coords=coords, name=self.key)
 
     def get_dimension_axes(
         self,

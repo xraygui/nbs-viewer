@@ -534,38 +534,6 @@ def prepare_2d_bundle(
     )
 
 
-def get_render_mode_hint(plot_hints: dict, ykey: str) -> Optional[str]:
-    """
-    Read an explicit render_mode override from Bluesky plot hints.
-
-    Parameters
-    ----------
-    plot_hints : dict
-        Plot hints dictionary from run metadata.
-    ykey : str
-        Y data key to match.
-
-    Returns
-    -------
-    str or None
-        ``image``, ``mesh``, or None if no override.
-    """
-    for field_list in plot_hints.values():
-        if not isinstance(field_list, list):
-            continue
-        for field in field_list:
-            if not isinstance(field, dict):
-                continue
-            signal = field.get("signal")
-            if isinstance(signal, list):
-                signal = signal[-1] if signal else None
-            if signal == ykey:
-                mode = field.get("render_mode")
-                if mode in ("image", "mesh"):
-                    return mode
-    return None
-
-
 def build_plot_bundle(
     y: np.ndarray,
     coords: Sequence[np.ndarray],

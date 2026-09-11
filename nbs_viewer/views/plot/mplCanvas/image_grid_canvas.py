@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import QTimer, Signal
 from qtpy.QtWidgets import QSizePolicy
 
+from nbs_viewer.models.data.array_contract import index_placeholders
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
 from nbs_viewer.models.plot.view_spec import spec_from_slice_info
@@ -160,11 +161,12 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         )
 
         try:
-            layout = run_model.describe_axes(y_key, x_keys)
-            shape = layout.shape
-            dim_names = list(layout.names)
-            axis_arrays = list(layout.placeholders)
-            associated_data = dict(layout.associated)
+            shape = run_model.describe(y_key).shape
+            dim_names = list(run_model.plot_axis_names(y_key, x_keys))
+            axis_arrays = list(index_placeholders(shape))
+            # Always empty on the describe path; the associated-axis payload
+            # only ever came from a load.
+            associated_data = {}
 
             print_debug("ImageGridCanvas", f"Shape: {shape}", category="plots")
             print_debug(

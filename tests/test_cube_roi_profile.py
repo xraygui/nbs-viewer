@@ -89,7 +89,7 @@ def test_the_cube_and_the_image_are_both_selectable():
 
     assert run.get_shape("detector_image") == (N_Y, N_X)
     assert run.get_shape("detector_cube") == (N_Y, N_X, N_Z)
-    names = run.describe_axes("detector_cube", ["en_energy"]).names
+    names = run.plot_axis_names("detector_cube", ["en_energy"])
     assert names == ("time", "pixel", "dim_2")
 
 

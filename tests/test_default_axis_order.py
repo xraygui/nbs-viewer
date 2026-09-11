@@ -121,7 +121,7 @@ def test_rule_holds_against_the_shipped_fixtures(plot_ndim):
             for xkey in ("x", "sampleVoltage_VSource"):
                 if xkey not in source.available_keys:
                     continue
-                names = list(source.describe_axes(ykey, [xkey]).names)
+                names = list(source.plot_axis_names(ykey, [xkey]))
                 if xkey not in names:
                     continue
                 seen += 1

@@ -2,10 +2,51 @@ from typing import Dict, List, Tuple, Any, Optional
 from qtpy.QtCore import QObject, Signal, Slot
 import logging
 import numpy as np
+import xarray as xr
+
+from .array_contract import labelled_array, surviving_dims
+from .key_info import KeyInfo
 from asteval import Interpreter
 from nbs_viewer.utils import time_function
 import time
 from nbs_viewer.utils import print_debug
+
+
+def render_mode_hint_for(plot_hints: dict, ykey: str) -> Optional[str]:
+    """
+    Read an explicit render_mode override from Bluesky plot hints.
+
+    Lives in the data layer because it reads run metadata and nothing
+    else; it was in ``plot_geometry`` only because its one caller was
+    there, which made the key table's render hint a plot-layer fact about
+    a run-level record.
+
+    Parameters
+    ----------
+    plot_hints : dict
+        Plot hints dictionary from run metadata.
+    ykey : str
+        Y data key to match.
+
+    Returns
+    -------
+    str or None
+        ``image``, ``mesh``, or None if no override.
+    """
+    for field_list in plot_hints.values():
+        if not isinstance(field_list, list):
+            continue
+        for field in field_list:
+            if not isinstance(field, dict):
+                continue
+            signal = field.get("signal")
+            if isinstance(signal, list):
+                signal = signal[-1] if signal else None
+            if signal == ykey:
+                mode = field.get("render_mode")
+                if mode in ("image", "mesh"):
+                    return mode
+    return None
 
 
 class CatalogRun(QObject):
@@ -133,6 +174,183 @@ class CatalogRun(QObject):
             Plot hints dictionary. Default implementation returns empty dict.
         """
         return {}
+
+    # ------------------------------------------------------------------
+    # The data contract: one static description, one labelled array.
+    # ------------------------------------------------------------------
+
+    def describe(self, key: str) -> KeyInfo:
+        """
+        Return static facts about one key, reading no data.
+
+        This is the single way to ask what a key is. ``getShape``,
+        ``getPlotHints`` and the key table each used to answer part of it, and
+        a fourth call answered a *selection-dependent* version -- which is why
+        the answers could disagree. The description here depends on the key
+        alone, so it can be cached for the life of the run.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        KeyInfo
+            Name, label, ``{axis name: length}``, and the render-mode hint.
+
+        Raises
+        ------
+        ValueError
+            If this source disagrees with its own arrays about their rank or
+            names its axes ambiguously. Enforced here rather than patched
+            downstream: a consumer that pads a short name list cannot tell a
+            missing name from a wrong one.
+        """
+        dims, _ = self.get_dims(key, [])
+        return KeyInfo.from_dims(
+            key,
+            dims,
+            tuple(self.getShape(key)),
+            hinted=True,
+            render_hint=self.render_mode_hint(key),
+        )
+
+    def load(
+        self,
+        key: str,
+        slice_info: Optional[tuple] = None,
+        *,
+        coords: bool = True,
+    ) -> xr.DataArray:
+        """
+        Return the key's array with its dimensions named and coordinates on it.
+
+        Names alone were nearly enough -- the pipeline matches a normalization
+        array to its detector by axis name -- but not quite. With fly-scanned
+        data every detector is its own timestream, so two keys whose axis is
+        named ``time`` no longer share that axis, and two equal-length streams
+        sampled out of phase would divide silently at mismatched times. A
+        coordinate makes that an ``AlignmentError`` under
+        ``arithmetic_join="exact"``.
+
+        A dimension gets a coordinate when the run holds a 1-D key of that
+        exact name and matching length -- which is how a labelled Bluesky run
+        spells ``time`` and a detector-internal axis like
+        ``tes_mca_energies``. An axis with no such key keeps its bare name,
+        where the join degrades to the shape check it was before.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        slice_info : tuple, optional
+            Per-axis slice tuple. Integer items index an axis away; the
+            coordinates are sliced with the data.
+        coords : bool, optional
+            Attach coordinates. Each one costs a read of its own key, so a
+            caller that drops the labels immediately -- everything upstream of
+            step 4 -- asks for none and still gets the dimension names and the
+            checks that come with them.
+
+        Returns
+        -------
+        xarray.DataArray
+            Labelled array for the (possibly sliced) key.
+        """
+        storage_dims = self.describe(key).dims
+        values = np.asarray(self.getData(key, slice_info))
+        dims = surviving_dims(storage_dims, slice_info)
+        if len(dims) != values.ndim:
+            raise ValueError(
+                f"key {key!r} sliced with {slice_info!r} returned rank "
+                f"{values.ndim} against {len(dims)} surviving names {dims}"
+            )
+        return labelled_array(
+            values,
+            dims,
+            coords=(
+                self._coords_for(storage_dims, dims, values.shape, slice_info)
+                if coords
+                else {}
+            ),
+            name=key,
+        )
+
+    def _coords_for(
+        self,
+        storage_dims: Tuple[str, ...],
+        dims: Tuple[str, ...],
+        shape: Tuple[int, ...],
+        slice_info: Optional[tuple],
+    ) -> Dict[str, np.ndarray]:
+        """
+        Resolve coordinate arrays for the dimensions that have one.
+
+        Parameters
+        ----------
+        storage_dims : tuple of str
+            Every dimension name of the unsliced key, so a surviving name can
+            be mapped back to the storage axis whose slice item it takes.
+        dims : tuple of str
+            Surviving dimension names.
+        shape : tuple of int
+            Shape of the sliced array.
+        slice_info : tuple, optional
+            The slice applied to the data, so coordinates are sliced to match.
+
+        Returns
+        -------
+        dict
+            Coordinate arrays by dimension name, for those that resolve.
+        """
+        available = set(self.available_keys or [])
+        items = list(slice_info or ())
+        coords: Dict[str, np.ndarray] = {}
+        for axis, name in enumerate(dims):
+            if name not in available:
+                continue
+            try:
+                coord_dims, _ = self.get_dims(name, [])
+                if tuple(coord_dims) != (name,):
+                    continue
+                storage_axis = storage_dims.index(name)
+                item = (
+                    items[storage_axis]
+                    if storage_axis < len(items)
+                    else slice(None)
+                )
+                values = np.asarray(self.getData(name, (item,)))
+            except Exception as ex:
+                print_debug(
+                    "CatalogRun._coords_for",
+                    f"No coordinate for dimension {name!r}: {ex}",
+                    category="catalog",
+                )
+                continue
+            # A source may clip an axis relative to its coordinate key --
+            # CombinedRun does, to the shortest of its sources. Attaching a
+            # mismatched coordinate would raise, so the axis keeps its bare
+            # name and the join falls back to a shape check.
+            if values.ndim == 1 and values.shape[0] == shape[axis]:
+                coords[name] = values
+        return coords
+
+    def render_mode_hint(self, key: str) -> Optional[str]:
+        """
+        Return a declared ``image`` / ``mesh`` override for one key.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        str or None
+            The declared render mode, or None when the run declares none.
+        """
+        return render_mode_hint_for(self.getPlotHints(), key)
 
     def to_header(self) -> Dict[str, Any]:
         """

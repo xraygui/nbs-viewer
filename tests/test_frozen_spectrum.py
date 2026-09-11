@@ -168,15 +168,24 @@ def test_run_model_get_data_delegates_to_frozen(qapp):
     np.testing.assert_allclose(model.get_shape(entry.key), (3,))
 
 
-def test_run_source_describe_axes_for_frozen(qapp):
+def test_run_source_describes_a_frozen_key(qapp):
+    """
+    A frozen key answers ``describe`` the way a catalog key does.
+
+    Its one axis is named after its label, which is what the dimension
+    controls have always shown for a frozen spectrum. The X selection does not
+    reach it: a frozen payload's axes are whatever the reduction produced.
+    """
     model = _run_model()
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
-    layout = model.describe_axes(entry.key, ["en_energy"])
-    assert layout.shape == (3,)
-    assert list(layout.names) == [entry.label]
-    np.testing.assert_allclose(layout.placeholders[0], [0.0, 1.0, 2.0])
-    assert dict(layout.associated) == {}
+
+    info = model.describe(entry.key)
+    assert info.shape == (3,)
+    assert info.dims == (entry.label,)
+    assert info.axes == {entry.label: 3}
+    assert info.synthetic is True
+    assert model.plot_axis_names(entry.key, ["en_energy"]) == (entry.label,)
 
 
 def test_synthetic_y_fetch_ignores_catalog_get_data(qapp):
@@ -191,7 +200,7 @@ def test_synthetic_y_fetch_ignores_catalog_get_data(qapp):
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
     np.testing.assert_allclose(bundle.x_line, [0.0, 1.0, 2.0])
-    get_data.assert_called_once_with("en_energy")
+    get_data.assert_called_once_with("en_energy", None)
 
 
 def test_stack_spectrum_uses_selected_catalog_x(qapp):

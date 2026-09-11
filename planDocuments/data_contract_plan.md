@@ -14,8 +14,9 @@ changes what that plan should do (see **Kept in mind**, below).
 contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
-rather than a bespoke type, and to settle coordinates onto the array. **Step 1
-landed 2026-09-10**; steps 2–7 not started. Numbers measured at `74a7d6d`.
+rather than a bespoke type, and to settle coordinates onto the array. **Steps
+1 and 2 landed 2026-09-10**; steps 3–7 not started. Numbers measured at
+`74a7d6d`.
 
 ---
 
@@ -483,20 +484,131 @@ inferred dims must agree with the tiled dims on every axis whose name is
 knowable. No `MemoryRun` fixture can carry either, because `MemoryRun` is
 already correct.
 
-### Step 2 — declare xarray; the sources return `DataArray`
+### Step 2 — declare xarray; the sources return `DataArray` ✅ 2026-09-10
 
-- [ ] Add `xarray` to `pyproject.toml`. It is already installed transitively;
+- [x] Add `xarray` to `pyproject.toml`. It is already installed transitively;
   depending on it implicitly is the hazard.
-- [ ] `CatalogRun.describe()` / `.load()`; the same on `FrozenSpectrum`.
-- [ ] Pin `skipna` and `arithmetic_join` at the pipeline boundary, with a test
-  for each that fails if the setting is removed.
-- [ ] `FrozenSpectrum` moves to `models/data/`, closing the upward import at
-  `bluesky.py:7`.
-- [ ] Deletes `RunSource._truncate_dim_names` — the padding-and-truncating
+- [x] `CatalogRun.describe()` / `.load()`; the same on `FrozenSpectrum`.
+- [x] Pin `skipna` and `arithmetic_join` at the pipeline boundary, with a test
+  for each that fails if the setting is removed. **`arithmetic_join` only** —
+  see the deviation below.
+- [x] ~~`FrozenSpectrum` moves to `models/data/`~~ — the *convention* moved,
+  not the class. See the deviation below; the upward import is closed either
+  way, and pinned by a test.
+- [x] Deletes `RunSource._truncate_dim_names` — the padding-and-truncating
   workaround has nothing left to hide — and `AxisLayout` entirely, whose
   `analysis` field has no readers and whose `placeholders` are derivable.
-- [ ] Facts: `AxisLayout` 5 fields → a `{name: length}` mapping; name/rank
+- [x] Facts: `AxisLayout` 5 fields → a `{name: length}` mapping; name/rank
   agreement enforced at 1 boundary instead of patched at 1 consumer.
+
+#### Outcome
+
+| | before | after |
+|---|---:|---:|
+| `RunSource` code lines | 586 | 533 |
+| `RunSource` public members | 24 | 25 |
+| frozen/catalog dispatch on the public surface | 5 | 4 |
+| places name/rank agreement is patched | 1 | 0 |
+| places it is enforced | 0 | 1 |
+| `models/data` → `models/plot` imports | 1 | 0 |
+
+Deleted: `AxisLayout`, `RunSource._truncate_dim_names`,
+`RunSource._frozen_axis_names`, `RunSource.get_plot_hints` (zero callers once
+the render hint came from the description), and `plot_geometry`'s
+`get_render_mode_hint`, which moved down as `render_mode_hint_for`: it reads
+run metadata and nothing else, and was in the plot layer only because its one
+caller was.
+
+New in `models/data`: `key_info.py` (`KeyInfo`, moved down and rebuilt around
+`axes`), `array_contract.py` (the xarray settings and the construction that
+enforces the contract), `synthetic_keys.py` (the naming convention).
+`models/plot/key_info.py` became `run_identity.py`, holding the one value that
+is genuinely a plot-layer concern.
+
+The public-member count went *up* by one, and that is the honest result: two
+methods went away and three arrived, because `describe_axes` was answering two
+questions and is now two calls.
+
+#### The split that made the rest work: `describe` against `plot_axis_names`
+
+`describe(key)` is static, as the plan said it should be. But the X-selection
+rename could not simply be dropped, and finding out why is the useful part:
+**the default axis-order rule locates the X key's storage axis by name.** With
+static names the X key never appears among a key's dimensions, `_project`
+cannot place it, and default axis order stops working — reproduced against the
+shipped fixtures before deciding.
+
+So the rename stayed, under its own name, as `RunSource.plot_axis_names`. That
+is better than where it was: the conflation is now visible in the signature
+rather than hidden inside a call named `describe_axes`, and step 4 has a
+single method to delete when a coordinate choice replaces it.
+
+`PlotSession.driving_axes` returns both halves together —
+`(run_model, ykey, KeyInfo, names)` — so neither of its two callers re-derives
+the other's half.
+
+#### Deviation: `skipna` has nothing to pin yet
+
+`arithmetic_join` is a global xarray option, is now set to `"exact"` at import
+of the data layer, and has two tests: one that fails if the setting is removed,
+and one on the fly-scan case it exists for — two 64-point timestreams of equal
+length and different phase, which divide silently under names alone.
+
+`skipna` has **no global option**; it is a per-call argument. The reductions
+are still `np.sum` / `np.nansum` today, so there is no call site to pin and a
+wrapper written now would have no caller. It moves to step 4, where the
+reductions convert. `REDUCE_SKIPNA = False` is recorded in `array_contract.py`
+so the decision is not re-taken.
+
+#### Deviation: the convention moved down, not the class
+
+Moving `FrozenSpectrum` into `models/data/` would have relocated the upward
+import rather than closing it: the class holds a `PlotBundle` and a
+`PlotRequest`, so `models/data/frozen_spectrum.py` would import from
+`models/plot` — worse than what it replaced.
+
+What `bluesky.py` actually reached up for was the *key-prefix convention*, so
+that is what moved, into `models/data/synthetic_keys.py`. `FrozenSpectrum`
+stays where its payload does and answers `describe` / `load` from there. The
+class can follow if `PlotBundle` ever stops being its payload, which is open
+question 5.
+
+A test now walks `models/data` for any import of `models.plot` and asserts
+there are none, so this cannot quietly reopen.
+
+#### Deviation: `load(..., coords=False)`, and why
+
+`RunSource.read` routes through `load` so that every existing read exercises
+the contract — which is what makes the enforcement real rather than a
+promise — but asks for no coordinates. Attaching one costs a read of its own
+key, and `read` returns bare values, so building them to discard them is pure
+waste. It showed up immediately as a test asserting the frozen path touches
+the catalog exactly once.
+
+#### Risk recorded: the option is process-global
+
+`xr.set_options(arithmetic_join="exact")` at import affects every xarray
+operation in the process, including any inside tiled or databroker. That is
+the plan's own choice, and it is the right default for a codebase whose bugs
+are silent wrong answers — the hazard is arithmetic written *without* thinking
+about joins, which a context manager around our own calls would not cover. It
+is noted here because it is a side effect of an import, which is the kind of
+thing that is hard to find later.
+
+#### What `load` attaches, and what it does not
+
+A dimension gets a coordinate when the run holds a 1-D key of that exact name
+whose own dims are `(name,)` and whose length matches — which is how a
+labelled Bluesky run spells `time` and a detector-internal axis like
+`tes_mca_energies`. An axis with no such key keeps its bare name, where
+`exact` degrades to the shape check it was before.
+
+**Non-dimension coordinates are not attached yet.** Putting every per-event
+motor onto the event axis is what makes `swap_dims` possible, and it is step
+4's business: it needs the X selection, which `load` deliberately does not
+take. A source that clips an axis relative to its coordinate key — as
+`CombinedRun` does, to the shortest of its sources — keeps the bare name
+rather than raising.
 
 ### Step 3 — `RunSource` performs the union once
 
@@ -671,3 +783,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Open questions 1 and 2 settled together on the maintainer's suggestion that `describe` return `KeyInfo`, so there is one way to ask for key metadata rather than four. Checking it showed why the call currently needs `xkeys`: `describe_axes` renames a key's event axis to whichever X key is selected, conflating the axis's identity with the coordinate being plotted against it. xarray separates those natively — several non-dimension coordinates on one dimension, with `swap_dims` choosing the plot axis — so `describe(key)` becomes static and selection-free, which is what `KeyInfo` was documented to be. Bug 15 found while confirming it: with no X key selected the motor fallback overrides a key's correct declared dims and can produce duplicate axis names, which xarray warns about rather than rejecting. |
 | 2026-09-10 | Step 1's bug 6 fix re-justified against two real runs the maintainer supplied, rather than against the other backends. UCAL labels its dims and is therefore ground truth: `nexafs_sc` is `('time',)` and `tes_mca_spectrum` is `('time','tes_mca_energies')`, so inference's job is to reproduce that where it can — which `range(1, ndim)` does and `range(0, ndim)` does not. The same run confirms bug 15 in production data: `en_energy` is the scanned motor and its dims are `('time',)`, a key on the event axis rather than a name of it, with `start['hints']['dimensions']` naming which coordinate to plot against. Two decisions explicitly excluded from the step: whether placeholder axis names should be per-key (it would fix a false-alignment hazard but break flat-field normalization) and whether the `has_time_key` guard is needed. |
 | 2026-09-10 | Step 1 done. Bugs 6, 7 and 15 fixed, with a test per fix verified to fail without it. Two deviations recorded: bug 15 turned out to have a second trigger — selecting a motor whose name is also a real dimension of the key produces the same duplicate — so it took a de-duplication guard as well as removing the motors fallback, with the full separation of dimension from plot coordinate left to step 2; and `KafkaRun` shares bug 7 but is left alone because its `getShape` calls `getData`, which would materialize every buffered array on a live stream. |
+| 2026-09-10 | Step 2 done. Both sources answer `describe` / `load`; `KeyInfo` moved down to `models/data` and was rebuilt around one `{axis name: length}` mapping, which makes bug 6's and bug 15's shapes unrepresentable rather than merely absent. `AxisLayout`, `_truncate_dim_names`, `_frozen_axis_names` and `RunSource.get_plot_hints` deleted. Four deviations recorded: `skipna` has no global option and no call site until step 4; the synthetic-key *convention* moved down rather than `FrozenSpectrum` itself, since the class holds a `PlotBundle` and moving it would have relocated the upward import rather than closed it; `read` asks `load` for no coordinates, since each costs a read of its own key that bare values gain nothing from; and `describe_axes` split into a static `describe` plus `plot_axis_names` rather than collapsing, because the default axis-order rule locates the X key's storage axis by name and stops working without the rename. |

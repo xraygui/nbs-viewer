@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
 import numpy as np
 from qtpy.QtCore import Qt, Signal
 
+from nbs_viewer.models.data.array_contract import index_placeholders
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     ROLE_LABELS,
@@ -20,7 +21,6 @@ from nbs_viewer.models.plot.view_spec import (
 )
 from nbs_viewer.utils import print_debug
 from nbs_viewer.views.common.panel import CollapsiblePanel
-
 
 
 class _SliceReduceRow(QWidget):
@@ -583,16 +583,17 @@ class DimensionControl(QWidget):
                     if run_model.is_synthetic_key(ykey):
                         continue
                     try:
-                        layout = run_model.describe_axes(ykey, x_keys)
-                        shape = layout.shape
-                        axis_names = list(layout.names)
+                        shape = run_model.describe(ykey).shape
+                        axis_names = list(
+                            run_model.plot_axis_names(ykey, x_keys)
+                        )
                         axis_arrays, associated_data = (
                             self._axis_coordinates_for_run(
                                 run_model,
                                 ykey,
                                 x_keys,
                                 shape,
-                                layout.placeholders,
+                                index_placeholders(shape),
                             )
                         )
 

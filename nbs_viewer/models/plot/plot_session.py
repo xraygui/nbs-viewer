@@ -299,8 +299,12 @@ class PlotSession(QObject):
         Returns
         -------
         tuple or None
-            ``(run_model, ykey, AxisLayout)``, or None when nothing visible
-            has more than one dimension.
+            ``(run_model, ykey, KeyInfo, axis_names)``, or None when nothing
+            visible has more than one dimension. The names come separately
+            from the description because they are not the same question: the
+            description is static, while the displayed names follow the X
+            selection. Carried together so neither caller re-derives the
+            other's half.
         """
         best = None
         for run_model in self._collection.visible_models:
@@ -310,12 +314,13 @@ class PlotSession(QObject):
                 if run_model.is_synthetic_key(ykey):
                     continue
                 try:
-                    layout = run_model.describe_axes(ykey, x_keys)
+                    layout = run_model.describe(ykey)
+                    names = run_model.plot_axis_names(ykey, x_keys)
                 except Exception:
                     continue
                 shape = layout.shape
                 if best is None:
-                    best = (run_model, ykey, layout)
+                    best = (run_model, ykey, layout, names)
                     continue
                 current = best[2].shape
                 if len(shape) > len(current) or (
@@ -339,8 +344,8 @@ class PlotSession(QObject):
         driving = self.driving_axes()
         if driving is None:
             return None
-        _run_model, _ykey, layout = driving
-        return self._intent.project(len(layout.shape), layout.shape, layout.names)
+        _run_model, _ykey, layout, names = driving
+        return self._intent.project(len(layout.shape), layout.shape, names)
 
     def move_view_axis(self, row_index: int, direction: int) -> None:
         """
@@ -361,7 +366,7 @@ class PlotSession(QObject):
         if target < 1 or target > projection.ndim - 1:
             return
         swapped = projection.swap_rows(target)
-        self._intent.set_axis_order(swapped.axis_order, driving[2].names)
+        self._intent.set_axis_order(swapped.axis_order, driving[3])
 
     def set_axis_reduce(self, assignments) -> None:
         """
@@ -447,7 +452,7 @@ class PlotSession(QObject):
         trace_key = TraceKey(run_model.uid, xkey, ykey)
         shape = run_model.get_shape(ykey)
         try:
-            names = run_model.describe_axes(ykey, [xkey] if xkey else []).names
+            names = run_model.plot_axis_names(ykey, [xkey] if xkey else [])
         except Exception:
             names = None
         intent = self._intent

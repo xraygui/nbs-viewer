@@ -3,11 +3,13 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
 
 from qtpy.QtCore import QObject, Signal
 import numpy as np
+import xarray as xr
 import time as ttime
 
 from ..data.base import CatalogRun
+from ..data.key_info import KeyInfo
 from .frozen_spectrum import FrozenSpectrum
-from .key_info import AxisLayout, KeyInfo, RunIdentity
+from .run_identity import RunIdentity
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -22,7 +24,6 @@ from .plot_geometry import (
     build_plot_bundle,
     classify_render_mode,
     display_flips,
-    get_render_mode_hint,
     orient_for_display,
 )
 from .plot_request import FetchPlan, PlotRequest, plan_fetch
@@ -35,8 +36,8 @@ class RunSource(QObject):
     """
     Uniform key access over a catalog run plus frozen synthetic keys.
 
-    The RunSource surface is ``key_table``, ``identity``, ``read``,
-    ``describe_axes``, ``load_axes``, and ``get_plot_bundle``. Selection,
+    The RunSource surface is ``key_table``, ``identity``, ``describe``,
+    ``load``, ``read``, ``load_axes``, and ``get_plot_bundle``. Selection,
     visibility, and transform live on :class:`PlotSession`.
 
     Parameters
@@ -144,9 +145,10 @@ class RunSource(QObject):
         """
         Merge catalog keys with frozen entries into a KeyInfo table.
 
-        Catalog keys are marked hinted until ``get_hinted_keys`` is confirmed
-        as the "Show All Keys" backing. ``render_hint`` comes from
-        ``get_render_mode_hint`` and is None when that returns nothing.
+        Both sources answer ``describe`` themselves, so this assembles rather
+        than derives: it no longer reads shapes and plot hints and builds the
+        records here, which was a third place that had to agree with the two
+        sources about what a key is.
 
         Returns
         -------
@@ -154,26 +156,10 @@ class RunSource(QObject):
             Fresh table keyed by data key name.
         """
         table: Dict[str, KeyInfo] = {}
-        plot_hints = self._run.getPlotHints()
         for name in self._catalog_keys:
-            shape = tuple(self._run.getShape(name))
-            table[name] = KeyInfo(
-                name=name,
-                label=name,
-                shape=shape,
-                synthetic=False,
-                hinted=True,
-                render_hint=get_render_mode_hint(plot_hints, name),
-            )
+            table[name] = self._run.describe(name)
         for key, entry in self._frozen_spectra.items():
-            table[key] = KeyInfo(
-                name=key,
-                label=entry.label,
-                shape=tuple(entry.get_shape()),
-                synthetic=True,
-                hinted=False,
-                render_hint=None,
-            )
+            table[key] = entry.describe()
         return table
 
     def key_table(self) -> Mapping[str, KeyInfo]:
@@ -223,58 +209,44 @@ class RunSource(QObject):
         """
         return self._frozen_spectra.get(key)
 
-    def _frozen_axis_names(self, entry: FrozenSpectrum) -> List[str]:
+    def load(self, key: str, slice_info=None, *, coords: bool = True) -> xr.DataArray:
         """
-        Resolve display dimension names for a frozen spectrum.
+        Return a labelled array for a catalog or frozen key.
+
+        The one place the two sources are joined. Both answer ``load``
+        themselves, so this dispatches once rather than unpacking two
+        differently-shaped answers.
 
         Parameters
         ----------
-        entry : FrozenSpectrum
-            Registered frozen entry.
+        key : str
+            Data key.
+        slice_info : tuple, optional
+            Per-axis slice tuple.
+        coords : bool, optional
+            Attach coordinate values as well as dimension names.
 
         Returns
         -------
-        list of str
-            Names truncated or padded to the storage rank.
+        xarray.DataArray
+            Storage array with named dimensions, and its coordinates when
+            asked for.
         """
-        shape = entry.get_shape()
-        ndim = len(shape)
-        names = list(entry.bundle.axis_names) if entry.bundle.axis_names else []
-        if entry.label and ndim == 1:
-            names = [entry.label]
-        while len(names) < ndim:
-            names.append(f"dim_{len(names)}")
-        return names[:ndim]
-
-    @staticmethod
-    def _truncate_dim_names(
-        ordered_dims: Sequence[str], ndim: int
-    ) -> List[str]:
-        """
-        Pad or truncate dimension names to match storage rank.
-
-        Parameters
-        ----------
-        ordered_dims : sequence of str
-            Names from ``analyze_dimensions``.
-        ndim : int
-            Storage rank.
-
-        Returns
-        -------
-        list of str
-            Names of length ``ndim``.
-        """
-        names = list(ordered_dims)
-        if len(names) < ndim:
-            names = names + [f"dim_{i}" for i in range(len(names), ndim)]
-        elif len(names) > ndim:
-            names = names[:ndim]
-        return names
+        entry = self._frozen_entry(key)
+        if entry is not None:
+            return entry.load(slice_info, coords=coords)
+        return self._run.load(key, slice_info, coords=coords)
 
     def read(self, key: str, slice_info=None) -> np.ndarray:
         """
-        Load array data for a catalog or frozen key.
+        Load raw array data for a catalog or frozen key.
+
+        The pipeline still works in bare numpy, so this drops the labels
+        ``load`` attaches, and asks for no coordinates -- each one would cost
+        a read of its own key to be discarded. What it keeps is the *check*: a
+        source that disagrees with its own arrays about their rank, or names
+        two axes the same thing, now fails here rather than mislabelling an
+        axis silently.
 
         Parameters
         ----------
@@ -293,24 +265,52 @@ class RunSource(QObject):
         ValueError
             If the underlying source returns None.
         """
-        entry = self._frozen_entry(key)
-        if entry is not None:
-            data = entry.get_data(slice_info)
-        elif slice_info is None:
-            data = self._run.getData(key)
-        else:
-            data = self._run.getData(key, slice_info)
+        data = self.load(key, slice_info, coords=False)
         if data is None:
             raise ValueError(f"No data returned for key {key!r}")
-        return np.asarray(data)
+        return np.asarray(data.values)
 
-    def describe_axes(self, ykey: str, xkeys: Sequence[str]) -> AxisLayout:
+    def describe(self, key: str) -> KeyInfo:
         """
-        Return shape and placeholder axis coordinates for dimension UI.
+        Return static facts about a catalog or frozen key.
 
-        Applies the frozen-key overlay. Catalog keys use
-        ``CatalogRun.analyze_dimensions`` with the same name truncation as
-        ``get_dimension_ui_info``.
+        Parameters
+        ----------
+        key : str
+            Data key.
+
+        Returns
+        -------
+        KeyInfo
+            Name, label, ``{axis name: length}``, and the render hint.
+        """
+        info = self.key_table().get(key)
+        if info is not None:
+            return info
+        entry = self._frozen_entry(key)
+        if entry is not None:
+            return entry.describe()
+        return self._run.describe(key)
+
+    def plot_axis_names(
+        self, ykey: str, xkeys: Sequence[str]
+    ) -> Tuple[str, ...]:
+        """
+        Return the axis names to plot a key under a given X selection.
+
+        Deliberately *not* part of ``describe``, which is static. This answers
+        a different question, and the difference is the one bug 15 was made
+        of: a key's dimensions are fixed, while the selected X key renames the
+        event axis after whatever is being plotted against it. A UCAL run says
+        the scanned motor is a key *on* the event axis rather than a name of
+        it, so the rename is a display choice rather than a fact about the
+        array.
+
+        It is kept because the projection rule locates the X key's storage
+        axis *by name* -- default axis order would stop working without it.
+        Step 4 replaces it: with coordinates on the array, choosing what to
+        plot against is ``swap_dims`` on a non-dimension coordinate, and the
+        dimension keeps its own name throughout.
 
         Parameters
         ----------
@@ -321,35 +321,22 @@ class RunSource(QObject):
 
         Returns
         -------
-        AxisLayout
-            Shape, truncated names, index placeholders, and analysis.
+        tuple of str
+            One name per storage axis.
         """
-        xkey_list = list(xkeys)
         entry = self._frozen_entry(ykey)
         if entry is not None:
-            shape = tuple(entry.get_shape())
-            names = self._frozen_axis_names(entry)
-            placeholders = tuple(
-                np.arange(size, dtype=float) for size in shape
-            )
-            return AxisLayout(
-                shape=shape,
-                names=tuple(names),
-                placeholders=placeholders,
-                associated=MappingProxyType({}),
-                analysis=MappingProxyType({}),
-            )
-        dim_info = self._run.analyze_dimensions(ykey, xkey_list)
-        shape = tuple(dim_info["effective_shape"])
-        names = self._truncate_dim_names(dim_info["ordered_dims"], len(shape))
-        placeholders = tuple(np.arange(size, dtype=float) for size in shape)
-        return AxisLayout(
-            shape=shape,
-            names=tuple(names),
-            placeholders=placeholders,
-            associated=MappingProxyType({}),
-            analysis=MappingProxyType(dict(dim_info)),
-        )
+            return entry.describe().dims
+        dim_info = self._run.analyze_dimensions(ykey, list(xkeys))
+        # Validated rather than trimmed. This used to pad or truncate the name
+        # list until it matched the rank, which is what let bug 6 go unnoticed
+        # for as long as it did: a backend naming one axis too many looked
+        # exactly like a backend naming them correctly.
+        return KeyInfo.from_dims(
+            ykey,
+            dim_info["ordered_dims"],
+            tuple(dim_info["effective_shape"]),
+        ).dims
 
     def load_axes(
         self, ykey: str, xkeys: Sequence[str], slice_info=None
@@ -446,6 +433,11 @@ class RunSource(QObject):
         """
         Return storage shape for a catalog or frozen key.
 
+        A view onto ``describe``, which is where the two sources are joined.
+        It used to dispatch between them a second time and reach past the key
+        table to the run when a key was missing from it, which meant a shape
+        could come from three places and was checked in none of them.
+
         Parameters
         ----------
         key : str
@@ -456,31 +448,7 @@ class RunSource(QObject):
         tuple of int
             Storage shape.
         """
-        info = self.key_table().get(key)
-        if info is not None:
-            return info.shape
-        entry = self._frozen_entry(key)
-        if entry is not None:
-            return entry.get_shape()
-        return self._run.getShape(key)
-
-    def get_plot_hints(self, ykey: str) -> Dict[str, Any]:
-        """
-        Return plot hints for a catalog or frozen Y key.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key.
-
-        Returns
-        -------
-        dict
-            Plot hints dictionary.
-        """
-        if self._frozen_entry(ykey) is not None:
-            return {}
-        return self._run.getPlotHints()
+        return self.describe(key).shape
 
     def frozen_spectra(self) -> List[FrozenSpectrum]:
         """
@@ -669,7 +637,7 @@ class RunSource(QObject):
         info = self.key_table().get(ykey)
         hint = info.render_hint if info is not None else None
         if hint is None and self._frozen_entry(ykey) is None:
-            hint = get_render_mode_hint(self.get_plot_hints(ykey), ykey)
+            hint = self._run.render_mode_hint(ykey)
         return hint
 
     def _plane_render_mode(
@@ -786,8 +754,7 @@ class RunSource(QObject):
         block_names = self._loaded_axis_names(slice_info, y_storage_names)
         norms = []
         for norm_key in request.norm_keys:
-            layout = self.describe_axes(norm_key, xkeys)
-            norm_names = list(layout.names)
+            norm_names = list(self.plot_axis_names(norm_key, xkeys))
             frozen = self._frozen_entry(norm_key) is not None
             key_slice = (
                 slice_info

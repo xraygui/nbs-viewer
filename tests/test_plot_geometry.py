@@ -6,7 +6,6 @@ import pytest
 from nbs_viewer.models.plot.plot_geometry import (
     classify_render_mode,
     display_flips,
-    get_render_mode_hint,
     is_uniform_1d,
     orient_for_display,
     prepare_2d_bundle,
@@ -126,19 +125,6 @@ def test_prepare_2d_mesh_mca_like_shape():
     assert bundle.axis_names == ["energy", "channel"]
     assert bundle.mesh_x.shape[0] - 1 == bundle.y.shape[0]
     assert bundle.mesh_x.shape[1] - 1 == bundle.y.shape[1]
-
-
-def test_render_mode_hint_override():
-    hints = {
-        "primary": [
-            {
-                "signal": "detector_image",
-                "render_mode": "mesh",
-            }
-        ]
-    }
-    assert get_render_mode_hint(hints, "detector_image") == "mesh"
-    assert get_render_mode_hint(hints, "other") is None
 
 
 def test_prepare_1d_bundle():

@@ -12,7 +12,7 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
 )
-from nbs_viewer.models.plot.key_info import KeyInfo
+from nbs_viewer.models.data.key_info import KeyInfo
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
@@ -130,20 +130,31 @@ def test_read_frozen_skips_catalog_get_data(qapp):
     get_data.assert_not_called()
 
 
-def test_describe_axes_matches_catalog_ui_info(qapp):
+def test_describe_and_plot_axis_names_answer_different_questions(qapp):
+    """
+    The description is static; the displayed names follow the X selection.
+
+    They used to be one call, which is why it needed the selection passed in
+    and why the answer could not be cached. Here ``PCOEdge_image`` keeps the
+    dimensions it declares whatever is selected, while the plot axis names
+    rename the event axis after whatever is being plotted against it -- still
+    agreeing with what the dimension controls read before.
+    """
     model = RunSource(make_vppem_run())
     xkeys = ["sampleVoltage_VSource"]
-    layout = model.describe_axes("PCOEdge_image", xkeys)
-    run_shape, run_names, run_placeholders, run_associated = (
+
+    info = model.describe("PCOEdge_image")
+    assert info.shape == (11, 24, 32)
+    assert info.dims == ("time", "dim_1", "dim_2")
+    assert model.describe("PCOEdge_image").dims == info.dims
+
+    run_shape, run_names, _placeholders, run_associated = (
         model.run.get_dimension_ui_info("PCOEdge_image", xkeys)
     )
-
-    assert layout.shape == run_shape == (11, 24, 32)
-    assert list(layout.names) == run_names
+    assert info.shape == run_shape
+    assert list(model.plot_axis_names("PCOEdge_image", xkeys)) == run_names
     assert run_names == ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    assert dict(layout.associated) == run_associated == {}
-    for left, right in zip(layout.placeholders, run_placeholders):
-        np.testing.assert_allclose(left, right)
+    assert run_associated == {}
 
 
 def test_load_axes_matches_catalog_dimension_axes(qapp):
@@ -228,4 +239,6 @@ def test_get_plot_bundle_frozen_uses_read(qapp):
         _plot_request(model, ["sampleVoltage_VSource"], entry.key)
     )
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
-    get_data.assert_called_once_with("sampleVoltage_VSource")
+    # ``load`` always passes the slice through, so the catalog sees an
+    # explicit ``None`` where ``read`` used to omit the argument.
+    get_data.assert_called_once_with("sampleVoltage_VSource", None)
