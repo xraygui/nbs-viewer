@@ -223,6 +223,7 @@ def _plain_2d_request():
         xkeys=["x"],
         ykey="det",
         projection=ViewIntent(plot_ndim=2).project(2, (4, 5)),
+        dims=("dim_0", "dim_1"),
     )
 
 

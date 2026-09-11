@@ -83,6 +83,7 @@ def _plane_request(parent=PARENT):
         ykey="y",
         norm_keys=(),
         view=parent,
+        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim)),
     )
 
 

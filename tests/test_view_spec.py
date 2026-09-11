@@ -120,7 +120,12 @@ def test_plan_fetch_intersects_the_crop_with_an_indexed_axis():
         crop=crop,
     )
     request = PlotRequest(
-        uid=VPPEM_UID, xkeys=("x",), ykey="y", norm_keys=(), view=view
+        uid=VPPEM_UID,
+        xkeys=("x",),
+        ykey="y",
+        norm_keys=(),
+        view=view,
+        dims=VPPEM_NAMES,
     )
     plan = plan_fetch(request)
     assert plan.slice_info == (4, slice(2, 10), slice(4, 20))
@@ -251,6 +256,7 @@ def test_plot_request_hash_and_equality():
         ykey="PCOEdge_image",
         norm_keys=(),
         view=view,
+        dims=VPPEM_NAMES,
     )
     b = PlotRequest(
         uid=VPPEM_UID,
@@ -258,6 +264,7 @@ def test_plot_request_hash_and_equality():
         ykey="PCOEdge_image",
         norm_keys=(),
         view=view,
+        dims=VPPEM_NAMES,
     )
     assert a == b
     assert hash(a) == hash(b)
@@ -273,6 +280,7 @@ def test_plot_request_identity_changes_with_view_and_transform():
         ykey="PCOEdge_image",
         norm_keys=(),
         view=base_view,
+        dims=VPPEM_NAMES,
     )
     by_index = PlotRequest(
         uid=VPPEM_UID,
@@ -280,6 +288,7 @@ def test_plot_request_identity_changes_with_view_and_transform():
         ykey="PCOEdge_image",
         norm_keys=(),
         view=other_view,
+        dims=VPPEM_NAMES,
     )
     by_transform = PlotRequest(
         uid=VPPEM_UID,
@@ -287,6 +296,7 @@ def test_plot_request_identity_changes_with_view_and_transform():
         ykey="PCOEdge_image",
         norm_keys=(),
         view=base_view,
+        dims=VPPEM_NAMES,
         transform="y = y * 2",
     )
     by_norm = PlotRequest(
@@ -295,6 +305,7 @@ def test_plot_request_identity_changes_with_view_and_transform():
         ykey="PCOEdge_image",
         norm_keys=("i0",),
         view=base_view,
+        dims=VPPEM_NAMES,
     )
     assert len({base, by_index, by_transform, by_norm}) == 4
 
@@ -307,6 +318,7 @@ def test_plot_request_empty_transform_means_off():
         ykey="PCOEdge_stats",
         norm_keys=(),
         view=view,
+        dims=("sampleVoltage_VSource",),
         transform="",
     )
     assert off.transform == ""
@@ -330,6 +342,7 @@ def test_plot_request_roi_requires_the_parent_plane():
             ykey="image",
             norm_keys=(),
             view=view_1d,
+            dims=("dim_0", "dim_1"),
             region=RectRegion(0.0, 1.0, 0.0, 1.0),
             profile_axis=1,
         )
@@ -343,6 +356,7 @@ def test_plot_request_roi_requires_a_profile_axis():
             ykey="image",
             norm_keys=(),
             view=ViewIntent(plot_ndim=2).project(2),
+            dims=("dim_0", "dim_1"),
             region=RectRegion(0.0, 1.0, 0.0, 1.0),
         )
 
@@ -365,6 +379,7 @@ def test_plot_request_roi_rejects_a_reduced_profile_axis():
             ykey="image",
             norm_keys=(),
             view=view,
+            dims=("dim_0", "dim_1", "dim_2"),
             region=RectRegion(0.0, 1.0, 0.0, 1.0),
             profile_axis=0,
         )
@@ -383,6 +398,7 @@ def test_plot_request_roi_profile_ok():
         ykey="image",
         norm_keys=(),
         view=view,
+        dims=("dim_0", "dim_1", "dim_2"),
         region=RectRegion(0.0, 1.0, 0.0, 1.0),
         mask_mode="outside",
         profile_axis=0,

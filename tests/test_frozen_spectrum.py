@@ -61,6 +61,7 @@ def _frozen_entry(model, key_suffix="abc", y=None):
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
             ),
+            dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
             spatial_reduce="mean",
@@ -81,6 +82,7 @@ def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
         xkeys=xkeys,
         ykey=ykey,
         projection=projection,
+        dims=model.plot_axis_names(ykey, xkeys),
         **kwargs,
     )
 
@@ -260,6 +262,7 @@ def test_local_profile_keeps_frozen_x(qapp):
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
             ),
+            dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
             spatial_reduce="mean",

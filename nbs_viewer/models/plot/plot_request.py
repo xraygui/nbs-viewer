@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple, Union
 
+from .plot_axes import PlotAxes
 from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
 from .region import (
     MaskMode,
@@ -41,6 +42,7 @@ def build_plot_request(
     xkeys: Sequence[str],
     ykey: str,
     projection: Projection,
+    dims: Sequence[str],
     norm_keys: Optional[Sequence[str]] = None,
     transform: str = "",
 ) -> "PlotRequest":
@@ -60,6 +62,9 @@ def build_plot_request(
         Y data key.
     projection : Projection
         Rank-bound view for this key, crop included.
+    dims : sequence of str
+        Dimension name per storage axis of ``ykey`` under ``xkeys`` -- the
+        names the projection was chosen against.
     norm_keys : sequence of str, optional
         Normalization keys.
     transform : str
@@ -76,6 +81,7 @@ def build_plot_request(
         ykey=ykey,
         norm_keys=tuple(norm_keys or ()),
         view=projection,
+        dims=tuple(dims),
         transform=transform or "",
     )
 
@@ -140,6 +146,12 @@ class PlotRequest:
         crop. When ``region`` is set this is still the *parent* 2-D plane:
         the ROI reduces it afterwards, and the plane's identity is what the
         mask, the profile axis and the crop are all expressed against.
+    dims : tuple of str
+        Dimension name per storage axis of ``ykey`` under ``xkeys``. These
+        are the names the projection was chosen against, so they travel with
+        it: the fetch path used to ask the source for them again, and the
+        read asked a third time. A function of ``(ykey, xkeys)``, so it adds
+        nothing to the request's identity.
     region : RegionDefinition, optional
         ROI in data coordinates on the plot plane described by ``view``. When
         set, the output is a 1-D profile rather than the 2-D plane.
@@ -165,6 +177,7 @@ class PlotRequest:
     ykey: str
     norm_keys: Tuple[str, ...]
     view: Projection
+    dims: Tuple[str, ...]
     region: Optional[RegionDefinition] = None
     mask_mode: MaskMode = "inside"
     profile_axis: Optional[int] = None
@@ -185,6 +198,10 @@ class PlotRequest:
                 f"spatial_reduce must be 'sum' or 'mean', got "
                 f"{self.spatial_reduce!r}"
             )
+        # Checked here, where the request is made, rather than wherever it is
+        # first fetched: names that disagree with the view's rank, or repeat,
+        # would give one axis another's role.
+        PlotAxes.of(self.view, self.dims)
         if self.region is None:
             return
         # The projection is the plane the ROI is drawn on, not the profile it
@@ -225,6 +242,32 @@ class PlotRequest:
             return None
         order = self.view.plot_axis_order()
         return (order[-2], order[-1])
+
+    @property
+    def axes(self) -> PlotAxes:
+        """
+        The projection by dimension name, for the stages after the load.
+
+        Returns
+        -------
+        PlotAxes
+            ``view`` named by ``dims``.
+        """
+        return PlotAxes.of(self.view, self.dims)
+
+    @property
+    def profile_axes(self) -> Optional[PlotAxes]:
+        """
+        The 1-D profile view the ROI reduces the plane to.
+
+        Returns
+        -------
+        PlotAxes or None
+            Named profile view, or None when there is no region.
+        """
+        if self.region is None:
+            return None
+        return self.axes.to_profile(self.profile_axis, self.spatial_reduce)
 
     @property
     def output_ndim(self) -> int:
@@ -325,6 +368,27 @@ def narrow(item: SliceItem, start: int, stop: int) -> slice:
     return slice(new_start, new_stop)
 
 
+def kept_axes(items: Sequence[SliceItem]) -> Tuple[int, ...]:
+    """
+    Return the storage axes a load keeps.
+
+    An integer item indexes its axis away; a slice keeps it.
+
+    Parameters
+    ----------
+    items : sequence of int or slice
+        Per-storage-axis load items.
+
+    Returns
+    -------
+    tuple of int
+        Storage axes present in the loaded array, in order.
+    """
+    return tuple(
+        axis for axis, item in enumerate(items) if isinstance(item, slice)
+    )
+
+
 @dataclass(frozen=True)
 class FetchPlan:
     """
@@ -352,6 +416,11 @@ class FetchPlan:
         Normalization keys read alongside, each on its own derived slice.
     slice_info : tuple
         Per-storage-axis slice or index for chunked loading.
+    dims : tuple of str
+        Dimension name of each ``slice_info`` entry. Without them the plan
+        said which index to read on each storage axis but not which dimension
+        that axis was, so everything executing it needed a named view beside
+        it to translate.
     plane_axes : tuple of int, optional
         Storage axes of the plot plane, ``(plot_y, plot_x)``. None when the
         request has no 2-D plane.
@@ -368,9 +437,17 @@ class FetchPlan:
     xkeys: Tuple[str, ...]
     norm_keys: Tuple[str, ...]
     slice_info: Tuple[SliceItem, ...]
+    dims: Tuple[str, ...]
     plane_axes: Optional[Tuple[int, int]] = None
     plane_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
     region_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        if len(self.dims) != len(self.slice_info):
+            raise ValueError(
+                f"{len(self.dims)} dimension names for "
+                f"{len(self.slice_info)} load items"
+            )
 
     def reads_the_same(self, other: "FetchPlan") -> bool:
         """
@@ -572,12 +649,13 @@ def plan_fetch(
 
     if request.region is None:
         return FetchPlan(
-            request.ykey,
-            request.xkeys,
-            request.norm_keys,
-            tuple(items),
-            plane_axes,
-            plane_frame,
+            ykey=request.ykey,
+            xkeys=request.xkeys,
+            norm_keys=request.norm_keys,
+            slice_info=tuple(items),
+            dims=request.dims,
+            plane_axes=plane_axes,
+            plane_frame=plane_frame,
         )
 
     if plane_frame is None:
@@ -609,11 +687,12 @@ def plan_fetch(
         plane_frame, plane_frame.storage_bbox(loaded)
     )
     return FetchPlan(
-        request.ykey,
-        request.xkeys,
-        request.norm_keys,
-        tuple(items),
-        plane_axes,
-        plane_frame,
-        region_frame,
+        ykey=request.ykey,
+        xkeys=request.xkeys,
+        norm_keys=request.norm_keys,
+        slice_info=tuple(items),
+        dims=request.dims,
+        plane_axes=plane_axes,
+        plane_frame=plane_frame,
+        region_frame=region_frame,
     )

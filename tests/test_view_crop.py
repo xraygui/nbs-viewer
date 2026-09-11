@@ -36,6 +36,7 @@ def _plane_request(parent, crop=None):
         ykey="y",
         norm_keys=(),
         view=replace(parent, crop=crop),
+        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim)),
     )
 
 

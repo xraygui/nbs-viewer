@@ -1194,6 +1194,71 @@ be split across two files is in one.
 Both mutations bite: a cache that ignores which keys it holds, and one that
 ignores the norm keys.
 
+#### Then: the names ride on the request ✅ 2026-09-11
+
+The maintainer asked why `_block_for_plan` needed a `PlotAxes` beside the
+plan — *why aren't these cases already covered by `PlotRequest` or
+`FetchPlan`?*
+
+`PlotAxes` is `request.view` plus exactly one fact neither type held: a
+dimension name per storage axis. `plane` and `profile` are derived from the
+view and those names. And the fact was not missing because it was unknowable
+when the request is made — the session computed it to choose the projection
+and then dropped it. The Y key's names were derived three times, all from the
+same `analyze_dimensions(...)["ordered_dims"]`:
+
+- `PlotSession._build_plot_request`, to build the projection — discarded;
+- `RunSource._view_by_name`, again, before every fetch;
+- `load_axes` inside the read — discarded as `_names`.
+
+The two halves of the pipeline used `axes` for different things, so they are
+answered differently:
+
+- **The fetch side read only `axes.names`**, to say which dimension each
+  entry of the plan's positional `slice_info` is. That was a gap in
+  `FetchPlan` of exactly the shape the keys were: the plan said which index,
+  not which axis. `FetchPlan.dims` closes it, and `_block_for_plan`,
+  `_read_block` and `_norm_arrays` take the plan alone.
+- **The stages genuinely need `PlotAxes`** — role, order, plane and profile by
+  name, because `Projection` is indexed by storage axis and xarray by name.
+  It survives unchanged, but as `request.axes` and `request.profile_axes`:
+  derived from the request, never stored, and no longer built by `RunSource`.
+
+`PlotRequest` validates its names against the view in `__post_init__`, so a
+wrong count or a repeated name fails where the request is made rather than at
+the first fetch.
+
+Deleted: `RunSource._view_by_name`; the `axes` parameter on `_load_block`,
+`_block_for_plan`, `_read_block` and `_norm_arrays`; the per-fetch
+`plot_axis_names` call for the Y key; and two copies of the surviving-axes
+comprehension, now `kept_axes`. `_plane_frame` takes the frame's axis names
+from the request rather than from `load_axes`.
+
+**Behaviour change, deliberate.** When `plot_axis_names` raises, the session
+used to build the projection with no names, and the fetch then failed on the
+same call. A request cannot exist without names now, so the fallback is the
+key's own static dimensions, `describe(ykey).dims` — valid, just not renamed
+after the X selection.
+
+**Not finished.** `load_axes` still computes the names alongside the
+coordinates it is actually called for, and they are still discarded. That
+goes with `analyze_dimensions` in the `swap_dims` work, not here. The image
+grid's one `build_plot_request` call gained one argument and nothing else.
+
+Facts: places the Y key's axis names are derived and used, **3 → 1**.
+`run_source.py` 443 → 420 code lines, `plot_request.py` 262 → 288,
+`plot_session.py` 371 → 372: net **+4**, because the fields, the two
+properties and `kept_axes` are new in `plot_request.py`. Suite 474 → 476.
+
+Four mutations, each reverted with the suite in place; all bite:
+
+| mutation | fails |
+|---|---|
+| the fetch asks the source for the names again | 1 |
+| the session builds the request from static names | 5 |
+| the request does not check its names | 1 |
+| the plan names its axes in the wrong order | 27 |
+
 ### Step 5 — the block cache stops holding normalized data
 
 Found while drafting, and reproduced:
@@ -1324,3 +1389,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Step 4b done, from the maintainer's observation that orientation is a pure display concern and has no business reaching back past normalization. It is: `display_flips` decides one thing, whether `imshow(origin="upper")` would put an image upside down. The flip moved from the load to the pack, the ROI mask turns round instead of the block, and `PlaneOrientation` -- added one commit earlier -- is gone. The payoff is not tidiness: reversal was what made the exact-join guard fire on correct data, so this is what unblocks coordinates on normalization arrays. The maintainer's further suggestion of letting the renderer flip works for rows via `origin="lower"` but not for columns, since `imshow` has one origin for both axes; stopping at the pack keeps `views/` untouched. Found while verifying: `build_plot_bundle` had no test references at all. |
 | 2026-09-11 | Norm arrays got their coordinates, closing step 4's one open deviation. This is what step 4b was for: the guard had been firing on correct data because the block was flipped at load and a norm read afterwards was not. A norm read from the wrong stretch of an axis has the right name and the right length, so only comparing coordinate values catches it. The frozen synthetic norm is left aligned by position, deliberately -- its axes belong to the reduction that made it, not to the block -- and that is the one remaining hole in the guard. |
 | 2026-09-11 | `FetchPlan` gained the keys. The maintainer asked why the reading step needed a request beside the plan; it took only `ykey`, `xkeys` and `norm_keys` from it, which is exactly what the block cache was holding as a separate key. Putting them on the plan makes its own docstring true, removes the request from `_read_block` and `_norm_arrays`, and deletes `_block_cache_key` -- the plan is now the whole cache identity. |
+| 2026-09-11 | The names ride on the request. The maintainer asked why `PlotAxes` travelled beside the plan when `PlotRequest` and `FetchPlan` existed; it is the request's view plus one fact neither held, a dimension name per storage axis -- which the session already computed to choose the projection and then dropped, so the Y key's names were derived three times. `PlotRequest.dims` carries them from where they are first known, `FetchPlan.dims` names the plan's own indices, and `PlotAxes` survives only as a derivation of the request for the stages that need roles by name. `_view_by_name` and four `axes` parameters deleted. When the names cannot be resolved the session now falls back to the key's static dimensions rather than to none. |

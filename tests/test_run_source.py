@@ -53,6 +53,7 @@ def _frozen_entry(model, key_suffix="abc", y=None, label=None):
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
             ),
+            dims=("dim_1", "dim_2"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
             spatial_reduce="mean",
@@ -70,6 +71,7 @@ def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
         xkeys=xkeys,
         ykey=ykey,
         projection=projection,
+        dims=model.plot_axis_names(ykey, xkeys),
         **kwargs,
     )
 
@@ -341,6 +343,7 @@ def test_a_frozen_norm_follows_the_event_axis_index(qapp):
             xkeys=["pixel"],
             ykey="detector_cube",
             projection=projection,
+            dims=model.plot_axis_names("detector_cube", ["pixel"]),
             norm_keys=[entry.key],
         )
     )

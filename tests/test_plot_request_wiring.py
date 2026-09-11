@@ -29,6 +29,11 @@ from nbs_viewer.models.sources.fixtures import (
     vppem_factors,
 )
 
+# What ``RunSource.plot_axis_names`` answers for the VPPEM keys under the
+# voltage selection: the event axis wears the X key's name.
+VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
+STATS_NAMES = ("sampleVoltage_VSource",)
+
 
 def test_a_low_rank_key_projects_on_its_own_terms():
     """
@@ -62,6 +67,7 @@ def test_plan_fetch_narrows_the_load_with_the_request_crop():
         xkeys=("sampleVoltage_VSource",),
         ykey="PCOEdge_image",
         projection=replace(cube, crop=crop),
+        dims=VPPEM_NAMES,
     )
     assert req.view.base_slice() == (4, slice(None), slice(None))
     assert plan_fetch(req).slice_info == (4, slice(2, 10), slice(4, 20))
@@ -80,6 +86,7 @@ def test_run_model_get_plot_bundle_from_request():
         xkeys=xkeys,
         ykey=ykey,
         projection=cube,
+        dims=VPPEM_NAMES,
     )
     via_request = model.get_plot_bundle(req)
 
@@ -99,6 +106,7 @@ def test_run_model_get_plot_bundle_request_with_crop():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
         projection=replace(cube, crop=crop),
+        dims=VPPEM_NAMES,
     )
     bundle = model.get_plot_bundle(req)
     expected = (a[4] * np.outer(b, c))[2:10, 4:20]
@@ -126,6 +134,7 @@ def test_plot_data_model_holds_request_and_fetches():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
         projection=cube,
+        dims=VPPEM_NAMES,
     )
     plot_data = Trace(model, request)
     assert plot_data.trace_key == TraceKey(
@@ -147,6 +156,7 @@ def test_set_request_keeps_trace_key():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
         projection=cube,
+        dims=VPPEM_NAMES,
     )
     plot_data = Trace(model, first)
     key = plot_data.trace_key
@@ -156,6 +166,7 @@ def test_set_request_keeps_trace_key():
         ykey="PCOEdge_image",
         transform="y = y * 2",
         projection=cube.with_index(0, 5),
+        dims=VPPEM_NAMES,
     )
     assert plot_data.set_request(second)
     assert plot_data.trace_key is key
@@ -165,6 +176,7 @@ def test_set_request_keeps_trace_key():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_stats",
         projection=ViewIntent(plot_ndim=1).project(len((11,)), (11,)),
+        dims=STATS_NAMES,
     )
     with pytest.raises(ValueError, match="does not match"):
         plot_data.set_request(other)
@@ -186,6 +198,8 @@ def test_ensure_trace_assembles_request(qapp):
     key = TraceKey(run.uid, "sampleVoltage_VSource", "PCOEdge_image")
     assert key in plot_model.traces
     assert first.request.view.indices[0] == 4
+    # The names the session chose the projection against ride on the request.
+    assert first.request.dims == VPPEM_NAMES
     same = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
@@ -213,6 +227,7 @@ def test_get_plot_bundle_records_the_display_reversal():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
         projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES,
     )
 
     bundle = model.get_plot_bundle(req)
@@ -241,6 +256,7 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
         xkeys=["sampleVoltage_VSource"],
         ykey="PCOEdge_image",
         projection=parent_spec,
+        dims=VPPEM_NAMES,
     )
     frame = _vppem_frame(model, parent_req)
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
@@ -276,8 +292,61 @@ def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
         ykey="PCOEdge_image",
         norm_keys=["PCOEdge_flat"],
         projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES,
     )
     bundle = model.get_plot_bundle(req)
 
     expected = (a[4] * np.outer(b, c) / flat)[::-1, :]
     np.testing.assert_allclose(bundle.y, expected, rtol=1e-9)
+
+
+def test_a_request_rejects_names_that_disagree_with_its_view():
+    """
+    The names are checked where the request is made, not where it is fetched.
+
+    Every stage after the load addresses an axis by name, so a count that
+    disagrees with the rank, or a repeated name, would give one axis another's
+    role.
+    """
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
+
+    def build(dims):
+        return build_plot_request(
+            uid=VPPEM_UID,
+            xkeys=["sampleVoltage_VSource"],
+            ykey="PCOEdge_image",
+            projection=cube,
+            dims=dims,
+        )
+
+    with pytest.raises(ValueError, match="rank-3"):
+        build(("dim_1", "dim_2"))
+    with pytest.raises(ValueError, match="duplicate"):
+        build(("dim_1", "dim_1", "dim_2"))
+
+
+def test_the_fetch_takes_the_names_from_the_request():
+    """
+    The session chose the projection against these names, so the fetch uses
+    them rather than asking the source again before every read.
+    """
+    model = RunSource(make_vppem_run())
+    asked = []
+    original = model.plot_axis_names
+
+    def counted(ykey, xkeys):
+        asked.append(ykey)
+        return original(ykey, xkeys)
+
+    model.plot_axis_names = counted
+    req = build_plot_request(
+        uid=VPPEM_UID,
+        xkeys=["sampleVoltage_VSource"],
+        ykey="PCOEdge_image",
+        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES,
+    )
+
+    assert plan_fetch(req).dims == VPPEM_NAMES
+    model.get_plot_bundle(req)
+    assert "PCOEdge_image" not in asked

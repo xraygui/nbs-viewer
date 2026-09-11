@@ -441,6 +441,9 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 ykey=y_key,
                 norm_keys=norm_keys,
                 projection=spec_from_slice_info(tuple(slice_info), 2),
+                dims=run_model.plot_axis_names(
+                    y_key, [xkey] if xkey else []
+                ),
                 transform=transform,
             )
             trace = Trace(

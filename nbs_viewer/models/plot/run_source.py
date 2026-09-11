@@ -11,7 +11,6 @@ from ..data.key_info import KeyInfo
 from ..data.key_source import CatalogKey
 from .frozen_spectrum import FrozenSpectrum
 from .run_identity import RunIdentity
-from .plot_axes import PlotAxes
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -28,7 +27,7 @@ from .plot_geometry import (
     display_flips,
 )
 from ..data.array_contract import labelled_array
-from .plot_request import FetchPlan, PlotRequest, plan_fetch
+from .plot_request import FetchPlan, PlotRequest, kept_axes, plan_fetch
 from .plot_view_frame import PlotViewFrame, frame_for_plane
 from nbs_viewer.utils import print_debug
 
@@ -585,9 +584,10 @@ class RunSource(QObject):
         if plane_axes is None:
             raise ValueError("cannot resolve the plot plane for an ROI fetch")
         row_axis, col_axis = plane_axes
-        axes, names, _extra = self.load_axes(
+        axes, _names, _extra = self.load_axes(
             request.ykey, list(request.xkeys), request.view.base_slice()
         )
+        names = request.dims
         rows = np.atleast_1d(np.asarray(axes[row_axis]))
         cols = np.atleast_1d(np.asarray(axes[col_axis]))
         plane_shape = (int(rows.size), int(cols.size))
@@ -628,33 +628,8 @@ class RunSource(QObject):
         """
         return self.describe(ykey).render_hint
 
-    def _view_by_name(self, request: PlotRequest) -> PlotAxes:
-        """
-        Name the request's projection, once, before anything is read.
-
-        Every stage after the load takes this and never sees a storage axis
-        index again. It is derived from the request alone: which dimension
-        plays which role, and what order they end up in, are decided by the
-        view and the X selection rather than by anything the data turns out
-        to be.
-
-        Parameters
-        ----------
-        request : PlotRequest
-            Frozen plot description.
-
-        Returns
-        -------
-        PlotAxes
-            The projection, by dimension name.
-        """
-        return PlotAxes.of(
-            request.view,
-            self.plot_axis_names(request.ykey, request.xkeys),
-        )
-
     def _norm_arrays(
-        self, plan: FetchPlan, axes: PlotAxes, data: xr.DataArray
+        self, plan: FetchPlan, data: xr.DataArray
     ) -> List[xr.DataArray]:
         """
         Read each normalization key, labelled and oriented to match the block.
@@ -687,9 +662,7 @@ class RunSource(QObject):
         Parameters
         ----------
         plan : FetchPlan
-            The keys to read and the load slices used for the Y key.
-        axes : PlotAxes
-            Named view of the Y key.
+            The keys to read, and the Y key's load slices and their names.
         data : xarray.DataArray
             The loaded block, for its dimension names.
 
@@ -711,25 +684,19 @@ class RunSource(QObject):
                 )
                 continue
             norm_names = list(self.plot_axis_names(norm_key, xkeys))
-            key_slice = slice_info_for_key(
-                slice_info, list(axes.names), norm_names
-            )
+            key_slice = slice_info_for_key(slice_info, plan.dims, norm_names)
             values = self.read(norm_key, key_slice)
             norm_coords, _names, _extra = self.load_axes(
                 norm_key, xkeys, key_slice
             )
-            surviving = [
-                axis
-                for axis, item in enumerate(key_slice)
-                if not isinstance(item, (int, np.integer))
-            ]
+            kept = kept_axes(key_slice)
             norms.append(
                 labelled_array(
                     values,
-                    [norm_names[axis] for axis in surviving],
+                    [norm_names[axis] for axis in kept],
                     coords={
                         norm_names[axis]: np.asarray(norm_coords[axis])
-                        for axis in surviving
+                        for axis in kept
                     },
                     name=norm_key,
                 )
@@ -792,20 +759,16 @@ class RunSource(QObject):
             )
         return windows
 
-    def _block_for_plan(
-        self, plan: FetchPlan, axes: PlotAxes
-    ) -> Optional[xr.DataArray]:
+    def _block_for_plan(self, plan: FetchPlan) -> Optional[xr.DataArray]:
         """
         Serve a loaded, normalized block from memory if one covers it.
 
         Parameters
         ----------
         plan : FetchPlan
-            Plan the caller is about to execute. It carries the keys as well
-            as the window, so it is the whole cache key -- there used to be a
-            separate tuple of ``(ykey, xkeys, norm_keys)`` held beside it.
-        axes : PlotAxes
-            Named view, for mapping a storage axis to its dimension.
+            Plan the caller is about to execute. It carries the keys and the
+            dimension names as well as the window, so it is the whole cache
+            key and names its own axes.
 
         Returns
         -------
@@ -825,7 +788,7 @@ class RunSource(QObject):
         for storage_axis, window in enumerate(windows):
             if window is None:
                 continue
-            dim = axes.names[storage_axis]
+            dim = plan.dims[storage_axis]
             if dim not in data.dims:
                 continue
             start, stop = window
@@ -836,7 +799,7 @@ class RunSource(QObject):
         return data
 
     def _load_block(
-        self, request: PlotRequest, axes: PlotAxes
+        self, request: PlotRequest
     ) -> Tuple[xr.DataArray, FetchPlan]:
         """
         Return the block a request needs, from memory or by reading it.
@@ -852,8 +815,6 @@ class RunSource(QObject):
         ----------
         request : PlotRequest
             Request being served.
-        axes : PlotAxes
-            Named view of the Y key.
 
         Returns
         -------
@@ -861,15 +822,13 @@ class RunSource(QObject):
             ``(data, plan)``.
         """
         plan = plan_fetch(request, plane_frame=self._plane_frame(request))
-        data = self._block_for_plan(plan, axes)
+        data = self._block_for_plan(plan)
         if data is None:
-            data = self._read_block(plan, axes)
+            data = self._read_block(plan)
             self._block = (plan, data)
         return data, plan
 
-    def _read_block(
-        self, plan: FetchPlan, axes: PlotAxes
-    ) -> xr.DataArray:
+    def _read_block(self, plan: FetchPlan) -> xr.DataArray:
         """
         Read, label and normalize the block a plan asks for.
 
@@ -885,9 +844,7 @@ class RunSource(QObject):
         Parameters
         ----------
         plan : FetchPlan
-            What to read and which indices of it.
-        axes : PlotAxes
-            Named view of the Y key.
+            What to read, which indices of it, and the name of each axis.
 
         Returns
         -------
@@ -904,25 +861,19 @@ class RunSource(QObject):
         values = self.read(ykey, slice_info)
         t_load = ttime.time() - t0
 
-        surviving = [
-            axis
-            for axis, item in enumerate(slice_info)
-            if not isinstance(item, (int, np.integer))
-        ]
+        kept = kept_axes(slice_info)
         data = labelled_array(
             values,
-            [axes.names[axis] for axis in surviving],
+            [plan.dims[axis] for axis in kept],
             coords={
-                axes.names[axis]: np.asarray(storage_coords[axis])
-                for axis in surviving
+                plan.dims[axis]: np.asarray(storage_coords[axis])
+                for axis in kept
             },
             name=ykey,
         )
 
         t0 = ttime.time()
-        data = apply_normalization(
-            data, self._norm_arrays(plan, axes, data)
-        )
+        data = apply_normalization(data, self._norm_arrays(plan, data))
         t_norm = ttime.time() - t0
 
         print_debug(
@@ -991,11 +942,11 @@ class RunSource(QObject):
                 plane = self.get_plot_bundle(request.plane_request)
             return reduce_cached_plane(plane, request, label=label)
 
-        axes = self._view_by_name(request)
-        data, plan = self._load_block(request, axes)
+        data, plan = self._load_block(request)
 
         t0 = ttime.time()
         if request.region is None:
+            axes = request.axes
             data = reduce_to_plane(data, axes)
             data = apply_transform(data, axes, request.transform)
         else:
@@ -1004,9 +955,7 @@ class RunSource(QObject):
             # mask. The profile axis is read in full by plan_fetch. The
             # transform sees the plane's own coordinates either way, so ``x``
             # means the same thing here as when the plane itself is drawn.
-            profile = axes.to_profile(
-                request.profile_axis, request.spatial_reduce
-            )
+            profile = request.profile_axes
             data = reduce_before_mask(data, profile)
             data = apply_transform(data, profile, request.transform)
             data = mask_to_profile(

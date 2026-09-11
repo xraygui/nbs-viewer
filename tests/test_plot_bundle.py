@@ -49,6 +49,7 @@ def _request(
         ykey=ykey,
         norm_keys=tuple(norm_keys),
         view=view,
+        dims=run.plot_axis_names(ykey, xkeys),
         transform=transform,
     )
 
@@ -405,6 +406,7 @@ def _image_request(run, ykey="detector_image", **kwargs):
         ykey=ykey,
         norm_keys=(),
         view=view,
+        dims=run.plot_axis_names(ykey, ("en_energy",)),
     )
 
 
@@ -474,6 +476,7 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
         ykey="detector_cube",
         norm_keys=(),
         view=view,
+        dims=run.plot_axis_names("detector_cube", ("en_energy",)),
     )
     wide = replace(
         parent,
@@ -575,6 +578,7 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
         ykey="detector_cube",
         norm_keys=(),
         view=view,
+        dims=run.plot_axis_names("detector_cube", ("en_energy",)),
         transform="y * len(x)",
     )
     assert run.get_plot_bundle(parent).ndim == 2
@@ -613,12 +617,12 @@ def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
         xkeys=xkeys,
         ykey=ykey,
         projection=view,
+        dims=model.plot_axis_names(ykey, xkeys),
         norm_keys=norm_keys,
     )
-    axes = model._view_by_name(request)
     plan = plan_fetch(request, plane_frame=model._plane_frame(request))
-    block = model._read_block(plan, axes)
-    return request, block, model._norm_arrays(plan, axes, block)
+    block = model._read_block(plan)
+    return request, block, model._norm_arrays(plan, block)
 
 
 def test_a_norm_arrives_with_the_same_coordinates_as_the_block():

@@ -67,6 +67,7 @@ def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectr
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
                 indices=(0, 0),
             ),
+            dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
             spatial_reduce="mean",
