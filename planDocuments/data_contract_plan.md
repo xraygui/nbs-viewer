@@ -1010,6 +1010,88 @@ axes* of a projection. `RunSource.plot_axis_names(ykey, xkeys)`, added in step
 things one import apart. Recorded for the module reorganization rather than
 renamed here.
 
+### Step 4b — orientation moves to the pack
+
+Raised by the maintainer after step 4 landed: *"why does `PlaneOrientation`
+need to be pushed down to such a low level? Isn't it a pure display concern?
+Orientation is just a statement about the display of 2-D detectors, and we can
+only display one 2-D plane at a time, so there's really no situation where
+different pieces of data can have different orientations, and we need to sort
+it all out before normalization."*
+
+Checked, and it is right. `display_flips` returns `(False, False)` for every
+mesh plane and, for an image, decides one thing: whether
+``imshow(origin="upper")`` would put the coordinates upside down. It is a
+matplotlib convention and nothing else.
+
+#### It is not only tidiness: the flip blocks the plan's central guard
+
+Step 4 left normalization arrays **without coordinates**, so they align by
+name and position. Attaching coordinates is what turns on the
+`arithmetic_join="exact"` check that the fly-scan argument settled the whole
+representation on — and the flip is what stops it. Measured:
+
+```
+flat-field divide, coordinates attached, block flipped  -> AlignmentError
+flat-field divide, no coordinates                       -> divides upside down, silently
+```
+
+Y's rows are reversed at load; a flat field read afterwards is not. Their
+coordinates disagree, so the guard fires on correct data. With nothing
+reversed, both are in source order and the guard means what it says. **This
+step has to come before coordinates go on norm arrays**, and that is the most
+valuable thing left in the plan.
+
+#### The move
+
+The flip goes from *the load, on the whole block* to *the pack, on the
+finished plane*.
+
+- [ ] `_read_block` returns a bare `xr.DataArray` in source order.
+- [ ] `_norm_arrays` stops reversing; `_block_for_plan` stops mirroring cache
+  windows.
+- [ ] `build_plot_bundle` classifies the render mode from the finished plane
+  and flips it. Classification is order-independent — uniformity is a property
+  of the differences — so moving it later does not change the answer.
+- [ ] `mask_to_profile` flips the **mask** rather than the data, using the
+  region frame's own flags. The ROI is compiled on the frame the user drew on,
+  which stays display-ordered; the block no longer is, so one of the two has
+  to turn round and the boolean plane is the cheaper one.
+- [ ] Deletes `PlaneOrientation`, `RunSource._plane_render_mode`,
+  `FetchPlan.reversed_axes_for`, the reversal loop in `_norm_arrays`, the
+  mirroring in `_block_for_plan`, and the `orient_block` test helper.
+- [ ] Facts: places that flip data, **3 → 1**.
+
+#### What deliberately does *not* move
+
+`PlotViewFrame.row_reversed` / `col_reversed` / `storage_bbox` stay. They are
+not a property of the data: they map a box the user drew on the screen back to
+storage indices, which is a genuine two-coordinate-system problem and is
+exactly where it belongs. `plan_fetch` keeps using them.
+
+`views/` is untouched, because `PlotBundle` stays display-ordered.
+
+#### The maintainer's further suggestion, and the wrinkle in it
+
+> *...and even then -- we can let the actual plot do the reversal, rather than
+> saving flipped array data.*
+
+That would make `PlotBundle` itself source-ordered and leave the flip to the
+renderer. It works for **rows**: `imshow(origin="lower")` puts storage row 0 at
+the bottom, which is precisely the case that is flipped today. Verified
+against matplotlib.
+
+It does not work for **columns**. `imshow` has one `origin` for both axes, and
+a descending column coordinate needs the array actually reversed; the only
+alternative is an inverted x extent, which draws x decreasing to the right.
+So the renderer would do two different things, and `frame_from_bundle` would
+describe a source-ordered array while the selector works on a displayed one —
+putting the two coordinate systems back, one layer further out.
+
+Stopping at `build_plot_bundle` gets the whole payoff: nothing in the model
+pipeline is ever flipped, and the flip happens once, on a 2-D plane, at the
+boundary where display begins.
+
 ### Step 5 — the block cache stops holding normalized data
 
 Found while drafting, and reproduced:
