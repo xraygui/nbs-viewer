@@ -187,6 +187,10 @@ def apply_normalization(
     name and *fell back to matching by shape*, which is a coincidence rather
     than a reason.
 
+    ``data`` may be the held block itself, and it is never written to: each
+    divide returns a new array, and with no norms the block comes back as it
+    is rather than copied on every fetch.
+
     A dimension the data does not have is rejected rather than broadcast. That
     is the one thing xarray would do too quietly: a norm array whose dimension
     is unknown to ``data`` produces an outer product -- ``(5, 3) / (5,)``
@@ -210,7 +214,7 @@ def apply_normalization(
     ValueError
         If a norm carries a dimension ``data`` does not have.
     """
-    out = data.astype(float)
+    out = data.astype(float, copy=False)
     for norm in norms:
         unknown = [dim for dim in norm.dims if dim not in out.dims]
         if unknown:
@@ -258,14 +262,15 @@ def apply_transform(
     if not transform_text:
         return data
     display = [dim for dim in axes.display_dims if dim in data.coords]
-    coords = [np.asarray(data.coords[dim].values) for dim in display]
-    # Snapshotted, because ``x`` is handed to the interpreter as this very
-    # list: an expression assigning ``x[0]`` rebinds an element in place, so
-    # comparing against the list afterwards would compare it with itself.
-    before = [np.array(axis, copy=True) for axis in coords]
+    before = [np.asarray(data.coords[dim].values) for dim in display]
+    # The interpreter gets copies of both. ``data`` can be the held block
+    # itself -- a plane that needs no reduce reaches here uncopied -- and a
+    # clip written ``y[y > t] = t`` assigns in place, which wrote the clip
+    # into every later fetch. The same for an element of ``x``.
+    coords = [np.array(axis, copy=True) for axis in before]
 
     interp = Interpreter()
-    interp.symtable["y"] = data.values
+    interp.symtable["y"] = np.array(data.values, copy=True)
     interp.symtable["x"] = coords
     result = interp(transform_text)
     values = np.asarray(

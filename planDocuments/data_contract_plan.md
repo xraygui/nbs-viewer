@@ -15,7 +15,7 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1–4 landed 2026-09-10**; steps 5–7 not started. Numbers measured at
+1–4 landed 2026-09-10, step 5 on 2026-09-11**; steps 6–7 not started. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -1259,7 +1259,7 @@ Four mutations, each reverted with the suite in place; all bite:
 | the request does not check its names | 1 |
 | the plan names its axes in the wrong order | 27 |
 
-### Step 5 — the block cache stops holding normalized data
+### Step 5 — the block cache stops holding normalized data ✅ 2026-09-11
 
 Found while drafting, and reproduced:
 
@@ -1275,16 +1275,94 @@ toggling a normalization re-reads **the whole detector array** — and toggling
 norms on and off is a routine interaction, not an edge case. It is bug 8's
 sibling, made by bug 8's fix.
 
-- [ ] Cache the oriented-but-not-normalized block, keyed without `norm_keys`,
-  and hold the loaded norm arrays in the same entry keyed by norm key.
-- [ ] The stage *order* does not change — `load → orient → normalize → reduce
-  → transform → mask` is still correct and is what step 7 established. Only
+- [x] Cache the block as read — not normalized, and since step 4b not
+  oriented either — keyed without `norm_keys`, and hold the loaded norm arrays
+  in the same entry keyed by norm key.
+- [x] The stage *order* does not change — `load → normalize → reduce →
+  transform → mask` is still correct and is what step 7 established. Only
   the cache boundary moves back one stage.
-- [ ] Preserve view-pipeline step 7's exit criterion: a transform change must
+- [x] Preserve view-pipeline step 7's exit criterion: a transform change must
   still cause **zero** reads. Caching the norm arrays alongside is what keeps
   that true.
-- [ ] Facts: reads caused by toggling a norm, **1 N-D read → 0** (a norm
-  arriving costs one small 1-D read; a norm leaving costs none).
+- [x] Facts: reads caused by toggling a norm, **1 N-D read → 0** (a norm
+  arriving costs one read of its own key; a norm leaving costs none).
+
+#### Outcome
+
+`_load_block` returns `(data, norms, plan)` and `get_plot_bundle` does the
+divide, so normalization is a visible stage of the pipeline — the shape step
+6 asks for — and costs arithmetic rather than I/O. Norms are read against the
+*held* block, not the narrowed request, so everything in the entry lines up,
+and `_narrowed` takes the same window out of the block and each norm on the
+way out.
+
+Pinned by test, on VPPEM `PCOEdge_image` summed over voltage against `i0`:
+
+```
+turning a norm ON    -> RunSource.read: ['i0']
+turning it OFF       -> RunSource.read: []
+turning it ON again  -> RunSource.read: []
+```
+
+Deleted: `_block_for_plan` — split into `_held_windows` and `_narrowed`,
+because the window now applies to norms as well as the block — the loop in
+`_norm_arrays`, now `_norm_array` for one key, and `norm_keys` and
+`plane_axes` from the cache identity.
+
+#### Deviation: the plot plane left the cache key too
+
+The same reasoning as the norm keys, one field over. `plane_axes` was in
+`reads_the_same` because the load used to flip the plane; since step 4b the
+block is in storage order, so which two axes are drawn does not change what
+was read. Swapping the drawn axes: **1 read → 0**. The identity is now
+`(ykey, xkeys, dims)` — which key, which coordinates, which names — and that
+is exactly what the held block depends on.
+
+#### Found while doing it: an in-place transform wrote into the cache
+
+Pre-existing, reproduced before fixing. A plane that needs no reduce reaches
+`apply_transform` as the held block itself, and the interpreter was handed
+the block's own `values` and coordinate arrays. So `y[y > t] = t` — a clip,
+the maintainer's own example of a transform that belongs before an ROI —
+assigned into the held block, and every later fetch showed clipped data even
+with the transform turned off. An element assignment to `x` rewrote the held
+coordinates the same way.
+
+It is this step's business because the cache now holds raw data across norm
+toggles as well: the interpreter gets copies of both. The cost is one copy of
+the reduced plane per fetch that has a transform, and none without one.
+`apply_normalization` meanwhile stopped copying when there is nothing to
+divide by (`astype(float, copy=False)`); the block becomes float once, at the
+read.
+
+#### One cost, named
+
+The entry keeps every norm read against the block until the block changes.
+A flat field is the size of the block, so toggling one on and off holds it.
+That is bounded by the norms toggled while one block is held, and it goes
+when the block does.
+
+Facts: reads per norm toggle **1 N-D → 0**; reads per swap of the drawn axes
+**1 → 0**. Code lines: `run_source.py` 420 → 420, `plot_request.py`
+288 → 287, `plot_bundle.py` 325 → 325 — net **−1**, because this step moved
+the cache boundary rather than deleting a layer. Suite 476 → 480.
+
+Six mutations, each reverted with the suite in place; all bite:
+
+| mutation | fails |
+|---|---|
+| the cache is keyed on the norm keys again | 1 |
+| the cache is keyed on the plot plane again | 1 |
+| the held norms are not narrowed with the block | 1 |
+| normalization is skipped | 10 |
+| the transform is handed the block's own `y` | 1 |
+| the transform is handed the block's own `x` | 2 |
+
+The third fails on the exact join rather than on a wrong number: a norm left
+at full size beside a narrowed block does not broadcast, it raises. One
+existing test moved with the boundary — the wrong-window norm test expected
+the alignment error from the load, and now gets it from the divide, through
+`get_plot_bundle`.
 
 ### Step 6 — the fetch orchestration leaves `RunSource`
 
@@ -1365,6 +1443,28 @@ should be re-derived after this lands rather than executed as written.
    **Settled: coordinates go on, indexed, wherever real ones exist.** See
    *Coordinates, and why fly-scan data settles it* below.
 
+6. **Known gap, deferred: the transform is session-global, so it cannot come
+   after an ROI.** Settled 2026-09-11 by the maintainer: the transform runs
+   *before* the ROI reduction — clip an image, then sum a region — and a
+   transform *after* one — background-subtract a spectrum taken from a cube —
+   is done by freezing the ROI as a frozen spectrum, which is what those are
+   for. The code already implements the first half on both ROI paths.
+
+   The second half does not work yet, because one session-wide transform
+   text (`PlotSession._effective_transform_text`) goes on every request.
+   A frozen spectrum stores the committed profile with the transform already
+   applied, and plotting the frozen key applies the session transform
+   again. Measured with `y * 2` on the image-scan fixture: the committed
+   profile is 2× raw, and the frozen key plotted with the transform still on
+   is **4×**. And two different transforms at once — a clip on the image, a
+   background subtraction on the spectrum — cannot be expressed at all.
+
+   The likely fix is a per-trace transform: `PlotRequest` already carries
+   one, only the session hands every request the same text. A frozen
+   spectrum's trace would then start with none. The cost is mostly in the UI,
+   where the transform editor would apply to a trace rather than the whole
+   plot. Not blocking this plan.
+
 5. **Does `PlotBundle` eventually become a `DataArray` plus render payload?**
    It already carries `y`, `axis_names`, `render_mode`, `row_reversed`,
    `col_reversed`. Out of scope here — it is the view layer's contract and
@@ -1390,3 +1490,5 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Norm arrays got their coordinates, closing step 4's one open deviation. This is what step 4b was for: the guard had been firing on correct data because the block was flipped at load and a norm read afterwards was not. A norm read from the wrong stretch of an axis has the right name and the right length, so only comparing coordinate values catches it. The frozen synthetic norm is left aligned by position, deliberately -- its axes belong to the reduction that made it, not to the block -- and that is the one remaining hole in the guard. |
 | 2026-09-11 | `FetchPlan` gained the keys. The maintainer asked why the reading step needed a request beside the plan; it took only `ykey`, `xkeys` and `norm_keys` from it, which is exactly what the block cache was holding as a separate key. Putting them on the plan makes its own docstring true, removes the request from `_read_block` and `_norm_arrays`, and deletes `_block_cache_key` -- the plan is now the whole cache identity. |
 | 2026-09-11 | The names ride on the request. The maintainer asked why `PlotAxes` travelled beside the plan when `PlotRequest` and `FetchPlan` existed; it is the request's view plus one fact neither held, a dimension name per storage axis -- which the session already computed to choose the projection and then dropped, so the Y key's names were derived three times. `PlotRequest.dims` carries them from where they are first known, `FetchPlan.dims` names the plan's own indices, and `PlotAxes` survives only as a derivation of the request for the stages that need roles by name. `_view_by_name` and four `axes` parameters deleted. When the names cannot be resolved the session now falls back to the key's static dimensions rather than to none. |
+| 2026-09-11 | Transform-after-ROI recorded as open question 6, a known gap deferred by the maintainer. The rule is settled -- the transform runs before the ROI reduction, and a transform after one is done by freezing the ROI -- but the transform is session-global, so a frozen spectrum gets it applied a second time (measured: 4× raw under `y * 2`), and two different transforms at once cannot be expressed. |
+| 2026-09-11 | Step 5 done. The block cache holds the block as read and its norm arrays beside it, keyed by norm key; `_load_block` returns them apart and `get_plot_bundle` divides, so toggling a normalization reads at most the norm key and never the block. The plot plane left the cache identity as well -- a leftover from when the load flipped it -- so swapping the drawn axes reads nothing; the identity is now `(ykey, xkeys, dims)`. Found while doing it and fixed in the step, because it corrupts exactly what the step holds: `apply_transform` handed the interpreter the held block's own arrays, so an in-place clip such as `y[y > t] = t` wrote into every later fetch. |

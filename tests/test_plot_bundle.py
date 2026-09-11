@@ -17,8 +17,11 @@ from nbs_viewer.models.plot.plot_bundle import (
 from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
+    make_vppem_data,
+    make_vppem_metadata,
     make_vppem_run,
     voltage_axis,
     vppem_factors,
@@ -494,6 +497,129 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
     np.testing.assert_allclose(from_cache.y, fresh.get_plot_bundle(inner).y)
 
 
+def test_toggling_a_norm_reads_the_norm_and_never_the_block():
+    """
+    Step 5: the block is held as read, and the norms beside it.
+
+    The cache used to hold the *normalized* block, so the norm keys were part
+    of its identity and turning a normalization on or off re-read the whole
+    detector array -- a routine interaction, not an edge case. Now a norm
+    costs one read of its own key the first time it is wanted, and turning it
+    off, or back on, costs nothing: the divide re-runs, the read does not.
+    """
+    run = _model()
+    view = Projection(
+        ndim=3,
+        plot_ndim=1,
+        roles=(DimRole.SUM, DimRole.INDEX, DimRole.PLOT_X),
+        indices=(0, 2, 0),
+    )
+    plain = _request(run, "PCOEdge_image", ["sampleVoltage_VSource"], view)
+    normed = replace(plain, norm_keys=("i0",))
+    run.get_plot_bundle(plain)
+
+    calls = _count_reads(run)
+    on = run.get_plot_bundle(normed)
+    assert [key for key, _slice in calls] == ["i0"]
+
+    del calls[:]
+    off = run.get_plot_bundle(plain)
+    again = run.get_plot_bundle(normed)
+    assert calls == []
+
+    np.testing.assert_allclose(on.y, _model().get_plot_bundle(normed).y)
+    np.testing.assert_allclose(off.y, _model().get_plot_bundle(plain).y)
+    np.testing.assert_allclose(again.y, on.y)
+    assert not np.allclose(on.y, off.y)
+
+
+def test_a_crop_inside_a_loaded_box_narrows_the_norms_with_the_block():
+    """
+    The norms in the entry were read against the held block, so a sub-block
+    served from memory has to take the same window out of each of them. With
+    coordinates on both, a norm left at full size does not broadcast quietly
+    -- the exact join refuses it.
+    """
+    data = make_vppem_data()
+    n_rows, n_cols = VPPEM_SHAPE[1:]
+    flat = 1.0 + np.arange(n_rows, dtype=float)[:, None] * np.ones(n_cols)
+    data["PCOEdge_flat"] = np.broadcast_to(flat[None, :, :], VPPEM_SHAPE).copy()
+
+    def flat_model():
+        return RunSource(MemoryRun(make_vppem_metadata(), data))
+
+    run = flat_model()
+    cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
+    full = _request(
+        run,
+        "PCOEdge_image",
+        ["sampleVoltage_VSource"],
+        cube,
+        norm_keys=("PCOEdge_flat",),
+    )
+    run.get_plot_bundle(full)
+
+    crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
+    cropped = replace(full, view=replace(cube, crop=crop))
+    calls = _count_reads(run)
+    from_cache = run.get_plot_bundle(cropped)
+
+    assert calls == []
+    np.testing.assert_allclose(
+        from_cache.y, flat_model().get_plot_bundle(cropped).y
+    )
+
+
+def test_swapping_the_plot_axes_reads_nothing():
+    """
+    The block is in storage order, so which two axes are drawn is not part
+    of what was read. The cache compared the plot plane because the load used
+    to flip it; once the flip moved to the pack, that was a re-read for
+    nothing.
+    """
+    run = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    request = _image_request(run)
+    plain = run.get_plot_bundle(request)
+
+    swapped = replace(request, view=request.view.swap_rows(1))
+    calls = _count_reads(run)
+    from_cache = run.get_plot_bundle(swapped)
+
+    assert calls == []
+    assert from_cache.y.shape == plain.y.shape[::-1]
+    fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
+    np.testing.assert_allclose(from_cache.y, fresh.get_plot_bundle(swapped).y)
+
+
+def test_a_transform_that_assigns_in_place_leaves_the_held_block_alone():
+    """
+    A clip written ``y[y > t] = t`` assigns into the array it is handed.
+
+    A plane that needs no reduce reaches the transform as the held block
+    itself, so handing the interpreter that array wrote the clip into every
+    later fetch: turning the transform off did not bring the data back. An
+    element assignment to ``x`` rewrote the held coordinates the same way.
+    """
+    run = _model()
+    line = _request(
+        run,
+        "PCOEdge_stats",
+        ["sampleVoltage_VSource"],
+        ViewIntent(plot_ndim=1).project(1),
+    )
+    plain = run.get_plot_bundle(line)
+    y_before, x_before = plain.y.copy(), plain.x_line.copy()
+
+    clipped = run.get_plot_bundle(replace(line, transform="y[0] = -99"))
+    moved = run.get_plot_bundle(replace(line, transform="x[0][0] = -99"))
+    assert clipped.y[0] == -99
+    assert moved.x_line[0] == -99
+
+    after = run.get_plot_bundle(line)
+    np.testing.assert_array_equal(after.y, y_before)
+    np.testing.assert_array_equal(after.x_line, x_before)
+
+
 def test_a_norm_key_varying_along_a_reduced_axis_divides_before_the_reduce():
     """
     The test that pins the normalization order, and nothing else did.
@@ -604,8 +730,8 @@ def _image_scan_model():
 
 
 def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
-    """Run the load boundary and return ``(block, norm arrays)``."""
-    from nbs_viewer.models.plot.plot_request import build_plot_request, plan_fetch
+    """Run the load boundary and return ``(request, block, norm arrays)``."""
+    from nbs_viewer.models.plot.plot_request import build_plot_request
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     shape = model.get_shape(ykey)
@@ -620,9 +746,8 @@ def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
         dims=model.plot_axis_names(ykey, xkeys),
         norm_keys=norm_keys,
     )
-    plan = plan_fetch(request, plane_frame=model._plane_frame(request))
-    block = model._read_block(plan)
-    return request, block, model._norm_arrays(plan, block)
+    block, norms, _plan = model._load_block(request)
+    return request, block, norms
 
 
 def test_a_norm_arrives_with_the_same_coordinates_as_the_block():
@@ -680,8 +805,13 @@ def test_a_norm_read_from_the_wrong_window_raises_instead_of_dividing():
 
     model._run.get_dimension_axes = shifted
 
+    # Loading holds the block and the norm apart; the divide is where they
+    # meet, so that is where the guard fires -- through the whole pipeline.
+    request, _block, _norms = _norms_for(
+        model, "detector_image", ["en_energy"], ["row"]
+    )
     with pytest.raises(xr.AlignmentError):
-        _norms_for(model, "detector_image", ["en_energy"], ["row"])
+        model.get_plot_bundle(request)
 
 
 def test_a_frozen_norm_has_no_coordinates_and_aligns_by_position(qapp):

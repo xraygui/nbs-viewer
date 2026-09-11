@@ -69,10 +69,11 @@ class RunSource(QObject):
         self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
         self._dynamic = False
         self._key_table: Optional[Dict[str, KeyInfo]] = None
-        # One loaded block, kept so a transform edit -- or an ROI moved
-        # inside a box already read -- re-runs only the tail of the
-        # pipeline. One entry, not a map: it covers the transform-edit case
-        # and the still-on-this-plane case, and it cannot grow.
+        # One loaded block, kept so a transform edit, a norm toggle, or an
+        # ROI moved inside a box already read re-runs only the tail of the
+        # pipeline: ``(plan, block as read, {norm key: norm array})``. One
+        # entry, not a map of blocks: it covers the still-on-this-plane case
+        # and it cannot grow past the norms toggled while it is held.
         self._block: Optional[Tuple] = None
         self._update_available_keys()
         self._connect_run()
@@ -628,15 +629,15 @@ class RunSource(QObject):
         """
         return self.describe(ykey).render_hint
 
-    def _norm_arrays(
-        self, plan: FetchPlan, data: xr.DataArray
-    ) -> List[xr.DataArray]:
+    def _norm_array(
+        self, plan: FetchPlan, norm_key: str, data: xr.DataArray
+    ) -> xr.DataArray:
         """
-        Read each normalization key, labelled and oriented to match the block.
+        Read one normalization key, labelled to match a block.
 
-        Normalization runs immediately after the orientation and before any
-        SUM or MEAN, because that is the physically right order: a flat field
-        divides per pixel and only then is summed.
+        Normalization runs on the whole block, before any SUM or MEAN,
+        because that is the physically right order: a flat field divides per
+        pixel and only then is summed.
 
         A catalog norm shares axis *names* with the block, so it takes the
         block's slice on the axes it has, and it arrives **with its own
@@ -662,46 +663,35 @@ class RunSource(QObject):
         Parameters
         ----------
         plan : FetchPlan
-            The keys to read, and the Y key's load slices and their names.
+            Plan of the block the norm has to line up with: its load slices,
+            their names, and the X selection.
+        norm_key : str
+            Normalization key to read.
         data : xarray.DataArray
-            The loaded block, for its dimension names.
+            That block, for its dimension names.
 
         Returns
         -------
-        list of xarray.DataArray
-            One labelled array per normalization key.
+        xarray.DataArray
+            The labelled norm array.
         """
-        if not plan.norm_keys:
-            return []
-        slice_info = plan.slice_info
+        if self.describe(norm_key).synthetic:
+            values = self.read(norm_key, plan.slice_info)
+            return xr.DataArray(values, dims=list(data.dims[: values.ndim]))
         xkeys = list(plan.xkeys)
-        norms: List[xr.DataArray] = []
-        for norm_key in plan.norm_keys:
-            if self.describe(norm_key).synthetic:
-                values = self.read(norm_key, slice_info)
-                norms.append(
-                    xr.DataArray(values, dims=list(data.dims[: values.ndim]))
-                )
-                continue
-            norm_names = list(self.plot_axis_names(norm_key, xkeys))
-            key_slice = slice_info_for_key(slice_info, plan.dims, norm_names)
-            values = self.read(norm_key, key_slice)
-            norm_coords, _names, _extra = self.load_axes(
-                norm_key, xkeys, key_slice
-            )
-            kept = kept_axes(key_slice)
-            norms.append(
-                labelled_array(
-                    values,
-                    [norm_names[axis] for axis in kept],
-                    coords={
-                        norm_names[axis]: np.asarray(norm_coords[axis])
-                        for axis in kept
-                    },
-                    name=norm_key,
-                )
-            )
-        return norms
+        norm_names = list(self.plot_axis_names(norm_key, xkeys))
+        key_slice = slice_info_for_key(plan.slice_info, plan.dims, norm_names)
+        values = self.read(norm_key, key_slice)
+        norm_coords, _names, _extra = self.load_axes(norm_key, xkeys, key_slice)
+        kept = kept_axes(key_slice)
+        return labelled_array(
+            values,
+            [norm_names[axis] for axis in kept],
+            coords={
+                norm_names[axis]: np.asarray(norm_coords[axis]) for axis in kept
+            },
+            name=norm_key,
+        )
 
     @staticmethod
     def _contained_window(
@@ -759,9 +749,11 @@ class RunSource(QObject):
             )
         return windows
 
-    def _block_for_plan(self, plan: FetchPlan) -> Optional[xr.DataArray]:
+    def _held_windows(
+        self, plan: FetchPlan
+    ) -> Optional[List[Optional[Tuple[int, Optional[int]]]]]:
         """
-        Serve a loaded, normalized block from memory if one covers it.
+        Locate a plan inside the held block, if it is there.
 
         Parameters
         ----------
@@ -772,37 +764,63 @@ class RunSource(QObject):
 
         Returns
         -------
-        xarray.DataArray or None
-            The held block narrowed to ``plan``, or None when a read is
-            needed.
+        list or None
+            Per-storage-axis windows into the held block, as from
+            :meth:`_contained_window`, or None when a read is needed.
         """
         if self._block is None:
             return None
-        held_plan, data = self._block
+        held_plan = self._block[0]
         if not held_plan.reads_the_same(plan):
             return None
-        windows = self._contained_window(held_plan.slice_info, plan.slice_info)
-        if windows is None:
-            return None
+        return self._contained_window(held_plan.slice_info, plan.slice_info)
 
+    @staticmethod
+    def _narrowed(
+        array: xr.DataArray,
+        dims: Sequence[str],
+        windows: Sequence[Optional[Tuple[int, Optional[int]]]],
+    ) -> xr.DataArray:
+        """
+        Take a window out of a held array, by dimension name.
+
+        Applied to the block and to each held norm alike. A norm shares the
+        block's names on the axes it has and was read against the same
+        slice there, so the same window is the right one; an axis it lacks
+        is skipped.
+
+        Parameters
+        ----------
+        array : xarray.DataArray
+            Held block or norm array.
+        dims : sequence of str
+            Dimension name per storage axis of the block.
+        windows : sequence
+            Per-storage-axis windows, None where nothing narrows.
+
+        Returns
+        -------
+        xarray.DataArray
+            The narrowed array.
+        """
         for storage_axis, window in enumerate(windows):
             if window is None:
                 continue
-            dim = plan.dims[storage_axis]
-            if dim not in data.dims:
+            dim = dims[storage_axis]
+            if dim not in array.dims:
                 continue
             start, stop = window
-            stop = data.sizes[dim] if stop is None else stop
+            stop = array.sizes[dim] if stop is None else stop
             # A plain window, because the block is in storage order. It used
             # to need mirroring on any axis the load had flipped.
-            data = data.isel({dim: slice(start, stop)})
-        return data
+            array = array.isel({dim: slice(start, stop)})
+        return array
 
     def _load_block(
         self, request: PlotRequest
-    ) -> Tuple[xr.DataArray, FetchPlan]:
+    ) -> Tuple[xr.DataArray, List[xr.DataArray], FetchPlan]:
         """
-        Return the block a request needs, from memory or by reading it.
+        Return the block a request needs and its norms, from memory or read.
 
         The one accessor. Planning the fetch, asking the cache and reading are
         three steps that always happen together and in this order, so they are
@@ -810,6 +828,17 @@ class RunSource(QObject):
         comes back with the block because it is not free to make -- an ROI
         plan compiles the region against the parent plane -- and the mask
         stage needs the frame it produced.
+
+        The cache holds the block *as read* and, beside it, every norm array
+        read against it. It used to hold the normalized block, which put the
+        norm keys into its identity, so toggling a normalization re-read the
+        whole detector array. Now a norm costs one read of its own key the
+        first time it is wanted and nothing after; the divide is re-run by the
+        caller, which is arithmetic rather than I/O.
+
+        Norms are read against the *held* block rather than the narrowed one,
+        so everything in the entry lines up, and all of it is narrowed by the
+        same window on the way out.
 
         Parameters
         ----------
@@ -819,21 +848,35 @@ class RunSource(QObject):
         Returns
         -------
         tuple
-            ``(data, plan)``.
+            ``(data, norms, plan)``: the block narrowed to the plan, one norm
+            array per ``plan.norm_keys`` in order, and the plan.
         """
         plan = plan_fetch(request, plane_frame=self._plane_frame(request))
-        data = self._block_for_plan(plan)
-        if data is None:
-            data = self._read_block(plan)
-            self._block = (plan, data)
-        return data, plan
+        windows = self._held_windows(plan)
+        if windows is None:
+            self._block = (plan, self._read_block(plan), {})
+            windows = [None] * len(plan.slice_info)
+        held_plan, block, norms = self._block
+        for norm_key in plan.norm_keys:
+            if norm_key not in norms:
+                norms[norm_key] = self._norm_array(held_plan, norm_key, block)
+        return (
+            self._narrowed(block, plan.dims, windows),
+            [
+                self._narrowed(norms[norm_key], plan.dims, windows)
+                for norm_key in plan.norm_keys
+            ],
+            plan,
+        )
 
     def _read_block(self, plan: FetchPlan) -> xr.DataArray:
         """
-        Read, label and normalize the block a plan asks for.
+        Read and label the block a plan asks for.
 
-        The stages that depend only on the fetch plan, so that the ones that
-        do not -- reduce, transform, mask -- can be re-run without a read.
+        The stage that depends only on the fetch plan, so that the ones that
+        do not -- normalize, reduce, transform, mask -- can be re-run without
+        a read. Values become floating point here, once, because the block is
+        held and reused and everything downstream divides or sums it.
 
         This is the boundary where storage axis indices stop: everything it
         returns is addressed by dimension name. It is *not* where display
@@ -849,7 +892,7 @@ class RunSource(QObject):
         Returns
         -------
         xarray.DataArray
-            Labelled, normalized block.
+            Labelled block, as read and not normalized.
         """
         slice_info = plan.slice_info
         ykey = plan.ykey
@@ -863,7 +906,7 @@ class RunSource(QObject):
 
         kept = kept_axes(slice_info)
         data = labelled_array(
-            values,
+            values.astype(float, copy=False),
             [plan.dims[axis] for axis in kept],
             coords={
                 plan.dims[axis]: np.asarray(storage_coords[axis])
@@ -872,14 +915,9 @@ class RunSource(QObject):
             name=ykey,
         )
 
-        t0 = ttime.time()
-        data = apply_normalization(data, self._norm_arrays(plan, data))
-        t_norm = ttime.time() - t0
-
         print_debug(
             "RunSource._read_block",
-            f"{ykey} shape={data.shape} "
-            f"load={t_load:.4f}s norm={t_norm:.4f}s",
+            f"{ykey} shape={data.shape} load={t_load:.4f}s",
             category="plots",
         )
         return data
@@ -907,9 +945,10 @@ class RunSource(QObject):
           mask. The user already sees ``f(y)`` on the image and draws the ROI
           on what they see, so summing the ROI must sum what they see.
 
-        Load and normalize depend only on the fetch plan, so their
-        result is held: editing a transform, or moving an ROI inside a box
-        already read, re-runs only the tail.
+        The load depends only on the fetch plan, so the block is held as
+        read, with its norm arrays beside it: editing a transform, toggling a
+        normalization already read, or moving an ROI inside a box already
+        read re-runs only the arithmetic.
 
         Parameters
         ----------
@@ -942,9 +981,10 @@ class RunSource(QObject):
                 plane = self.get_plot_bundle(request.plane_request)
             return reduce_cached_plane(plane, request, label=label)
 
-        data, plan = self._load_block(request)
+        data, norms, plan = self._load_block(request)
 
         t0 = ttime.time()
+        data = apply_normalization(data, norms)
         if request.region is None:
             axes = request.axes
             data = reduce_to_plane(data, axes)
@@ -965,12 +1005,12 @@ class RunSource(QObject):
                 request.mask_mode,
                 plan.region_frame,
             )
-        t_reduce = ttime.time() - t0
+        t_tail = ttime.time() - t0
 
         print_debug(
             "RunSource.get_plot_bundle",
             f"{request.ykey} shape={data.shape} "
-            f"cached={self._block is not None} reduce={t_reduce:.4f}s",
+            f"cached={self._block is not None} tail={t_tail:.4f}s",
             category="plots",
         )
 

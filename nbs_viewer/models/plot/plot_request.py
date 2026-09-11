@@ -451,11 +451,18 @@ class FetchPlan:
 
     def reads_the_same(self, other: "FetchPlan") -> bool:
         """
-        Whether two plans read the same thing, ignoring the window.
+        Whether two plans read the same block, ignoring the window.
 
         What the block cache needs: a held block can serve a new plan when it
-        came from the same keys and the same plot plane, and the window is
-        handled separately because containment is not equality.
+        is the same key under the same X selection, and so carries the same
+        coordinates and dimension names. The window is handled separately
+        because containment is not equality.
+
+        Two things are deliberately *not* compared. The norm keys: the cache
+        holds the block as read and the norms beside it, so switching a
+        normalization reads at most the norm. And the plot plane: the block
+        is in storage order, so which two axes are drawn does not change what
+        was read -- it did while the load flipped the plane.
 
         Parameters
         ----------
@@ -467,12 +474,11 @@ class FetchPlan:
         bool
             True when only the load window may differ.
         """
-        return (
-            self.ykey,
-            self.xkeys,
-            self.norm_keys,
-            self.plane_axes,
-        ) == (other.ykey, other.xkeys, other.norm_keys, other.plane_axes)
+        return (self.ykey, self.xkeys, self.dims) == (
+            other.ykey,
+            other.xkeys,
+            other.dims,
+        )
 
 
 def crop_from_region(
