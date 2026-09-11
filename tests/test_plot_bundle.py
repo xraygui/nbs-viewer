@@ -617,8 +617,8 @@ def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
     )
     axes = model._view_by_name(request)
     plan = plan_fetch(request, plane_frame=model._plane_frame(request))
-    block = model._read_block(request, plan, axes)
-    return request, block, model._norm_arrays(request, plan, axes, block)
+    block = model._read_block(plan, axes)
+    return request, block, model._norm_arrays(plan, axes, block)
 
 
 def test_a_norm_arrives_with_the_same_coordinates_as_the_block():

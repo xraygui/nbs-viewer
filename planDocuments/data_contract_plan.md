@@ -1165,6 +1165,35 @@ Facts: norm arrays aligned by coordinate value, **0 → all but the synthetic
 one**. Both mutations bite — a norm built without coordinates, and a frozen
 norm given index coordinates it has no business carrying.
 
+#### Then: `FetchPlan` says what to read, not only where ✅ 2026-09-11
+
+The maintainer asked why `_read_block` needed a `PlotRequest` *and* a
+`FetchPlan`. It took exactly three things from the request — `ykey`, `xkeys`,
+`norm_keys` — and `RunSource._block_cache_key` was, verbatim,
+`(request.ykey, request.xkeys, request.norm_keys)`.
+
+So the plan described *where* to read but not *what*, and the missing half was
+sitting next to it in the cache. Both are fixed by putting the keys on the
+plan:
+
+- `FetchPlan` gains `ykey`, `xkeys`, `norm_keys`, and its docstring —
+  "``plan_fetch`` says what to read" — becomes true.
+- `_read_block(plan, axes)` and `_norm_arrays(plan, axes, data)` no longer
+  take a request at all. Only `_load_block` does, to *make* the plan, which is
+  the layer boundary.
+- `_block_cache_key` is deleted. The plan is the whole cache identity, and
+  `FetchPlan.reads_the_same` is what the cache asks: same keys, same plane,
+  window handled separately because containment is not equality.
+
+Facts: things the cache has to keep in step, **2 → 1**. `run_source.py`
+451 → 443 code lines; `plot_request.py` 237 → 262, because the fields and
+`reads_the_same` are new there. Net **+17**, which is the right trade: the
+type now carries what it claims to describe, and the knowledge that used to
+be split across two files is in one.
+
+Both mutations bite: a cache that ignores which keys it holds, and one that
+ignores the norm keys.
+
 ### Step 5 — the block cache stops holding normalized data
 
 Found while drafting, and reproduced:
@@ -1294,3 +1323,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Step 4 done. The middle value is a bare `xr.DataArray`; `PlotAxes` names the projection over dimension names once, before any load, and `PlaneOrientation` carries the three display facts from the load to the pack without entering a stage. Parameter slots that are pieces of one concept went 78 to 47, with the storage-to-tensor group to zero; the four files went 1315 to 1113 code lines. Seven mutations run: four bit immediately, two found pre-existing gaps (nothing held the sum/nansum distinction, nothing held the plot-order transpose), and one survives by design because a named mask aligns regardless of how it was built. Building the arrays as `DataArray`s also caught two inconsistent test fixtures -- a stack axis that broadcast to length 1 under a length-3 coordinate, and mesh edge grids passed as cell coordinates. Normalization deliberately stops short of coordinates, so the exact-join guard is not yet active on it; that is the most valuable thing left in this plan. |
 | 2026-09-11 | Step 4b done, from the maintainer's observation that orientation is a pure display concern and has no business reaching back past normalization. It is: `display_flips` decides one thing, whether `imshow(origin="upper")` would put an image upside down. The flip moved from the load to the pack, the ROI mask turns round instead of the block, and `PlaneOrientation` -- added one commit earlier -- is gone. The payoff is not tidiness: reversal was what made the exact-join guard fire on correct data, so this is what unblocks coordinates on normalization arrays. The maintainer's further suggestion of letting the renderer flip works for rows via `origin="lower"` but not for columns, since `imshow` has one origin for both axes; stopping at the pack keeps `views/` untouched. Found while verifying: `build_plot_bundle` had no test references at all. |
 | 2026-09-11 | Norm arrays got their coordinates, closing step 4's one open deviation. This is what step 4b was for: the guard had been firing on correct data because the block was flipped at load and a norm read afterwards was not. A norm read from the wrong stretch of an axis has the right name and the right length, so only comparing coordinate values catches it. The frozen synthetic norm is left aligned by position, deliberately -- its axes belong to the reduction that made it, not to the block -- and that is the one remaining hole in the guard. |
+| 2026-09-11 | `FetchPlan` gained the keys. The maintainer asked why the reading step needed a request beside the plan; it took only `ykey`, `xkeys` and `norm_keys` from it, which is exactly what the block cache was holding as a separate key. Putting them on the plan makes its own docstring true, removes the request from `_read_block` and `_norm_arrays`, and deletes `_block_cache_key` -- the plan is now the whole cache identity. |

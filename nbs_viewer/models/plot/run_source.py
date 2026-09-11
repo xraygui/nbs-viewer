@@ -654,11 +654,7 @@ class RunSource(QObject):
         )
 
     def _norm_arrays(
-        self,
-        request: PlotRequest,
-        plan: FetchPlan,
-        axes: PlotAxes,
-        data: xr.DataArray,
+        self, plan: FetchPlan, axes: PlotAxes, data: xr.DataArray
     ) -> List[xr.DataArray]:
         """
         Read each normalization key, labelled and oriented to match the block.
@@ -690,10 +686,8 @@ class RunSource(QObject):
 
         Parameters
         ----------
-        request : PlotRequest
-            Supplies norm keys and X keys.
         plan : FetchPlan
-            Load slices used for the Y key.
+            The keys to read and the load slices used for the Y key.
         axes : PlotAxes
             Named view of the Y key.
         data : xarray.DataArray
@@ -704,12 +698,12 @@ class RunSource(QObject):
         list of xarray.DataArray
             One labelled array per normalization key.
         """
-        if not request.norm_keys:
+        if not plan.norm_keys:
             return []
         slice_info = plan.slice_info
-        xkeys = list(request.xkeys)
+        xkeys = list(plan.xkeys)
         norms: List[xr.DataArray] = []
-        for norm_key in request.norm_keys:
+        for norm_key in plan.norm_keys:
             if self.describe(norm_key).synthetic:
                 values = self.read(norm_key, slice_info)
                 norms.append(
@@ -798,30 +792,18 @@ class RunSource(QObject):
             )
         return windows
 
-    @staticmethod
-    def _block_cache_key(request: PlotRequest) -> Tuple:
-        """
-        What, besides the load slices, decides the contents of a block.
-
-        Returns
-        -------
-        tuple
-            Y key, x keys and norm keys. The uid is implied by the run.
-        """
-        return (request.ykey, request.xkeys, request.norm_keys)
-
     def _block_for_plan(
-        self, cache_key: Tuple, plan: FetchPlan, axes: PlotAxes
+        self, plan: FetchPlan, axes: PlotAxes
     ) -> Optional[xr.DataArray]:
         """
         Serve a loaded, normalized block from memory if one covers it.
 
         Parameters
         ----------
-        cache_key : tuple
-            Key from :meth:`_block_cache_key`.
         plan : FetchPlan
-            Plan the caller is about to execute.
+            Plan the caller is about to execute. It carries the keys as well
+            as the window, so it is the whole cache key -- there used to be a
+            separate tuple of ``(ykey, xkeys, norm_keys)`` held beside it.
         axes : PlotAxes
             Named view, for mapping a storage axis to its dimension.
 
@@ -833,8 +815,8 @@ class RunSource(QObject):
         """
         if self._block is None:
             return None
-        held_key, held_plan, data = self._block
-        if held_key != cache_key or held_plan.plane_axes != plan.plane_axes:
+        held_plan, data = self._block
+        if not held_plan.reads_the_same(plan):
             return None
         windows = self._contained_window(held_plan.slice_info, plan.slice_info)
         if windows is None:
@@ -879,15 +861,14 @@ class RunSource(QObject):
             ``(data, plan)``.
         """
         plan = plan_fetch(request, plane_frame=self._plane_frame(request))
-        cache_key = self._block_cache_key(request)
-        data = self._block_for_plan(cache_key, plan, axes)
+        data = self._block_for_plan(plan, axes)
         if data is None:
-            data = self._read_block(request, plan, axes)
-            self._block = (cache_key, plan, data)
+            data = self._read_block(plan, axes)
+            self._block = (plan, data)
         return data, plan
 
     def _read_block(
-        self, request: PlotRequest, plan: FetchPlan, axes: PlotAxes
+        self, plan: FetchPlan, axes: PlotAxes
     ) -> xr.DataArray:
         """
         Read, label and normalize the block a plan asks for.
@@ -903,10 +884,8 @@ class RunSource(QObject):
 
         Parameters
         ----------
-        request : PlotRequest
-            Request being served.
         plan : FetchPlan
-            Load slices for it.
+            What to read and which indices of it.
         axes : PlotAxes
             Named view of the Y key.
 
@@ -916,11 +895,11 @@ class RunSource(QObject):
             Labelled, normalized block.
         """
         slice_info = plan.slice_info
-        ykey = request.ykey
+        ykey = plan.ykey
 
         t0 = ttime.time()
         storage_coords, _names, _extra = self.load_axes(
-            ykey, list(request.xkeys), slice_info
+            ykey, list(plan.xkeys), slice_info
         )
         values = self.read(ykey, slice_info)
         t_load = ttime.time() - t0
@@ -942,7 +921,7 @@ class RunSource(QObject):
 
         t0 = ttime.time()
         data = apply_normalization(
-            data, self._norm_arrays(request, plan, axes, data)
+            data, self._norm_arrays(plan, axes, data)
         )
         t_norm = ttime.time() - t0
 

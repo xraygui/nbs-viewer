@@ -328,15 +328,28 @@ def narrow(item: SliceItem, start: int, stop: int) -> slice:
 @dataclass(frozen=True)
 class FetchPlan:
     """
-    What array indices to read, and the frame the loaded plane lands in.
+    What to read, which indices of it, and the frame the loaded plane lands in.
 
     The bottom of the two fixed layers: a :class:`PlotRequest` says what ends
     up on the plot, ``plan_fetch`` says what to read. Equality covers the load
     identity only -- the frames are derived and carry numpy arrays, so they
     are excluded from comparison.
 
+    It used to carry the indices but not the keys, so anything executing a
+    plan needed the request beside it to know *what* to read, and the block
+    cache kept ``(ykey, xkeys, norm_keys)`` as a separate key -- which was
+    exactly the missing half, held next to the plan rather than in it.
+
+    The run is implied: a plan is executed by the source that made it.
+
     Parameters
     ----------
+    ykey : str
+        The data key being plotted.
+    xkeys : tuple of str
+        Selected X-axis keys, which decide the coordinates the load resolves.
+    norm_keys : tuple of str
+        Normalization keys read alongside, each on its own derived slice.
     slice_info : tuple
         Per-storage-axis slice or index for chunked loading.
     plane_axes : tuple of int, optional
@@ -351,10 +364,38 @@ class FetchPlan:
         for compiling the ROI mask against it. None when there is no region.
     """
 
+    ykey: str
+    xkeys: Tuple[str, ...]
+    norm_keys: Tuple[str, ...]
     slice_info: Tuple[SliceItem, ...]
     plane_axes: Optional[Tuple[int, int]] = None
     plane_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
     region_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
+
+    def reads_the_same(self, other: "FetchPlan") -> bool:
+        """
+        Whether two plans read the same thing, ignoring the window.
+
+        What the block cache needs: a held block can serve a new plan when it
+        came from the same keys and the same plot plane, and the window is
+        handled separately because containment is not equality.
+
+        Parameters
+        ----------
+        other : FetchPlan
+            Plan to compare against.
+
+        Returns
+        -------
+        bool
+            True when only the load window may differ.
+        """
+        return (
+            self.ykey,
+            self.xkeys,
+            self.norm_keys,
+            self.plane_axes,
+        ) == (other.ykey, other.xkeys, other.norm_keys, other.plane_axes)
 
 
 def crop_from_region(
@@ -530,7 +571,14 @@ def plan_fetch(
         items[crop.plot_x_axis] = narrow(items[crop.plot_x_axis], c0, c1)
 
     if request.region is None:
-        return FetchPlan(tuple(items), plane_axes, plane_frame)
+        return FetchPlan(
+            request.ykey,
+            request.xkeys,
+            request.norm_keys,
+            tuple(items),
+            plane_axes,
+            plane_frame,
+        )
 
     if plane_frame is None:
         raise ValueError("plan_fetch needs plane_frame when request.region is set")
@@ -560,4 +608,12 @@ def plan_fetch(
     region_frame = region_frame_for_bbox(
         plane_frame, plane_frame.storage_bbox(loaded)
     )
-    return FetchPlan(tuple(items), plane_axes, plane_frame, region_frame)
+    return FetchPlan(
+        request.ykey,
+        request.xkeys,
+        request.norm_keys,
+        tuple(items),
+        plane_axes,
+        plane_frame,
+        region_frame,
+    )
