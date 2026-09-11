@@ -693,32 +693,175 @@ event's value, and matching by name raises because a 6-long norm cannot
 broadcast onto a 3-long plot axis. So the branch is load-bearing and correct
 — it simply had nothing pinning it. It does now, and all four mutations fail.
 
-### Step 4 — the pipeline stages take and return a `DataArray`
+### Step 4 — the pipeline stages take and return a labelled array
 
-- [ ] `orient_for_display`, `apply_normalization`, `apply_transform`,
-  `reduce_before_mask`, `mask_to_profile`, `materialize_view`,
-  `build_plot_bundle`.
-- [ ] **Settle the provenance question first**, because it decides whether any
-  bespoke type is needed: can `storage_axis` and `reversed` be served from
-  `FetchPlan`, which already records both? Try it on the load / orient /
-  normalize path before converting the rest.
+**Designed 2026-09-10, not yet implemented.** This is the step the plan was
+written for, so it is designed in full first rather than discovered while
+editing.
+
+#### The complaint, in the maintainer's words
+
+> `get_plot_bundle` → `_load_block` → `_normalized_block` is too deep, and
+> mixes high and low-level code. A method should generally either orchestrate
+> high-level functions, or do low-level data manipulation.
+
+Three levels, and *every one* of them does raw numpy work **and** calls into
+other modules. The cause is not where the functions live. It is that the value
+being passed down has no name, so each level unpacks it, re-derives the axis
+context, and packs it again.
+
+#### From the top: what `get_plot_bundle` should be
+
+```python
+def get_plot_bundle(self, request, *, cached_plane=None, label=""):
+    if <in-plane ROI>:
+        return reduce_cached_plane(plane, request, label=label)
+
+    plan  = plan_fetch(request, plane_frame=self._plane_frame(request))
+    block = self._block_for_plan(request, plan) or self._load_block(request, plan)
+
+    if request.region is None:
+        plane = reduce_to_plane(block, request.view)
+        plane = apply_transform(plane, request.transform)
+    else:
+        spec  = request.view.to_profile(request.profile_axis, request.spatial_reduce)
+        plane = reduce_before_mask(block, spec)
+        plane = apply_transform(plane, request.transform)
+        plane = mask_to_profile(plane, spec, request, plan.region_frame)
+
+    return build_plot_bundle(plane, request, label=label)
+```
+
+Orchestration only, one altitude, no array indices. Every stage is
+`PlotArray -> PlotArray`.
+
+#### From the bottom: what the middle value has to carry
+
+Almost every low-level helper in the fetch path answers **one** question:
+*given an array that has been sliced and reduced, which storage axis is each
+of its current axes?* That is what `_storage_to_tensor`, `_loaded_axis_names`,
+`_loaded_plane_shape`, `_reduce_axis_index`, `remaining`, `slice_info_for_key`
+and `_aligned_norm` all exist for.
+
+`xr.DataArray` answers it directly, provided the dimension names are unique
+and survive the pipeline — which is what step 1 guaranteed and step 2
+enforces. `da.dims` *is* `remaining`; `da.get_axis_num(name)` *is*
+`_reduce_axis_index`; alignment by name *is* `_aligned_norm`.
+
+What xarray does **not** carry is the four display facts it drops silently
+through `.sum()`, arithmetic and `where()`:
+
+| fact | who needs it |
+|---|---|
+| `render_mode` | the orientation decision, and the pack |
+| `reversed_dims` | `PlotBundle.row_reversed` / `col_reversed`, and reversing a norm the same way |
+| `plane_dims` | the transform's `x`, the ROI mask, the pack |
+| `storage_names` | turning `Projection.roles[i]` — indexed by storage axis — into `roles[name]` |
+
+So the middle value is a thin frozen wrapper:
+
+```python
+@dataclass(frozen=True)
+class PlotArray:
+    data: xr.DataArray                 # display order, dims named, coords attached
+    storage_names: Tuple[str, ...]     # name per storage axis, full rank
+    plane_dims: Optional[Tuple[str, str]] = None
+    render_mode: Optional[str] = None
+    reversed_dims: FrozenSet[str] = frozenset()
+
+    def replace(self, data) -> "PlotArray": ...
+```
+
+**This answers the plan's own test.** It asked whether any bespoke type
+survives step 4, and said that if none did, `AxisArray` was re-derivation with
+nothing to show for it. The answer is: one survives, and it is a fifth the
+size. `AxisArray` was going to hold the array, the names, the coordinates, the
+shape and the rank validation — xarray took all of that. What is left is
+exactly the provenance xarray drops, which is the one thing the bespoke type
+was *not* originally proposed for.
+
+#### Measured, not assumed
+
+Every claim below was run before designing around it.
+
+| | result |
+|---|---|
+| `skipna=False` ≡ `np.sum`; `skipna=True` ≡ `np.nansum` | confirmed exactly, so the step-3 sum/nansum distinction survives as a flag |
+| a mask `DataArray` with the plane's dim names broadcasts by name | confirmed — **and a transposed mask aligns identically** |
+| `.copy(data=...)` keeps dims and coords | confirmed |
+| a norm whose coordinate is **reversed** | **raises** under `exact` — so a norm sharing a reversed axis must still be reversed |
+| a norm whose dim name is foreign | **outer-products silently**: `(5,3) / (5,) → (5,3,5)` |
+| `load_axes` returns one 1-D array per surviving storage axis, lengths matching the sliced data | confirmed on both fixtures, including integer-indexed axes |
+
+The last two matter most.
+
+The transposed-mask result deletes the hardest twelve lines in `plot_bundle`:
+`mask_to_profile` currently transposes the compiled mask by hand when storage
+order disagrees with display order, and reshapes it into the right broadcast
+shape. `data.where(mask)` does both, by name.
+
+The foreign-name result is a **hazard the conversion creates**. `_aligned_norm`
+falls back to matching by *shape* when names do not match, and a frozen stack
+spectrum relies on it: its only dim is named after the ROI label, which is not
+a dim of anything. Under xarray that silently becomes an outer product instead
+of an elementwise divide. So a synthetic norm must be explicitly renamed onto
+the dim it actually lives on — which is Y's event axis, stated positively
+rather than inferred from a shape collision.
+
+#### Stage by stage
+
+| stage | today | after |
+|---|---|---|
+| orient | `orient_for_display(y, arrays, reversed_axes, storage_to_tensor)` | `data.isel({dim: slice(None, None, -1)})` — the coordinate follows |
+| normalize | `apply_normalization` + `_aligned_norm`, 35 lines | `data / norm`, once per norm |
+| reduce | `_materialize_without_region`, ~45 lines of index juggling | `.sum(dim=…, skipna=False)`, `.mean(dim=…)`, `.transpose(*order)` |
+| transform | `apply_transform(xlist, y, text) -> (coords, y)` | `block.replace(data.copy(data=result))` |
+| mask | 9 parameters, manual mask transpose and reshape | `data.where(mask)`, dims named |
+| pack | `build_plot_bundle(y, coords, names, request, …)` | `build_plot_bundle(block, request, label=…)` |
+
+`Projection` gains two pure derivations — a description deriving another
+description, which is what view-pipeline step 7's criterion was narrowed to
+allow:
+
+- `roles_by_name(storage_names) -> Mapping[str, DimRole]`
+- `plot_order(storage_names) -> Tuple[str, ...]` — every dim, non-plot first,
+  then plot Y, then plot X
+
+#### Scope
+
+- [ ] New `PlotArray`; the stages take and return it.
 - [ ] Fold in the type-level moves while the signatures are open:
   `plan_fetch` → `PlotRequest.plan_fetch(plane_frame=None)`,
-  `profile_view_spec` → `Projection.to_profile(axis, reduce)`. Both are
-  derivations returning their own type and add no imports.
+  `profile_view_spec` → `Projection.to_profile(axis, reduce)`.
 - [ ] Narrow view-pipeline step 7's exit criterion — "`Projection` gains no
   reduce method" — to what it meant: a *describing* type may derive another
-  description but may not apply itself to data. `view/` describes, `fetch/`
-  applies.
+  description but may not apply itself to data.
 - [ ] Deletes `_storage_to_tensor`, `_loaded_axis_names`,
-  `_loaded_plane_shape`, `_reduce_axis_index`, `_aligned_norm`, and the
-  `remaining` parameter — all of which reconstruct what the dims already know.
+  `_loaded_plane_shape`, `_reduce_axis_index`, `_aligned_norm`,
+  `orient_for_display`, `apply_normalization`, and the `remaining` parameter.
 - [ ] Facts: parameter slots **74 → target**, recorded honestly whatever it
   lands at.
 
-Blast radius measured: **166 call sites across 27 files, two of them in
-`views/`** (both `frame_from_bundle`). `PlotBundle` is the view layer's
-contract and does not change.
+**Explicitly not in this step**, both because they are separable and because
+each is its own risk:
+
+- **Replacing `analyze_dimensions` with `swap_dims`.** The end state is that
+  `load` attaches every per-event motor as a non-dimension coordinate and the
+  X selection picks one with `swap_dims`, which deletes
+  `RunSource.plot_axis_names` and most of `analyze_dimensions`. Here
+  `plot_axis_names` and `load_axes` stay, as the *boundary* that produces the
+  first labelled array — they run once, at the load, instead of being threaded
+  through every stage. Doing both at once would change axis naming and
+  coordinate resolution application-wide inside an already large change.
+- **Step 5's cache boundary.** Normalization stays inside `_load_block` here.
+  Once it is a `PlotArray -> PlotArray` stage, step 5 is a move of the call
+  site and the cache key, not a rewrite.
+
+Blast radius re-measured against the functions that actually change: **~80
+references across 8 test files and 6 source files**, not the 166 the earlier
+estimate counted (that included `frame_from_bundle` and other untouched
+names). `PlotBundle` is the view layer's contract and does not change, so
+`views/` is untouched.
 
 Honest accounting of what xarray buys: of the 392 raw lines of axis
 bookkeeping measured across twelve functions, roughly **160 is genuinely
@@ -727,6 +870,14 @@ surviving-name list, the plane-shape lookup, the transpose and reduce
 mechanics. The other ~230 is domain policy that stays either way: which axes
 the ROI reduces, the *decision* to flip, and the fetch cache's containment
 check. This step should not claim the larger number.
+
+#### Found while designing: one name means two things
+
+`view_spec.plot_axis_names(spec, dim_names)` returns the names of the *plot
+axes* of a projection. `RunSource.plot_axis_names(ykey, xkeys)`, added in step
+2, returns a name for *every storage axis* under an X selection. Two different
+things one import apart. Recorded for the module reorganization rather than
+renamed here.
 
 ### Step 5 — the block cache stops holding normalized data
 
