@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any, Union
 
 from qtpy.QtCore import QObject, Signal
 import numpy as np
@@ -8,6 +8,7 @@ import time as ttime
 
 from ..data.base import CatalogRun
 from ..data.key_info import KeyInfo
+from ..data.key_source import CatalogKey
 from .frozen_spectrum import FrozenSpectrum
 from .run_identity import RunIdentity
 from .plot_bundle import (
@@ -34,11 +35,21 @@ from nbs_viewer.utils import print_debug
 
 class RunSource(QObject):
     """
-    Uniform key access over a catalog run plus frozen synthetic keys.
+    The union of a catalog run and its frozen synthetic keys, under one key
+    space, plus the key table, identity and signals the plot layer needs.
+
+    A :class:`CatalogRun` is one source of labelled arrays for a run's keys.
+    This is a higher-level object rather than a near-duplicate of it, and
+    :meth:`_source` is where the difference lives: one place decides which
+    source holds a key, and everything else either delegates to what it
+    returns or reads a fact off the key's description. Only one thing needs
+    both sources at once -- a frozen stack spectrum plotted against the
+    catalog's X keys -- and that is this class's own business.
 
     The RunSource surface is ``key_table``, ``identity``, ``describe``,
-    ``load``, ``read``, ``load_axes``, and ``get_plot_bundle``. Selection,
-    visibility, and transform live on :class:`PlotSession`.
+    ``load``, ``read``, ``plot_axis_names``, ``load_axes``, and
+    ``get_plot_bundle``. Selection, visibility, and transform live on
+    :class:`PlotSession`.
 
     Parameters
     ----------
@@ -193,9 +204,18 @@ class RunSource(QObject):
             metadata=MappingProxyType(dict(self.metadata)),
         )
 
-    def _frozen_entry(self, key: str) -> Optional[FrozenSpectrum]:
+    def _source(self, key: str) -> Union[FrozenSpectrum, CatalogKey]:
         """
-        Return a frozen spectrum entry when registered.
+        Return whichever source holds this key, bound to it.
+
+        **The union, performed once.** Everything else on this class delegates
+        to what this returns, or reads a fact off the key's description. It
+        used to be spelled out in five separate methods -- one dispatch,
+        written five times, which is a copy rather than an abstraction.
+
+        The two sources answer the same key-free protocol: a
+        :class:`FrozenSpectrum` *is* one key already, and :class:`CatalogKey`
+        binds a run to one of its many.
 
         Parameters
         ----------
@@ -204,10 +224,13 @@ class RunSource(QObject):
 
         Returns
         -------
-        FrozenSpectrum or None
-            Registered frozen entry, if any.
+        FrozenSpectrum or CatalogKey
+            The source that holds the key.
         """
-        return self._frozen_spectra.get(key)
+        entry = self._frozen_spectra.get(key)
+        if entry is not None:
+            return entry
+        return CatalogKey(self._run, key)
 
     def load(self, key: str, slice_info=None, *, coords: bool = True) -> xr.DataArray:
         """
@@ -232,10 +255,7 @@ class RunSource(QObject):
             Storage array with named dimensions, and its coordinates when
             asked for.
         """
-        entry = self._frozen_entry(key)
-        if entry is not None:
-            return entry.load(slice_info, coords=coords)
-        return self._run.load(key, slice_info, coords=coords)
+        return self._source(key).load(slice_info, coords=coords)
 
     def read(self, key: str, slice_info=None) -> np.ndarray:
         """
@@ -274,6 +294,10 @@ class RunSource(QObject):
         """
         Return static facts about a catalog or frozen key.
 
+        The key table already holds a description of every key either source
+        offers, so this is a cache read for anything selectable. The fallback
+        covers a key asked about before the table is built.
+
         Parameters
         ----------
         key : str
@@ -287,10 +311,7 @@ class RunSource(QObject):
         info = self.key_table().get(key)
         if info is not None:
             return info
-        entry = self._frozen_entry(key)
-        if entry is not None:
-            return entry.describe()
-        return self._run.describe(key)
+        return self._source(key).describe()
 
     def plot_axis_names(
         self, ykey: str, xkeys: Sequence[str]
@@ -310,7 +331,9 @@ class RunSource(QObject):
         axis *by name* -- default axis order would stop working without it.
         Step 4 replaces it: with coordinates on the array, choosing what to
         plot against is ``swap_dims`` on a non-dimension coordinate, and the
-        dimension keeps its own name throughout.
+        dimension keeps its own name throughout. Each source answers it: a
+        frozen payload's axes are whatever the reduction produced, so the
+        selection does not reach them.
 
         Parameters
         ----------
@@ -324,19 +347,7 @@ class RunSource(QObject):
         tuple of str
             One name per storage axis.
         """
-        entry = self._frozen_entry(ykey)
-        if entry is not None:
-            return entry.describe().dims
-        dim_info = self._run.analyze_dimensions(ykey, list(xkeys))
-        # Validated rather than trimmed. This used to pad or truncate the name
-        # list until it matched the rank, which is what let bug 6 go unnoticed
-        # for as long as it did: a backend naming one axis too many looked
-        # exactly like a backend naming them correctly.
-        return KeyInfo.from_dims(
-            ykey,
-            dim_info["ordered_dims"],
-            tuple(dim_info["effective_shape"]),
-        ).dims
+        return self._source(ykey).plot_axis_names(list(xkeys))
 
     def load_axes(
         self, ykey: str, xkeys: Sequence[str], slice_info=None
@@ -369,14 +380,16 @@ class RunSource(QObject):
             If a catalog X key length does not match the frozen spectrum.
         """
         xkey_list = list(xkeys)
-        entry = self._frozen_entry(ykey)
-        if entry is not None:
-            if entry.kind == "stack_spectrum" and xkey_list:
-                return self._stack_spectrum_dimension_axes(
-                    entry, xkey_list, slice_info
-                )
-            return entry.get_dimension_axes(xkey_list, slice_info)
-        return self._run.get_dimension_axes(ykey, xkey_list, slice_info)
+        source = self._source(ykey)
+        # The one thing that is genuinely this class's own business rather
+        # than either source's: a frozen Y plotted against the *catalog's* X
+        # keys is the only case that needs both at once. The branch is on the
+        # kind a source declares itself to be, not on which class it is.
+        if source.kind == "stack_spectrum" and xkey_list:
+            return self._stack_spectrum_dimension_axes(
+                source, xkey_list, slice_info
+            )
+        return source.get_dimension_axes(xkey_list, slice_info)
 
     def _stack_spectrum_dimension_axes(
         self,
@@ -624,6 +637,11 @@ class RunSource(QObject):
         """
         Return the declared render mode for a key, if any.
 
+        It is on the description, which both sources fill in -- a frozen
+        payload declares none. This used to read the key table and then fall
+        back to the run's plot hints, which meant two sources of one answer
+        that had to agree.
+
         Parameters
         ----------
         ykey : str
@@ -634,11 +652,7 @@ class RunSource(QObject):
         str or None
             ``image`` or ``mesh`` from the key table or plot hints.
         """
-        info = self.key_table().get(ykey)
-        hint = info.render_hint if info is not None else None
-        if hint is None and self._frozen_entry(ykey) is None:
-            hint = self._run.render_mode_hint(ykey)
-        return hint
+        return self.describe(ykey).render_hint
 
     def _plane_render_mode(
         self,
@@ -755,7 +769,8 @@ class RunSource(QObject):
         norms = []
         for norm_key in request.norm_keys:
             norm_names = list(self.plot_axis_names(norm_key, xkeys))
-            frozen = self._frozen_entry(norm_key) is not None
+            # A fact off the description, not a second lookup of the source.
+            frozen = self.describe(norm_key).synthetic
             key_slice = (
                 slice_info
                 if frozen
@@ -1083,9 +1098,9 @@ class RunSource(QObject):
             category="plots",
         )
 
-        frozen = self._frozen_entry(request.ykey)
-        if frozen is not None and y.ndim == 1:
-            names = [label or frozen.label]
+        info = self.describe(request.ykey)
+        if info.synthetic and y.ndim == 1:
+            names = [label or info.label]
         return build_plot_bundle(
             y,
             coords,

@@ -15,7 +15,7 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1 and 2 landed 2026-09-10**; steps 3–7 not started. Numbers measured at
+1–3 landed 2026-09-10**; steps 4–7 not started. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -610,11 +610,12 @@ take. A source that clips an axis relative to its coordinate key — as
 `CombinedRun` does, to the shortest of its sources — keeps the bare name
 rather than raising.
 
-### Step 3 — `RunSource` performs the union once
+### Step 3 — `RunSource` performs the union once ✅ 2026-09-10
 
-- [ ] `read`, `load_axes`, `describe_axes`, `get_shape` and `get_plot_hints`
+- [x] `read`, `load_axes`, `describe_axes`, `get_shape` and `get_plot_hints`
   collapse onto one dispatch over `load` / `describe`.
-- [ ] Facts: dispatch sites **5 → 1**.
+- [x] Facts: dispatch sites **5 → 1**. Counting every branch rather than only
+  the five the diagnosis listed: **7 → 1**.
 
 After this step the two classes are describable in one line each, which is the
 test of whether the split was ever real:
@@ -623,6 +624,74 @@ test of whether the split was ever real:
 - **`RunSource`** — the union of a catalog run and its frozen synthetic keys
   under one key space, plus the key table, identity and signals the plot layer
   needs.
+
+Both descriptions are now the classes' own docstrings.
+
+#### Outcome
+
+| | before | after |
+|---|---:|---:|
+| `RunSource` code lines | 533 | 517 |
+| branches asking "is this key frozen?" | 7 | 1 |
+
+The seven were `load`, `describe`, `plot_axis_names`, `load_axes`,
+`_render_hint`, `_normalized_block`'s norm-key flag, and `get_plot_bundle`'s
+label choice. Three of them dispatched to a *method*; four only wanted a
+*fact*, and those four now read it off `KeyInfo` — `.synthetic` and
+`.render_hint` — which is the plan's invariant working: a fact established
+once at the boundary and carried, rather than re-established by looking the
+source up again.
+
+#### What makes one dispatch possible
+
+The two sources differ in *shape*, not capability. A `FrozenSpectrum` **is**
+one key, so its methods take no key name; a `CatalogRun` holds many, so its
+methods take one. `CatalogKey` (`models/data/key_source.py`, 23 code lines)
+binds a run and a key name so both answer the same key-free protocol —
+`describe()`, `load()`, `plot_axis_names()`, `get_dimension_axes()`, and a
+`kind`.
+
+`RunSource._source(key)` returns whichever one holds the key, and it is the
+only place on the class that knows there are two.
+
+This is more code than the branches it replaces, and it is an adapter whose
+body is delegation — normally not worth extracting. It earns its place by
+being the boundary rather than a layer in front of one: a reader of
+`RunSource.load` now sees one line with no branch in it, and there is exactly
+one place to look for how the union is decided.
+
+`plot_axis_names` moved onto `CatalogRun` as part of that protocol, taking the
+`analyze_dimensions` call and its `KeyInfo.from_dims` validation with it.
+
+#### The one branch that stayed, and why it is not a dispatch
+
+`load_axes` still tests `source.kind == "stack_spectrum"`. That is the single
+case that genuinely needs both sources at once — a frozen Y plotted against
+the *catalog's* X keys — so it is `RunSource`'s own business rather than
+either source's. The branch is on a kind each source declares itself to be,
+not on which class it is.
+
+#### Verification: three branches were reachable but untested
+
+Each rewritten branch was reverted individually with the suite in place.
+Three survived, meaning nothing checked the rewrite had preserved behaviour:
+
+- a declared `render_mode` reaching the bundle,
+- a 1-D frozen result being labelled with its ROI label,
+- a frozen norm taking Y's event-axis index.
+
+All three were already untested before this step, so this is a gap found
+rather than one introduced — but a green suite after a signature change is not
+evidence, which is the lesson from the `driving_axes` tie-break that shipped
+broken in step 2.
+
+The third is the interesting one. A catalog norm is matched to Y's axes *by
+name*; a frozen one shares no name with anything, so it takes Y's own slice
+instead. With a rank-3 cube plotted as a line, both leading axes are indexed
+to a single event and the two rules diverge: the frozen rule divides by that
+event's value, and matching by name raises because a 6-long norm cannot
+broadcast onto a 3-long plot axis. So the branch is load-bearing and correct
+— it simply had nothing pinning it. It does now, and all four mutations fail.
 
 ### Step 4 — the pipeline stages take and return a `DataArray`
 
@@ -784,3 +853,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Step 1's bug 6 fix re-justified against two real runs the maintainer supplied, rather than against the other backends. UCAL labels its dims and is therefore ground truth: `nexafs_sc` is `('time',)` and `tes_mca_spectrum` is `('time','tes_mca_energies')`, so inference's job is to reproduce that where it can — which `range(1, ndim)` does and `range(0, ndim)` does not. The same run confirms bug 15 in production data: `en_energy` is the scanned motor and its dims are `('time',)`, a key on the event axis rather than a name of it, with `start['hints']['dimensions']` naming which coordinate to plot against. Two decisions explicitly excluded from the step: whether placeholder axis names should be per-key (it would fix a false-alignment hazard but break flat-field normalization) and whether the `has_time_key` guard is needed. |
 | 2026-09-10 | Step 1 done. Bugs 6, 7 and 15 fixed, with a test per fix verified to fail without it. Two deviations recorded: bug 15 turned out to have a second trigger — selecting a motor whose name is also a real dimension of the key produces the same duplicate — so it took a de-duplication guard as well as removing the motors fallback, with the full separation of dimension from plot coordinate left to step 2; and `KafkaRun` shares bug 7 but is left alone because its `getShape` calls `getData`, which would materialize every buffered array on a live stream. |
 | 2026-09-10 | Step 2 done. Both sources answer `describe` / `load`; `KeyInfo` moved down to `models/data` and was rebuilt around one `{axis name: length}` mapping, which makes bug 6's and bug 15's shapes unrepresentable rather than merely absent. `AxisLayout`, `_truncate_dim_names`, `_frozen_axis_names` and `RunSource.get_plot_hints` deleted. Four deviations recorded: `skipna` has no global option and no call site until step 4; the synthetic-key *convention* moved down rather than `FrozenSpectrum` itself, since the class holds a `PlotBundle` and moving it would have relocated the upward import rather than closed it; `read` asks `load` for no coordinates, since each costs a read of its own key that bare values gain nothing from; and `describe_axes` split into a static `describe` plus `plot_axis_names` rather than collapsing, because the default axis-order rule locates the X key's storage axis by name and stops working without the rename. |
+| 2026-09-10 | Step 3 done. Branches asking "is this key frozen?" went 7 to 1: three dispatched to a method and now go through `RunSource._source`, while four only wanted a fact and read it off `KeyInfo` instead. `CatalogKey` binds a run and a key name so both sources answer the same key-free protocol — an adapter whose body is delegation, which earns its place by being the boundary rather than a layer in front of one. Three of the rewritten branches turned out to be reachable but untested, found by reverting each one with the suite in place rather than by trusting it green; the frozen-norm branch in particular is load-bearing, and dividing a cube's line plot by a frozen stack spectrum is the case that shows why. |

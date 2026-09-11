@@ -336,6 +336,48 @@ class CatalogRun(QObject):
                 coords[name] = values
         return coords
 
+    def plot_axis_names(
+        self, key: str, xkeys: List[str]
+    ) -> Tuple[str, ...]:
+        """
+        Return the axis names to plot a key under a given X selection.
+
+        Deliberately *not* part of :meth:`describe`, which is static. This
+        answers a different question, and the difference is the one bug 15 was
+        made of: a key's dimensions are fixed, while the selected X key
+        renames the event axis after whatever is being plotted against it. A
+        labelled run says the scanned motor is a key *on* the event axis
+        rather than a name of it, so the rename is a display choice and not a
+        fact about the array.
+
+        It is kept because the default axis-order rule locates the X key's
+        storage axis *by name*, and stops working without it. Its replacement
+        is a coordinate choice on the loaded array, which needs the pipeline
+        to be carrying labelled arrays first.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        xkeys : list of str
+            Selected X-axis keys.
+
+        Returns
+        -------
+        tuple of str
+            One name per storage axis.
+        """
+        dim_info = self.analyze_dimensions(key, list(xkeys))
+        # Validated rather than trimmed. A consumer used to pad or truncate
+        # this list until it matched the rank, which is what let bug 6 go
+        # unnoticed: a backend naming one axis too many looked exactly like a
+        # backend naming them correctly.
+        return KeyInfo.from_dims(
+            key,
+            dim_info["ordered_dims"],
+            tuple(dim_info["effective_shape"]),
+        ).dims
+
     def render_mode_hint(self, key: str) -> Optional[str]:
         """
         Return a declared ``image`` / ``mesh`` override for one key.

@@ -13,10 +13,12 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     FrozenSpectrum,
 )
 from nbs_viewer.models.data.key_info import KeyInfo
+from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.run_source import RunSource
+from tests.fixtures.catalog_recipes import image_scan_run
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_UID,
     make_vppem_run,
@@ -242,3 +244,106 @@ def test_get_plot_bundle_frozen_uses_read(qapp):
     # ``load`` always passes the slice through, so the catalog sees an
     # explicit ``None`` where ``read`` used to omit the argument.
     get_data.assert_called_once_with("sampleVoltage_VSource", None)
+
+
+# ---------------------------------------------------------------------------
+# What the single dispatch has to keep true
+# ---------------------------------------------------------------------------
+#
+# ``RunSource`` used to ask "is this key frozen?" in seven places. Six of them
+# now read a fact off the key's description instead, and one -- ``_source`` --
+# picks the source that answers. These three cases were reachable but untested,
+# which meant the rewrite had nothing to check it against; each was confirmed
+# to fail if the branch it exercises is removed.
+
+
+def test_a_declared_render_mode_reaches_the_bundle(qapp):
+    """
+    A key's ``render_mode`` hint overrides what the coordinates imply.
+
+    The same image classifies as ``image`` from its coordinates and as
+    ``mesh`` when the run says so, which is the whole point of the override.
+    The hint now travels on the key's description rather than being looked up
+    from the run's plot hints as a fallback, so this is what says the two
+    routes give the same answer.
+    """
+    plain = image_scan_run(0)
+    declared = MemoryRun(
+        {
+            **plain.metadata,
+            "plot_hints": {
+                "primary": [
+                    {"signal": "detector_image", "render_mode": "mesh"}
+                ]
+            },
+        },
+        {key: np.asarray(plain.getData(key)) for key in plain.available_keys},
+    )
+
+    assert declared.render_mode_hint("detector_image") == "mesh"
+    assert declared.describe("detector_image").render_hint == "mesh"
+
+    def _mode(run):
+        source = RunSource(run)
+        return source.get_plot_bundle(
+            _plot_request(source, ["en_energy"], "detector_image", plot_ndim=2)
+        ).render_mode
+
+    assert _mode(plain) == "image"
+    assert _mode(declared) == "mesh"
+
+
+def test_a_one_dimensional_frozen_result_is_labelled_with_its_label(qapp):
+    """
+    A frozen spectrum's axis is named after the ROI it came from.
+
+    Nothing else on the run knows that name -- it is not a data key -- so if
+    the bundle does not take it from the description, the axis falls back to
+    whatever the reduction happened to leave behind.
+    """
+    model = RunSource(make_vppem_run())
+    entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
+    model.register_frozen_spectrum(entry)
+    model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
+
+    bundle = model.get_plot_bundle(
+        _plot_request(model, ["sampleVoltage_VSource"], entry.key)
+    )
+
+    assert bundle.axis_names == [entry.label]
+
+
+def test_a_frozen_norm_follows_the_event_axis_index(qapp):
+    """
+    A frozen stack spectrum is per-event, so it takes Y's event-axis slice.
+
+    A catalog norm is matched to Y's axes *by name*; a frozen one has no name
+    in common with anything, so it is sliced with Y's own slice instead. With
+    a rank-3 cube plotted as a line, both leading axes are indexed to a single
+    event, and the two rules give different answers: the frozen rule divides
+    by that event's value, and matching by name raises because a 6-long norm
+    cannot broadcast onto a 3-long plot axis.
+    """
+    run = image_scan_run(0, n_y=6, n_x=5, n_z=3)
+    model = RunSource(run)
+    entry = _frozen_entry(model, y=[2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    model.register_frozen_spectrum(entry)
+    assert model.describe(entry.key).synthetic is True
+    assert model.describe("detector_cube").synthetic is False
+
+    shape = model.get_shape("detector_cube")
+    projection = ViewIntent(plot_ndim=1).project(len(shape), shape)
+    assert projection.base_slice() == (0, 0, slice(None))
+
+    bundle = model.get_plot_bundle(
+        build_plot_request(
+            uid=model.uid,
+            xkeys=["pixel"],
+            ykey="detector_cube",
+            projection=projection,
+            norm_keys=[entry.key],
+        )
+    )
+
+    # cube[0, 0, :] is [0, 30, 60]; the frozen norm at event 0 is 2.0.
+    np.testing.assert_allclose(bundle.y, [0.0, 15.0, 30.0])

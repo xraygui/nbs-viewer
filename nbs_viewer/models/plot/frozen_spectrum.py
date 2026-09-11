@@ -234,6 +234,28 @@ class FrozenSpectrum:
             hinted=False,
         )
 
+    def plot_axis_names(self, xkeys: List[str]) -> Tuple[str, ...]:
+        """
+        Return the axis names to plot this key under an X selection.
+
+        The selection does not reach a frozen payload: its axes are whatever
+        the reduction produced and stored, so this is the description's answer
+        unchanged. The method exists so that both sources answer the same
+        protocol and ``RunSource`` picks between them once.
+
+        Parameters
+        ----------
+        xkeys : list of str
+            Selected X-axis keys, ignored.
+
+        Returns
+        -------
+        tuple of str
+            One name per storage axis.
+        """
+        del xkeys
+        return self.describe().dims
+
     def load(
         self, slice_info: Optional[tuple] = None, *, coords: bool = True
     ) -> xr.DataArray:
