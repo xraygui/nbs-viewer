@@ -919,20 +919,26 @@ a function with extra ceremony. `profile_view_spec` did move, onto `PlotAxes`
 rather than `Projection`, because the profile view needs the parent plane by
 name and only `PlotAxes` knows it.
 
-#### Deviation: normalization does not yet get the coordinate guard
+#### Deviation, since closed: normalization and the coordinate guard
 
-Norm arrays are labelled but **carry no coordinates**, so they align by
-dimension name and position, exactly as the hand-written aligner did. Giving
-them coordinates would activate the `arithmetic_join="exact"` check that step
-2's fly-scan argument was all about — and would change behaviour, since it can
-raise where the current code broadcasts. That is its own step, not a rider on
-this one. It is the single most valuable thing left in this plan.
+As shipped, step 4 left norm arrays labelled but **carrying no coordinates**,
+so they aligned by dimension name and position, exactly as the hand-written
+aligner had. Giving them coordinates is what activates the
+`arithmetic_join="exact"` check that step 2's fly-scan argument was all about,
+and it was held back because it can raise where the old code broadcast.
 
-What *is* closed here is the hazard the conversion created: a synthetic norm's
-only dimension is named after its ROI label, which is foreign to the block, and
-xarray would have broadcast it into a new axis rather than dividing element by
-element. `_norm_arrays` renames it onto the block's leading dimensions, which
-is the same rule the old shape-matching fallback implemented by accident.
+**Closed 2026-09-11, after step 4b.** The reason it could not be done here is
+that it did not work yet: the block was flipped at load and a norm read
+afterwards was not, so their coordinates disagreed and the guard fired on
+correct data. Moving the flip to the pack is what made it possible, and the
+two changes are one argument in two commits.
+
+What step 4 *did* close is the hazard the conversion created: a synthetic
+norm's only dimension is named after its ROI label, which is foreign to the
+block, and xarray would have broadcast it into a new axis rather than dividing
+element by element. `_norm_arrays` renames it onto the block's leading
+dimensions, which is the same rule the old shape-matching fallback implemented
+by accident.
 
 #### Verification: seven mutations, three gaps found
 
@@ -1134,6 +1140,31 @@ Stopping at `build_plot_bundle` gets the whole payoff: nothing in the model
 pipeline is ever flipped, and the flip happens once, on a 2-D plane, at the
 boundary where display begins.
 
+#### Then: the norms get their coordinates ✅ 2026-09-11
+
+The thing step 4b was for. A catalog norm now arrives from
+`RunSource.load_axes` with its own coordinates, on the same axes and from the
+same source as the block's, so the divide either lines up on coordinate
+*values* or raises.
+
+The failure this catches has the right name and the right length, which is
+why nothing short of comparing values can see it: a norm read from a
+different stretch of the same axis broadcasts without complaint. The test
+shifts the coordinate by half a step, asserts first that the shapes still
+match, and then that the divide raises.
+
+**One norm is still aligned by position**, on purpose: a frozen synthetic
+spectrum. Its axes are whatever the ROI reduction produced and stored, not the
+block's, so attaching them would compare two unrelated coordinate systems. Its
+single axis is renamed onto the block's leading one, which is the old
+shape-matching fallback stated deliberately rather than by accident. That is
+the remaining hole in the guard, and it is named here rather than left to be
+found.
+
+Facts: norm arrays aligned by coordinate value, **0 → all but the synthetic
+one**. Both mutations bite — a norm built without coordinates, and a frozen
+norm given index coordinates it has no business carrying.
+
 ### Step 5 — the block cache stops holding normalized data
 
 Found while drafting, and reproduced:
@@ -1262,3 +1293,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Step 3 done. Branches asking "is this key frozen?" went 7 to 1: three dispatched to a method and now go through `RunSource._source`, while four only wanted a fact and read it off `KeyInfo` instead. `CatalogKey` binds a run and a key name so both sources answer the same key-free protocol — an adapter whose body is delegation, which earns its place by being the boundary rather than a layer in front of one. Three of the rewritten branches turned out to be reachable but untested, found by reverting each one with the suite in place rather than by trusting it green; the frozen-norm branch in particular is load-bearing, and dividing a cube's line plot by a frozen stack spectrum is the case that shows why. |
 | 2026-09-10 | Step 4 done. The middle value is a bare `xr.DataArray`; `PlotAxes` names the projection over dimension names once, before any load, and `PlaneOrientation` carries the three display facts from the load to the pack without entering a stage. Parameter slots that are pieces of one concept went 78 to 47, with the storage-to-tensor group to zero; the four files went 1315 to 1113 code lines. Seven mutations run: four bit immediately, two found pre-existing gaps (nothing held the sum/nansum distinction, nothing held the plot-order transpose), and one survives by design because a named mask aligns regardless of how it was built. Building the arrays as `DataArray`s also caught two inconsistent test fixtures -- a stack axis that broadcast to length 1 under a length-3 coordinate, and mesh edge grids passed as cell coordinates. Normalization deliberately stops short of coordinates, so the exact-join guard is not yet active on it; that is the most valuable thing left in this plan. |
 | 2026-09-11 | Step 4b done, from the maintainer's observation that orientation is a pure display concern and has no business reaching back past normalization. It is: `display_flips` decides one thing, whether `imshow(origin="upper")` would put an image upside down. The flip moved from the load to the pack, the ROI mask turns round instead of the block, and `PlaneOrientation` -- added one commit earlier -- is gone. The payoff is not tidiness: reversal was what made the exact-join guard fire on correct data, so this is what unblocks coordinates on normalization arrays. The maintainer's further suggestion of letting the renderer flip works for rows via `origin="lower"` but not for columns, since `imshow` has one origin for both axes; stopping at the pack keeps `views/` untouched. Found while verifying: `build_plot_bundle` had no test references at all. |
+| 2026-09-11 | Norm arrays got their coordinates, closing step 4's one open deviation. This is what step 4b was for: the guard had been firing on correct data because the block was flipped at load and a norm read afterwards was not. A norm read from the wrong stretch of an axis has the right name and the right length, so only comparing coordinate values catches it. The frozen synthetic norm is left aligned by position, deliberately -- its axes belong to the reduction that made it, not to the block -- and that is the one remaining hole in the guard. |

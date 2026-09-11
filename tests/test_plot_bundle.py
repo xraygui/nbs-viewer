@@ -18,6 +18,7 @@ from nbs_viewer.models.plot.plot_request import PlotRequest
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.sources.fixtures import (
+    VPPEM_SHAPE,
     make_vppem_run,
     voltage_axis,
     vppem_factors,
@@ -27,6 +28,7 @@ import xarray as xr
 from nbs_viewer.models.plot.plot_axes import PlotAxes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.display_plane import labelled_block
+from tests.test_run_source import _frozen_entry
 
 
 VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
@@ -586,3 +588,119 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
     plain = run.get_plot_bundle(replace(roi, transform=""))
 
     np.testing.assert_allclose(scaled.y, 2.0 * plain.y)
+
+
+# ---------------------------------------------------------------------------
+# Normalization arrays arrive with their coordinates
+# ---------------------------------------------------------------------------
+
+
+def _image_scan_model():
+    return RunSource(image_scan_run(0, n_y=6, n_x=5, n_z=3))
+
+
+def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
+    """Run the load boundary and return ``(block, norm arrays)``."""
+    from nbs_viewer.models.plot.plot_request import build_plot_request, plan_fetch
+    from nbs_viewer.models.plot.view_intent import ViewIntent
+
+    shape = model.get_shape(ykey)
+    view = ViewIntent(plot_ndim=min(plot_ndim, len(shape))).project(
+        len(shape), shape
+    )
+    request = build_plot_request(
+        uid=model.uid,
+        xkeys=xkeys,
+        ykey=ykey,
+        projection=view,
+        norm_keys=norm_keys,
+    )
+    axes = model._view_by_name(request)
+    plan = plan_fetch(request, plane_frame=model._plane_frame(request))
+    block = model._read_block(request, plan, axes)
+    return request, block, model._norm_arrays(request, plan, axes, block)
+
+
+def test_a_norm_arrives_with_the_same_coordinates_as_the_block():
+    """
+    A norm is aligned on coordinate *values*, not on a name and a length.
+
+    Matching by name and shape divides one array into another wherever the
+    two happen to be the same size, which is a plausible wrong answer rather
+    than an error. Under ``arithmetic_join="exact"`` the coordinates have to
+    agree, so the divide either lines up or raises.
+
+    This only became possible once nothing in the pipeline was flipped: a
+    reversed coordinate does not compare equal to the one the source holds,
+    so the guard used to fire on correct data.
+    """
+    model = _image_scan_model()
+    _request, block, norms = _norms_for(
+        model, "detector_image", ["en_energy"], ["row"]
+    )
+
+    assert len(norms) == 1
+    norm = norms[0]
+    assert norm.dims == ("time",)
+    assert "time" in norm.coords
+    np.testing.assert_array_equal(
+        norm.coords["time"].values, block.coords["time"].values
+    )
+
+
+def test_a_norm_read_from_the_wrong_window_raises_instead_of_dividing():
+    """
+    The failure the coordinates exist to catch.
+
+    A norm taken from a different stretch of the same axis has the right name
+    and the right length, so nothing short of comparing coordinate values can
+    tell. Shifting them by half a step is enough; the arrays still broadcast,
+    which is exactly why the old rule could not see it.
+    """
+    # Same name, same length as the block's axis: it would broadcast without
+    # complaint, which is exactly why the old rule could not see the shift.
+    _request, block, norms = _norms_for(
+        _image_scan_model(), "detector_image", ["en_energy"], ["row"]
+    )
+    assert norms[0].dims == ("time",)
+    assert norms[0].sizes["time"] == block.sizes["time"]
+
+    model = _image_scan_model()
+    original = model._run.get_dimension_axes
+
+    def shifted(ykey, xkeys, slice_info=None):
+        arrays, names, extra = original(ykey, xkeys, slice_info)
+        if ykey == "row":
+            arrays = [np.asarray(a, dtype=float) + 0.5 for a in arrays]
+        return arrays, names, extra
+
+    model._run.get_dimension_axes = shifted
+
+    with pytest.raises(xr.AlignmentError):
+        _norms_for(model, "detector_image", ["en_energy"], ["row"])
+
+
+def test_a_frozen_norm_has_no_coordinates_and_aligns_by_position(qapp):
+    """
+    The one norm still aligned by position, and why.
+
+    A frozen spectrum's axes are whatever the ROI reduction produced and
+    stored -- they are not the block's, so attaching them would compare two
+    unrelated coordinate systems. Its single axis is renamed onto the block's
+    leading one instead, which is the same rule the old shape-matching
+    fallback implemented by accident, stated on purpose.
+    """
+    model = _model()
+    # Same length as the block's leading axis: a frozen stack spectrum is a
+    # per-event quantity, and nothing but the length can say so.
+    entry = _frozen_entry(
+        model, key_suffix="norm", y=list(np.full(VPPEM_SHAPE[0], 2.0))
+    )
+    model.register_frozen_spectrum(entry)
+
+    _request, block, norms = _norms_for(
+        model, "PCOEdge_stats", ["sampleVoltage_VSource"], [entry.key], plot_ndim=1
+    )
+
+    assert norms[0].dims == block.dims[: norms[0].ndim]
+    assert list(norms[0].coords) == []

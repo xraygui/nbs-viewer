@@ -668,16 +668,25 @@ class RunSource(QObject):
         divides per pixel and only then is summed.
 
         A catalog norm shares axis *names* with the block, so it takes the
-        block's slice on the axes it has. It needs no reorientation: nothing
-        in the pipeline is flipped any more, so both arrays are in the order
-        their source stored them. A frozen synthetic norm shares no name with
-        anything: it is a per-event
+        block's slice on the axes it has, and it arrives **with its own
+        coordinates**. That is the guard the whole representation was chosen
+        for: under ``arithmetic_join="exact"`` the divide either lines up on
+        coordinate values or raises, where matching by name and shape alone
+        would divide one detector into another at mismatched positions and
+        give a plausible wrong answer. It is only possible because nothing in
+        the pipeline is flipped any more -- a reversed coordinate does not
+        compare equal to the source's, so this used to fire on correct data.
+
+        A frozen synthetic norm shares no name with anything: it is a
+        per-event
         quantity that took the block's own slice, so its axes correspond in
         order to the block's leading axes and are named after them. Without
         that renaming xarray would broadcast it into a *new* dimension instead
         of dividing element by element -- the hand-written aligner this
         replaced fell back to matching by shape, which is the same rule stated
-        as a coincidence.
+        as a coincidence. It gets **no** coordinates: its axes are whatever
+        the reduction produced and stored, not the block's, so it is the one
+        norm still aligned by position alone.
 
         Parameters
         ----------
@@ -712,12 +721,25 @@ class RunSource(QObject):
                 slice_info, list(axes.names), norm_names
             )
             values = self.read(norm_key, key_slice)
-            dims = [
-                name
-                for name, item in zip(norm_names, key_slice)
+            norm_coords, _names, _extra = self.load_axes(
+                norm_key, xkeys, key_slice
+            )
+            surviving = [
+                axis
+                for axis, item in enumerate(key_slice)
                 if not isinstance(item, (int, np.integer))
             ]
-            norms.append(xr.DataArray(values, dims=dims))
+            norms.append(
+                labelled_array(
+                    values,
+                    [norm_names[axis] for axis in surviving],
+                    coords={
+                        norm_names[axis]: np.asarray(norm_coords[axis])
+                        for axis in surviving
+                    },
+                    name=norm_key,
+                )
+            )
         return norms
 
     @staticmethod
