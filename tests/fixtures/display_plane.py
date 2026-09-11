@@ -1,9 +1,9 @@
 """Build display-ordered 2D planes the way the fetch path does.
 
 ``prepare_2d_bundle`` packs a plane; it does not reorder one. Orientation is
-a separate step that :meth:`RunSource.get_plot_bundle` runs immediately after
-the load, so a test that wants a frame matching what the user sees has to run
-it too.
+a separate step -- ``build_plot_bundle`` turns the finished plane the right
+way up at the pack -- so a test that wants a frame matching what the user sees
+has to run it too.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ def roi_profile_from_block(
     """
     Reduce an oriented block to an ROI profile, with no transform.
 
-    What ``RunSource.get_plot_bundle`` runs between the load and the pack for
+    What ``RunFetch.get_plot_bundle`` runs between the load and the pack for
     a request that carries a region. The production path calls the two halves
     itself so it can transform in between; with an empty transform the
     composition ``materialize_view`` performs is the same answer, so a test
@@ -168,7 +168,7 @@ def roi_profile_from_block(
 
     axis_names = list(axis_names)
     # The block is what the plan loaded, so an axis the slice indexed away is
-    # not one of its dimensions -- the same rule ``RunSource._load_block``
+    # not one of its dimensions -- the same rule ``RunFetch._read_block``
     # applies. ``axis_names`` and ``axis_arrays`` stay per *storage* axis.
     surviving = [
         axis
@@ -214,7 +214,7 @@ def labelled_block(y, axis_arrays, axis_names):
     """
     Build the labelled array the load boundary produces.
 
-    ``RunSource._load_block`` names the loaded array's dimensions and attaches
+    ``RunFetch._read_block`` names the loaded array's dimensions and attaches
     the coordinates it read, and everything downstream addresses it by name. A
     test that builds a block by hand has to do the same, so it is doing it
     once here rather than in every test body.

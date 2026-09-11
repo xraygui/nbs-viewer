@@ -177,7 +177,7 @@ def test_get_plot_bundle_1d_closed_form(qapp):
     model = RunSource(make_vppem_run())
     a, b, c = vppem_factors()
     expected = a * b.mean() * c.mean()
-    bundle = model.get_plot_bundle(
+    bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats")
     )
     assert bundle.render_mode == "line"
@@ -195,7 +195,7 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(4, 0, 0),
     )
-    bundle = model.get_plot_bundle(
+    bundle = model.fetch.get_plot_bundle(
         _plot_request(
             model,
             ["sampleVoltage_VSource"],
@@ -217,7 +217,7 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
         indices=(0, 0, 0),
         axis_order=(1, 2, 0),
     )
-    cube_bundle = model.get_plot_bundle(
+    cube_bundle = model.fetch.get_plot_bundle(
         _plot_request(
             model,
             ["sampleVoltage_VSource"],
@@ -226,7 +226,7 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
             projection=spec,
         )
     )
-    stats_bundle = model.get_plot_bundle(
+    stats_bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats")
     )
     np.testing.assert_allclose(cube_bundle.y, stats_bundle.y)
@@ -239,7 +239,7 @@ def test_get_plot_bundle_frozen_uses_read(qapp):
     get_data = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
     model._run.getData = get_data
 
-    bundle = model.get_plot_bundle(
+    bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["sampleVoltage_VSource"], entry.key)
     )
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
@@ -287,7 +287,7 @@ def test_a_declared_render_mode_reaches_the_bundle(qapp):
 
     def _mode(run):
         source = RunSource(run)
-        return source.get_plot_bundle(
+        return source.fetch.get_plot_bundle(
             _plot_request(source, ["en_energy"], "detector_image", plot_ndim=2)
         ).render_mode
 
@@ -308,7 +308,7 @@ def test_a_one_dimensional_frozen_result_is_labelled_with_its_label(qapp):
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
 
-    bundle = model.get_plot_bundle(
+    bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["sampleVoltage_VSource"], entry.key)
     )
 
@@ -337,7 +337,7 @@ def test_a_frozen_norm_follows_the_event_axis_index(qapp):
     projection = ViewIntent(plot_ndim=1).project(len(shape), shape)
     assert projection.base_slice() == (0, 0, slice(None))
 
-    bundle = model.get_plot_bundle(
+    bundle = model.fetch.get_plot_bundle(
         build_plot_request(
             uid=model.uid,
             xkeys=["pixel"],

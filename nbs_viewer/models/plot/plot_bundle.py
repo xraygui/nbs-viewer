@@ -1,7 +1,7 @@
 """
 Request-to-bundle helpers: reduce, normalize, transform, and pack.
 
-Orchestration lives on ``RunSource.get_plot_bundle``. These functions are
+Orchestration lives on ``RunFetch.get_plot_bundle``. These functions are
 pure in the arrays they receive so they can be tested without a run.
 """
 

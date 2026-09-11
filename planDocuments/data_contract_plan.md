@@ -15,7 +15,7 @@ contract", never started.
 
 **Status:** drafted 2026-09-10 and revised the same day — to adopt `xarray`
 rather than a bespoke type, and to settle coordinates onto the array. **Steps
-1–4 landed 2026-09-10, step 5 on 2026-09-11**; steps 6–7 not started. Numbers measured at
+1–4 landed 2026-09-10, steps 5 and 6 on 2026-09-11**; step 7 not started. Numbers measured at
 `74a7d6d`.
 
 ---
@@ -1396,7 +1396,7 @@ existing test moved with the boundary — the wrong-window norm test expected
 the alignment error from the load, and now gets it from the divide, through
 `get_plot_bundle`.
 
-### Step 6 — the fetch orchestration leaves `RunSource`
+### Step 6 — the fetch orchestration leaves `RunSource` ✅ 2026-09-11
 
 Re-derived 2026-09-11, after steps 4b and 5, at the maintainer's direction.
 The original said *mechanical once step 4 lands, because the signatures are
@@ -1459,18 +1459,18 @@ it costs at most another read.
 
 #### The move
 
-- [ ] The nine methods and `_block` move into one fetch object, constructed
+- [x] The nine methods and `_block` move into one fetch object, constructed
   and owned by `RunSource` and handed the source for its four members.
   `RunSource` exposes it as one attribute and keeps no `get_plot_bundle` of
   its own: `Trace`'s two call sites go to the fetch object directly, so there
   is no forwarding method to count against the split.
-- [ ] `RunSource` clears the cache by a **direct call**, in `_on_data_changed`
+- [x] `RunSource` clears the cache by a **direct call**, in `_on_data_changed`
   before it emits `data_changed` and in `_invalidate_key_table`. `Trace`
   refetches on `data_changed`, so a cache that cleared itself by subscribing
   to the same signal would depend on connection order to be cleared first.
-- [ ] Both routes stay. `cached_plane` still earns its place: it serves an
+- [x] Both routes stay. `cached_plane` still earns its place: it serves an
   in-plane profile when another trace on the run has evicted the plane.
-- [ ] `get_plot_bundle` moves as it is, which already reads as a pipeline:
+- [x] `get_plot_bundle` moves as it is, which already reads as a pipeline:
 
 ```python
 def get_plot_bundle(self, request, *, cached_plane=None, label=""):
@@ -1493,8 +1493,53 @@ def get_plot_bundle(self, request, *, cached_plane=None, label=""):
     return build_plot_bundle(data, request, ...)
 ```
 
-- [ ] Facts: `run_source.py` 420 → ~215 code lines; fetch-side project
+- [x] Facts: `run_source.py` 420 → ~215 code lines; fetch-side project
   imports in `run_source.py` **5 → 0**; `RunSource` members −9 +1.
+
+#### Outcome
+
+`RunFetch`, in `models/plot/run_fetch.py`, holds the nine methods and the
+block cache; `RunSource` owns one and hands it out as `fetch`. The methods
+were moved by their syntax-tree line ranges, so every docstring moved
+unchanged. The only edits inside them route `read`, `load_axes`, `describe`
+and `plot_axis_names` through `self._source`, and a check confirmed nothing
+else in the class reaches back into `RunSource`.
+
+| | before | after |
+|---|---:|---:|
+| `run_source.py` code lines | 420 | 200 |
+| `run_fetch.py` code lines | — | 237 |
+| `RunSource` methods and properties | 43 | 35 |
+| fetch-side project modules imported by `run_source.py` | 5 | 0 |
+| `RunSource` members the fetch uses | — | 4 |
+
+Net **+17** code lines across the two files: the new module's header,
+imports, constructor and `clear`. No forwarding method: `Trace`'s two call
+sites go to `run.fetch`, and the 70 test calls on a `RunSource` were renamed
+the same way.
+
+#### Found while verifying: the data-change clear was already redundant
+
+The first two ordering mutations both survived. `_on_data_changed` calls
+`_update_available_keys` before it emits, and that always invalidates the key
+table — which clears the cache as well. So a data change clears it twice, and
+did before this step too, as two `_block = None` lines.
+
+The direct clear stays. It states the reason, and it keeps data-change
+invalidation from depending on the key-table path, which an optimisation
+that skipped invalidation when the keys are unchanged would otherwise remove
+without anyone noticing.
+
+The new test — a slot on `data_changed` that refetches must already see the
+new data — is pinned by the mutations that matter:
+
+| mutation | fails |
+|---|---|
+| nothing clears the cache on a data change | 1 |
+| invalidation happens after the signal | 1 |
+| only the direct clear removed | survives, by design |
+
+Suite 490 → 491.
 
 **Not in this step**, each its own decision: a multi-entry block cache;
 deleting the `cached_plane` route, which only a cache that no longer evicts
@@ -1608,3 +1653,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-11 | Step 5 done. The block cache holds the block as read and its norm arrays beside it, keyed by norm key; `_load_block` returns them apart and `get_plot_bundle` divides, so toggling a normalization reads at most the norm key and never the block. The plot plane left the cache identity as well -- a leftover from when the load flipped it -- so swapping the drawn axes reads nothing; the identity is now `(ykey, xkeys, dims)`. Found while doing it and fixed in the step, because it corrupts exactly what the step holds: `apply_transform` handed the interpreter the held block's own arrays, so an in-place clip such as `y[y > t] = t` wrote into every later fetch. |
 | 2026-09-11 | Regression from step 4b, found by the maintainer and fixed: an in-plane ROI profile on a row-reversed image summed the mirror-image rows. `mask_to_profile` flips the mask to meet a storage-ordered block, but `reduce_cached_plane` handed it the displayed plane, so the mask was flipped twice. It now turns the plane back to storage order first, and the in-plane branch pairs its frame-derived coordinates to match. The ground-truth test had only covered the off-plane route; the in-plane route has a four-orientation one now. |
 | 2026-09-11 | Step 6 re-derived before starting, at the maintainer's direction. Its "mechanical once step 4 lands" held for the move itself -- the seam is now four members wide, not six -- but its sketch predated steps 4, 4b and 5 and showed one route where the code has two. Two decisions recorded: the block cache stays on the run as it is, since the maintainer wants a cache that serves many consumers to live on the run and declined making it multi-entry, and the chunk cache already absorbs the re-reads its eviction causes on tiled runs; and clearing it on key-table invalidation stays too, since that costs at most another read. |
+| 2026-09-11 | Step 6 done. The fetch orchestration left `RunSource` for `RunFetch`, which `RunSource` owns and hands out as `fetch`; `Trace` calls it directly, so there is no forwarding method. `run_source.py` 420 → 200 code lines, `run_fetch.py` 237, and none of the five fetch-side modules is imported by `run_source.py` any more. Found while verifying: a data change clears the cache twice, directly and through the key table, so a mutation of either site alone survives; the direct clear stays, and the ordering test is pinned by removing both. |
