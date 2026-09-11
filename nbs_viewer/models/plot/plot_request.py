@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple, Union
 
-from .plot_geometry import display_flips
 from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
 from .region import (
     MaskMode,
@@ -344,8 +343,9 @@ class FetchPlan:
         Storage axes of the plot plane, ``(plot_y, plot_x)``. None when the
         request has no 2-D plane.
     plane_frame : PlotViewFrame, optional
-        Display frame of the *full* plot plane. Carries the storage-to-display
-        reversal used to orient the loaded block.
+        Display frame of the *full* plot plane. It is what a drawn ROI is
+        compiled against, and what maps the resulting box back to storage
+        indices.
     region_frame : PlotViewFrame, optional
         Display frame matching the block that ``slice_info`` actually loads,
         for compiling the ROI mask against it. None when there is no region.
@@ -355,46 +355,6 @@ class FetchPlan:
     plane_axes: Optional[Tuple[int, int]] = None
     plane_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
     region_frame: Optional[PlotViewFrame] = field(default=None, compare=False)
-
-    def reversed_axes_for(
-        self,
-        axis_arrays: Sequence,
-        render_mode: Optional[str],
-    ) -> Tuple[int, ...]:
-        """
-        Return the storage axes to reverse after loading.
-
-        When the plan has a parent plane frame, that frame already recorded
-        the decision made when the plane was drawn, and it wins: an ROI load
-        narrowed to a couple of rows no longer shows the coordinate direction,
-        so re-deriving it there would silently disagree with the plane the
-        user drew on. Otherwise the plane being loaded *is* the parent, and
-        the decision is made from its coordinates.
-
-        Parameters
-        ----------
-        axis_arrays : sequence
-            Coordinate array per storage axis, as loaded.
-        render_mode : str or None
-            Render mode of the plane; only ``image`` is ever reversed.
-
-        Returns
-        -------
-        tuple of int
-            Storage axes whose order must reverse, in plane order.
-        """
-        if self.plane_axes is None:
-            return ()
-        row_axis, col_axis = self.plane_axes
-        if self.plane_frame is not None:
-            flips = (self.plane_frame.row_reversed, self.plane_frame.col_reversed)
-        else:
-            flips = display_flips(
-                axis_arrays[row_axis], axis_arrays[col_axis], render_mode
-            )
-        return tuple(
-            axis for axis, flip in zip(self.plane_axes, flips) if flip
-        )
 
 
 def crop_from_region(

@@ -22,7 +22,6 @@ from .plot_bundle import (
     slice_info_for_key,
 )
 from .plot_geometry import (
-    PlaneOrientation,
     PlotBundle,
     build_plot_bundle,
     classify_render_mode,
@@ -629,45 +628,6 @@ class RunSource(QObject):
         """
         return self.describe(ykey).render_hint
 
-    def _plane_render_mode(
-        self,
-        ykey: str,
-        data: xr.DataArray,
-        axes: PlotAxes,
-    ) -> Optional[str]:
-        """
-        Classify the render mode of the loaded plot plane.
-
-        Classified before any reduction, because the orientation decision
-        depends on it and orientation happens immediately after the load. The
-        answer is recorded on the :class:`PlaneOrientation` so the packing
-        step does not classify a second time.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key, for the plot-hint lookup.
-        data : xarray.DataArray
-            Loaded block, before orientation.
-        axes : PlotAxes
-            Named view, for the plane's dimension names.
-
-        Returns
-        -------
-        str or None
-            ``image`` or ``mesh``, or the bare hint when the plane is not in
-            the loaded array.
-        """
-        hint = self._render_hint(ykey)
-        plane = axes.plane
-        if plane is None or any(dim not in data.dims for dim in plane):
-            return hint
-        return classify_render_mode(
-            tuple(data.sizes[dim] for dim in plane),
-            [np.asarray(data.coords[dim].values) for dim in plane],
-            render_mode_hint=hint,
-        )
-
     def _view_by_name(self, request: PlotRequest) -> PlotAxes:
         """
         Name the request's projection, once, before anything is read.
@@ -699,7 +659,6 @@ class RunSource(QObject):
         plan: FetchPlan,
         axes: PlotAxes,
         data: xr.DataArray,
-        orientation: PlaneOrientation,
     ) -> List[xr.DataArray]:
         """
         Read each normalization key, labelled and oriented to match the block.
@@ -709,9 +668,10 @@ class RunSource(QObject):
         divides per pixel and only then is summed.
 
         A catalog norm shares axis *names* with the block, so it takes the
-        block's slice on the axes it has and is flipped the same way -- a norm
-        divided into an image upside down is a silent wrong answer. A frozen
-        synthetic norm shares no name with anything: it is a per-event
+        block's slice on the axes it has. It needs no reorientation: nothing
+        in the pipeline is flipped any more, so both arrays are in the order
+        their source stored them. A frozen synthetic norm shares no name with
+        anything: it is a per-event
         quantity that took the block's own slice, so its axes correspond in
         order to the block's leading axes and are named after them. Without
         that renaming xarray would broadcast it into a *new* dimension instead
@@ -728,9 +688,7 @@ class RunSource(QObject):
         axes : PlotAxes
             Named view of the Y key.
         data : xarray.DataArray
-            The oriented block, for its dimension names.
-        orientation : PlaneOrientation
-            Which plane axes were flipped.
+            The loaded block, for its dimension names.
 
         Returns
         -------
@@ -741,7 +699,6 @@ class RunSource(QObject):
             return []
         slice_info = plan.slice_info
         xkeys = list(request.xkeys)
-        reversed_dims = set(orientation.reversed_dims(axes.plane))
         norms: List[xr.DataArray] = []
         for norm_key in request.norm_keys:
             if self.describe(norm_key).synthetic:
@@ -760,11 +717,7 @@ class RunSource(QObject):
                 for name, item in zip(norm_names, key_slice)
                 if not isinstance(item, (int, np.integer))
             ]
-            norm = xr.DataArray(values, dims=dims)
-            for dim in dims:
-                if dim in reversed_dims:
-                    norm = norm.isel({dim: slice(None, None, -1)})
-            norms.append(norm)
+            norms.append(xr.DataArray(values, dims=dims))
         return norms
 
     @staticmethod
@@ -837,9 +790,9 @@ class RunSource(QObject):
 
     def _block_for_plan(
         self, cache_key: Tuple, plan: FetchPlan, axes: PlotAxes
-    ) -> Optional[Tuple[xr.DataArray, PlaneOrientation]]:
+    ) -> Optional[xr.DataArray]:
         """
-        Serve an oriented, normalized block from memory if one covers it.
+        Serve a loaded, normalized block from memory if one covers it.
 
         Parameters
         ----------
@@ -852,41 +805,35 @@ class RunSource(QObject):
 
         Returns
         -------
-        tuple or None
-            ``(data, orientation)`` narrowed to ``plan``, or None when a read
-            is needed.
+        xarray.DataArray or None
+            The held block narrowed to ``plan``, or None when a read is
+            needed.
         """
         if self._block is None:
             return None
-        held_key, held_plan, data, orientation = self._block
+        held_key, held_plan, data = self._block
         if held_key != cache_key or held_plan.plane_axes != plan.plane_axes:
             return None
         windows = self._contained_window(held_plan.slice_info, plan.slice_info)
         if windows is None:
             return None
 
-        reversed_dims = set(orientation.reversed_dims(axes.plane))
         for storage_axis, window in enumerate(windows):
             if window is None:
                 continue
             dim = axes.names[storage_axis]
             if dim not in data.dims:
                 continue
-            length = data.sizes[dim]
             start, stop = window
-            stop = length if stop is None else stop
-            if dim in reversed_dims:
-                # The block was flipped along this axis at load, so the
-                # storage window sits at the mirrored position in it.
-                lo, hi = length - stop, length - start
-            else:
-                lo, hi = start, stop
-            data = data.isel({dim: slice(lo, hi)})
-        return data, orientation
+            stop = data.sizes[dim] if stop is None else stop
+            # A plain window, because the block is in storage order. It used
+            # to need mirroring on any axis the load had flipped.
+            data = data.isel({dim: slice(start, stop)})
+        return data
 
     def _load_block(
         self, request: PlotRequest, axes: PlotAxes
-    ) -> Tuple[xr.DataArray, PlaneOrientation, FetchPlan]:
+    ) -> Tuple[xr.DataArray, FetchPlan]:
         """
         Return the block a request needs, from memory or by reading it.
 
@@ -907,28 +854,30 @@ class RunSource(QObject):
         Returns
         -------
         tuple
-            ``(data, orientation, plan)``.
+            ``(data, plan)``.
         """
         plan = plan_fetch(request, plane_frame=self._plane_frame(request))
         cache_key = self._block_cache_key(request)
-        block = self._block_for_plan(cache_key, plan, axes)
-        if block is None:
-            block = self._read_block(request, plan, axes)
-            self._block = (cache_key, plan) + block
-        data, orientation = block
-        return data, orientation, plan
+        data = self._block_for_plan(cache_key, plan, axes)
+        if data is None:
+            data = self._read_block(request, plan, axes)
+            self._block = (cache_key, plan, data)
+        return data, plan
 
     def _read_block(
         self, request: PlotRequest, plan: FetchPlan, axes: PlotAxes
-    ) -> Tuple[xr.DataArray, PlaneOrientation]:
+    ) -> xr.DataArray:
         """
-        Read, label, orient and normalize the block a plan asks for.
+        Read, label and normalize the block a plan asks for.
 
         The stages that depend only on the fetch plan, so that the ones that
         do not -- reduce, transform, mask -- can be re-run without a read.
 
-        This is also the boundary where storage axis indices stop. Everything
-        it returns is addressed by dimension name.
+        This is the boundary where storage axis indices stop: everything it
+        returns is addressed by dimension name. It is *not* where display
+        order begins -- the block stays in the order the source stored it, and
+        the flip that puts a plane the right way up for ``imshow`` happens
+        once, at the pack.
 
         Parameters
         ----------
@@ -941,8 +890,8 @@ class RunSource(QObject):
 
         Returns
         -------
-        tuple
-            ``(data, orientation)``.
+        xarray.DataArray
+            Labelled, normalized block.
         """
         slice_info = plan.slice_info
         ykey = request.ykey
@@ -969,25 +918,9 @@ class RunSource(QObject):
             name=ykey,
         )
 
-        render_mode = self._plane_render_mode(ykey, data, axes)
-        reversed_axes = plan.reversed_axes_for(storage_coords, render_mode)
-        plane_axes = plan.plane_axes or ()
-        orientation = PlaneOrientation(
-            render_mode=render_mode,
-            row_reversed=bool(plane_axes and plane_axes[0] in reversed_axes),
-            col_reversed=bool(plane_axes and plane_axes[1] in reversed_axes),
-        )
-        # One reversal per flipped axis, and the coordinate follows the data
-        # because they are the same object. This replaced a flip of the array
-        # by tensor axis plus a separate flip of a coordinate list by storage
-        # axis, with a map between the two.
-        for dim in orientation.reversed_dims(axes.plane):
-            if dim in data.dims:
-                data = data.isel({dim: slice(None, None, -1)})
-
         t0 = ttime.time()
         data = apply_normalization(
-            data, self._norm_arrays(request, plan, axes, data, orientation)
+            data, self._norm_arrays(request, plan, axes, data)
         )
         t_norm = ttime.time() - t0
 
@@ -997,7 +930,7 @@ class RunSource(QObject):
             f"load={t_load:.4f}s norm={t_norm:.4f}s",
             category="plots",
         )
-        return data, orientation
+        return data
 
     def get_plot_bundle(
         self,
@@ -1007,7 +940,7 @@ class RunSource(QObject):
         label: str = "",
     ) -> PlotBundle:
         """
-        Load, orient, normalize, reduce, transform, mask and pack a request.
+        Load, normalize, reduce, transform, mask and pack a request.
 
         The request is the whole description: the projection, the crop, and
         for an ROI the region, the profile axis and the spatial reduce. What
@@ -1016,16 +949,13 @@ class RunSource(QObject):
 
         The stage order is the content of the pipeline:
 
-        - Storage-to-display reorientation happens immediately after the
-          load, so every later step sees display-ordered data and the
-          renderer never reorders anything again.
-        - Normalization happens next, on the whole block, so a norm key is
+        - Normalization happens first, on the whole block, so a norm key is
           divided in per element before anything is summed.
         - The transform runs on the finished plot plane, *before* the ROI
           mask. The user already sees ``f(y)`` on the image and draws the ROI
           on what they see, so summing the ROI must sum what they see.
 
-        Load, orient and normalize depend only on the fetch plan, so their
+        Load and normalize depend only on the fetch plan, so their
         result is held: editing a transform, or moving an ROI inside a box
         already read, re-runs only the tail.
 
@@ -1061,7 +991,7 @@ class RunSource(QObject):
             return reduce_cached_plane(plane, request, label=label)
 
         axes = self._view_by_name(request)
-        data, orientation, plan = self._load_block(request, axes)
+        data, plan = self._load_block(request, axes)
 
         t0 = ttime.time()
         if request.region is None:
@@ -1097,7 +1027,12 @@ class RunSource(QObject):
         info = self.describe(request.ykey)
         if info.synthetic and data.ndim == 1:
             data = data.rename({data.dims[0]: label or info.label})
-        return build_plot_bundle(data, orientation, request, label=label)
+        return build_plot_bundle(
+            data,
+            request,
+            render_mode_hint=self._render_hint(request.ykey),
+            label=label,
+        )
 
     @property
     def dynamic_update(self) -> bool:

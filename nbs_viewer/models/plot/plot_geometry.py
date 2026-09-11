@@ -26,61 +26,6 @@ if TYPE_CHECKING:  # pragma: no cover - annotation only
 RenderMode = Literal["line", "image", "mesh"]
 
 
-@dataclass(frozen=True)
-class PlaneOrientation:
-    """
-    How the loaded plot plane ended up facing, recorded where it was decided.
-
-    Three facts xarray cannot carry -- ``.attrs`` is dropped silently by
-    ``.sum()``, by arithmetic and by ``where()``, which are three of the
-    pipeline's own stages. They are produced by the load, where the
-    coordinates are still visible, and read by exactly one consumer: the step
-    that packs a :class:`PlotBundle`. No stage in between looks at them, which
-    is why they ride alongside the array rather than on it.
-
-    Reversal is two booleans rather than a set of dimension names because a
-    flip only ever applies to the plot plane's two axes:
-    ``FetchPlan.reversed_axes_for`` returns a subset of ``plane_axes`` and
-    nothing else.
-
-    Parameters
-    ----------
-    render_mode : str or None
-        ``image`` or ``mesh``, classified from the loaded plane's coordinates
-        before any reduction -- the orientation decision depends on it. None
-        when there is no plane to classify.
-    row_reversed : bool
-        Whether display rows are the reverse of storage order.
-    col_reversed : bool
-        Same for display columns.
-    """
-
-    render_mode: Optional[str] = None
-    row_reversed: bool = False
-    col_reversed: bool = False
-
-    def reversed_dims(
-        self, plane: Optional[Sequence[str]]
-    ) -> Tuple[str, ...]:
-        """
-        Return the plane dimensions that were flipped.
-
-        Parameters
-        ----------
-        plane : sequence of str or None
-            The plot plane's ``(row, column)`` dimension names.
-
-        Returns
-        -------
-        tuple of str
-            Flipped dimension names, empty when nothing was flipped.
-        """
-        if not plane:
-            return ()
-        flips = (self.row_reversed, self.col_reversed)
-        return tuple(dim for dim, flip in zip(plane, flips) if flip)
-
-
 @dataclass
 class PlotBundle:
     """
@@ -549,34 +494,45 @@ def prepare_2d_bundle(
 
 def build_plot_bundle(
     data: "xr.DataArray",
-    orientation: PlaneOrientation,
     request: "PlotRequest",
     *,
+    render_mode_hint: Optional[str] = None,
     label: str = "",
 ):
     """
     Pack a finished labelled array into a :class:`PlotBundle`.
 
+    **This is where display order begins.** Everything upstream works in the
+    order the source stored the data; the reversal that puts a plane the right
+    way up for ``imshow`` happens here, once, on a finished 2-D plane.
+
+    It used to happen immediately after the load, on the whole N-D block,
+    which meant a normalization array sharing a plot-plane axis had to be
+    reversed to match, the block cache had to mirror its windows, and the
+    render mode had to be classified before the reduce so the flip could be
+    decided. None of that was about the data; it was about a matplotlib
+    convention -- ``origin="upper"`` puts storage row 0 at the top -- reaching
+    five stages back into the pipeline.
+
     The array's trailing dimensions are the plot axes and carry their own
-    coordinates, so the names and coordinate arrays are read off it rather
-    than passed alongside. The orientation is the one thing it cannot carry:
-    xarray drops ``attrs`` through the reduce, the divide and the mask.
+    coordinates, so names and coordinate arrays are read off it rather than
+    passed alongside.
 
     Parameters
     ----------
     data : xarray.DataArray
-        Reduced, transformed array in plot order.
-    orientation : PlaneOrientation
-        Render mode and axis reversal recorded at the load.
+        Reduced, transformed array in plot order and source orientation.
     request : PlotRequest
         Used to detect ROI profile output.
+    render_mode_hint : str, optional
+        Declared ``image`` / ``mesh`` override for the key.
     label : str, optional
         Display name for a 1-D ROI profile.
 
     Returns
     -------
     PlotBundle
-        Prepared payload for the view layer.
+        Prepared payload for the view layer, in display order.
 
     Raises
     ------
@@ -584,9 +540,7 @@ def build_plot_bundle(
         If an ROI profile is empty, or the output is neither 1-D nor 2-D.
     """
     y = np.asarray(data.values)
-    names = [str(dim) for dim in data.dims[-2:]] if y.ndim >= 2 else [
-        str(dim) for dim in data.dims
-    ]
+    names = [str(dim) for dim in (data.dims[-2:] if y.ndim >= 2 else data.dims)]
     coords = [
         np.asarray(data.coords[dim].values)
         if dim in data.coords
@@ -601,12 +555,27 @@ def build_plot_bundle(
     if y.ndim == 1:
         return prepare_1d_bundle(y, coords, names)
     if y.ndim == 2:
+        # Classified before the flip, which is safe: uniformity is a property
+        # of the coordinate differences, and reversing an array does not
+        # change whether its steps are equal.
+        render_mode = classify_render_mode(
+            y.shape, coords, render_mode_hint=render_mode_hint
+        )
+        row_reversed, col_reversed = display_flips(
+            coords[0], coords[1], render_mode
+        )
+        if row_reversed:
+            y = np.flip(y, axis=0)
+            coords[0] = coords[0][::-1]
+        if col_reversed:
+            y = np.flip(y, axis=1)
+            coords[1] = coords[1][::-1]
         return prepare_2d_bundle(
             y,
             coords,
             names,
-            render_mode_hint=orientation.render_mode,
-            row_reversed=orientation.row_reversed,
-            col_reversed=orientation.col_reversed,
+            render_mode_hint=render_mode,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
         )
     raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")

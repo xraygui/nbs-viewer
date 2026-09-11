@@ -1010,7 +1010,7 @@ axes* of a projection. `RunSource.plot_axis_names(ykey, xkeys)`, added in step
 things one import apart. Recorded for the module reorganization rather than
 renamed here.
 
-### Step 4b — orientation moves to the pack
+### Step 4b — orientation moves to the pack ✅ 2026-09-11
 
 Raised by the maintainer after step 4 landed: *"why does `PlaneOrientation`
 need to be pushed down to such a low level? Isn't it a pure display concern?
@@ -1047,20 +1047,62 @@ valuable thing left in the plan.
 The flip goes from *the load, on the whole block* to *the pack, on the
 finished plane*.
 
-- [ ] `_read_block` returns a bare `xr.DataArray` in source order.
-- [ ] `_norm_arrays` stops reversing; `_block_for_plan` stops mirroring cache
+- [x] `_read_block` returns a bare `xr.DataArray` in source order.
+- [x] `_norm_arrays` stops reversing; `_block_for_plan` stops mirroring cache
   windows.
-- [ ] `build_plot_bundle` classifies the render mode from the finished plane
+- [x] `build_plot_bundle` classifies the render mode from the finished plane
   and flips it. Classification is order-independent — uniformity is a property
   of the differences — so moving it later does not change the answer.
-- [ ] `mask_to_profile` flips the **mask** rather than the data, using the
+- [x] `mask_to_profile` flips the **mask** rather than the data, using the
   region frame's own flags. The ROI is compiled on the frame the user drew on,
   which stays display-ordered; the block no longer is, so one of the two has
   to turn round and the boolean plane is the cheaper one.
-- [ ] Deletes `PlaneOrientation`, `RunSource._plane_render_mode`,
-  `FetchPlan.reversed_axes_for`, the reversal loop in `_norm_arrays`, the
-  mirroring in `_block_for_plan`, and the `orient_block` test helper.
-- [ ] Facts: places that flip data, **3 → 1**.
+- [x] Deletes `PlaneOrientation`, `RunSource._plane_render_mode`,
+  `FetchPlan.reversed_axes_for`, the reversal loop in `_norm_arrays`, and the
+  mirroring in `_block_for_plan`. The `orient_block` test helper survives, for
+  the fixtures that build a *displayed* plane by hand.
+- [x] Facts: places that flip data, **3 → 1**.
+
+#### Outcome
+
+`run_source.py` 468 → 438 code lines. `_read_block` returns one value where it
+returned two; `_load_block` returns `(data, plan)`.
+
+The block's coordinates are now in source order, which is the change in one
+line — measured on the VPPEM fixture, whose rows do reverse:
+
+```
+before:  block dim_1: 23 -> 0    (descending; flipped at load)
+after:   block dim_1:  0 -> 23   (ascending; flipped at the pack)
+         bundle.row_reversed = True
+```
+
+And the flat-field divide that raised under `exact` join now aligns:
+
+```
+plane / flat, coordinates attached  ->  (24, 32)   OK
+```
+
+#### Verification
+
+The four-orientation ground-truth test in `test_fetch_slice_info` — written
+because *"three of the four orientations were wrong before"* — passes
+unchanged with the flip moved, which is the evidence that matters most: the
+ROI answer is identical whether the data turns round or the mask does.
+
+Four mutations, each reverted with the suite in place:
+
+| mutation | result |
+|---|---|
+| the mask is not flipped on reversed rows | 4 fail |
+| the mask is not flipped on reversed columns | 2 fail |
+| the pack does not flip rows | 8 fail |
+| the pack does not flip columns | **survived** → now 2 fail |
+
+The survivor was a real gap: `build_plot_bundle` had **no test references at
+all**, so nothing packed a plane whose column coordinate descends. It now has
+a four-orientation test of its own, plus one for a mesh, which is never
+reordered.
 
 #### What deliberately does *not* move
 
@@ -1219,3 +1261,4 @@ should be re-derived after this lands rather than executed as written.
 | 2026-09-10 | Step 2 done. Both sources answer `describe` / `load`; `KeyInfo` moved down to `models/data` and was rebuilt around one `{axis name: length}` mapping, which makes bug 6's and bug 15's shapes unrepresentable rather than merely absent. `AxisLayout`, `_truncate_dim_names`, `_frozen_axis_names` and `RunSource.get_plot_hints` deleted. Four deviations recorded: `skipna` has no global option and no call site until step 4; the synthetic-key *convention* moved down rather than `FrozenSpectrum` itself, since the class holds a `PlotBundle` and moving it would have relocated the upward import rather than closed it; `read` asks `load` for no coordinates, since each costs a read of its own key that bare values gain nothing from; and `describe_axes` split into a static `describe` plus `plot_axis_names` rather than collapsing, because the default axis-order rule locates the X key's storage axis by name and stops working without the rename. |
 | 2026-09-10 | Step 3 done. Branches asking "is this key frozen?" went 7 to 1: three dispatched to a method and now go through `RunSource._source`, while four only wanted a fact and read it off `KeyInfo` instead. `CatalogKey` binds a run and a key name so both sources answer the same key-free protocol — an adapter whose body is delegation, which earns its place by being the boundary rather than a layer in front of one. Three of the rewritten branches turned out to be reachable but untested, found by reverting each one with the suite in place rather than by trusting it green; the frozen-norm branch in particular is load-bearing, and dividing a cube's line plot by a frozen stack spectrum is the case that shows why. |
 | 2026-09-10 | Step 4 done. The middle value is a bare `xr.DataArray`; `PlotAxes` names the projection over dimension names once, before any load, and `PlaneOrientation` carries the three display facts from the load to the pack without entering a stage. Parameter slots that are pieces of one concept went 78 to 47, with the storage-to-tensor group to zero; the four files went 1315 to 1113 code lines. Seven mutations run: four bit immediately, two found pre-existing gaps (nothing held the sum/nansum distinction, nothing held the plot-order transpose), and one survives by design because a named mask aligns regardless of how it was built. Building the arrays as `DataArray`s also caught two inconsistent test fixtures -- a stack axis that broadcast to length 1 under a length-3 coordinate, and mesh edge grids passed as cell coordinates. Normalization deliberately stops short of coordinates, so the exact-join guard is not yet active on it; that is the most valuable thing left in this plan. |
+| 2026-09-11 | Step 4b done, from the maintainer's observation that orientation is a pure display concern and has no business reaching back past normalization. It is: `display_flips` decides one thing, whether `imshow(origin="upper")` would put an image upside down. The flip moved from the load to the pack, the ROI mask turns round instead of the block, and `PlaneOrientation` -- added one commit earlier -- is gone. The payoff is not tidiness: reversal was what made the exact-join guard fire on correct data, so this is what unblocks coordinates on normalization arrays. The maintainer's further suggestion of letting the renderer flip works for rows via `origin="lower"` but not for columns, since `imshow` has one origin for both axes; stopping at the pack keeps `views/` untouched. Found while verifying: `build_plot_bundle` had no test references at all. |

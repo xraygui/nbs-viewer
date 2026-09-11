@@ -16,7 +16,6 @@ from nbs_viewer.models.plot.region import RectRegion
 from tests.fixtures.display_plane import (
     display_bundle,
     display_frame,
-    orient_block,
     roi_profile_from_block,
 )
 
@@ -178,9 +177,6 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
         row_axis[plan.slice_info[2]],
         col_axis[plan.slice_info[3]],
     ]
-    y_load, axes = orient_block(
-        y_load, axes, plan.reversed_axes_for(axes, "image")
-    )
     out, _, _ = roi_profile_from_block(
         y_load,
         axes,

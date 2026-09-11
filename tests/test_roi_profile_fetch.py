@@ -25,7 +25,6 @@ from nbs_viewer.models.plot.region import RectRegion
 
 from tests.fixtures.display_plane import (
     display_frame,
-    orient_block,
     roi_profile_from_block,
 )
 
@@ -344,12 +343,7 @@ def test_roi_profile_along_dim1_matches_plane_means():
             (e_count, d0_count, y_count, x_count), fetch_slice
         )
     ]
-    y_roi, axis_arrays = orient_block(
-        y_full[fetch_slice],
-        axis_arrays,
-        plan.reversed_axes_for(axis_arrays, "image"),
-        {1: 0, 2: 1, 3: 2},
-    )
+    y_roi = y_full[fetch_slice]
     profile, _, names = roi_profile_from_block(
         y_roi,
         axis_arrays,

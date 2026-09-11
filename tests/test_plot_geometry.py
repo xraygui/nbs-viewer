@@ -206,3 +206,83 @@ def test_image_and_mesh_agree_on_axis_placement():
     assert _screen_position(image, 1.0) == _screen_position(mesh, 1.0)
     # storage axis 1 is horizontal, storage axis 0 is vertical, in both modes
     assert _screen_position(image, 1.0) == (500.0, 30.0)
+
+
+# ---------------------------------------------------------------------------
+# The pack is where display order begins
+# ---------------------------------------------------------------------------
+
+
+def _plain_2d_request():
+    """A 2-D request with no region, for the packing step."""
+    from nbs_viewer.models.plot.plot_request import build_plot_request
+    from nbs_viewer.models.plot.view_intent import ViewIntent
+
+    return build_plot_request(
+        uid="uid",
+        xkeys=["x"],
+        ykey="det",
+        projection=ViewIntent(plot_ndim=2).project(2, (4, 5)),
+    )
+
+
+@pytest.mark.parametrize("row_descending", [False, True], ids=["row asc", "row desc"])
+@pytest.mark.parametrize("col_descending", [False, True], ids=["col asc", "col desc"])
+def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descending):
+    """
+    ``build_plot_bundle`` is the only place data is ever reordered.
+
+    It used to happen immediately after the load, on the whole N-D block,
+    which made a matplotlib convention -- ``origin="upper"`` puts storage row
+    0 at the top -- reach five stages back: a normalization array sharing a
+    plot-plane axis had to be reversed to match, the block cache had to mirror
+    its windows, and the render mode had to be classified before the reduce so
+    the flip could be decided.
+
+    All four orientations are checked because three of them are flips, and a
+    reversal applied to the wrong axis is a silently plausible image.
+    """
+    from nbs_viewer.models.plot.plot_geometry import build_plot_bundle
+    from tests.fixtures.display_plane import labelled_block
+
+    y = np.arange(20.0).reshape(4, 5)
+    rows = np.arange(4.0)[::-1] if row_descending else np.arange(4.0)
+    cols = np.arange(5.0)[::-1] if col_descending else np.arange(5.0)
+
+    bundle = build_plot_bundle(
+        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+    )
+
+    # Display order is the order in which the coordinates ascend upward and
+    # rightward, which is what ``imshow(origin="upper")`` needs.
+    expected = y
+    if not row_descending:
+        expected = np.flip(expected, axis=0)
+    if col_descending:
+        expected = np.flip(expected, axis=1)
+    np.testing.assert_array_equal(bundle.y, expected)
+
+    assert bundle.row_reversed is (not row_descending)
+    assert bundle.col_reversed is col_descending
+    assert bundle.render_mode == "image"
+
+
+def test_the_pack_leaves_a_mesh_alone():
+    """
+    A mesh carries its own coordinate grids, so nothing is ever reordered.
+    """
+    from nbs_viewer.models.plot.plot_geometry import build_plot_bundle
+    from tests.fixtures.display_plane import labelled_block
+
+    y = np.arange(20.0).reshape(4, 5)
+    rows = np.arange(4.0)
+    cols = np.cumsum(np.linspace(0.1, 0.9, 5))
+
+    bundle = build_plot_bundle(
+        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+    )
+
+    assert bundle.render_mode == "mesh"
+    assert bundle.row_reversed is False
+    assert bundle.col_reversed is False
+    np.testing.assert_array_equal(bundle.y, y)

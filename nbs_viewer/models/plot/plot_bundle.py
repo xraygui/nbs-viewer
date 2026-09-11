@@ -565,8 +565,18 @@ def mask_to_profile(
     if compiled.pixel_count == 0:
         raise ValueError("ROI does not cover any cells")
 
+    # The ROI is compiled on the frame the user drew on, which is in display
+    # order; the block is in the order the source stored it. One of the two
+    # has to turn round, and a boolean plane is the cheaper one -- the block
+    # can be a stack of them.
+    mask = compiled.mask
+    if region_frame.row_reversed:
+        mask = mask[::-1, :]
+    if region_frame.col_reversed:
+        mask = mask[:, ::-1]
+
     data = data.astype(float)
-    data = data.where(xr.DataArray(compiled.mask, dims=list(plane)))
+    data = data.where(xr.DataArray(mask, dims=list(plane)))
 
     spatial = _spatial_dims(axes)
     roles = {axes.role(dim) for dim in spatial}
