@@ -1,357 +1,228 @@
 # Module organization plan
 
 Reorganising `models/plot` so a reader holds less in their head at once.
-Follows [`refactor_plan.md`](refactor_plan.md), which completed 2026-09-10,
-and its [`post_refactor_review.md`](post_refactor_review.md), which named
-`run_source` and package size as what remains.
 
-**Status:** drafted 2026-09-10, not started, and **superseded in part**.
-Discussing step 1 established that `run_source` cannot be fixed by moving
-functions — the pipeline's intermediate value has no name, so every stage
-re-derives it from loose parameters. That became
-[`data_contract_plan.md`](data_contract_plan.md), which runs first and takes
-this plan's step 1 with it. Re-derive the rest of this document afterwards
-rather than executing it as written; the data-contract plan's **Kept in mind**
-section lists what changes.
+**Status:** drafted 2026-09-10, **re-derived 2026-09-14** at `f50633a` after
+[`data_contract_plan.md`](data_contract_plan.md) completed. The draft's
+measurements were taken at `9ecbe11` and are superseded; its step 1 is half
+done. Written to the conventions in
+[`data_contract_review.md`](data_contract_review.md): steps name their files,
+functions and call sites, and no step states a count it has not measured.
 
-## The goal, and how it differs from the last plan
+## The goal
 
 The refactor asked *does each thing have one implementation?* This pass asks
 *can a reader understand one file without opening six others?*
 
-It is **not a rewrite**. No behaviour changes, no function bodies rewritten.
-It moves code between files and renames things so that where something lives
-tells you what altitude it is at. It will produce **more files and probably
-more lines**; the thing being minimised is how much a reader must hold open at
-one time, not the total.
+It is **not a rewrite**. No behaviour changes and no function bodies rewritten:
+code moves between files, and names change so that where something lives tells
+you what altitude it is at. It produces more files and probably more lines.
 
-### Invariant 10 does not apply here, and its replacement
-
-The refactor's invariant 10 — *every step names what it deletes* — is what
-stopped that work becoming a layer-adding exercise. This pass deletes almost
-nothing by design, so that invariant would disqualify every step. It is
-replaced, for this plan only, by one that measures the same instinct against a
-different quantity:
-
-> **Every step names, before and after, the *reader's working set* of each
-> file it touches** — the number of sibling modules whose free functions that
-> file uses. A step that does not lower a working set somewhere is not a step
-> in this plan.
+> **Invariant.** Every step names, before and after, the **reader's working
+> set** of each file it touches — the number of sibling *free functions* it
+> imports. A step that lowers no working set is not a step in this plan.
 >
-> And two absolutes: **no runtime import cycles inside `models/plot`**, and
-> **no function-local import used to dodge one**.
+> Two absolutes: **no runtime import cycles inside `models/plot`**, and **no
+> function-local import used to dodge one**.
 
-Working set counts *free functions*, not classes, because that is the
-distinction the maintainer drew and the measurements confirm. Importing
-`RunCollection` and calling `add_runs` on it costs a reader nothing; importing
-`reduce_before_mask`, `mask_to_profile` and `materialize_view` means the
-reader must go and read another module to know what this one does.
-
-Both are scriptable, so step 1 ships them as a test — the same move as the
-refactor's ownership guard.
+Classes do not count toward a working set; free functions do. Importing
+`RunCollection` and calling a method costs a reader nothing. Importing
+`reduce_before_mask`, `mask_to_profile` and `materialize_view` means going to
+read another module to know what this one does.
 
 ---
 
-## What the tree measures
+## What the tree measures now
 
-Taken at `9ecbe11`. `models/plot` is 20 files, 4889 code lines, and **201
-import statements naming one of its modules across 52 files**.
+22 files, 10 605 raw / 4 791 code lines, and **267 import statements naming one
+of its modules across 74 files** — 178 of them in `tests/`, 24 in `views/`, 64
+inside the package. External churn for any rename is therefore small and the
+suite verifies it immediately.
 
-### Working sets today
+### Working sets (files above zero)
 
-| File | free fns imported | from N modules | |
-|---|---:|---:|---|
-| `run_source` | 15 | **5** | worst |
-| `plot_bundle` | 9 | 5 | |
-| `region_controller` | 9 | 4 | |
-| `plot_request` | 7 | 4 | |
-| `region` | 7 | **1** | a cohesive pair, not a spread |
-| `trace` | 2 | 2 | |
-| `plot_session` | 1 | 1 | the healthy shape |
-| `view_spec` | 0 | 0 | pure leaf, fan-in of 27 |
+| File | code | free fns | from N modules | |
+|---|---:|---:|---:|---|
+| `run_fetch` | 217 | **12** | 4 | worst; inherited the fetch half |
+| `region_controller` | 456 | 9 | 4 | |
+| `region` | 285 | 7 | **1** | a module pair, not a spread |
+| `plot_bundle` | 339 | 6 | 4 | plus 2 function-local imports |
+| `plot_request` | 287 | 6 | 3 | |
+| `plot_view_frame` | 187 | 2 | 2 | plus 1 function-local import |
+| `trace` | 203 | 2 | 2 | |
+| `plot_axes`, `plot_session`, `view_intent` | | 1 | 1 | the healthy shape |
+| everything else (13 files) | | 0 | 0 | including `run_source`, `view_spec` |
 
-`region` shows why the count alone is the wrong metric: seven functions from
-*one* partner is a module pair. Fifteen from *five* is a procedure smeared
-across a package.
+### Cycles and dodges
 
-### The finding: files are mixing altitudes
+- **1 runtime cycle:** `plot_view_frame ↔ region_mesh`.
+- **3 function-local sibling imports**, all reaching into `region_mesh`:
+  `plot_view_frame.py:332` (`_image_cell_bounds`), `plot_bundle.py:352`
+  (`_mesh_separable_edge_grids`), `plot_bundle.py:388` (`_cell_x_bounds_mesh`,
+  `_cell_y_bounds_mesh`). The draft found only the first; the other two date
+  from view-pipeline step 5 (`e0d2ef1`) and were undercounted, not introduced.
+- **2 `TYPE_CHECKING` cycles:** `region_controller ↔ plot_session` (a
+  controller naming its parent — expected) and `run_fetch ↔ run_source`, new,
+  created by the data-contract split. A fetch that names the source it is
+  handed is the same expected shape.
+- `plot_geometry ↔ plot_request` is **closed**: `plot_request` no longer
+  imports `plot_geometry` at all.
 
-Every member of every large module was mapped to the sibling modules it
-actually uses. Four out of four split the same way:
+### Files whose names still mislead
 
-| File | zero-coupling half | all-coupling half |
-|---|---|---|
-| `view_spec.py` (789) | `Projection`, `ViewCrop`, `DimRole` — 269 | 13 axis/profile queries — 438 |
-| `plot_request.py` (603) | `PlotRequest`, `FetchPlan`, `TraceKey`, `narrow` — 310 | `plan_fetch`, `crop_from_region`, `roi_profile_request` — 238 |
-| `plot_bundle.py` (758) | `apply_normalization`, `apply_transform`, `slice_info_for_key` — 125 | reduce + ROI mask — 570 |
-| `run_source.py` (1193) | `RunSource` key access — 512 | fetch orchestration — 569 |
+`plot_bundle.py` does not define `PlotBundle` — `plot_geometry.py` does. The
+`plot_` prefix spans three altitudes and is redundant inside a folder called
+`plot`. `display_manager.py` and `presenter.py` are the multi-display shell,
+not plotting: **nothing inside `models/plot` imports either**, and their only
+production importer is `models/app_model.py`.
 
-There are three altitudes in this package and the filenames encode none of
-them:
+### What the data-contract refactor already settled
 
-1. **Vocabulary** — value types and pure queries about them. Near-zero sibling
-   coupling, very high fan-in.
-2. **Machinery** — free functions combining several vocabulary types. All the
-   cross-module coupling lives here.
-3. **Objects** — long-lived `QObject`s that coordinate.
-
-`run_source.py` is the only file mixing an *object* with *machinery*, which is
-exactly why it reads worst.
-
-### `run_source`'s seam is exact
-
-512 raw lines of key access, 569 of fetch orchestration, and the fetch half
-reaches into the other through precisely six members:
-
-```
-read   load_axes   describe_axes   key_table   get_plot_hints   _frozen_entry
-```
-
-That is almost verbatim the surface `session_and_traces_plan.md` documented
-for `RunSource` — "`key_table`, `identity`, `read`, `describe_axes`,
-`load_axes`". The class has been carrying a second job against its own
-declared interface.
-
-### Names that mislead
-
-- **`plot_bundle.py` does not define `PlotBundle`.** `plot_geometry.py` does,
-  and since view-pipeline step 7 it also holds `build_plot_bundle`.
-- **The `plot_` prefix spans all three altitudes**: `plot_geometry` and
-  `plot_view_frame` are display primitives, `plot_request` and `plot_bundle`
-  are the pipeline, `plot_session` is the object root. It groups by accident
-  of history, and it is redundant inside a folder called `plot`.
-- **`display_manager.py` and `presenter.py` are not about plotting.** Fan-in 0
-  and 1; nothing in the package imports them back. They are the multi-display
-  shell, filed one layer too low.
-
-### One runtime cycle, dodged rather than fixed
-
-`plot_view_frame ↔ region_mesh` is a genuine runtime cycle, survived by a
-**function-local import** at `plot_view_frame.py:332`:
-
-```python
-from .region_mesh import _image_cell_bounds
-```
-
-`_image_cell_bounds` is cell geometry *on a frame*. It belongs with the frame,
-not with mask rasterization; moving it removes the cycle and the deferred
-import together.
-
-Two more cycles exist and are survivable only because they are
-`TYPE_CHECKING`: `region_controller ↔ plot_session` (a controller naming its
-parent — expected), and **`plot_geometry ↔ plot_request`, which this project
-created in view-pipeline step 7** when `build_plot_bundle` moved to
-`plot_geometry`. A cycle broken by `TYPE_CHECKING` is a boundary in the wrong
-place, not a solved problem.
-
-### Who actually imports this package
-
-| | views/ | tests/ | other |
-|---|---:|---:|---:|
-| name-imports | **43** | **258** | 3 |
-
-Production code outside `models/plot` imports 43 names, spread thinly: 12 from
-`view_spec`, 12 from `region`, 4 each from `plot_request`, `plot_geometry` and
-`plot_view_frame`, then single digits. Everything else is tests.
-
-Two consequences. First, **rewriting import sites is cheap and the suite
-verifies it instantly** — 85% of the churn is test files. Second, the modules
-with a genuinely healthy shape are visible: `run_source`, `plot_session` and
-`view_intent` export exactly *one name each* to the outside world, across 22,
-14 and 11 files.
-
-**Tests import 19 private names**, all from `region_mesh` —
-`_cell_x_bounds_mesh`, `_cell_y_bounds_mesh`, `_data_limits`,
-`_image_cell_bounds`. A module whose real public surface is undeclared and
-whose useful functions are marked private.
+- **The `run_source` split is done.** `RunFetch` exists, `run_source`'s working
+  set is 5 → **0**, and `run_fetch` inherited 12 free functions from 4 modules
+  exactly as predicted. What remains of the draft's step 1 is the guard test.
+- **`run/`'s contents changed.** `KeyInfo` and the array contract moved to
+  `models/data`; `AxisLayout` is deleted; `FrozenSpectrum` did *not* move,
+  because it holds a `PlotBundle`. So `run/` is four files, not three.
+- **`fetch/` wants one `stages.py`**, not the draft's `reduce.py` +
+  `normalize.py`: every stage is now `DataArray -> DataArray` and the split
+  stopped being a boundary.
 
 ---
 
-## Target layout
+## Decisions
 
-```
-models/plot/
-│
-│   the ownership tree, at the top level, one class per file
-├── session.py              PlotSession
-├── run_collection.py       RunCollection
-├── selection.py            Selection
-├── trace.py                Trace
-├── trace_set.py            TraceSet
-├── region_controller.py    RegionController
-│
-├── geometry/               "what is drawn, and where"
-│   ├── bundle.py           PlotBundle, RenderMode, prepare_1d_bundle, prepare_2d_bundle
-│   ├── orientation.py      display_flips, orient_for_display, classify_render_mode,
-│   │                       extents, edges, mesh grids, get_render_mode_hint
-│   ├── frame.py            PlotViewFrame, frame_for_plane, frame_from_bundle,
-│   │                       region_frame_for_bbox, cell bounds
-│   └── mask.py             the mask_from_* rasterizers        (was region_mesh)
-│
-├── view/                   "what the user asked to see"
-│   ├── projection.py       DimRole, Projection, ViewCrop, ROLE_LABELS, SLICE_ROLES
-│   ├── axes.py             the 13 axis / profile queries
-│   └── intent.py           ViewIntent
-│
-├── roi/                    "what the user drew"
-│   ├── region.py           RegionDefinition + shapes + compile_*
-│   └── roi_set.py          RoiEntry, RoiOperation, RoiSetModel
-│
-├── fetch/                  "request → indices → bundle"
-│   ├── request.py          PlotRequest, TraceKey, FetchPlan, build_plot_request
-│   ├── plan.py             narrow, plan_fetch, crop_from_region, roi_profile_request
-│   ├── reduce.py           projection reduce + ROI mask machinery
-│   ├── normalize.py        slice_info_for_key, apply_normalization, apply_transform
-│   └── pipeline.py         the fetch half of run_source
-│
-└── run/                    "one run's keys and their data"
-    ├── source.py           RunSource
-    ├── key_info.py         KeyInfo, RunIdentity, AxisLayout
-    └── frozen_spectrum.py  FrozenSpectrum
-```
+Settled here so no step has to stop and ask. Each is reversible; none blocks.
 
-`display_manager.py` and `presenter.py` leave the package entirely.
-
-**Why the session objects stay flat.** They *are* the ownership tree the last
-plan spent thirteen steps establishing. A reader opening `models/plot/` should
-see that tree first, with the machinery tucked into folders behind it. Putting
-them in `session/` would bury the one thing the package is organised around.
-
-### Re-export policy, decided per package
-
-Deciding this per package, as agreed. The 43-vs-258 split is what drives it:
-re-exporting to spare *test* imports would be paying the cost of a second way
-to import every name — the thing step F just finished removing — for a
-benefit that accrues to files the suite rewrites for free.
-
-So the question is only whether a package `__init__` **declares a boundary
-worth declaring**, which is a comprehensibility argument, not a churn one.
-
-| Package | `__init__` re-exports? | Why |
-|---|---|---|
-| `geometry/` | **Yes** | The cycle lives inside it, and outsiders are currently importing four private names from `region_mesh`. A declared surface is what turns three entangled files into one concept and puts `mask.py`'s internals behind a door. |
-| `view/` | **Yes** | 49 of its 69 name-imports are three types (`DimRole`, `Projection`, `ViewCrop`). A stable, tiny, genuinely public vocabulary. |
-| `roi/` | **Yes** | Small fixed surface — the four region shapes plus `RoiOperation` / `RoiSetModel` — and `views/` legitimately needs it. |
-| `fetch/` | **No** | Its only production consumer is `run/source.py`, inside the package. Views import four names. A surface would be declaring a boundary nobody crosses. |
-| `run/` | **No** | Each file already exports one class. That is the healthy shape; it needs no help. |
-| top level | **No** | Same. |
+1. **The fetch half is a class.** Settled by execution: `RunFetch`, owned by
+   `RunSource` and handed out as `fetch`, with no forwarding method.
+2. **`ViewIntent` stays at the top level**, with the other session children.
+   The package is organised around the ownership tree, and a reader follows
+   `session.py` to its children; `view/` holds the vocabulary the intent is
+   expressed in, not the object.
+3. **`display_manager.py` and `presenter.py` move to `models/displays/`.**
+   Move only — `PlotPresenter`'s design stays as step F left it.
+4. **`run/` exists**: `source.py`, `fetch.py`, `frozen_spectrum.py`,
+   `identity.py`.
+5. **The axis/profile queries stay free functions** taking a `Projection`.
+   Precedent from the data contract: a describing type may derive another
+   description, but the queries that pick axes for a *view* are not that.
+6. **`region_controller` is measured before phase 2, not refactored in it.**
+   456 code lines, 28 public members, 6 signals, coupling across 4 modules. It
+   is either a coordinator like `PlotSession` or a `run_source`-shaped split,
+   and the answer changes where it lives. Step 7 is that measurement.
 
 ---
 
 ## Phase 1 — split and rename, still flat
 
-The judgment is here. Each step changes which file code lives in, and a
-mistake in one is visible on its own rather than buried in import churn.
+### Step 1 — the boundary guard
 
-### Step 1 — the guard, and `run_source`
+- [ ] `tests/test_module_boundaries.py`, asserting three things by AST over
+  `nbs_viewer/models/plot/*.py`: no runtime import cycle; no function-local
+  import of a sibling, with an allowlist seeded at exactly the three known
+  offenders above; and each file's working set at or below a recorded ceiling,
+  seeded at today's numbers (`run_fetch` 12, `region_controller` 9, `region` 7,
+  `plot_bundle` 6, `plot_request` 6, `plot_view_frame` 2, `trace` 2, the rest
+  ≤ 1).
+- [ ] Deletes nothing. It is the measurement every later step is checked
+  against, and the allowlist is what step 2 empties.
+- **Out of scope:** changing any ceiling. The seed is today's state.
 
-Ship the measurement first so every later step is checked against it.
+### Step 2 — break the runtime cycle and declare the mask surface
 
-- [ ] `tests/test_module_boundaries.py`: no runtime cycles inside
-  `models/plot`; no function-local imports of a sibling; working set of every
-  file at or below a recorded ceiling. Seed the ceiling at today's maximum
-  so it can only ratchet down.
-- [ ] Split `run_source.py` at the six-member seam. `RunSource` keeps key
-  access; the fetch orchestration moves out with the block cache it owns.
-- [ ] Working set: `run_source` **5 → 0**; the new file inherits 5.
+- [ ] Move four functions from `region_mesh.py` to `plot_view_frame.py`:
+  `_image_cell_bounds`, `_cell_x_bounds_mesh`, `_cell_y_bounds_mesh`,
+  `_mesh_separable_edge_grids`. They are cell geometry *on a frame*; the
+  rasterizers stay.
+- [ ] Delete all three function-local imports (`plot_view_frame.py:332`,
+  `plot_bundle.py:352`, `plot_bundle.py:388`) and empty step 1's allowlist.
+- [ ] Rename the moved functions without their underscore, and update the
+  **24 imports of private `region_mesh` names across 9 files** — six test
+  files, plus `plot_bundle.py`, `plot_view_frame.py` and `region.py`, which
+  means production code reaches for them too and the surface is undeclared
+  rather than merely leaky.
+- [ ] Deletes: the runtime cycle (**1 → 0**) and the allowlist.
 
-**The decision this step turns on** (see open questions): whether the fetch
-half becomes a class the source holds, or free functions taking the source.
-A class is one forwarding method on `RunSource` — acceptable under the
-standing rule, which forbids a model that re-exposes *many* of a child's
-methods, not one. The payoff either way is that the pipeline becomes testable
-against a six-method fake instead of a whole run.
+### Step 3 — `plot_geometry` and `plot_bundle` stop lying about their contents
 
-### Step 2 — `plot_bundle` and `plot_geometry` stop lying
+- [ ] `bundle.py`: `PlotBundle`, `RenderMode`, `prepare_1d_bundle`,
+  `prepare_2d_bundle`, `build_plot_bundle`.
+- [ ] `orientation.py`: `classify_render_mode`, `display_flips`, the extent and
+  mesh-grid builders.
+- [ ] `stages.py`: `apply_normalization`, `apply_transform`, `reduce_to_plane`,
+  `reduce_before_mask`, `mask_to_profile`, `materialize_view`,
+  `reduce_cached_plane`, `slice_info_for_key` — the whole `DataArray ->
+  DataArray` set, which is one concept and one file.
+- [ ] `plot_bundle.py` and `plot_geometry.py` cease to exist.
+- **Out of scope:** the stage bodies, and `PlotBundle`'s fields (open question
+  5 in the data-contract plan owns those).
 
-- [ ] `PlotBundle` and the `prepare_*` packers get a file whose name says so.
-- [ ] The orientation / render-mode / extent geometry gets its own.
-- [ ] `plot_bundle.py`'s two halves separate: pure array ops (125 lines, zero
-  sibling coupling) from reduce + ROI mask (570).
-- [ ] `build_plot_bundle` moves to sit with the reduce machinery rather than
-  the geometry, which **removes the `plot_geometry ↔ plot_request`
-  `TYPE_CHECKING` cycle** this project created in view-pipeline step 7.
-- [ ] Working set: `plot_bundle` **5 → 3 and 0**.
+### Step 4 — separate value types from machinery
 
-### Step 3 — `plot_request` and `view_spec` separate types from machinery
+- [ ] `view_spec.py` (789 raw) splits: `Projection`, `ViewCrop`, `DimRole`,
+  `ROLE_LABELS`, `SLICE_ROLES` stay; the 14 module-level queries —
+  `plot_axis_names`, `resolve_axis_order`, `spec_from_slice_info`,
+  `plot_axis_to_storage_axis`, `storage_axis_to_plot_axis`,
+  `eligible_profile_axes`, `default_profile_label`, `profile_axis_name`,
+  `profile_view_spec`, `profile_storage_axis`, `scan_profile_storage_axis`,
+  `classify_profile_kind`, `is_plot_plane_storage_axis`, `_resolved_roles` —
+  move to a file of their own.
+- [ ] `plot_request.py` (705 raw) splits: `PlotRequest`, `TraceKey`,
+  `FetchPlan`, `build_plot_request`, `narrow`, `kept_axes` stay; `plan_fetch`,
+  `crop_from_region` and `roi_profile_request` move.
+- [ ] Rename `view_spec.plot_axis_names`, which means *the plot axes of a
+  projection* while `RunSource.plot_axis_names` means *a name per storage
+  axis* — two different things one import apart, recorded in the data-contract
+  plan and never fixed.
 
-- [ ] `PlotRequest` / `FetchPlan` / `TraceKey` / `narrow` (310) from
-  `plan_fetch` / `crop_from_region` / `roi_profile_request` (238).
-- [ ] `Projection` / `ViewCrop` / `DimRole` (269) from the 13 axis and
-  profile queries (438).
-- [ ] Working set: `plot_request` **4 → 0 and 4**; `view_spec` unchanged at 0
-  but 789 lines become 269 + 438.
+### Step 5 — one definition per type alias
 
-### Step 4 — break the real cycle, declare the mask surface
-
-- [ ] Move `_image_cell_bounds` to sit with the frame; delete the
-  function-local import at `plot_view_frame.py:332`.
-- [ ] Decide the public surface of the mask module and rename the four
-  underscore functions that 19 test imports already treat as public — or
-  stop the tests reaching for them. Both are defensible; picking one is the
-  step.
-- [ ] Working set: one runtime cycle **1 → 0**.
+- [ ] One home for `SliceItem` (5 definitions today), `MaskMode` (3),
+  `SpatialReduce` (2), `PlotAxisName` (2).
+- [ ] Delete `roi_set.py`'s `MaskMode = str` and `SpatialReduce = str`, which
+  widen two of them to "any string" under the same name.
+- [ ] Closes item 7 of [`post_refactor_review.md`](post_refactor_review.md).
+- **Out of scope:** `models/cache`'s two `SliceItem` definitions — a different
+  package with no dependency either way.
 
 ## Phase 2 — move into packages
 
-Mechanical. Every diff hunk is a file rename or an import line; no hunk
-touches a function body. Verified by the suite plus the step 1 guard.
+Mechanical: every hunk is a file rename or an import line. Verified by the
+suite plus step 1's guard.
 
-### Step 5 — `geometry/`, `view/`, `roi/`
+### Step 6 — `geometry/`, `view/`, `roi/`
 
-The three that get a declared surface. Do them together: they are the bottom
-of the stack, and their `__init__` files are the point.
+The three with a declared `__init__` surface, done together because their
+surfaces are the point: `geometry/` (bundle, orientation, frame, mask) because
+outsiders currently import private names from it; `view/` because 63 of
+`view_spec`'s 93 name-imports are `Projection`, `DimRole` and `ViewCrop`;
+`roi/` because `views/` legitimately needs its small fixed surface.
 
-### Step 6 — `fetch/` and `run/`
+### Step 7 — measure `region_controller`, then `fetch/` and `run/`
 
-No `__init__` surface. `run/source.py` is the only production consumer of
-`fetch/`.
+- [ ] Measure `region_controller` for a seam first — decision 6 — and record
+  the result even if it is "one object".
+- [ ] `fetch/`: `request.py`, `plan.py`, `stages.py`, `pipeline.py`. No
+  `__init__` surface; its only production consumer is `run/source.py`.
+- [ ] `run/`: `source.py`, `fetch.py`, `frozen_spectrum.py`, `identity.py`. No
+  surface; each file exports one class.
 
-### Step 7 — top level and the shell
+### Step 8 — top level and the shell
 
-- [ ] `plot_session.py` → `session.py`; the remaining session objects stay put.
-- [ ] `display_manager.py` and `presenter.py` leave `models/plot` entirely.
+- [ ] `plot_session.py` → `session.py`; the other session objects stay put.
+- [ ] `display_manager.py` and `presenter.py` → `models/displays/`.
 - [ ] Record the final layout, per-file working sets, and the import-site count
-  against the 201 measured here.
+  against the 267 measured here.
 
 ---
 
-## Open questions — what to discuss before starting
+## Not in this plan
 
-1. **Does the fetch half of `run_source` become a class or free functions?**
-   It owns the one-entry block cache, so it wants state. A `BundleFetcher`
-   the source holds costs one forwarding method; free functions taking a
-   cache object cost a parameter on every call. This is step 1's real content
-   and worth settling first.
-
-2. **Where does `ViewIntent` live — `view/` or the top level?** It is a
-   `QObject` the session owns, so by the "ownership tree at the top level"
-   rule it belongs there; but a reader looking for view state will open
-   `view/`. The rule and the reader disagree, which usually means the rule
-   is slightly wrong.
-
-3. **Where do `display_manager` and `presenter` go?** `models/displays/`,
-   or flat in `models/` next to `app_model.py`? Note this is a *move only* —
-   `PlotPresenter`'s design was deliberately left alone in step F and stays
-   that way here.
-
-4. **Should `run/` exist at all,** or do `source.py`, `key_info.py` and
-   `frozen_spectrum.py` sit flat? Three files is a thin package. The argument
-   for it is that `key_info` has fan-in from exactly one module and reads as
-   `RunSource`'s private vocabulary.
-
-5. **The 13 axis/profile queries in `view/axes.py` are all functions taking a
-   `Projection`.** They were kept off the type deliberately — view-pipeline
-   step 7's exit criterion says "`Projection` gains no reduce method". A
-   *query* is not a reduce, so some of them could be methods. Worth deciding
-   explicitly rather than inheriting a rule written about something else.
-
-6. **Is `region_controller` still one object?** It was not measured for a
-   seam in this pass, but its coupling is smeared across 4–5 modules per
-   method and it is 455 code lines with 28 public members. It may be a
-   coordinator like `PlotSession`, or it may be hiding a split like
-   `run_source` was. Measuring it is cheap and should probably happen before
-   phase 2 fixes its home.
+`ImageGridCanvas` and `RunDisplayWidget` key ordering are deferred by the
+maintainer until those widgets are rewritten. `MplCanvas`'s size, the widget
+testing gap (3 of 473 tests), and teardown are named in the reviews and want
+their own plans.
 
 ---
 
@@ -359,4 +230,5 @@ No `__init__` surface. `run/source.py` is the only production consumer of
 
 | Date | Change |
 |------|--------|
-| 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses, not from reading the files. Invariant 10 explicitly replaced for this plan, since a reorganisation deletes nothing. |
+| 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Re-derived at `f50633a` after the data-contract refactor. Measurements retaken: 22 files, 4791 code lines, 267 import sites, and a working-set table in which `run_fetch` has replaced `run_source` as the worst file. Step 1's split is done; what remains of it is the guard. Two function-local imports the draft missed are recorded, the `plot_geometry ↔ plot_request` cycle is closed, and `run/`'s contents changed because `KeyInfo` moved to `models/data` while `FrozenSpectrum` stayed. The draft's six open questions are settled as decisions, and the type-alias consolidation from the previous review is now a step, because it is the one part of this plan that deletes something. |
