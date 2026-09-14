@@ -1,6 +1,6 @@
 # Post-refactor review
 
-Where the codebase stands after [`refactor_plan.md`](refactor_plan.md)
+Where the codebase stands after [`refactor_plan.md`](archive/refactor_plan.md)
 completed on 2026-09-10, measured rather than remembered. Every number here
 was taken from the tree at `f7780fb` against the branch point `6dcb5ef`, and
 every claim about a defect was reproduced before it was written down.

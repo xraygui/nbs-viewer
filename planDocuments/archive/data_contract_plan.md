@@ -7,7 +7,7 @@ This is the `RunSource` refactor, but it is written from the data layer
 because that is where its logic starts: `RunSource` is hard to read because
 the thing it is handed has no name. Standalone — it proceeds by its own
 argument and is not gated on
-[`module_organization_plan.md`](module_organization_plan.md), though it
+[`module_organization_plan.md`](../module_organization_plan.md), though it
 changes what that plan should do (see **Kept in mind**, below).
 
 **Absorbs** `structural_remediation_plan.md` step 9, "Enforceable data-layer
@@ -1821,7 +1821,7 @@ event-axis slider reads the voltage and shows `i0` beside it. Suite 491 →
 
 ## Kept in mind: what this does to the module reorganization
 
-Not gating, but [`module_organization_plan.md`](module_organization_plan.md)
+Not gating, but [`module_organization_plan.md`](../module_organization_plan.md)
 should be re-derived after this lands rather than executed as written.
 
 - **The pipeline's value type is `xr.DataArray`, from `models/data`.** That

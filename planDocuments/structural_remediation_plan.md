@@ -2,7 +2,7 @@
 
 > **Superseded in part (2026-09-08).** Steps 3-8 below assume a
 > `models/plot/cube/` and `models/plot/roi/` package split.
-> [`view_pipeline_plan.md`](view_pipeline_plan.md) deletes those files
+> [`view_pipeline_plan.md`](archive/view_pipeline_plan.md) deletes those files
 > instead of moving them, and owns the view / crop / ROI / fetch stack.
 > **Step 2 and steps 9-12 are unaffected and still live** - CI and the
 > ownership guard, the data-layer contract, the `ChunkCache` split, the
@@ -35,7 +35,7 @@ consumes those fixtures rather than duplicating them.
 | 6    | Reorg 7d (`canvas/`, checkboxes) + teardown discipline           | Not started |
 | 7    | Move matplotlib artists off `PlotDataModel`                      | Not started |
 | 8    | Split the ROI pipeline off `PlotModel`                           | Not started |
-| 9    | Enforceable data-layer contract                                  | Moved to [`data_contract_plan.md`](data_contract_plan.md) |
+| 9    | Enforceable data-layer contract                                  | Moved to [`data_contract_plan.md`](archive/data_contract_plan.md) |
 | 10   | Split `ChunkCache`; fix cache concurrency                        | Not started |
 | 11   | Logging and exception sweep                                      | Not started |
 | 12   | Config, packaging, and repo hygiene                              | Not started |

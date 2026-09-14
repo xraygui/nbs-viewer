@@ -9,7 +9,7 @@ so unit and integration tests exercise real objects instead of duplicated
 
 ~~Related: `plot_package_reorganization.md` (mechanical moves; run after
 Phase 1 fixtures land so imports stay stable).~~ That plan was absorbed into
-[`refactor_plan.md`](refactor_plan.md) and deleted on 2026-09-08
+[`refactor_plan.md`](archive/refactor_plan.md) and deleted on 2026-09-08
 (recoverable from `57f6d7b`); the folder splits it proposed are cancelled.
 
 

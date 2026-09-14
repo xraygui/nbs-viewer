@@ -7,7 +7,7 @@ goal, the invariants, and the order of work. **Detail lives in the sub-plans**
 **Status:** **complete** on branch `mesh-transpose-removal` off `image_viewing`.
 All thirteen steps landed 2026-09-08/10; suite green at 431 tests. What the
 refactor achieved against its own targets, and what it did not, is in
-[`post_refactor_review.md`](post_refactor_review.md).
+[`post_refactor_review.md`](../post_refactor_review.md).
 
 ## The diagnosis, in one sentence
 
@@ -223,7 +223,7 @@ buttons.
 ## After this refactor
 
 **The refactor is complete. Read
-[`post_refactor_review.md`](post_refactor_review.md) first** — it measures the
+[`post_refactor_review.md`](../post_refactor_review.md) first** — it measures the
 tree against this plan's own diagnosis, invariants and size targets, ranks
 what is still wrong, and says what to do next. The thread below is the one
 this plan named in advance, and the review confirms it.
@@ -276,7 +276,7 @@ harness pinned to today's constructors would have to be rewritten by step F.
 Not sub-plans; not on the critical path. Kept because nothing else covers
 them.
 
-- **[`codebase_problem_statement.md`](codebase_problem_statement.md)** — the
+- **[`codebase_problem_statement.md`](../codebase_problem_statement.md)** — the
   ranked problem inventory. Still the backlog. Item 2 (display vs storage) is
   what steps 3 and 4 close. Item 7 (domain policy in views) is mostly gone:
   the `DimensionControl` bullet fell to step 6 and the
@@ -284,7 +284,7 @@ them.
   are not defects — `run_display.py`'s key sort is display, and
   `views/catalog/base.py`'s proxies are invariant 1's carve-out — so item 7
   reduces to the `ImageGridCanvas` bullet, which its rewrite absorbs.
-- **[`structural_remediation_plan.md`](structural_remediation_plan.md)** —
+- **[`structural_remediation_plan.md`](../structural_remediation_plan.md)** —
   its steps 3–8 are superseded (they plan folder splits this refactor
   cancels). **Steps 2 and 9–12 are live and independent**: CI and the
   ownership guard, the data-layer contract, the `ChunkCache` split, the
@@ -295,13 +295,13 @@ them.
   data layer because that is where its logic starts. **Absorbs
   `structural_remediation_plan.md` step 9** and closes bugs 6 and 7 as its
   precondition rather than as a favour. Runs before the module reorganization.
-- **[`module_organization_plan.md`](module_organization_plan.md)** — the
+- **[`module_organization_plan.md`](../module_organization_plan.md)** — the
   follow-on pass, drafted 2026-09-10 and not started: reorganising
   `models/plot` so a reader holds fewer modules open at once. It deliberately
   **replaces invariant 10** for its own steps, since a reorganisation deletes
   nothing; its measure is the reader's working set instead. It picks up
   `run_source` from the review.
-- **[`headless_testing_plan.md`](headless_testing_plan.md)** — test tiers.
+- **[`headless_testing_plan.md`](../headless_testing_plan.md)** — test tiers.
   Phases 0–2 done, 3–4 open. **The constraint it records is lifted**
   (`9a567db`): the suite ran on `QCoreApplication`, where constructing a
   `QWidget` aborts the interpreter, and now runs on an offscreen
@@ -309,13 +309,13 @@ them.
   test is still preferable whenever the behaviour can be reached without a
   widget. What remains open there is the shape of a broad widget suite, per
   "After this refactor" above.
-- **[`zarr_l2_cache_plan.md`](zarr_l2_cache_plan.md)** — cache internals,
+- **[`zarr_l2_cache_plan.md`](../zarr_l2_cache_plan.md)** — cache internals,
   phase 2+ open.
 - Feature plans, untouched by this refactor and blocked on it:
-  [`roi_workbench_plan.md`](roi_workbench_plan.md),
-  [`roi_analysis_plan.md`](roi_analysis_plan.md),
-  [`band_projection_plan.md`](band_projection_plan.md),
-  [`derived_spectra_plan.md`](derived_spectra_plan.md).
+  [`roi_workbench_plan.md`](../roi_workbench_plan.md),
+  [`roi_analysis_plan.md`](../roi_analysis_plan.md),
+  [`band_projection_plan.md`](../band_projection_plan.md),
+  [`derived_spectra_plan.md`](../derived_spectra_plan.md).
 
 ## Modification log
 
@@ -335,4 +335,4 @@ them.
 | 2026-09-09 | Step D landed (`aba26a3`). Crop and ROI are one child, `RegionController`, handed out as `session.region` with no delegating methods — 110 references retargeted instead. Two things the plan had not predicted: `cached_parent_bundle_for_preview` was deleted rather than moved, because `_refresh_held_requests` is now wired to every view-change signal and its equality check can no longer fail; and the three-way crop collapse turned out to be one method, since guarding `set_view_crop` on real change is what makes `clear_view_crop` redundant. `MplCanvas.current_view_fingerprint` and `_last_2d_view_crop` deleted. `plot_session.py` 2045 → 1263. Suite 380 → 389. |
 | 2026-09-09 | Widget testing partly unblocked (`9a567db`). The `QCoreApplication` fixture, not pytest, was what made `QWidget` construction impossible — a widget under one aborts the process rather than failing a test. `qapp` is now an autouse `QApplication` on the offscreen platform; 389 existing tests unaffected. Three mutation-checked widget tests landed. `headless_testing_plan.md` phases 3–4 keep the harness question; the enabler is done. |
 | 2026-09-09 | Step 7 landed (`f5a72b3`), closing bugs 8 and 13. The pipeline is `load → orient → normalize → reduce-to-plane → transform → mask → pack`. A third divergence surfaced with them — the two ROI paths disagreed about profile *length* — and both now go through `reduce_cached_plane`. Two deviations recorded in the sub-plan; `models/plot/` grew 79 code lines, the block cache being the growth and the thing that closes bug 8. |
-| 2026-09-10 | Step F landed and the refactor is complete. Open question 6 closed on a wrong premise: `AppModel` and `DisplayManager` are not near-duplicates — `AppModel`'s whole public surface was dead code. `models/plot/` is snake_case and pinned by a test; six steps of rename debris cleared, which also surfaced two tests that never ran. `flake8 --select=F811,F821` is empty across the tree. Seven of nine objects met their code-line targets. Next is [`post_refactor_review.md`](post_refactor_review.md), not another step. |
+| 2026-09-10 | Step F landed and the refactor is complete. Open question 6 closed on a wrong premise: `AppModel` and `DisplayManager` are not near-duplicates — `AppModel`'s whole public surface was dead code. `models/plot/` is snake_case and pinned by a test; six steps of rename debris cleared, which also surfaced two tests that never ran. `flake8 --select=F811,F821` is empty across the tree. Seven of nine objects met their code-line targets. Next is [`post_refactor_review.md`](../post_refactor_review.md), not another step. |

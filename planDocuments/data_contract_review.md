@@ -1,6 +1,6 @@
 # Data contract review
 
-Where the data layer stands after [`data_contract_plan.md`](data_contract_plan.md)
+Where the data layer stands after [`data_contract_plan.md`](archive/data_contract_plan.md)
 completed on 2026-09-11, measured at `f50633a` rather than remembered. Same
 shape as [`post_refactor_review.md`](post_refactor_review.md), which reviewed
 the refactor before it.
@@ -107,15 +107,21 @@ Three rules follow, and they are cheap:
    rule as part of its scope.** Step 8 did not, and twenty-eight tests failed at
    once. That was scope discovered late, not a test problem.
 
-## Finding 2: the plan document outgrew what it describes
+## Finding 2: a plan that grows as it lands makes its own later steps expensive
 
 `data_contract_plan.md` grew **332 → 1919 lines across 23 commits**, a 5.8×
 increase, to describe a change that left production 38 lines larger.
-`planDocuments/` held 14 documents and 9836 lines before this one, against
-18 963 lines of production code.
 
-The cause is that one file carries three kinds of content with three different
-lifetimes. Measured by counting each heading's section:
+The cost is not untidiness. **It falls on whoever implements the next step.**
+Starting step 5 meant reading past roughly a thousand lines of write-up about
+steps 1 to 4 — outcomes, deviations, verification tables — almost none of which
+changes what step 5 does. The plan is heaviest exactly when the remaining work
+is hardest, and it gets worse with every step that lands. A tight plan is
+cheaper to execute, and nothing is lost: the detail is already in the commit
+history.
+
+One file carrying three kinds of content is what produces that. Measured by
+counting each heading's section:
 
 | Content | Lifetime | Lines |
 |---|---|---:|
@@ -135,10 +141,13 @@ decision — is a ninth of the file.
    commit message.
 2. Deviations and verification detail belong in the **review**, written once
    per refactor, at the end. This document is 180 lines for eight steps.
-3. When a plan completes, trim it to diagnosis, decisions, final facts, and a
-   pointer to its review. `data_contract_plan.md` would be roughly 400 lines
-   under that rule; it is 1919. **Not done here** — it is the maintainer's
-   call whether the history is worth keeping in place.
+3. **A completed plan is archived, not trimmed.** It moves to
+   `planDocuments/archive/`, so the active set is what remains at the top
+   level and nobody has to open an old plan to find out whether it is done.
+   Rewriting history to save lines would be work for its own sake; getting it
+   out of the way is the point. Ten links in these documents already point at
+   plans that were *deleted* on completion, which is the version of this that
+   loses the history instead.
 4. Still no new *plan* documents where an existing one can be superseded. A
    review is not a plan.
 
