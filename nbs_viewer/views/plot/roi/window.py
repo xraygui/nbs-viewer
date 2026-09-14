@@ -32,13 +32,13 @@ from nbs_viewer.models.plot.view_spec import (
     Projection,
     eligible_profile_axes,
     is_plot_plane_storage_axis,
-    profile_axis_name,
     plot_axis_to_storage_axis,
     scan_profile_storage_axis,
     storage_axis_to_plot_axis,
 )
+from nbs_viewer.models.plot.roi import profile_axis_name
 from nbs_viewer.models.plot.geometry import PlotViewFrame, RegionDefinition
-from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation
+from nbs_viewer.models.plot.roi import RoiEntry, RoiOperation
 
 from .preview_canvas import RoiPreviewCanvas, RoiPreviewWorker
 from .types import (

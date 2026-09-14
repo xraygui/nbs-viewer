@@ -202,8 +202,9 @@ its subject instead:
 |---|---|
 | the one real decision — `resolve_axis_order` | stays; `view_intent` is its only caller |
 | construction — `_resolved_roles` | stays; only `Projection.__post_init__` calls it |
-| ROI vocabulary — `eligible_profile_axes`, `profile_view_spec`, `profile_storage_axis`, `scan_profile_storage_axis`, `classify_profile_kind`, `is_plot_plane_storage_axis`, plus `crop_from_region` and `roi_profile_request` from `plot_request` | `roi/`, step 6 |
-| label text — `default_profile_label`, `profile_axis_name` | `roi/`, step 6; neither takes a `Projection`, and moving `default_profile_label` deletes `view_spec`'s last sibling import |
+| ROI vocabulary — `eligible_profile_axes`, `profile_view_spec`, `profile_storage_axis`, `scan_profile_storage_axis`, `classify_profile_kind`, `is_plot_plane_storage_axis` | ~~`roi/`~~ **stay.** Wrong call, corrected in step 6: each reads a `Projection` and answers a question about a view, and `PlotAxes.to_profile` needs `profile_view_spec`, so moving it makes `view` import `roi` while `roi` already imports `view` — a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary. |
+| label text — `default_profile_label`, `profile_axis_name` | `roi/`, step 6. Neither takes a `Projection`, which is the line that separates them from the six above; moving `default_profile_label` deletes `view_spec`'s last sibling import |
+| request builders — `crop_from_region`, `roi_profile_request` | ~~`roi/`~~ `fetch/request.py`, step 7. Both build a request, and `crop_from_region` is view *cropping*, not ROI: its docstring contrasts its cell-intersects rule with the cell-center rule ROI reduction uses |
 | fetch planning — `plan_fetch` | `fetch/plan.py`, step 7 |
 | blocked — `spec_from_slice_info` | only caller is `ImageGridCanvas`, deferred |
 
@@ -267,10 +268,10 @@ outsiders currently import private names from it; `view/` because 63 of
 `view_spec`'s 93 name-imports are `Projection`, `DimRole` and `ViewCrop`;
 `roi/` because `views/` legitimately needs its small fixed surface.
 
-`roi/` also takes the eight functions step 4 redistributed to it. After that
-`view_spec.py` imports nothing from the package at all: the `PlotViewFrame`
-import goes in step 4, and `MaskMode` from `.region` goes with
-`default_profile_label` here. Pure vocabulary, which is what `view/` is for.
+`roi/` takes two of the eight functions step 4 sent to it, not eight — see
+the corrected table there. `view_spec.py` now imports nothing from the
+package at all: `PlotViewFrame` went in step 4, and `MaskMode` left with
+`default_profile_label`. Pure vocabulary, which is what `view/` is for.
 
 ### Step 7 — measure `region_controller`, then `fetch/` and `run/`
 
@@ -305,6 +306,7 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Step 6 in progress: the guard was taught to walk subpackages first (it globbed one directory, so the moves would have silenced it), then `geometry/` and `roi/` landed. Two corrections to step 4's predicted redistribution, both recorded in its table: six of the eight functions promised to `roi/` stay in `view_spec`, because each reads a `Projection` and `PlotAxes.to_profile` needs `profile_view_spec` — moving it makes `view` import `roi` while `roi` already imports `view` for `SpatialReduce`, which is a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary, and that is the distinction the step-4 table got wrong. `crop_from_region` and `roi_profile_request` go to `fetch/` in step 7 instead: both build a request, and `crop_from_region` is view cropping, not ROI. `roi/` is therefore two files and a five-name surface. Two diagnostic bugs the first surface exposed are fixed in the tool: `working_set` now follows re-exports to the defining module, without which every count would have drifted toward zero as files moved while no reader's job got smaller, and `import_sites` now recurses. Surface rows are labelled, since their count measures the door. |
 | 2026-09-14 | Step 5 landed. Four aliases, one definition each, and five deleted. No behaviour change: `PlotRequest.__post_init__` already validated both `mask_mode` and `spatial_reduce`, so `roi_set`'s widening to `str` was invisible to the interpreter — which is why it survived, and why narrowing it back is free. It adds one mutual pair, `region ↔ view_spec`: `region` now imports `PlotAxisName` at runtime while `view_spec` still names `MaskMode` under `TYPE_CHECKING` for `default_profile_label`. Not a runtime cycle, and it dissolves in step 6 when that function leaves for `roi/`. 522 tests. |
 | 2026-09-14 | Step 4 landed. `view_spec` now imports one name from one sibling, `MaskMode` under `TYPE_CHECKING`, which leaves with `default_profile_label` in step 6. Making the spec required turned a silent fall-through into a raise for a 1-D projection, whose single plot axis had been passing the old `len(plot_order) >= 2` test and reaching the frame; the two ROI-window plane guards now ask `is_plot_plane_storage_axis`, which answers False without a plane, and two tests pin both. One precondition deliberately left alone: `profile_axis_for_roi_span` still refuses to answer without a frame, even though the mapping no longer needs one. Removing it would change when the ROI span axis gets corrected — `set_profile_context` can be handed a spec with no frame — and the plan's goal forbids behaviour changes, so it is recorded here instead of fixed. 522 tests. |
 | 2026-09-14 | Step 4 re-scoped before starting, because its `view_spec` bullet sorted 14 functions by syntactic form into one destination and would have encapsulated nothing. Grouped by what they answer, they are five different things, and all but four already have a home in step 6 or step 7, so the step creates no new file. What survives is one defect the draft had not noticed: `storage_axis_to_plot_axis` holds two implementations of one mapping, and its own docstring says the frame branch answers wrong. That branch turns out to be dead at all five call sites, so the step is a deletion. Also measured: the `plot_axis_names` collision is three test call sites, not the wide rename the draft implied, and the free function has no production caller at all — `ViewIntent` names it as the overplot-compatibility check, so it is unwired rather than dead and keeps its test. |

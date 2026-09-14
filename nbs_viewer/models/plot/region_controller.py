@@ -42,16 +42,16 @@ from .geometry import (
     frame_from_bundle,
     view_fingerprint_from_bundle,
 )
-from .roi_set import RoiEntry, RoiSetModel
+from .roi import RoiEntry, RoiSetModel
 from .trace import Trace
 from .view_spec import (
     Projection,
     ViewCrop,
     classify_profile_kind,
-    default_profile_label,
     is_plot_plane_storage_axis,
     scan_profile_storage_axis,
 )
+from .roi import default_profile_label
 
 if TYPE_CHECKING:  # pragma: no cover
     from .frozen_spectrum import FrozenSpectrum

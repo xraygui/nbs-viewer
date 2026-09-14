@@ -28,7 +28,7 @@ from nbs_viewer.models.plot.geometry import (
     RenderMode,
     frame_from_bundle,
 )
-from nbs_viewer.models.plot.roi_set import RoiSetModel
+from nbs_viewer.models.plot.roi import RoiSetModel
 from nbs_viewer.models.plot.view_spec import ViewCrop
 from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists

@@ -8,7 +8,8 @@ along as integer storage bounds on the plot plane; it is applied by
 ``plot_request.plan_fetch``, never here.
 
 Applying a projection to loaded arrays lives in ``stages.py``. This
-module only describes and queries it.
+module only describes and queries it, and imports nothing else in the
+package to do so.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     List,
     Literal,
     Optional,
@@ -24,10 +24,6 @@ from typing import (
     Tuple,
     Union,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - annotation only
-    from .geometry import MaskMode
-
 
 # The one definition of each. ``SliceItem`` had three in this package,
 # ``PlotAxisName`` two, and ``SpatialReduce`` two -- one of them widened to
@@ -540,59 +536,6 @@ def eligible_profile_axes(spec: Projection) -> List[int]:
         if storage_axis in plot_axes or role == DimRole.INDEX:
             eligible.append(storage_axis)
     return eligible
-
-
-def default_profile_label(
-    mask_mode: MaskMode,
-    spatial_reduce: SpatialReduce,
-    profile_axis: int,
-    axis_names: Sequence[str],
-) -> str:
-    """
-    Return a short default legend label for an ROI profile.
-
-    Parameters
-    ----------
-    mask_mode : str
-        ``inside`` or ``outside`` the ROI.
-    spatial_reduce : str
-        ``sum`` or ``mean`` within the ROI.
-    profile_axis : int
-        Storage axis the profile runs along.
-    axis_names : sequence of str
-        Names per parent storage axis.
-
-    Returns
-    -------
-    str
-        Label summarizing mask mode, reduce op, and profile axis.
-    """
-    region = "in" if mask_mode == "inside" else "out"
-    return (
-        f"{spatial_reduce} ({region} ROI) · "
-        f"{profile_axis_name(profile_axis, axis_names)}"
-    )
-
-
-def profile_axis_name(storage_axis: int, axis_names: Sequence[str]) -> str:
-    """
-    Return a display name for a profile axis dropdown entry.
-
-    Parameters
-    ----------
-    storage_axis : int
-        Storage dimension index.
-    axis_names : sequence of str
-        Names per storage axis.
-
-    Returns
-    -------
-    str
-        Axis label for UI display.
-    """
-    if storage_axis < len(axis_names):
-        return axis_names[storage_axis]
-    return f"axis {storage_axis}"
 
 
 def profile_view_spec(

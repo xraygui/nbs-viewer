@@ -17,7 +17,7 @@ from nbs_viewer.models.plot.geometry.frame import (
     frame_from_bundle,
 )
 from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.roi_set import RoiOperation
+from nbs_viewer.models.plot.roi import RoiOperation
 
 from tests.fixtures.session import HeadlessSession
 

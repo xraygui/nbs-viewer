@@ -5,7 +5,7 @@ from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
 )
-from nbs_viewer.models.plot.roi_set import RoiOperation, RoiSetModel
+from nbs_viewer.models.plot.roi import RoiOperation, RoiSetModel
 
 
 def test_add_select_and_update_region():
