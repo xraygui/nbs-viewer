@@ -12,9 +12,12 @@ from nbs_viewer.models.plot.view_spec import (
     profile_view_spec,
 )
 from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.plot_view_frame import (
+    cell_x_bounds_mesh,
+    cell_y_bounds_mesh,
+    frame_from_bundle,
+)
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh
 from nbs_viewer.models.plot.plot_axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
@@ -128,10 +131,10 @@ def test_materialize_in_plane_profile_mesh():
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
     frame = frame_from_bundle(bundle)
-    x0, _ = _cell_x_bounds_mesh(frame, 10, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, 20, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 5, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 8, 0)
+    x0, _ = cell_x_bounds_mesh(frame, 10, 0)
+    _, x1 = cell_x_bounds_mesh(frame, 20, 0)
+    y0, _ = cell_y_bounds_mesh(frame, 5, 0)
+    _, y1 = cell_y_bounds_mesh(frame, 8, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     compiled = region.compile(frame)
     expected = np.array(

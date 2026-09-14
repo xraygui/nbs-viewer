@@ -17,7 +17,13 @@ from ..data.array_contract import REDUCE_SKIPNA
 from .plot_axes import PlotAxes
 from .plot_geometry import PlotBundle, prepare_1d_bundle
 from .plot_request import PlotRequest
-from .plot_view_frame import PlotViewFrame, frame_from_bundle
+from .plot_view_frame import (
+    PlotViewFrame,
+    cell_x_bounds_mesh,
+    cell_y_bounds_mesh,
+    frame_from_bundle,
+    mesh_separable_edge_grids,
+)
 from .region import RegionDefinition, compile_with_mask_mode
 from .view_spec import (
     DimRole,
@@ -349,9 +355,7 @@ def _profile_coords(
     Return profile bin-center coordinates along one plot axis.
     """
     if frame.render_mode == "mesh":
-        from .region_mesh import _mesh_separable_edge_grids
-
-        edges = _mesh_separable_edge_grids(frame)
+        edges = mesh_separable_edge_grids(frame)
         if edges is not None:
             x_edges, y_edges = edges
             axis_edges = x_edges if profile_axis == "plot_x" else y_edges
@@ -385,12 +389,10 @@ def _coord_for_profile_index(
         return float(top - (index + 0.5) * dy)
 
     if frame.render_mode == "mesh":
-        from .region_mesh import _cell_x_bounds_mesh, _cell_y_bounds_mesh
-
         if profile_axis == "plot_x":
-            x0, x1 = _cell_x_bounds_mesh(frame, index, 0)
+            x0, x1 = cell_x_bounds_mesh(frame, index, 0)
             return 0.5 * (x0 + x1)
-        y0, y1 = _cell_y_bounds_mesh(frame, index, 0)
+        y0, y1 = cell_y_bounds_mesh(frame, index, 0)
         return 0.5 * (y0 + y1)
 
     if profile_axis == "plot_x":

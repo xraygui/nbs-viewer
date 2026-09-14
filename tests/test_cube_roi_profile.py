@@ -16,12 +16,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import RectRegion, compile_with_mask_mode
-from nbs_viewer.models.plot.region_mesh import (
-    _cell_x_bounds_mesh,
-    _cell_y_bounds_mesh,
+from nbs_viewer.models.plot.plot_view_frame import (
+    cell_x_bounds_mesh,
+    cell_y_bounds_mesh,
+    frame_from_bundle,
 )
+from nbs_viewer.models.plot.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.roi_set import RoiOperation
 from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.view_spec import eligible_profile_axes
@@ -66,10 +66,10 @@ def _add_roi(session, trace, profile_storage_axis):
     """
     frame = frame_from_bundle(trace.last_bundle)
     n_rows, n_cols = trace.last_bundle.y.shape
-    x0, _ = _cell_x_bounds_mesh(frame, 1, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, n_cols - 2, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 1, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, n_rows - 2, 0)
+    x0, _ = cell_x_bounds_mesh(frame, 1, 0)
+    _, x1 = cell_x_bounds_mesh(frame, n_cols - 2, 0)
+    y0, _ = cell_y_bounds_mesh(frame, 1, 0)
+    _, y1 = cell_y_bounds_mesh(frame, n_rows - 2, 0)
     entry_id = session.region.roi_set.add(
         RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
         operation=RoiOperation(

@@ -14,9 +14,8 @@ from typing import ClassVar, Dict, Literal, Tuple, Type
 
 import numpy as np
 
-from .plot_view_frame import PlotViewFrame
+from .plot_view_frame import PlotViewFrame, data_limits
 from .region_mesh import (
-    _data_limits,
     cell_mask_at_point,
     mask_covering_data_rect,
     mask_from_axis_slice,
@@ -293,7 +292,7 @@ class RectRegion(RegionDefinition):
         uses the drawn band on plot Y (e.g. tes_mca_energies).
         """
         x0, x1, y0, y1 = self.data_bounds()
-        x_lo, x_hi, y_lo, y_hi = _data_limits(frame)
+        x_lo, x_hi, y_lo, y_hi = data_limits(frame)
         if profile_axis == "plot_x":
             return RectRegion(x0=x_lo, x1=x_hi, y0=y0, y1=y1).normalized()
         if profile_axis == "plot_y":

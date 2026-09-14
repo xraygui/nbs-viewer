@@ -75,16 +75,16 @@ def test_cached_plane_profile_mesh():
     plane = prepare_2d_bundle(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
-    from nbs_viewer.models.plot.region_mesh import (
-        _cell_x_bounds_mesh,
-        _cell_y_bounds_mesh,
+    from nbs_viewer.models.plot.plot_view_frame import (
+        cell_x_bounds_mesh,
+        cell_y_bounds_mesh,
     )
 
     frame = frame_from_bundle(plane)
-    x0, _ = _cell_x_bounds_mesh(frame, 10, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, 20, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 5, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 8, 0)
+    x0, _ = cell_x_bounds_mesh(frame, 10, 0)
+    _, x1 = cell_x_bounds_mesh(frame, 20, 0)
+    y0, _ = cell_y_bounds_mesh(frame, 5, 0)
+    _, y1 = cell_y_bounds_mesh(frame, 8, 0)
 
     request = _profile_request(
         _PLANE_2D,

@@ -11,12 +11,12 @@ from nbs_viewer.models.plot.view_spec import (
     Projection,
 )
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.region_mesh import (
-    _cell_x_bounds_mesh,
-    _cell_y_bounds_mesh,
+from nbs_viewer.models.plot.plot_view_frame import (
+    cell_x_bounds_mesh,
+    cell_y_bounds_mesh,
+    frame_from_bundle,
 )
+from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.roi_set import RoiOperation
 
 from tests.fixtures.session import HeadlessSession
@@ -64,10 +64,10 @@ def _wired_image_scan_with_roi(
     bundle = plot_data.get_plot_bundle()
 
     frame = frame_from_bundle(bundle)
-    x0, _ = _cell_x_bounds_mesh(frame, 5, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, 35, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 28, 0)
+    x0, _ = cell_x_bounds_mesh(frame, 5, 0)
+    _, x1 = cell_x_bounds_mesh(frame, 35, 0)
+    y0, _ = cell_y_bounds_mesh(frame, 2, 0)
+    _, y1 = cell_y_bounds_mesh(frame, 28, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     entry_id = session.session.region.roi_set.add(
         region,

@@ -5,6 +5,10 @@ Two selection rules live here. ROI reduction uses cell-center-inside, so a
 cell contributes only when its center lies within the shape. View cropping
 uses cell-intersects, so the extracted plane still covers the drawn
 rectangle.
+
+Where a cell *is* belongs to the frame, not to this module: the bounds come
+from :mod:`plot_view_frame`, and what is rasterized here is a shape against
+them.
 """
 
 from __future__ import annotations
@@ -13,30 +17,12 @@ from typing import Tuple
 
 import numpy as np
 
-from .plot_view_frame import PlotViewFrame
-
-
-def _data_limits(frame: PlotViewFrame) -> Tuple[float, float, float, float]:
-    """
-    Return axis data limits as x_lo, x_hi, y_lo, y_hi.
-    """
-    if frame.render_mode == "image":
-        if frame.extent is None:
-            ny, nx = frame.shape
-            return (-0.5, nx - 0.5, -0.5, ny - 0.5)
-        left, right, bottom, top = frame.extent
-        return (float(left), float(right), float(bottom), float(top))
-
-    mesh_x = frame.mesh_x
-    mesh_y = frame.mesh_y
-    if mesh_x is None or mesh_y is None:
-        raise ValueError("Mesh frame requires mesh_x and mesh_y")
-    return (
-        float(np.nanmin(mesh_x)),
-        float(np.nanmax(mesh_x)),
-        float(np.nanmin(mesh_y)),
-        float(np.nanmax(mesh_y)),
-    )
+from .plot_view_frame import (
+    PlotViewFrame,
+    data_limits,
+    mesh_cell_bounds,
+    mesh_separable_edge_grids,
+)
 
 
 def _normalize_rect(
@@ -57,130 +43,6 @@ def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
     Return whether two closed intervals overlap.
     """
     return a0 <= b1 and b0 <= a1
-
-
-def _image_row_y_bounds(
-    frame: PlotViewFrame, row: int
-) -> Tuple[float, float]:
-    """
-    Return vertical data bounds for an image row.
-
-    Matches ``imshow(..., origin="upper")``: storage row 0 is at the top of
-    the axes (near ``top``), increasing row index moves toward ``bottom``.
-    """
-    _, _, bottom, top = _data_limits(frame)
-    ny, _ = frame.shape
-    dy = (top - bottom) / ny if ny else 1.0
-    y_hi = top - row * dy
-    y_lo = top - (row + 1) * dy
-    return y_lo, y_hi
-
-
-def _image_cell_bounds(
-    frame: PlotViewFrame, row: int, col: int
-) -> Tuple[float, float, float, float]:
-    """
-    Return x_lo, x_hi, y_lo, y_hi for an image cell at storage (row, col).
-    """
-    left, right, bottom, top = _data_limits(frame)
-    _, nx = frame.shape
-    dx = (right - left) / nx if nx else 1.0
-    x_lo = left + col * dx
-    x_hi = left + (col + 1) * dx
-    y_lo, y_hi = _image_row_y_bounds(frame, row)
-    return x_lo, x_hi, y_lo, y_hi
-
-
-def _mesh_cell_bounds(
-    frame: PlotViewFrame, row: int, col: int
-) -> Tuple[float, float, float, float]:
-    """
-    Return x_lo, x_hi, y_lo, y_hi for a mesh cell at storage (row, col).
-    """
-    mesh_x = frame.mesh_x
-    mesh_y = frame.mesh_y
-    ny, nx = frame.shape
-    corners_x = [mesh_x[row, col]]
-    corners_y = [mesh_y[row, col]]
-    if row + 1 < ny:
-        corners_x.append(mesh_x[row + 1, col])
-        corners_y.append(mesh_y[row + 1, col])
-    if col + 1 < nx:
-        corners_x.append(mesh_x[row, col + 1])
-        corners_y.append(mesh_y[row, col + 1])
-    if row + 1 < ny and col + 1 < nx:
-        corners_x.append(mesh_x[row + 1, col + 1])
-        corners_y.append(mesh_y[row + 1, col + 1])
-    return (
-        float(np.nanmin(corners_x)),
-        float(np.nanmax(corners_x)),
-        float(np.nanmin(corners_y)),
-        float(np.nanmax(corners_y)),
-    )
-
-
-def _cell_bounds(
-    frame: PlotViewFrame, row: int, col: int
-) -> Tuple[float, float, float, float]:
-    """
-    Return ``(x_lo, x_hi, y_lo, y_hi)`` for the cell at display (row, col).
-
-    Display rows are plot Y and display columns are plot X in both render
-    modes, so no per-mode index juggling is needed here.
-    """
-    if frame.render_mode == "image":
-        return _image_cell_bounds(frame, row, col)
-    return _mesh_cell_bounds(frame, row, col)
-
-
-def _cell_x_bounds_mesh(
-    frame: PlotViewFrame, index: int, along: int
-) -> Tuple[float, float]:
-    """
-    Return horizontal data bounds for a cell along plot X.
-
-    Parameters
-    ----------
-    frame : PlotViewFrame
-        View frame.
-    index : int
-        Cell index along plot X (display column).
-    along : int
-        Reference index along plot Y (display row), which matters only for
-        curvilinear mesh grids.
-
-    Returns
-    -------
-    tuple of float
-        ``(x_lo, x_hi)``.
-    """
-    x_lo, x_hi, _, _ = _cell_bounds(frame, along, index)
-    return x_lo, x_hi
-
-
-def _cell_y_bounds_mesh(
-    frame: PlotViewFrame, index: int, along: int
-) -> Tuple[float, float]:
-    """
-    Return vertical data bounds for a cell along plot Y.
-
-    Parameters
-    ----------
-    frame : PlotViewFrame
-        View frame.
-    index : int
-        Cell index along plot Y (display row).
-    along : int
-        Reference index along plot X (display column), which matters only
-        for curvilinear mesh grids.
-
-    Returns
-    -------
-    tuple of float
-        ``(y_lo, y_hi)``.
-    """
-    _, _, y_lo, y_hi = _cell_bounds(frame, index, along)
-    return y_lo, y_hi
 
 
 def cell_centers(frame: PlotViewFrame) -> Tuple[np.ndarray, np.ndarray]:
@@ -205,7 +67,7 @@ def cell_centers(frame: PlotViewFrame) -> Tuple[np.ndarray, np.ndarray]:
     """
     ny, nx = frame.shape
     if frame.render_mode == "image":
-        left, right, bottom, top = _data_limits(frame)
+        left, right, bottom, top = data_limits(frame)
         dx = (right - left) / nx if nx else 1.0
         dy = (top - bottom) / ny if ny else 1.0
         centers_x = left + (np.arange(nx, dtype=float) + 0.5) * dx
@@ -373,7 +235,7 @@ def cell_mask_at_point(
     mask = np.zeros(frame.shape, dtype=bool)
     if not (np.isfinite(x) and np.isfinite(y)):
         return mask
-    x_lo, x_hi, y_lo, y_hi = _data_limits(frame)
+    x_lo, x_hi, y_lo, y_hi = data_limits(frame)
     if not (x_lo <= x <= x_hi and y_lo <= y <= y_hi):
         return mask
     centers_x, centers_y = cell_centers(frame)
@@ -396,7 +258,7 @@ def _mask_covering_rect_image(
     """
     Build a rectangular mask on a uniform ``image`` grid using index bounds.
     """
-    left, right, bottom, top = _data_limits(frame)
+    left, right, bottom, top = data_limits(frame)
     ny, nx = frame.shape
     dx = (right - left) / nx if nx else 1.0
     dy = (top - bottom) / ny if ny else 1.0
@@ -414,40 +276,6 @@ def _mask_covering_rect_image(
     return mask
 
 
-def _mesh_separable_edge_grids(
-    frame: PlotViewFrame,
-) -> Tuple[np.ndarray, np.ndarray] | None:
-    """
-    Return 1D X and Y edge arrays when the mesh is a separable grid.
-    """
-    mesh_x = frame.mesh_x
-    mesh_y = frame.mesh_y
-    if mesh_x is None or mesh_y is None:
-        return None
-    ny, nx = frame.shape
-    if mesh_x.shape != mesh_y.shape:
-        return None
-    if mesh_x.shape == (ny + 1, nx + 1):
-        x_edges = np.asarray(mesh_x[0, :], dtype=float)
-        y_edges = np.asarray(mesh_y[:, 0], dtype=float)
-        if not (
-            np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
-            and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
-        ):
-            return None
-        return x_edges, y_edges
-    if mesh_x.shape != (ny, nx):
-        return None
-    if not (
-        np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
-        and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
-    ):
-        return None
-    x_edges = np.asarray(mesh_x[0, :], dtype=float)
-    y_edges = np.asarray(mesh_y[:, 0], dtype=float)
-    return x_edges, y_edges
-
-
 def _mask_covering_rect_mesh_separable(
     frame: PlotViewFrame,
     x0: float,
@@ -458,7 +286,7 @@ def _mask_covering_rect_mesh_separable(
     """
     Vectorized rectangular mask for separable ``pcolormesh`` edge grids.
     """
-    edges = _mesh_separable_edge_grids(frame)
+    edges = mesh_separable_edge_grids(frame)
     if edges is None:
         return None
     x_edges, y_edges = edges
@@ -503,7 +331,7 @@ def _mask_covering_rect_mesh_bbox(
         return mask
     for row in rows:
         for col in cols:
-            cx0, cx1, cy0, cy1 = _mesh_cell_bounds(frame, int(row), int(col))
+            cx0, cx1, cy0, cy1 = mesh_cell_bounds(frame, int(row), int(col))
             if _intervals_overlap(x0, x1, cx0, cx1) and _intervals_overlap(
                 y0, y1, cy0, cy1
             ):

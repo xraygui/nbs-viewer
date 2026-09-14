@@ -43,15 +43,15 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     bundle = plot_data.get_plot_bundle()
 
     frame = frame_from_bundle(bundle)
-    from nbs_viewer.models.plot.region_mesh import (
-        _cell_x_bounds_mesh,
-        _cell_y_bounds_mesh,
+    from nbs_viewer.models.plot.plot_view_frame import (
+        cell_x_bounds_mesh,
+        cell_y_bounds_mesh,
     )
 
-    x0, _ = _cell_x_bounds_mesh(frame, 5, 0)
-    _, x1 = _cell_x_bounds_mesh(frame, 35, 0)
-    y0, _ = _cell_y_bounds_mesh(frame, 2, 0)
-    _, y1 = _cell_y_bounds_mesh(frame, 28, 0)
+    x0, _ = cell_x_bounds_mesh(frame, 5, 0)
+    _, x1 = cell_x_bounds_mesh(frame, 35, 0)
+    y0, _ = cell_y_bounds_mesh(frame, 2, 0)
+    _, y1 = cell_y_bounds_mesh(frame, 28, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     entry_id = plot_model.region.roi_set.add(
         region,

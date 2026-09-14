@@ -69,7 +69,7 @@ suite verifies it immediately.
 | `plot_view_frame` | 187 | 2 | 2 | plus 1 function-local import |
 | `trace` | 203 | 2 | 2 | |
 | `plot_axes`, `plot_session`, `view_intent` | | 1 | 1 | the healthy shape |
-| everything else (13 files) | | 0 | 0 | including `run_source`, `view_spec` |
+| everything else (12 files) | | 0 | 0 | including `run_source`, `view_spec` |
 
 ### Cycles and dodges
 
@@ -134,33 +134,40 @@ Settled here so no step has to stop and ask. Each is reversible; none blocks.
 
 ## Phase 1 — split and rename, still flat
 
-### Step 1 — the boundary guard
+### Step 1 — the boundary guard — **landed**
 
-- [ ] `tests/test_module_boundaries.py`, asserting **the two hard rules** by
+- [x] `tests/test_module_boundaries.py`, asserting **the two hard rules** by
   AST over `nbs_viewer/models/plot/*.py`: no runtime import cycle, and no
   function-local import of a sibling — with an allowlist seeded at exactly the
   three known offenders above, which step 2 empties.
-- [ ] A script, **not a test**, that prints the working-set table so a step can
-  report what moved. It is a diagnostic: nothing fails when a number rises,
-  because a step may legitimately concentrate related functions in one place.
-- [ ] Deletes nothing.
+- [x] A script, **not a test**, that prints the working-set table so a step can
+  report what moved: `pixi run python -m tools.module_graph`. It is a
+  diagnostic: nothing fails when a number rises, because a step may
+  legitimately concentrate related functions in one place.
+- [x] Deletes nothing.
 - **Out of scope:** enforcing a working-set ceiling. A threshold would make the
   count a target, and the count is gameable.
 
-### Step 2 — break the runtime cycle and declare the mask surface
+### Step 2 — break the runtime cycle and declare the mask surface — **landed**
 
-- [ ] Move four functions from `region_mesh.py` to `plot_view_frame.py`:
-  `_image_cell_bounds`, `_cell_x_bounds_mesh`, `_cell_y_bounds_mesh`,
-  `_mesh_separable_edge_grids`. They are cell geometry *on a frame*; the
-  rasterizers stay.
-- [ ] Delete all three function-local imports (`plot_view_frame.py:332`,
+- [x] Move the cell geometry from `region_mesh.py` to `plot_view_frame.py`:
+  the four the draft named — `_image_cell_bounds`, `_cell_x_bounds_mesh`,
+  `_cell_y_bounds_mesh`, `_mesh_separable_edge_grids` — plus the four they
+  call, `_data_limits`, `_image_row_y_bounds`, `_mesh_cell_bounds` and
+  `_cell_bounds`. They are cell geometry *on a frame*; the rasterizers and
+  `cell_centers` stay.
+- [x] Delete all three function-local imports (`plot_view_frame.py:332`,
   `plot_bundle.py:352`, `plot_bundle.py:388`) and empty step 1's allowlist.
-- [ ] Rename the moved functions without their underscore, and update the
+- [x] Rename the moved functions without their underscore, and update the
   **24 imports of private `region_mesh` names across 9 files** — six test
   files, plus `plot_bundle.py`, `plot_view_frame.py` and `region.py`, which
   means production code reaches for them too and the surface is undeclared
-  rather than merely leaky.
-- [ ] Deletes: the runtime cycle (**1 → 0**) and the allowlist.
+  rather than merely leaky. `_image_row_y_bounds` and `_cell_bounds` keep
+  their underscore: nothing outside `plot_view_frame` calls either, and the
+  step is for declaring the surface that is crossed, not for promoting every
+  helper that came with it.
+- [x] Deletes: the runtime cycle (**1 → 0**), the allowlist, and the
+  `plot_view_frame ↔ region_mesh` pair, which is now one-way.
 
 ### Step 3 — `plot_geometry` and `plot_bundle` stop lying about their contents
 
@@ -249,4 +256,5 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Steps 1 and 2 landed. The guard and the diagnostic share one implementation, `tools/module_graph.py`, run as a script and imported by `tests/test_module_boundaries.py`; it reproduces every measurement in this plan (22 modules, 4791 code lines, each working-set row, and 64 inside / 178 `tests/` / 24 `views/` import sites), which is what lets a later step quote a before and an after. Two of this plan's derived totals are off and are corrected above: 12 files sit at zero, not 13, and the import sites measure 268 across 75 files rather than 267 across 74. The guard carries self-tests on throwaway packages, because a silently broken detector is a guard that passes forever. Step 2 moved eight functions rather than four — the four named cannot leave without the four they call, and leaving those behind would have re-pointed the same cycle the other way. `region_mesh`'s working set rose 0 → 3 and `plot_view_frame`'s fell 2 → 1: the rise is the point, since a rasterizer asking a frame where its cells are is the direction that was backwards before. Both hard rules now hold with an empty allowlist, and 520 tests pass. |
 | 2026-09-14 | Re-derived at `f50633a` after the data-contract refactor. Measurements retaken: 22 files, 4791 code lines, 267 import sites, and a working-set table in which `run_fetch` has replaced `run_source` as the worst file. Step 1's split is done; what remains of it is the guard. Two function-local imports the draft missed are recorded, the `plot_geometry ↔ plot_request` cycle is closed, and `run/`'s contents changed because `KeyInfo` moved to `models/data` while `FrozenSpectrum` stayed. The draft's six open questions are settled as decisions, and the type-alias consolidation from the previous review is now a step, because it is the one part of this plan that deletes something. |

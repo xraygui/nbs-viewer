@@ -1,5 +1,11 @@
 """
-View-frame metadata for 2D plots used by region compilation.
+The coordinate frame of a displayed 2D plane, and where its cells sit.
+
+A frame records the shape, render mode, axis assignment and coordinates of
+what is on screen, which is enough to map a drawn rectangle back to storage
+indices. It also answers where any one cell lies in data coordinates, since
+that is a question about the frame and nothing else: the rasterizers in
+:mod:`region_mesh` turn those bounds into masks, but they do not own them.
 """
 
 from __future__ import annotations
@@ -329,10 +335,8 @@ def region_frame_for_bbox(
 
     new_extent = None
     if frame.render_mode == "image" and frame.extent is not None:
-        from .region_mesh import _image_cell_bounds
-
-        x_lo, _, _, y_hi = _image_cell_bounds(frame, r0, c0)
-        _, x_hi, y_lo, _ = _image_cell_bounds(frame, r1 - 1, c1 - 1)
+        x_lo, _, _, y_hi = image_cell_bounds(frame, r0, c0)
+        _, x_hi, y_lo, _ = image_cell_bounds(frame, r1 - 1, c1 - 1)
         new_extent = (x_lo, x_hi, y_lo, y_hi)
 
     return PlotViewFrame(
@@ -369,3 +373,193 @@ def _crop_mesh_grids_for_bbox(
     raise ValueError(
         f"Mesh grid shape {mesh_x.shape} does not match cell shape {shape}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Cell geometry -- where one cell of a frame sits in data coordinates
+# ---------------------------------------------------------------------------
+#
+# These answer a question about a frame and nothing else, so they live with
+# the frame. They used to sit with the rasterizers in :mod:`region_mesh`,
+# which is why cropping a frame meant reaching into the mask module.
+
+
+def data_limits(frame: PlotViewFrame) -> Tuple[float, float, float, float]:
+    """
+    Return axis data limits as x_lo, x_hi, y_lo, y_hi.
+    """
+    if frame.render_mode == "image":
+        if frame.extent is None:
+            ny, nx = frame.shape
+            return (-0.5, nx - 0.5, -0.5, ny - 0.5)
+        left, right, bottom, top = frame.extent
+        return (float(left), float(right), float(bottom), float(top))
+
+    mesh_x = frame.mesh_x
+    mesh_y = frame.mesh_y
+    if mesh_x is None or mesh_y is None:
+        raise ValueError("Mesh frame requires mesh_x and mesh_y")
+    return (
+        float(np.nanmin(mesh_x)),
+        float(np.nanmax(mesh_x)),
+        float(np.nanmin(mesh_y)),
+        float(np.nanmax(mesh_y)),
+    )
+
+
+def _image_row_y_bounds(
+    frame: PlotViewFrame, row: int
+) -> Tuple[float, float]:
+    """
+    Return vertical data bounds for an image row.
+
+    Matches ``imshow(..., origin="upper")``: storage row 0 is at the top of
+    the axes (near ``top``), increasing row index moves toward ``bottom``.
+    """
+    _, _, bottom, top = data_limits(frame)
+    ny, _ = frame.shape
+    dy = (top - bottom) / ny if ny else 1.0
+    y_hi = top - row * dy
+    y_lo = top - (row + 1) * dy
+    return y_lo, y_hi
+
+
+def image_cell_bounds(
+    frame: PlotViewFrame, row: int, col: int
+) -> Tuple[float, float, float, float]:
+    """
+    Return x_lo, x_hi, y_lo, y_hi for an image cell at storage (row, col).
+    """
+    left, right, bottom, top = data_limits(frame)
+    _, nx = frame.shape
+    dx = (right - left) / nx if nx else 1.0
+    x_lo = left + col * dx
+    x_hi = left + (col + 1) * dx
+    y_lo, y_hi = _image_row_y_bounds(frame, row)
+    return x_lo, x_hi, y_lo, y_hi
+
+
+def mesh_cell_bounds(
+    frame: PlotViewFrame, row: int, col: int
+) -> Tuple[float, float, float, float]:
+    """
+    Return x_lo, x_hi, y_lo, y_hi for a mesh cell at storage (row, col).
+    """
+    mesh_x = frame.mesh_x
+    mesh_y = frame.mesh_y
+    ny, nx = frame.shape
+    corners_x = [mesh_x[row, col]]
+    corners_y = [mesh_y[row, col]]
+    if row + 1 < ny:
+        corners_x.append(mesh_x[row + 1, col])
+        corners_y.append(mesh_y[row + 1, col])
+    if col + 1 < nx:
+        corners_x.append(mesh_x[row, col + 1])
+        corners_y.append(mesh_y[row, col + 1])
+    if row + 1 < ny and col + 1 < nx:
+        corners_x.append(mesh_x[row + 1, col + 1])
+        corners_y.append(mesh_y[row + 1, col + 1])
+    return (
+        float(np.nanmin(corners_x)),
+        float(np.nanmax(corners_x)),
+        float(np.nanmin(corners_y)),
+        float(np.nanmax(corners_y)),
+    )
+
+
+def _cell_bounds(
+    frame: PlotViewFrame, row: int, col: int
+) -> Tuple[float, float, float, float]:
+    """
+    Return ``(x_lo, x_hi, y_lo, y_hi)`` for the cell at display (row, col).
+
+    Display rows are plot Y and display columns are plot X in both render
+    modes, so no per-mode index juggling is needed here.
+    """
+    if frame.render_mode == "image":
+        return image_cell_bounds(frame, row, col)
+    return mesh_cell_bounds(frame, row, col)
+
+
+def cell_x_bounds_mesh(
+    frame: PlotViewFrame, index: int, along: int
+) -> Tuple[float, float]:
+    """
+    Return horizontal data bounds for a cell along plot X.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        View frame.
+    index : int
+        Cell index along plot X (display column).
+    along : int
+        Reference index along plot Y (display row), which matters only for
+        curvilinear mesh grids.
+
+    Returns
+    -------
+    tuple of float
+        ``(x_lo, x_hi)``.
+    """
+    x_lo, x_hi, _, _ = _cell_bounds(frame, along, index)
+    return x_lo, x_hi
+
+
+def cell_y_bounds_mesh(
+    frame: PlotViewFrame, index: int, along: int
+) -> Tuple[float, float]:
+    """
+    Return vertical data bounds for a cell along plot Y.
+
+    Parameters
+    ----------
+    frame : PlotViewFrame
+        View frame.
+    index : int
+        Cell index along plot Y (display row).
+    along : int
+        Reference index along plot X (display column), which matters only
+        for curvilinear mesh grids.
+
+    Returns
+    -------
+    tuple of float
+        ``(y_lo, y_hi)``.
+    """
+    _, _, y_lo, y_hi = _cell_bounds(frame, index, along)
+    return y_lo, y_hi
+
+
+def mesh_separable_edge_grids(
+    frame: PlotViewFrame,
+) -> Tuple[np.ndarray, np.ndarray] | None:
+    """
+    Return 1D X and Y edge arrays when the mesh is a separable grid.
+    """
+    mesh_x = frame.mesh_x
+    mesh_y = frame.mesh_y
+    if mesh_x is None or mesh_y is None:
+        return None
+    ny, nx = frame.shape
+    if mesh_x.shape != mesh_y.shape:
+        return None
+    if mesh_x.shape == (ny + 1, nx + 1):
+        x_edges = np.asarray(mesh_x[0, :], dtype=float)
+        y_edges = np.asarray(mesh_y[:, 0], dtype=float)
+        if not (
+            np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
+            and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
+        ):
+            return None
+        return x_edges, y_edges
+    if mesh_x.shape != (ny, nx):
+        return None
+    if not (
+        np.allclose(mesh_x, mesh_x[0:1, :], equal_nan=True)
+        and np.allclose(mesh_y, mesh_y[:, 0:1], equal_nan=True)
+    ):
+        return None
+    x_edges = np.asarray(mesh_x[0, :], dtype=float)
+    y_edges = np.asarray(mesh_y[:, 0], dtype=float)
+    return x_edges, y_edges
