@@ -44,13 +44,7 @@ from .geometry import (
 )
 from .roi import RoiEntry, RoiSetModel
 from .trace import Trace
-from .view import (
-    Projection,
-    ViewCrop,
-    classify_profile_kind,
-    is_plot_plane_storage_axis,
-    scan_profile_storage_axis,
-)
+from .view import Projection, ViewCrop
 from .roi import default_profile_label
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -674,9 +668,9 @@ class RegionController(QObject):
         profile_storage_axis: int,
         span_full: bool,
     ) -> bool:
-        if classify_profile_kind(parent_spec, profile_storage_axis) != "stack_spectrum":
+        if parent_spec.profile_kind(profile_storage_axis) != "stack_spectrum":
             return span_full
-        if is_plot_plane_storage_axis(parent_spec, profile_storage_axis):
+        if parent_spec.is_plot_plane_axis(profile_storage_axis):
             return True
         return span_full
 
@@ -784,9 +778,9 @@ class RegionController(QObject):
             profile_axis = default_profile_axis
         if profile_axis is None:
             raise ValueError("Profile axis is unavailable")
-        profile_kind = classify_profile_kind(spec, profile_axis)
+        profile_kind = spec.profile_kind(profile_axis)
         if profile_kind == "local_profile":
-            scan_axis = scan_profile_storage_axis(spec)
+            scan_axis = spec.scan_axis
             names = tuple(axis_names or ())
             if scan_axis is not None and scan_axis < len(names):
                 hint = names[scan_axis]

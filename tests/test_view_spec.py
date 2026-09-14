@@ -4,13 +4,7 @@ import pytest
 
 from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import (
-    DimRole,
-    Projection,
-    ViewCrop,
-    projected_axis_names,
-    spec_from_slice_info,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
@@ -228,10 +222,8 @@ def test_projected_axis_names_compatibility():
     image_spec = intent_1d.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     stats_spec = ViewIntent(plot_ndim=1).project(1, (11,))
 
-    image_names = projected_axis_names(
-        image_spec, ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    )
-    stats_names = projected_axis_names(stats_spec, ["sampleVoltage_VSource"])
+    image_names = image_spec.plot_dim_names(["sampleVoltage_VSource", "dim_1", "dim_2"])
+    stats_names = stats_spec.plot_dim_names(["sampleVoltage_VSource"])
     assert image_names == ("sampleVoltage_VSource",)
     assert image_names == stats_names
 
@@ -241,9 +233,7 @@ def test_projected_axis_names_compatibility():
         reduce_indices=(0, 0),
     )
     detector_spec = detector_intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
-    detector_names = projected_axis_names(
-        detector_spec, ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    )
+    detector_names = detector_spec.plot_dim_names(["sampleVoltage_VSource", "dim_1", "dim_2"])
     assert detector_names == ("dim_2",)
     assert detector_names != stats_names
 
@@ -434,7 +424,7 @@ def test_projection_2d_trailing_axes():
 
 def test_spec_from_slice_info_roundtrip():
     legacy = (0, 0, slice(None))
-    spec = spec_from_slice_info(legacy, plot_ndim=1)
+    spec = Projection.from_slice_info(legacy, plot_ndim=1)
     assert spec.roles[0] == DimRole.INDEX
     assert spec.roles[-1] == DimRole.PLOT_X
 

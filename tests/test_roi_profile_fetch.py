@@ -3,13 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.view.spec import (
-    DimRole,
-    Projection,
-    is_plot_plane_storage_axis,
-    plot_axis_to_storage_axis,
-    storage_axis_to_plot_axis,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.stages import reduce_cached_plane
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_request import (
@@ -151,7 +145,7 @@ def test_cached_plane_profile_with_4d_parent_spec():
     request = _profile_request(
         parent,
         RectRegion(x0=2.5, x1=6.5, y0=2.5, y1=6.5),
-        profile_axis=plot_axis_to_storage_axis(parent, "plot_x"),
+        profile_axis=parent.storage_axis_for("plot_x"),
     )
 
     bundle = reduce_cached_plane(plane, request)
@@ -289,8 +283,8 @@ def test_storage_axis_to_plot_axis_follows_the_spec_not_the_frame():
 
     # The opposite of what those display positions say, which is why the
     # function no longer accepts a frame at all.
-    assert storage_axis_to_plot_axis(_SELECTION_DRIVEN, 0) == "plot_x"
-    assert storage_axis_to_plot_axis(_SELECTION_DRIVEN, 1) == "plot_y"
+    assert _SELECTION_DRIVEN.plot_axis_for(0) == "plot_x"
+    assert _SELECTION_DRIVEN.plot_axis_for(1) == "plot_y"
 
 
 def test_span_full_expands_the_profile_axis_not_the_reduction_axis():
@@ -341,9 +335,9 @@ def test_a_1d_view_has_no_plot_plane_to_map_onto():
         indices=(0, 0),
     )
     assert spectrum.plot_axis_order() == (1,)
-    assert not is_plot_plane_storage_axis(spectrum, 1)
-    with pytest.raises(ValueError, match="2D parent spec"):
-        storage_axis_to_plot_axis(spectrum, 1)
+    assert not spectrum.is_plot_plane_axis(1)
+    with pytest.raises(ValueError, match="2D projection"):
+        spectrum.plot_axis_for(1)
 
 
 def test_an_off_plane_storage_axis_has_no_plot_axis():
@@ -356,9 +350,9 @@ def test_an_off_plane_storage_axis_has_no_plot_axis():
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0),
     )
-    assert not is_plot_plane_storage_axis(cube, 0)
+    assert not cube.is_plot_plane_axis(0)
     with pytest.raises(ValueError, match="not on the plot plane"):
-        storage_axis_to_plot_axis(cube, 0)
+        cube.plot_axis_for(0)
 
 
 def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
@@ -368,8 +362,8 @@ def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0, 0),
     )
-    assert storage_axis_to_plot_axis(parent_spec, 3) == "plot_x"
-    assert storage_axis_to_plot_axis(parent_spec, 2) == "plot_y"
+    assert parent_spec.plot_axis_for(3) == "plot_x"
+    assert parent_spec.plot_axis_for(2) == "plot_y"
 
 
 def test_stack_profile_fetch_slice_widens_the_profile_axis():

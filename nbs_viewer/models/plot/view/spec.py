@@ -324,40 +324,296 @@ class Projection:
         roles[storage_axis] = role
         return replace(self, roles=tuple(roles))
 
+    # -- questions about this projection -------------------------------
 
-def projected_axis_names(
-    spec: Projection,
-    dim_names: Sequence[str],
-) -> Tuple[str, ...]:
-    """
-    Dimension names of the plot axes for cross-key compatibility checks.
+    @classmethod
+    def from_slice_info(cls, 
+        slice_info: Tuple[SliceItem, ...], plot_ndim: int
+    ) -> Projection:
+        """
+        Infer a projection from a per-axis slice tuple.
 
-    Named apart from ``RunSource.plot_axis_names``, which it used to share a
-    name with: that one returns a name per *storage* axis, this one the names
-    of the axes a projection *plots*. Two different answers one import apart.
+        Parameters
+        ----------
+        slice_info : tuple
+            Per-dimension slice or integer index.
+        plot_ndim : int
+            Plot dimension count (1 or 2).
 
-    Two projected views are compatible for overplotting when their plot-axis
-    name tuples match. A rank-1 key whose sole axis is ``sampleVoltage`` is
-    compatible with a rank-3 key projected so that Plot X is also
-    ``sampleVoltage``, and incompatible when Plot X is a detector axis.
-
-    Parameters
-    ----------
-    spec : Projection
-        Concrete projected view.
-    dim_names : sequence of str
-        Dimension name per storage axis, length ``spec.ndim``.
-
-    Returns
-    -------
-    tuple of str
-        Names of plot axes in order (Y then X when 2D).
-    """
-    if len(dim_names) != spec.ndim:
-        raise ValueError(
-            f"dim_names length {len(dim_names)} must match ndim {spec.ndim}"
+        Returns
+        -------
+        Projection
+            Equivalent projection.
+        """
+        ndim = len(slice_info)
+        roles: List[DimRole] = []
+        indices: List[int] = []
+        plot_slots = list(range(ndim - plot_ndim, ndim))
+        for i, item in enumerate(slice_info):
+            if isinstance(item, slice):
+                if i == plot_slots[-1]:
+                    roles.append(DimRole.PLOT_X)
+                elif plot_ndim == 2 and i == plot_slots[-2]:
+                    roles.append(DimRole.PLOT_Y)
+                else:
+                    roles.append(DimRole.SUM)
+                indices.append(0)
+            else:
+                roles.append(DimRole.INDEX)
+                indices.append(int(item))
+        return cls(
+            ndim=ndim,
+            plot_ndim=plot_ndim,
+            roles=tuple(roles),
+            indices=tuple(indices),
         )
-    return tuple(dim_names[i] for i in spec.plot_axis_order())
+
+    def storage_axis_for(self, plot_axis: PlotAxisName) -> int:
+        """
+        Return the storage dimension index carrying a named plot axis.
+
+        Parameters
+        ----------
+        plot_axis : str
+            ``plot_x`` or ``plot_y``.
+
+        Returns
+        -------
+        int
+            Storage axis index for the named plot dimension.
+        """
+        if self.plot_ndim != 2:
+            raise ValueError("storage_axis_for requires a 2D projection")
+        plot_order = self.plot_axis_order()
+        if plot_axis == "plot_x":
+            return plot_order[-1]
+        if plot_axis == "plot_y":
+            return plot_order[-2]
+        raise ValueError(f"Unknown plot axis {plot_axis!r}")
+
+    def plot_axis_for(self, storage_axis: int) -> PlotAxisName:
+        """
+        Return the plot axis name a storage dimension is displayed on.
+
+        The inverse of :meth:`storage_axis_for`, and the projection is the only
+        thing that can answer it. A frame cannot: since orientation
+        moved to just after the load, ``frame.plot_y_dim`` and
+        ``frame.plot_x_dim`` are always 0 and 1 -- display positions, not storage
+        axes -- so comparing a storage axis against them inverts the answer for
+        any view whose plot-axis order is not the identity, which is the normal
+        case as soon as the user picks an X key that is not the trailing axis.
+        This function used to take a frame and fall back to exactly that
+        comparison whenever it was handed no spec.
+
+        Parameters
+        ----------
+        storage_axis : int
+            Storage axis index on the self projection.
+
+        Returns
+        -------
+        str
+            ``plot_x`` or ``plot_y``.
+
+        Raises
+        ------
+        ValueError
+            If the self is not 2D, or the axis is not on its plot plane.
+        """
+        if self.plot_ndim != 2:
+            raise ValueError("plot_axis_for requires a 2D projection")
+        plot_order = self.plot_axis_order()
+        if storage_axis == plot_order[-1]:
+            return "plot_x"
+        if storage_axis == plot_order[-2]:
+            return "plot_y"
+        raise ValueError(
+            f"storage axis {storage_axis} is not on the plot plane "
+            f"{plot_order[-2:]}"
+        )
+
+    def plot_dim_names(self, dim_names: Sequence[str]) -> Tuple[str, ...]:
+        """
+        Dimension names of the plot axes for cross-key compatibility checks.
+
+        Named apart from ``RunSource.plot_axis_names``, which it used to share a
+        name with: that one returns a name per *storage* axis, this one the names
+        of the axes a projection *plots*. Two different answers one import apart.
+
+        Two projected views are compatible for overplotting when their plot-axis
+        name tuples match. A rank-1 key whose sole axis is ``sampleVoltage`` is
+        compatible with a rank-3 key projected so that Plot X is also
+        ``sampleVoltage``, and incompatible when Plot X is a detector axis.
+
+        Parameters
+        ----------
+        dim_names : sequence of str
+            Dimension name per storage axis, length ``self.ndim``.
+
+        Returns
+        -------
+        tuple of str
+            Names of plot axes in order (Y then X when 2D).
+        """
+        if len(dim_names) != self.ndim:
+            raise ValueError(
+                f"dim_names length {len(dim_names)} must match ndim {self.ndim}"
+            )
+        return tuple(dim_names[i] for i in self.plot_axis_order())
+
+    def is_plot_plane_axis(self, storage_axis: int) -> bool:
+        """
+        Return whether a storage axis lies on the parent 2D plot plane.
+
+        Parameters
+        ----------
+        storage_axis : int
+            Storage dimension index.
+
+        Returns
+        -------
+        bool
+            True when ``storage_axis`` is this projection's plot Y or plot X axis.
+        """
+        if self.plot_ndim != 2:
+            return False
+        return storage_axis in set(self.plot_axis_order())
+
+    def eligible_profile_axes(self) -> List[int]:
+        """
+        Return storage axis indices valid as profile axis choices.
+
+
+        Returns
+        -------
+        list of int
+            This projection's plot axes and INDEX axes, excluding SUM
+            and MEAN axes.
+        """
+        if self.plot_ndim != 2:
+            return []
+        plot_axes = set(self.plot_axis_order())
+        eligible: List[int] = []
+        for storage_axis in self.axis_order:
+            role = self.roles[storage_axis]
+            if role in (DimRole.SUM, DimRole.MEAN):
+                continue
+            if storage_axis in plot_axes or role == DimRole.INDEX:
+                eligible.append(storage_axis)
+        return eligible
+
+    @property
+    def scan_axis(self) -> Optional[int]:
+        """
+        Return the leading scan storage axis in tensor order.
+
+        Among axes that are not globally reduced (SUM or MEAN), returns the
+        minimum storage index. This is the external scan axis for stack spectra,
+        whether its role is INDEX or a plot axis (e.g. mesh ``en_energy``).
+
+
+        Returns
+        -------
+        int or None
+            Scan storage axis index, or None when no candidates exist.
+        """
+        candidates = [
+            sa
+            for sa in range(self.ndim)
+            if self.roles[sa] not in (DimRole.SUM, DimRole.MEAN)
+        ]
+        return min(candidates) if candidates else None
+
+    @property
+    def profile_axis(self) -> int:
+        """
+        Return the storage axis assigned Plot X in a 1D output self.
+        """
+        profile_axes = [
+            i for i, role in enumerate(self.roles) if role == DimRole.PLOT_X
+        ]
+        if len(profile_axes) != 1:
+            raise ValueError("expected exactly one profile axis in output self")
+        return profile_axes[0]
+
+    def profile_kind(
+        self, profile_storage_axis: int
+    ) -> Literal["stack_spectrum", "local_profile"]:
+        """
+        Classify a profile axis for save routing.
+
+        Parameters
+        ----------
+        profile_storage_axis : int
+            Selected profile storage axis.
+
+        Returns
+        -------
+        str
+            ``stack_spectrum`` for the scan axis; ``local_profile`` otherwise.
+        """
+        scan_axis = self.scan_axis
+        if scan_axis is not None and profile_storage_axis == scan_axis:
+            return "stack_spectrum"
+        return "local_profile"
+
+    def to_profile(
+        self,
+        profile_storage_axis: int,
+        spatial_reduce: SpatialReduce,
+    ) -> Projection:
+        """
+        Build a 1D profile output spec from a 2D self view.
+
+        Parameters
+        ----------
+        profile_storage_axis : int
+            Storage axis along which profile coordinates run.
+        spatial_reduce : str
+            ``sum`` or ``mean`` over plot-plane axes within the ROI.
+
+        Returns
+        -------
+        Projection
+            Output view with ``plot_ndim == 1``.
+        """
+        if self.plot_ndim != 2:
+            raise ValueError("to_profile requires a 2D projection")
+        reduce_role = (
+            DimRole.SUM if spatial_reduce == "sum" else DimRole.MEAN
+        )
+        parent_plot_axes = set(self.plot_axis_order())
+        roles = list(self.roles)
+
+        if profile_storage_axis in parent_plot_axes:
+            for storage_axis in parent_plot_axes:
+                if storage_axis == profile_storage_axis:
+                    roles[storage_axis] = DimRole.PLOT_X
+                else:
+                    roles[storage_axis] = reduce_role
+        elif self.roles[profile_storage_axis] == DimRole.INDEX:
+            roles[profile_storage_axis] = DimRole.PLOT_X
+            for storage_axis in parent_plot_axes:
+                roles[storage_axis] = reduce_role
+        else:
+            raise ValueError(
+                f"profile axis {profile_storage_axis} must be a self plot axis "
+                "or INDEX role"
+            )
+
+        axis_order = list(self.axis_order)
+        axis_order = [
+            storage_axis
+            for storage_axis in axis_order
+            if storage_axis != profile_storage_axis
+        ] + [profile_storage_axis]
+        return Projection(
+            ndim=self.ndim,
+            plot_ndim=1,
+            roles=tuple(roles),
+            indices=tuple(self.indices),
+            axis_order=tuple(axis_order),
+        )
 
 
 def resolve_axis_order(
@@ -443,288 +699,3 @@ def resolve_axis_order(
     return tuple(a for a in natural if a not in plane) + (other, x_axis)
 
 
-def spec_from_slice_info(
-    slice_info: Tuple[SliceItem, ...], plot_ndim: int
-) -> Projection:
-    """
-    Infer a projection from a per-axis slice tuple.
-
-    Parameters
-    ----------
-    slice_info : tuple
-        Per-dimension slice or integer index.
-    plot_ndim : int
-        Plot dimension count (1 or 2).
-
-    Returns
-    -------
-    Projection
-        Equivalent projection.
-    """
-    ndim = len(slice_info)
-    roles: List[DimRole] = []
-    indices: List[int] = []
-    plot_slots = list(range(ndim - plot_ndim, ndim))
-    for i, item in enumerate(slice_info):
-        if isinstance(item, slice):
-            if i == plot_slots[-1]:
-                roles.append(DimRole.PLOT_X)
-            elif plot_ndim == 2 and i == plot_slots[-2]:
-                roles.append(DimRole.PLOT_Y)
-            else:
-                roles.append(DimRole.SUM)
-            indices.append(0)
-        else:
-            roles.append(DimRole.INDEX)
-            indices.append(int(item))
-    return Projection(
-        ndim=ndim,
-        plot_ndim=plot_ndim,
-        roles=tuple(roles),
-        indices=tuple(indices),
-    )
-
-
-def plot_axis_to_storage_axis(parent: Projection, plot_axis: PlotAxisName) -> int:
-    """
-    Map a plot axis name to its storage dimension index on a 2D parent spec.
-
-    Parameters
-    ----------
-    parent : Projection
-        Parent view with ``plot_ndim == 2``.
-    plot_axis : str
-        ``plot_x`` or ``plot_y``.
-
-    Returns
-    -------
-    int
-        Storage axis index for the named plot dimension.
-    """
-    if parent.plot_ndim != 2:
-        raise ValueError("plot_axis_to_storage_axis requires a 2D parent spec")
-    plot_order = parent.plot_axis_order()
-    if plot_axis == "plot_x":
-        return plot_order[-1]
-    if plot_axis == "plot_y":
-        return plot_order[-2]
-    raise ValueError(f"Unknown plot axis {plot_axis!r}")
-
-
-def eligible_profile_axes(spec: Projection) -> List[int]:
-    """
-    Return storage axis indices valid as profile axis choices.
-
-    Parameters
-    ----------
-    spec : Projection
-        Parent projection.
-
-    Returns
-    -------
-    list of int
-        Parent plot axes and INDEX axes, excluding SUM and MEAN axes.
-    """
-    if spec.plot_ndim != 2:
-        return []
-    plot_axes = set(spec.plot_axis_order())
-    eligible: List[int] = []
-    for storage_axis in spec.axis_order:
-        role = spec.roles[storage_axis]
-        if role in (DimRole.SUM, DimRole.MEAN):
-            continue
-        if storage_axis in plot_axes or role == DimRole.INDEX:
-            eligible.append(storage_axis)
-    return eligible
-
-
-def profile_view_spec(
-    parent: Projection,
-    profile_storage_axis: int,
-    spatial_reduce: SpatialReduce,
-) -> Projection:
-    """
-    Build a 1D profile output spec from a 2D parent view.
-
-    Parameters
-    ----------
-    parent : Projection
-        Parent projection with ``plot_ndim == 2``.
-    profile_storage_axis : int
-        Storage axis along which profile coordinates run.
-    spatial_reduce : str
-        ``sum`` or ``mean`` over plot-plane axes within the ROI.
-
-    Returns
-    -------
-    Projection
-        Output view with ``plot_ndim == 1``.
-    """
-    if parent.plot_ndim != 2:
-        raise ValueError("profile_view_spec requires a 2D parent spec")
-    reduce_role = (
-        DimRole.SUM if spatial_reduce == "sum" else DimRole.MEAN
-    )
-    parent_plot_axes = set(parent.plot_axis_order())
-    roles = list(parent.roles)
-
-    if profile_storage_axis in parent_plot_axes:
-        for storage_axis in parent_plot_axes:
-            if storage_axis == profile_storage_axis:
-                roles[storage_axis] = DimRole.PLOT_X
-            else:
-                roles[storage_axis] = reduce_role
-    elif parent.roles[profile_storage_axis] == DimRole.INDEX:
-        roles[profile_storage_axis] = DimRole.PLOT_X
-        for storage_axis in parent_plot_axes:
-            roles[storage_axis] = reduce_role
-    else:
-        raise ValueError(
-            f"profile axis {profile_storage_axis} must be a parent plot axis "
-            "or INDEX role"
-        )
-
-    axis_order = list(parent.axis_order)
-    axis_order = [
-        storage_axis
-        for storage_axis in axis_order
-        if storage_axis != profile_storage_axis
-    ] + [profile_storage_axis]
-    return Projection(
-        ndim=parent.ndim,
-        plot_ndim=1,
-        roles=tuple(roles),
-        indices=tuple(parent.indices),
-        axis_order=tuple(axis_order),
-    )
-
-
-def profile_storage_axis(spec: Projection) -> int:
-    """
-    Return the storage axis assigned Plot X in a 1D output spec.
-    """
-    profile_axes = [
-        i for i, role in enumerate(spec.roles) if role == DimRole.PLOT_X
-    ]
-    if len(profile_axes) != 1:
-        raise ValueError("expected exactly one profile axis in output spec")
-    return profile_axes[0]
-
-
-def scan_profile_storage_axis(parent_spec: Projection) -> Optional[int]:
-    """
-    Return the leading scan storage axis in tensor order.
-
-    Among axes that are not globally reduced (SUM or MEAN), returns the
-    minimum storage index. This is the external scan axis for stack spectra,
-    whether its role is INDEX or a plot axis (e.g. mesh ``en_energy``).
-
-    Parameters
-    ----------
-    parent_spec : Projection
-        Parent projection.
-
-    Returns
-    -------
-    int or None
-        Scan storage axis index, or None when no candidates exist.
-    """
-    candidates = [
-        sa
-        for sa in range(parent_spec.ndim)
-        if parent_spec.roles[sa] not in (DimRole.SUM, DimRole.MEAN)
-    ]
-    return min(candidates) if candidates else None
-
-
-def classify_profile_kind(
-    parent_spec: Projection, profile_storage_axis: int
-) -> Literal["stack_spectrum", "local_profile"]:
-    """
-    Classify a profile axis for save routing.
-
-    Parameters
-    ----------
-    parent_spec : Projection
-        Parent projection.
-    profile_storage_axis : int
-        Selected profile storage axis.
-
-    Returns
-    -------
-    str
-        ``stack_spectrum`` for the scan axis; ``local_profile`` otherwise.
-    """
-    scan_axis = scan_profile_storage_axis(parent_spec)
-    if scan_axis is not None and profile_storage_axis == scan_axis:
-        return "stack_spectrum"
-    return "local_profile"
-
-
-def is_plot_plane_storage_axis(
-    parent_spec: Projection, storage_axis: int
-) -> bool:
-    """
-    Return whether a storage axis lies on the parent 2D plot plane.
-
-    Parameters
-    ----------
-    parent_spec : Projection
-        Parent projection with ``plot_ndim == 2``.
-    storage_axis : int
-        Storage dimension index.
-
-    Returns
-    -------
-    bool
-        True when ``storage_axis`` is a parent plot Y or plot X axis.
-    """
-    if parent_spec.plot_ndim != 2:
-        return False
-    return storage_axis in set(parent_spec.plot_axis_order())
-
-
-def storage_axis_to_plot_axis(
-    parent: Projection, storage_axis: int
-) -> PlotAxisName:
-    """
-    Map a storage dimension index to its plot axis name on a 2D parent spec.
-
-    The inverse of :func:`plot_axis_to_storage_axis`, and the projection is
-    the only thing that can answer it. A frame cannot: since orientation
-    moved to just after the load, ``frame.plot_y_dim`` and
-    ``frame.plot_x_dim`` are always 0 and 1 -- display positions, not storage
-    axes -- so comparing a storage axis against them inverts the answer for
-    any view whose plot-axis order is not the identity, which is the normal
-    case as soon as the user picks an X key that is not the trailing axis.
-    This function used to take a frame and fall back to exactly that
-    comparison whenever it was handed no spec.
-
-    Parameters
-    ----------
-    parent : Projection
-        Parent view with ``plot_ndim == 2``.
-    storage_axis : int
-        Storage axis index on the parent projection.
-
-    Returns
-    -------
-    str
-        ``plot_x`` or ``plot_y``.
-
-    Raises
-    ------
-    ValueError
-        If the parent is not 2D, or the axis is not on its plot plane.
-    """
-    if parent.plot_ndim != 2:
-        raise ValueError("storage_axis_to_plot_axis requires a 2D parent spec")
-    plot_order = parent.plot_axis_order()
-    if storage_axis == plot_order[-1]:
-        return "plot_x"
-    if storage_axis == plot_order[-2]:
-        return "plot_y"
-    raise ValueError(
-        f"storage axis {storage_axis} is not on the plot plane "
-        f"{plot_order[-2:]}"
-    )

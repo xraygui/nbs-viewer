@@ -17,7 +17,7 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
-from .view import Projection, classify_profile_kind
+from .view import Projection
 from .frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -317,7 +317,7 @@ class Trace(QObject):
         spec = parent_spec if parent_spec is not None else self.projection
         kind = "stack_spectrum"
         if spec is not None and request.profile_axis is not None:
-            kind = classify_profile_kind(spec, request.profile_axis)
+            kind = spec.profile_kind(request.profile_axis)
         if committed_xkey is None:
             committed_xkey = self.xkey
         return FrozenSpectrum(

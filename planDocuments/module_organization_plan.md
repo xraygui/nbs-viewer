@@ -122,11 +122,15 @@ Settled here so no step has to stop and ask. Each is reversible; none blocks.
    Move only — `PlotPresenter`'s design stays as step F left it.
 4. **`run/` exists**: `source.py`, `fetch.py`, `frozen_spectrum.py`,
    `identity.py`.
-5. **The axis/profile queries stay free functions** taking a `Projection`.
-   Precedent from the data contract: a describing type may derive another
-   description, but the queries that pick axes for a *view* are not that.
-   They move with the feature that asks them, not into a file of queries —
-   see step 4, which measured the five different questions they answer.
+5. ~~**The axis/profile queries stay free functions** taking a
+   `Projection`.~~ **Reversed by the maintainer during step 6.** A function
+   whose first argument is a `Projection` is a method on it. The nine were
+   the same shape as the eight methods the class already carried, so the free
+   functions were the inconsistency — and this is the encapsulation this
+   plan's own opening names as the win, not the count. What it buys is that
+   asking a projection a question costs **no import at all**, which is why
+   steps 4 and 6 kept finding these functions hard to place: they had no home
+   because they were already home, on the type.
 6. **`region_controller` is measured before phase 2, not refactored in it.**
    456 code lines, 28 public members, 6 signals, coupling across 4 modules. It
    is either a coordinator like `PlotSession` or a `run_source`-shaped split,
@@ -287,6 +291,20 @@ five because that is what `views/` needs. Tests reach past all three to the
 module when they exercise internals, which is deliberate: a test of the
 cell-bounds arithmetic should break when that arithmetic moves.
 
+- [x] **`Projection` answers its own questions.** Nine free functions taking
+  a `Projection` first became methods, and `spec_from_slice_info` became
+  `Projection.from_slice_info`: `storage_axis_for`, `plot_axis_for` (a real
+  inverse pair at last), `plot_dim_names`, `is_plot_plane_axis`,
+  `eligible_profile_axes`, `scan_axis` and `profile_axis` (properties),
+  `profile_kind`, and `to_profile` — which matches the verb
+  `PlotAxes.to_profile` already used for the same operation. 32 import
+  bindings and 44 calls updated across 12 files. `resolve_axis_order` stays
+  free: it decides an axis order before any projection exists.
+- [x] Deletes 10 names from `view/`'s surface, 19 → 10, of which 9 are now
+  types. Working sets fall with it: `region_controller` 9 → 6,
+  `plot_request` 6 → 4, `trace` 2 → 1, `view.axes` 1 → 0, and
+  `views/plot/roi/window.py` goes from six imported names to one.
+
 ### Step 7 — measure `region_controller`, then `fetch/` and `run/`
 
 - [ ] Measure `region_controller` for a seam first — decision 6 — and record
@@ -320,6 +338,7 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Decision 5 reversed by the maintainer, and acted on in step 6: nine free functions taking a `Projection` are now methods on it, plus a `from_slice_info` constructor. The observation had been made twice — step 4 noted these looked like methods in costume and deferred to the decision, and step 6 then found six of them impossible to place because moving them would cycle. Both difficulties had the same cause: they were already home, on the type, and the placement question was the wrong one. `view/`'s surface is 19 → 10 names, nine of them types; `region_controller` 9 → 6, `plot_request` 6 → 4, `trace` 2 → 1, and the ROI window imports one name where it imported six. Two transcription hazards worth recording for the next mechanical conversion: substituting the receiver name for `self` also rewrote it inside error-message strings and numpydoc parameter entries, and neither shows up as a test failure except where a test matched the message text. 529 tests. |
 | 2026-09-14 | Step 6 landed. `view/` is `spec.py` + `axes.py` with a 19-name surface, and a test now asserts the package imports nothing else in `models/plot`. One finding: `profile_storage_axis` has no caller anywhere — the seventeen apparent uses are a `RoiOperation` field and a widget method of the same name, which is a third name collision of the kind step 4 fixed for `plot_axis_names`. Left in place, kept off the surface, and flagged rather than deleted. 27 modules, 4900 code lines, no runtime cycles, no function-local sibling imports, 529 tests. |
 | 2026-09-14 | Step 6, first two packages: the guard was taught to walk subpackages first (it globbed one directory, so the moves would have silenced it), then `geometry/` and `roi/` landed. Two corrections to step 4's predicted redistribution, both recorded in its table: six of the eight functions promised to `roi/` stay in `view_spec`, because each reads a `Projection` and `PlotAxes.to_profile` needs `profile_view_spec` — moving it makes `view` import `roi` while `roi` already imports `view` for `SpatialReduce`, which is a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary, and that is the distinction the step-4 table got wrong. `crop_from_region` and `roi_profile_request` go to `fetch/` in step 7 instead: both build a request, and `crop_from_region` is view cropping, not ROI. `roi/` is therefore two files and a five-name surface. Two diagnostic bugs the first surface exposed are fixed in the tool: `working_set` now follows re-exports to the defining module, without which every count would have drifted toward zero as files moved while no reader's job got smaller, and `import_sites` now recurses. Surface rows are labelled, since their count measures the door. |
 | 2026-09-14 | Step 5 landed. Four aliases, one definition each, and five deleted. No behaviour change: `PlotRequest.__post_init__` already validated both `mask_mode` and `spatial_reduce`, so `roi_set`'s widening to `str` was invisible to the interpreter — which is why it survived, and why narrowing it back is free. It adds one mutual pair, `region ↔ view_spec`: `region` now imports `PlotAxisName` at runtime while `view_spec` still names `MaskMode` under `TYPE_CHECKING` for `default_profile_label`. Not a runtime cycle, and it dissolves in step 6 when that function leaves for `roi/`. 522 tests. |

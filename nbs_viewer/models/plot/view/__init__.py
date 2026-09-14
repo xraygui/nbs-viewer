@@ -2,10 +2,9 @@
 How to slice, reduce and orient an array for display -- the vocabulary only.
 
 :mod:`spec` holds :class:`Projection`, the rank-bound description a request
-carries, with the roles and aliases it is written in and the queries that
-read one. :mod:`axes` is :class:`PlotAxes`, the same projection spoken in
-dimension *names* rather than storage indices, which is what every stage
-after the load uses.
+carries, with the roles and aliases it is written in. :mod:`axes` is
+:class:`PlotAxes`, the same projection spoken in dimension *names* rather
+than storage indices, which is what every stage after the load uses.
 
 **This package imports nothing else in ``models/plot``.** That is the point
 of it: everything else here describes data, fetches it or draws it, and all
@@ -15,16 +14,17 @@ wants it is not vocabulary and belongs elsewhere -- which is how
 ``storage_axis_to_plot_axis`` was found taking a frame it should never have
 had, and how ``default_profile_label`` was found to be ROI text.
 
-Unlike :mod:`~nbs_viewer.models.plot.geometry`, this surface hides almost
-nothing; there is no arithmetic here to hide. It exists so that the 60-odd
-callers who want three names -- ``Projection``, ``DimRole``, ``ViewCrop`` --
-say one short thing, and so that how these two files divide the vocabulary
-can change without touching any of them.
+Nine free functions that took a ``Projection`` as their first argument are
+now methods on it, and a tenth that built one is
+:meth:`Projection.from_slice_info`. They were the same shape as the methods
+the class already carried, and the difference it makes is not tidiness: a
+method travels with the object a caller already holds, so asking a
+projection a question costs no import at all. That took this surface from
+nineteen names to ten, of which nine are types.
 
-Not exported: ``profile_storage_axis``, which reads the plot-X axis back off
-a 1-D profile projection and has no caller anywhere. The name is taken three
-times over by a ``RoiOperation`` field and a widget method, which is why it
-looked used. Left in place rather than deleted, and not put on the door.
+The one function left is :func:`resolve_axis_order`, and it is left because
+it decides an axis order *before* any projection exists -- policy rather than
+a question about a value.
 """
 
 from .axes import PlotAxes
@@ -37,16 +37,7 @@ from .spec import (
     SliceItem,
     SpatialReduce,
     ViewCrop,
-    classify_profile_kind,
-    eligible_profile_axes,
-    is_plot_plane_storage_axis,
-    plot_axis_to_storage_axis,
-    profile_view_spec,
-    projected_axis_names,
     resolve_axis_order,
-    scan_profile_storage_axis,
-    spec_from_slice_info,
-    storage_axis_to_plot_axis,
 )
 
 __all__ = [
@@ -59,14 +50,5 @@ __all__ = [
     "SliceItem",
     "SpatialReduce",
     "ViewCrop",
-    "classify_profile_kind",
-    "eligible_profile_axes",
-    "is_plot_plane_storage_axis",
-    "plot_axis_to_storage_axis",
-    "profile_view_spec",
-    "projected_axis_names",
     "resolve_axis_order",
-    "scan_profile_storage_axis",
-    "spec_from_slice_info",
-    "storage_axis_to_plot_axis",
 ]

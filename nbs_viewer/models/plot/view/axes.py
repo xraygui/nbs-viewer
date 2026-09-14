@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence, Tuple
 
-from .spec import DimRole, Projection, profile_view_spec
+from .spec import DimRole, Projection
 
 
 @dataclass(frozen=True)
@@ -195,7 +195,7 @@ class PlotAxes:
             Named profile view.
         """
         return PlotAxes.of(
-            profile_view_spec(self.spec, profile_storage_axis, spatial_reduce),
+            self.spec.to_profile(profile_storage_axis, spatial_reduce),
             self.names,
             plane=self.plane,
             profile=self.names[profile_storage_axis],

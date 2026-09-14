@@ -8,12 +8,7 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import (
-    DimRole,
-    Projection,
-    classify_profile_kind,
-    scan_profile_storage_axis,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -104,10 +99,10 @@ def test_scan_profile_storage_axis_4d():
         ),
         indices=(0, 0, 0, 0),
     )
-    assert scan_profile_storage_axis(spec) == 0
-    assert classify_profile_kind(spec, 0) == "stack_spectrum"
-    assert classify_profile_kind(spec, 1) == "local_profile"
-    assert classify_profile_kind(spec, 3) == "local_profile"
+    assert spec.scan_axis == 0
+    assert spec.profile_kind(0) == "stack_spectrum"
+    assert spec.profile_kind(1) == "local_profile"
+    assert spec.profile_kind(3) == "local_profile"
 
 
 def test_scan_profile_storage_axis_2d_mesh():
@@ -117,9 +112,9 @@ def test_scan_profile_storage_axis_2d_mesh():
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    assert scan_profile_storage_axis(spec) == 0
-    assert classify_profile_kind(spec, 0) == "stack_spectrum"
-    assert classify_profile_kind(spec, 1) == "local_profile"
+    assert spec.scan_axis == 0
+    assert spec.profile_kind(0) == "stack_spectrum"
+    assert spec.profile_kind(1) == "local_profile"
 
 
 def test_scan_profile_storage_axis_unchanged_after_swap():
@@ -135,7 +130,7 @@ def test_scan_profile_storage_axis_unchanged_after_swap():
         indices=(0, 0, 0, 0),
     )
     swapped = spec.swap_rows(1)
-    assert scan_profile_storage_axis(swapped) == 0
+    assert swapped.scan_axis == 0
 
 
 def test_copy_plot_bundle_is_independent():

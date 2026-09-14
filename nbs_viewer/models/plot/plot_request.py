@@ -14,16 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple
 
-from .view import (
-    DimRole,
-    PlotAxes,
-    Projection,
-    SliceItem,
-    SpatialReduce,
-    ViewCrop,
-    plot_axis_to_storage_axis,
-    storage_axis_to_plot_axis,
-)
+from .view import DimRole, PlotAxes, Projection, SliceItem, SpatialReduce, ViewCrop
 from .geometry import (
     MaskMode,
     PlotViewFrame,
@@ -577,9 +568,7 @@ def roi_profile_request(
     if plane_axes is None:
         raise ValueError("an ROI profile needs a 2-D parent plane")
     if not isinstance(profile_axis, int):
-        profile_axis = plot_axis_to_storage_axis(
-            parent.view, profile_axis
-        )
+        profile_axis = parent.view.storage_axis_for(profile_axis)
     if (
         span_full
         and region.separable_for_profile
@@ -589,7 +578,7 @@ def roi_profile_request(
         region = expand_region_for_profile(
             plane_frame,
             region,
-            storage_axis_to_plot_axis(parent.view, profile_axis),
+            parent.view.plot_axis_for(profile_axis),
         )
     # The transform is inherited, not cleared. An ROI is drawn on what the
     # user sees, and what they see is f(y): clearing it here was why the same

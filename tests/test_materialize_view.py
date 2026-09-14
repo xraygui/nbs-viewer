@@ -5,12 +5,7 @@ import pytest
 
 from nbs_viewer.models.plot.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import (
-    DimRole,
-    Projection,
-    eligible_profile_axes,
-    profile_view_spec,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.geometry.frame import (
     cell_x_bounds_mesh,
@@ -75,10 +70,10 @@ def test_profile_view_spec_in_plane_roles():
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
     )
-    output = profile_view_spec(parent, profile_storage_axis=1, spatial_reduce="sum")
+    output = parent.to_profile(profile_storage_axis=1, spatial_reduce="sum")
     assert output.plot_ndim == 1
     assert output.roles == (DimRole.SUM, DimRole.PLOT_X)
-    along_y = profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="mean")
+    along_y = parent.to_profile(profile_storage_axis=0, spatial_reduce="mean")
     assert along_y.roles[0] == DimRole.PLOT_X
     assert along_y.roles[1] == DimRole.MEAN
 
@@ -176,7 +171,7 @@ def test_profile_view_spec_stack_roles():
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(1, 0, 0, 0),
     )
-    output = profile_view_spec(parent, profile_storage_axis=0, spatial_reduce="mean")
+    output = parent.to_profile(profile_storage_axis=0, spatial_reduce="mean")
     assert output.plot_ndim == 1
     assert output.roles[0] == DimRole.PLOT_X
     assert output.roles[1] == DimRole.SUM
@@ -193,7 +188,7 @@ def test_eligible_profile_axes_excludes_sum_mean():
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0, 0),
     )
-    axes = eligible_profile_axes(parent)
+    axes = parent.eligible_profile_axes()
     assert 0 in axes
     assert 2 in axes
     assert 3 in axes

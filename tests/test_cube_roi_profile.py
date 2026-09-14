@@ -24,7 +24,6 @@ from nbs_viewer.models.plot.geometry.frame import (
 from nbs_viewer.models.plot.geometry.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run_source import RunSource
-from nbs_viewer.models.plot.view.spec import eligible_profile_axes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session
 
@@ -125,7 +124,7 @@ def test_every_eligible_profile_axis_previews_on_a_cube(
     session, _run, trace = _session(
         "detector_cube", depth_on_slider=depth_on_slider
     )
-    eligible = eligible_profile_axes(trace.request.view)
+    eligible = trace.request.view.eligible_profile_axes()
     assert eligible, "no profile axis offered for a rank-3 key"
 
     sizes = {0: N_Y, 1: N_X, 2: N_Z}

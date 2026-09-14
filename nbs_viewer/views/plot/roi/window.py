@@ -28,14 +28,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nbs_viewer.models.plot.view import (
-    Projection,
-    eligible_profile_axes,
-    is_plot_plane_storage_axis,
-    plot_axis_to_storage_axis,
-    scan_profile_storage_axis,
-    storage_axis_to_plot_axis,
-)
+from nbs_viewer.models.plot.view import Projection
 from nbs_viewer.models.plot.roi import profile_axis_name
 from nbs_viewer.models.plot.geometry import PlotViewFrame, RegionDefinition
 from nbs_viewer.models.plot.roi import RoiEntry, RoiOperation
@@ -992,9 +985,7 @@ class RoiWindow(QDialog):
             and self._parent_spec is not None
         ):
             try:
-                profile_plot_axis = storage_axis_to_plot_axis(
-                    self._parent_spec, storage_axis
-                )
+                profile_plot_axis = self._parent_spec.plot_axis_for(storage_axis)
             except ValueError:
                 profile_plot_axis = None
         has_selection = entry is not None
@@ -1008,7 +999,7 @@ class RoiWindow(QDialog):
         if self._parent_spec is None:
             return False
         storage_axis = self.get_profile_storage_axis()
-        return is_plot_plane_storage_axis(self._parent_spec, storage_axis)
+        return self._parent_spec.is_plot_plane_axis(storage_axis)
 
     def set_draw_checked(self, checked: bool):
         """
@@ -1053,7 +1044,7 @@ class RoiWindow(QDialog):
         if isinstance(data, int):
             return data
         if self._parent_spec is not None:
-            return plot_axis_to_storage_axis(self._parent_spec, "plot_x")
+            return self._parent_spec.storage_axis_for("plot_x")
         return 0
 
     def set_profile_context(
@@ -1080,9 +1071,9 @@ class RoiWindow(QDialog):
                 if entry is not None
                 else self.profile_axis_combo.currentData()
             )
-            eligible = eligible_profile_axes(parent_spec)
+            eligible = parent_spec.eligible_profile_axes()
             plot_order = parent_spec.plot_axis_order()
-            default_axis = scan_profile_storage_axis(parent_spec)
+            default_axis = parent_spec.scan_axis
             if default_axis is None and len(plot_order) >= 1:
                 default_axis = plot_order[-1]
 
@@ -1160,6 +1151,6 @@ class RoiWindow(QDialog):
         if self._parent_frame is None or self._parent_spec is None:
             return None
         storage_axis = self.get_profile_storage_axis()
-        if not is_plot_plane_storage_axis(self._parent_spec, storage_axis):
+        if not self._parent_spec.is_plot_plane_axis(storage_axis):
             return None
-        return storage_axis_to_plot_axis(self._parent_spec, storage_axis)
+        return self._parent_spec.plot_axis_for(storage_axis)

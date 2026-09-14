@@ -11,7 +11,7 @@ from qtpy.QtWidgets import QSizePolicy
 from nbs_viewer.models.data.array_contract import index_placeholders
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
-from nbs_viewer.models.plot.view import spec_from_slice_info
+from nbs_viewer.models.plot.view import Projection
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker
 
@@ -440,7 +440,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
                 xkeys=[xkey] if xkey else (),
                 ykey=y_key,
                 norm_keys=norm_keys,
-                projection=spec_from_slice_info(tuple(slice_info), 2),
+                projection=Projection.from_slice_info(tuple(slice_info), 2),
                 dims=run_model.plot_axis_names(
                     y_key, [xkey] if xkey else []
                 ),
@@ -460,7 +460,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             self._traces[key] = trace
         else:
             trace = self._traces[key]
-            trace.set_projection(spec_from_slice_info(tuple(slice_info), 2))
+            trace.set_projection(Projection.from_slice_info(tuple(slice_info), 2))
         return trace
 
     def _grid_worker_key(self, run_uid, image_idx):
@@ -496,7 +496,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         request = trace.request
         if slice_info is not None:
             trace.set_projection(
-                spec_from_slice_info(tuple(slice_info), dimension), emit=False
+                Projection.from_slice_info(tuple(slice_info), dimension), emit=False
             )
             request = trace.request
         worker = PlotWorker(trace, request, generation, artist)
