@@ -305,15 +305,52 @@ cell-bounds arithmetic should break when that arithmetic moves.
   `plot_request` 6 → 4, `trace` 2 → 1, `view.axes` 1 → 0, and
   `views/plot/roi/window.py` goes from six imported names to one.
 
-### Step 7 — measure `region_controller`, then `fetch/` and `run/`
+### Step 7 — measure `region_controller`, then `fetch/` and `run/` — **landed**
 
-- [ ] Measure `region_controller` for a seam first — decision 6 — and record
-  the result even if it is "one object".
-- [ ] `fetch/`: `request.py`, `plan.py`, `stages.py`, `pipeline.py`. No
-  `__init__` surface; its only production consumer is `run/source.py`.
-  `plan.py` is `plan_fetch`, whose only caller is `run_fetch`.
-- [ ] `run/`: `source.py`, `fetch.py`, `frozen_spectrum.py`, `identity.py`. No
-  surface; each file exports one class.
+- [x] **`region_controller` measured — decision 6.** 452 code lines, 31
+  members (28 public), 6 signals, 8 private fields. Mapping each public
+  member to the fields it reaches, transitively through its own helpers,
+  partitions it:
+
+  | members | touch | what they are |
+  |---:|---|---|
+  | 7 | `_view_crop`, `_view_crop_key` only | the crop |
+  | 10 | `_roi_set` + three flags only | the ROI set |
+  | 4 | both | `sync_region_state_with_view`, `invalidate_all_region_state`, `on_selected_keys_changed`, `on_plot_ndim_changed` |
+  | 7 | neither | resolve a trace, frame or session from outside, and build a request |
+
+  **The verdict is coordinator, with a real seam.** The crop cluster and the
+  ROI cluster share *no field*, so the split is available — but the four
+  members that touch both are not shared state, they are lifecycle fan-out:
+  the view changed, so invalidate and resync both halves. That is what a
+  coordinator does. Three of the six signals are emitted from both clusters
+  for the same reason.
+
+  So it **stays at the top level with `plot_session.py`**, and the split is
+  not done here — decision 6 says measure, not refactor. If it is taken
+  later it must hand out its two children rather than forward to them, per
+  decision 1's precedent with `RunFetch`; a `RegionController` that
+  re-exposed seventeen members would be the forwarding shell this project
+  has said repeatedly it does not want.
+- [x] `fetch/`: `request.py`, `plan.py`, `stages.py` — **no `pipeline.py`**,
+  because there is nothing to put in one. The pipeline is the order the
+  stages run in, and decision 1 put that on `RunFetch.get_plot_bundle`.
+  `plot_request.py` split along the direction the dependency already ran:
+  `plan` needs `PlotRequest`, `request` needs nothing from `plan`. The two
+  builders step 4 reassigned here, `crop_from_region` and
+  `roi_profile_request`, are in `request.py` with the thing they build. No
+  `__init__` surface; every consumer names its module.
+- [x] `run/`: `source.py`, **`pipeline.py`**, `frozen_spectrum.py`,
+  `identity.py`. Not `fetch.py` as decision 4 had it: `models/plot/fetch/` is
+  the package next door, and two things called `fetch` one directory apart is
+  the kind of name this plan exists to delete. The distinction is real — that
+  package *describes* a fetch, this class *performs* one — and `pipeline` is
+  the name the draft wanted for it anyway. `RunFetch` and `.fetch` are
+  unchanged, so nothing outside the package moved. No surface; each file
+  exports one class.
+- [x] Fixed in passing: `frozen_spectrum` annotated with `List` without
+  importing it, invisible because `from __future__ import annotations` makes
+  annotations strings.
 
 ### Step 8 — top level and the shell
 
@@ -339,6 +376,7 @@ their own plans.
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
 | 2026-09-14 | Decision 5 reversed by the maintainer, and acted on in step 6: nine free functions taking a `Projection` are now methods on it, plus a `from_slice_info` constructor. The observation had been made twice — step 4 noted these looked like methods in costume and deferred to the decision, and step 6 then found six of them impossible to place because moving them would cycle. Both difficulties had the same cause: they were already home, on the type, and the placement question was the wrong one. `view/`'s surface is 19 → 10 names, nine of them types; `region_controller` 9 → 6, `plot_request` 6 → 4, `trace` 2 → 1, and the ROI window imports one name where it imported six. Two transcription hazards worth recording for the next mechanical conversion: substituting the receiver name for `self` also rewrote it inside error-message strings and numpydoc parameter entries, and neither shows up as a test failure except where a test matched the message text. 529 tests. |
+| 2026-09-14 | Step 7 landed. The `region_controller` measurement is recorded under the step: coordinator-shaped, with a real seam between two state clusters that share no field, and it stays at the top level. Two naming corrections. `fetch/pipeline.py` does not exist — the pipeline is `RunFetch.get_plot_bundle`, so the draft's fourth file had no contents. And `run/fetch.py` is `run/pipeline.py`, because `models/plot/fetch/` already had that name one directory away; `RunFetch` and the `.fetch` attribute are unchanged. Three mechanical hazards worth recording: a regex keyed on `from .fetch` silently resolved to the sibling module rather than the package, an import list derived by comparing two groups missed a name both needed, and neither showed up as a test failure until the code ran. An undefined-name sweep across the package now runs after each move and is what caught the second, plus a pre-existing missing `List` import in `frozen_spectrum`. 30 modules, 4862 code lines, no runtime cycles, 529 tests. |
 | 2026-09-14 | Step 6 landed. `view/` is `spec.py` + `axes.py` with a 19-name surface, and a test now asserts the package imports nothing else in `models/plot`. One finding: `profile_storage_axis` has no caller anywhere — the seventeen apparent uses are a `RoiOperation` field and a widget method of the same name, which is a third name collision of the kind step 4 fixed for `plot_axis_names`. Left in place, kept off the surface, and flagged rather than deleted. 27 modules, 4900 code lines, no runtime cycles, no function-local sibling imports, 529 tests. |
 | 2026-09-14 | Step 6, first two packages: the guard was taught to walk subpackages first (it globbed one directory, so the moves would have silenced it), then `geometry/` and `roi/` landed. Two corrections to step 4's predicted redistribution, both recorded in its table: six of the eight functions promised to `roi/` stay in `view_spec`, because each reads a `Projection` and `PlotAxes.to_profile` needs `profile_view_spec` — moving it makes `view` import `roi` while `roi` already imports `view` for `SpatialReduce`, which is a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary, and that is the distinction the step-4 table got wrong. `crop_from_region` and `roi_profile_request` go to `fetch/` in step 7 instead: both build a request, and `crop_from_region` is view cropping, not ROI. `roi/` is therefore two files and a five-name surface. Two diagnostic bugs the first surface exposed are fixed in the tool: `working_set` now follows re-exports to the defining module, without which every count would have drifted toward zero as files moved while no reader's job got smaller, and `import_sites` now recurses. Surface rows are labelled, since their count measures the door. |
 | 2026-09-14 | Step 5 landed. Four aliases, one definition each, and five deleted. No behaviour change: `PlotRequest.__post_init__` already validated both `mask_mode` and `spatial_reduce`, so `roi_set`'s widening to `str` was invisible to the interpreter — which is why it survived, and why narrowing it back is free. It adds one mutual pair, `region ↔ view_spec`: `region` now imports `PlotAxisName` at runtime while `view_spec` still names `MaskMode` under `TYPE_CHECKING` for `default_profile_label`. Not a runtime cycle, and it dissolves in step 6 when that function leaves for `roi/`. 522 tests. |

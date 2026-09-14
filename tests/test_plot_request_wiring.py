@@ -11,12 +11,9 @@ from nbs_viewer.models.plot.view.spec import DimRole, ViewCrop
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import PolygonRegion, compile_with_mask_mode
-from nbs_viewer.models.plot.plot_request import (
-    build_plot_request,
-    plan_fetch,
-    roi_profile_request,
-)
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.fetch.request import build_plot_request, roi_profile_request
+from nbs_viewer.models.plot.fetch.plan import plan_fetch
+from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
     VPPEM_UID,
@@ -113,7 +110,7 @@ def test_run_model_get_plot_bundle_request_with_crop():
 def test_plot_data_model_holds_request_and_fetches():
     from nbs_viewer.models.plot.view.spec import Projection
     from nbs_viewer.models.plot.trace import Trace
-    from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
+    from nbs_viewer.models.plot.fetch.request import TraceKey, build_plot_request
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -178,7 +175,7 @@ def test_set_request_keeps_trace_key():
 
 
 def test_ensure_trace_assembles_request(qapp):
-    from nbs_viewer.models.plot.plot_request import TraceKey
+    from nbs_viewer.models.plot.fetch.request import TraceKey
     from tests.fixtures.plot_session import make_plot_session
 
     run = make_vppem_run()

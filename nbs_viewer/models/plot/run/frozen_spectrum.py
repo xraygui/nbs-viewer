@@ -5,17 +5,17 @@ Frozen ROI-derived spectra registered as synthetic keys on RunSource.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
 import xarray as xr
 
-from ..data.array_contract import labelled_array, surviving_dims
-from ..data.key_info import KeyInfo
-from ..data.synthetic_keys import SYNTHETIC_KEY_PREFIX, is_synthetic_key
-from .geometry import PlotBundle
-from .plot_request import PlotRequest
+from ...data.array_contract import labelled_array, surviving_dims
+from ...data.key_info import KeyInfo
+from ...data.synthetic_keys import SYNTHETIC_KEY_PREFIX, is_synthetic_key
+from ..geometry import PlotBundle
+from ..fetch.request import PlotRequest
 
 __all__ = [
     "SYNTHETIC_KEY_PREFIX",

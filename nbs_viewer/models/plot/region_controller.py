@@ -28,12 +28,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
 
-from .plot_request import (
-    PlotRequest,
-    TraceKey,
-    crop_from_region,
-    roi_profile_request,
-)
+from .fetch.request import PlotRequest, TraceKey, crop_from_region, roi_profile_request
 from .geometry import (
     PlotViewFrame,
     RectRegion,
@@ -48,7 +43,7 @@ from .view import Projection, ViewCrop
 from .roi import default_profile_label
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .frozen_spectrum import FrozenSpectrum
+    from .run.frozen_spectrum import FrozenSpectrum
     from .geometry import PlotBundle
     from .plot_session import PlotSession
 

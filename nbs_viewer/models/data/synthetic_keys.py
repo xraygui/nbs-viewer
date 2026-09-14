@@ -10,7 +10,7 @@ measurement.
 The convention lives here, below both layers that use it, because it used to
 live in ``models/plot`` and ``models/data/bluesky.py`` imported upward to
 reach it. What the data layer needs is the convention, not the class that
-follows it: :class:`~nbs_viewer.models.plot.frozen_spectrum.FrozenSpectrum`
+follows it: :class:`~nbs_viewer.models.plot.run.frozen_spectrum.FrozenSpectrum`
 carries a ``PlotBundle`` and stays in the plot layer.
 """
 

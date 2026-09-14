@@ -8,7 +8,7 @@ from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
 
 from nbs_viewer.models.plot.plot_session import PlotSession
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 
 from tests.fixtures.catalog_recipes import (
     RECIPE_NAMES,

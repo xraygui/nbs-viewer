@@ -2,7 +2,7 @@
 A run pinned as an immutable reference for other runs to be computed against.
 
 This is the *cross-run* half of "frozen" in this codebase. The other half,
-:class:`~nbs_viewer.models.plot.frozen_spectrum.FrozenSpectrum`, is an
+:class:`~nbs_viewer.models.plot.run.frozen_spectrum.FrozenSpectrum`, is an
 intra-run synthetic key produced by an ROI commit and registered on the
 ``RunSource`` it came from. A :class:`FrozenRun` is a different thing: a
 whole run whose data is captured so that a *different* run can be divided

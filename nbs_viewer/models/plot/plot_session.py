@@ -30,13 +30,10 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     aggregate_tiled_fetch_label,
 )
 
-from .plot_request import (
-    TraceKey,
-    build_plot_request,
-)
+from .fetch.request import TraceKey, build_plot_request
 from .region_controller import RegionController
 from .run_collection import RunCollection
-from .run_source import RunSource
+from .run.source import RunSource
 from .selection import Selection
 from .trace import Trace
 from .trace_set import TraceSet

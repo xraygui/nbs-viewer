@@ -214,7 +214,7 @@ def test_image_and_mesh_agree_on_axis_placement():
 
 def _plain_2d_request():
     """A 2-D request with no region, for the packing step."""
-    from nbs_viewer.models.plot.plot_request import build_plot_request
+    from nbs_viewer.models.plot.fetch.request import build_plot_request
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     return build_plot_request(

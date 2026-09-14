@@ -9,16 +9,16 @@ import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.frozen_spectrum import (
-    SYNTHETIC_KEY_PREFIX,
+from nbs_viewer.models.plot.run.frozen_spectrum import (
     FrozenSpectrum,
+    SYNTHETIC_KEY_PREFIX,
     copy_plot_bundle,
     is_synthetic_key,
 )
 from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
-from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
 
 

@@ -26,7 +26,7 @@ from nbs_viewer.models.data.array_contract import (
 )
 from nbs_viewer.models.data.base import render_mode_hint_for
 from nbs_viewer.models.data.key_info import KeyInfo
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.fixtures import make_vppem_run
 from tests.fixtures.catalog_recipes import image_scan_run
 

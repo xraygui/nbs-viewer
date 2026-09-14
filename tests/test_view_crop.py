@@ -5,12 +5,12 @@ from dataclasses import replace
 import numpy as np
 
 from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.plot_request import (
+from nbs_viewer.models.plot.fetch.request import (
     PlotRequest,
     crop_from_region,
-    plan_fetch,
     roi_profile_request,
 )
+from nbs_viewer.models.plot.fetch.plan import plan_fetch
 from nbs_viewer.models.plot.geometry.region import RectRegion
 
 from tests.fixtures.display_plane import (

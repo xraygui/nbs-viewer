@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from nbs_viewer.models.plot.plot_session import PlotSession
-from nbs_viewer.models.plot.plot_request import TraceKey
+from nbs_viewer.models.plot.fetch.request import TraceKey
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 

@@ -11,11 +11,11 @@ import pytest
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
+from nbs_viewer.models.plot.run.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

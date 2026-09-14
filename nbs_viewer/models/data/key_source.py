@@ -9,7 +9,7 @@ abstraction; performed five times it is a copy, and the copies could drift.
 
 What makes one dispatch possible is that the two sources have different
 *shapes* rather than different capabilities. A
-:class:`~nbs_viewer.models.plot.frozen_spectrum.FrozenSpectrum` **is** one
+:class:`~nbs_viewer.models.plot.run.frozen_spectrum.FrozenSpectrum` **is** one
 key, so its methods take no key name. A :class:`CatalogRun` holds many, so
 its methods take one. :class:`CatalogKey` binds a run and a key name together
 so that both answer the same key-free protocol, and ``RunSource`` picks a

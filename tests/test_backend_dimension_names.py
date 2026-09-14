@@ -21,7 +21,7 @@ import pytest
 
 from nbs_viewer.models.data.bluesky import BlueskyRun
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import _base_metadata, image_scan_run
 
 

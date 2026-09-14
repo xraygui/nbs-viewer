@@ -15,7 +15,7 @@ from pathlib import Path
 
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.region_controller import RegionController
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.plot.view.spec import ViewCrop
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session

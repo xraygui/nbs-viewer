@@ -12,11 +12,8 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.plot_request import (
-    PlotRequest,
-    plan_fetch,
-    roi_profile_request,
-)
+from nbs_viewer.models.plot.fetch.request import PlotRequest, roi_profile_request
+from nbs_viewer.models.plot.fetch.plan import plan_fetch
 from nbs_viewer.models.plot.geometry.frame import region_frame_for_bbox
 from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,

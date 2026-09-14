@@ -19,8 +19,8 @@ import numpy as np
 import xarray as xr
 from asteval import Interpreter
 
-from ..data.array_contract import REDUCE_SKIPNA
-from .geometry import (
+from ...data.array_contract import REDUCE_SKIPNA
+from ..geometry import (
     MaskMode,
     PlotBundle,
     PlotViewFrame,
@@ -32,8 +32,8 @@ from .geometry import (
     mesh_separable_edge_grids,
     prepare_1d_bundle,
 )
-from .view import DimRole, PlotAxes, PlotAxisName, Projection, SliceItem
-from .plot_request import PlotRequest
+from ..view import DimRole, PlotAxes, PlotAxisName, Projection, SliceItem
+from .request import PlotRequest
 
 
 def _plane_axis_arrays(

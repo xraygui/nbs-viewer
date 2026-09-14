@@ -13,7 +13,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
 from ...models.data.combined import CombinationMethod, CombineError
-from ...models.plot.run_source import RunSource
+from ...models.plot.run.source import RunSource
 from .run_list_item_model import RunListItemModel
 from ..plot.metadataView import FullMetadataBrowser
 from typing import List

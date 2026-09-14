@@ -161,7 +161,7 @@ def roi_profile_from_block(
     import xarray as xr
 
     from nbs_viewer.models.plot.view.axes import PlotAxes
-    from nbs_viewer.models.plot.stages import materialize_view
+    from nbs_viewer.models.plot.fetch.stages import materialize_view
 
     axis_names = list(axis_names)
     # The block is what the plan loaded, so an axis the slice indexed away is

@@ -42,7 +42,7 @@ from nbs_viewer.models.data.combined import (
 )
 from nbs_viewer.models.data.frozen import FreezeError, FrozenRun
 
-from .run_source import RunSource
+from .run.source import RunSource
 
 
 class RunCollection(QObject):

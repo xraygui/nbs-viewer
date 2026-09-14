@@ -17,7 +17,7 @@ from nbs_viewer.models.data.combined import (
 from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import line_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

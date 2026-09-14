@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QSizePolicy
 
 from nbs_viewer.models.data.array_contract import index_placeholders
 from nbs_viewer.models.plot.trace import Trace
-from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
+from nbs_viewer.models.plot.fetch.request import TraceKey, build_plot_request
 from nbs_viewer.models.plot.view import Projection
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker

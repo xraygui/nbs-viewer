@@ -11,7 +11,7 @@ from typing import Dict, Iterator, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal
 
-from .plot_request import PlotRequest, TraceKey
+from .fetch.request import PlotRequest, TraceKey
 from .trace import Trace
 
 

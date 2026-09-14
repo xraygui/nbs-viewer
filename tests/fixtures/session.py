@@ -10,7 +10,7 @@ from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.geometry.bundle import PlotBundle
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.presenter import PlotPresenter
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run.source import RunSource
 
 from .catalog_recipes import build_catalog
 

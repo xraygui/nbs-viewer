@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 import numpy as np
 import xarray as xr
 
-from .stages import (
+from ..fetch.stages import (
     apply_normalization,
     apply_transform,
     mask_to_profile,
@@ -32,7 +32,7 @@ from .stages import (
     reduce_to_plane,
     slice_info_for_key,
 )
-from .geometry import (
+from ..geometry import (
     PlotBundle,
     PlotViewFrame,
     build_plot_bundle,
@@ -40,11 +40,12 @@ from .geometry import (
     display_flips,
     frame_for_plane,
 )
-from .plot_request import FetchPlan, PlotRequest, plan_fetch
+from ..fetch.request import PlotRequest
+from ..fetch.plan import FetchPlan, plan_fetch
 from nbs_viewer.utils import print_debug
 
 if TYPE_CHECKING:
-    from .run_source import RunSource
+    from .source import RunSource
 
 
 class RunFetch:

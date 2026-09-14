@@ -5,12 +5,12 @@ from qtpy.QtCore import QObject, Signal
 import numpy as np
 import xarray as xr
 
-from ..data.base import CatalogRun
-from ..data.key_info import KeyInfo
-from ..data.key_source import CatalogKey
+from ...data.base import CatalogRun
+from ...data.key_info import KeyInfo
+from ...data.key_source import CatalogKey
 from .frozen_spectrum import FrozenSpectrum
-from .run_fetch import RunFetch
-from .run_identity import RunIdentity
+from .pipeline import RunFetch
+from .identity import RunIdentity
 from nbs_viewer.utils import print_debug
 
 
