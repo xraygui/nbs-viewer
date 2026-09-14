@@ -4,7 +4,7 @@ A sibling tool to ROI and crop that collapses **one** in-plane axis inside a
 drawn band and yields a **2-D** image of the kept spatial coordinate versus the
 stack / scan axis (e.g. `dim_1` × `sampleVoltage_VSource`).
 
-ROI stays **1-D only** ([`roi_workbench_plan.md`](roi_workbench_plan.md)). Crop
+ROI stays **1-D only** ([`roi_workbench_plan.md`](archive/roi_workbench_plan.md)). Crop
 stays **same-plane 2-D** extraction. Band projection is the third product.
 
 ## Motivation

@@ -145,7 +145,7 @@ decision — is a ninth of the file.
    `planDocuments/archive/`, so the active set is what remains at the top
    level and nobody has to open an old plan to find out whether it is done.
    Rewriting history to save lines would be work for its own sake; getting it
-   out of the way is the point. Ten links in these documents already point at
+   out of the way is the point. Seven links in these documents already point at
    plans that were *deleted* on completion, which is the version of this that
    loses the history instead.
 4. Still no new *plan* documents where an existing one can be superseded. A

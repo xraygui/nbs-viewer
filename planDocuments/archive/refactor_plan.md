@@ -309,13 +309,13 @@ them.
   test is still preferable whenever the behaviour can be reached without a
   widget. What remains open there is the shape of a broad widget suite, per
   "After this refactor" above.
-- **[`zarr_l2_cache_plan.md`](../zarr_l2_cache_plan.md)** — cache internals,
+- **[`zarr_l2_cache_plan.md`](zarr_l2_cache_plan.md)** — cache internals,
   phase 2+ open.
 - Feature plans, untouched by this refactor and blocked on it:
-  [`roi_workbench_plan.md`](../roi_workbench_plan.md),
-  [`roi_analysis_plan.md`](../roi_analysis_plan.md),
+  [`roi_workbench_plan.md`](roi_workbench_plan.md),
+  [`roi_analysis_plan.md`](roi_analysis_plan.md),
   [`band_projection_plan.md`](../band_projection_plan.md),
-  [`derived_spectra_plan.md`](../derived_spectra_plan.md).
+  [`derived_spectra_plan.md`](derived_spectra_plan.md).
 
 ## Modification log
 
