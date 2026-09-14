@@ -162,11 +162,12 @@ def image_scan_run(
         ],
         # Declared for every key, as the VPPEM fixture does, so nothing
         # depends on inference. ``time`` names the event axis and every
-        # per-event key shares it; each detector-axis coordinate names its
-        # own axis. Both detectors still render as images -- an earlier note
-        # here warned that naming the real (non-uniform) ``pixel``
-        # coordinates would flip ``detector_image`` to a mesh, which is no
-        # longer true and was verified before removing the warning.
+        # per-event key shares it; ``pixel`` and ``dim_2`` are each their own
+        # axis's coordinate, and ``en_energy`` is a second coordinate on
+        # ``pixel``. The fetch plots against them, so the unevenly spaced
+        # ``pixel`` makes ``detector_image`` a mesh -- until ``en_energy`` is
+        # selected as X, which names that axis after it and, being evenly
+        # spaced, makes the plane an image.
         dims={
             "time": ("time",),
             # ``row`` is a coordinate *along* the event axis, the way a motor
@@ -181,6 +182,61 @@ def image_scan_run(
             "detector_cube": ("time", "pixel", "dim_2"),
         },
     )
+    return MemoryRun(metadata, data)
+
+
+def mca_scan_run(
+    *, hint_path=("mca_energies",), n_events: int = 6, n_bins: int = 8
+) -> MemoryRun:
+    """
+    Build a scan whose detector names its second axis's coordinate by hint.
+
+    The one fixture that declares plot-hint ``axes``. ``mca`` is
+    ``(time, dim_1)``, and nothing named ``dim_1`` exists, so its bins have
+    no coordinate of their own; the run's plot hints say that
+    ``mca_energies`` supplies it -- the way an energy-dispersive detector's
+    bin energies are published beside its spectrum. The energies are spaced
+    unevenly, so a consumer that plots bin indices instead is visibly wrong.
+
+    Parameters
+    ----------
+    hint_path : sequence of str, optional
+        The key path the hint gives. One element names a data key; a longer
+        path is walked by the backend's ``getAxis``, which on a memory run
+        reads its last element.
+    n_events : int, optional
+        Length of the event axis.
+    n_bins : int, optional
+        Number of detector bins.
+
+    Returns
+    -------
+    MemoryRun
+        Run with ``time``, ``en_energy``, ``mca_energies`` and ``mca``.
+    """
+    energies = 100.0 + np.cumsum(np.linspace(1.0, 3.0, n_bins))
+    data = {
+        "time": np.arange(n_events, dtype=float),
+        "en_energy": np.linspace(200.0, 300.0, n_events),
+        "mca_energies": energies,
+        "mca": 1.0
+        + np.arange(n_events * n_bins, dtype=float).reshape(n_events, n_bins),
+    }
+    metadata = _base_metadata(
+        0,
+        plan_name="mca_scan",
+        motors=["en_energy"],
+        dimensions=[(["en_energy"], "primary")],
+        dims={
+            "time": ("time",),
+            "en_energy": ("time",),
+            "mca_energies": ("dim_1",),
+            "mca": ("time", "dim_1"),
+        },
+    )
+    metadata["plot_hints"] = {
+        "primary": [{"signal": "mca", "axes": [list(hint_path)]}]
+    }
     return MemoryRun(metadata, data)
 
 

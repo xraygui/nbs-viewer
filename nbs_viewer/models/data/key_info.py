@@ -44,6 +44,13 @@ class KeyInfo:
         backing, catalog keys are ``True`` and synthetic keys are ``False``.
     render_hint : str or None
         Per-key ``image`` / ``mesh`` override from plot hints, or None.
+    coords : mapping of str to tuple of str
+        For each dimension that has a coordinate, the key path that supplies
+        it: a one-element path names a data key -- a same-named 1-D key, or
+        one a plot hint points at -- and a longer one is a hint path the
+        backend walks. Static, like everything else here, so a consumer can
+        read an axis's coordinate without reading the key itself. A
+        dimension absent from it has only its storage index.
     """
 
     name: str
@@ -52,6 +59,9 @@ class KeyInfo:
     synthetic: bool = False
     hinted: bool = False
     render_hint: Optional[str] = None
+    coords: Mapping[str, Tuple[str, ...]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     @classmethod
     def from_dims(
@@ -64,6 +74,7 @@ class KeyInfo:
         synthetic: bool = False,
         hinted: bool = False,
         render_hint: Optional[str] = None,
+        coords: Optional[Mapping[str, Sequence[str]]] = None,
     ) -> "KeyInfo":
         """
         Build a ``KeyInfo`` from a source's dimension names and shape.
@@ -90,6 +101,8 @@ class KeyInfo:
             Whether the key is a hinted primary.
         render_hint : str or None, optional
             Per-key render-mode override.
+        coords : mapping of str to sequence of str, optional
+            Coordinate key path per dimension, for those that have one.
 
         Returns
         -------
@@ -99,8 +112,8 @@ class KeyInfo:
         Raises
         ------
         ValueError
-            If the name count disagrees with the rank, or two axes share a
-            name.
+            If the name count disagrees with the rank, two axes share a
+            name, or a coordinate is given for a dimension the key lacks.
         """
         dims = tuple(dims)
         shape = tuple(int(size) for size in shape)
@@ -115,6 +128,13 @@ class KeyInfo:
                 "Normalization aligns arrays by axis name, so a duplicate is "
                 "a silent wrong answer rather than a cosmetic problem."
             )
+        coords = {dim: tuple(path) for dim, path in (coords or {}).items()}
+        stray = [dim for dim in coords if dim not in dims]
+        if stray:
+            raise ValueError(
+                f"key {name!r} gives coordinates for {stray}, which are not "
+                f"among its dimensions {dims}"
+            )
         return cls(
             name=name,
             label=name if label is None else label,
@@ -122,6 +142,7 @@ class KeyInfo:
             synthetic=synthetic,
             hinted=hinted,
             render_hint=render_hint,
+            coords=MappingProxyType(coords),
         )
 
     @property

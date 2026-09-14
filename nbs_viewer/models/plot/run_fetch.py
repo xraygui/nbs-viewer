@@ -4,8 +4,8 @@ Fetch for one run: from a plot request to a plot bundle.
 ``RunSource`` is the union of a catalog run and its frozen synthetic keys
 under one key space. Turning a request into a bundle is a different job --
 plan the load, hold the block, normalize, reduce, transform, mask, pack --
-and it reaches the source through four members only: ``read``,
-``load_axes``, ``describe`` and ``plot_axis_names``. It lived on ``RunSource``
+and it reaches the source through ``load``, ``load_coords``, ``read``,
+``describe`` and ``plot_axis_names`` only. It lived on ``RunSource``
 as nine methods, about half the class, and was the only user of every
 plot-layer module that class imported.
 
@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 import numpy as np
 import xarray as xr
 
-from ..data.array_contract import labelled_array
 from .plot_bundle import (
     apply_normalization,
     apply_transform,
@@ -39,7 +38,7 @@ from .plot_geometry import (
     classify_render_mode,
     display_flips,
 )
-from .plot_request import FetchPlan, PlotRequest, kept_axes, plan_fetch
+from .plot_request import FetchPlan, PlotRequest, plan_fetch
 from .plot_view_frame import PlotViewFrame, frame_for_plane
 from nbs_viewer.utils import print_debug
 
@@ -54,8 +53,8 @@ class RunFetch:
     Parameters
     ----------
     source : RunSource
-        The run whose keys are read. Only ``read``, ``load_axes``,
-        ``describe`` and ``plot_axis_names`` are used.
+        The run whose keys are read. Only ``load``, ``load_coords``,
+        ``read``, ``describe`` and ``plot_axis_names`` are used.
     """
 
     def __init__(self, source: "RunSource") -> None:
@@ -371,6 +370,12 @@ class RunFetch:
         the flip that puts a plane the right way up for ``imshow`` happens
         once, at the pack.
 
+        The X selection is applied by the load, as a coordinate, under the
+        names the plan carries: the axis named after the X key carries that
+        key's values. That used to be a second call beside the read, which
+        re-ran the dimension analysis to produce coordinates and names, and
+        dropped the names.
+
         Parameters
         ----------
         plan : FetchPlan
@@ -385,22 +390,10 @@ class RunFetch:
         ykey = plan.ykey
 
         t0 = ttime.time()
-        storage_coords, _names, _extra = self._source.load_axes(
-            ykey, list(plan.xkeys), slice_info
-        )
-        values = self._source.read(ykey, slice_info)
+        data = self._source.load(
+            ykey, slice_info, xkeys=plan.xkeys, dims=plan.dims
+        ).astype(float, copy=False)
         t_load = ttime.time() - t0
-
-        kept = kept_axes(slice_info)
-        data = labelled_array(
-            values.astype(float, copy=False),
-            [plan.dims[axis] for axis in kept],
-            coords={
-                plan.dims[axis]: np.asarray(storage_coords[axis])
-                for axis in kept
-            },
-            name=ykey,
-        )
 
         print_debug(
             "RunFetch._read_block",
@@ -459,18 +452,10 @@ class RunFetch:
             values = self._source.read(norm_key, plan.slice_info)
             return xr.DataArray(values, dims=list(data.dims[: values.ndim]))
         xkeys = list(plan.xkeys)
-        norm_names = list(self._source.plot_axis_names(norm_key, xkeys))
+        norm_names = self._source.plot_axis_names(norm_key, xkeys)
         key_slice = slice_info_for_key(plan.slice_info, plan.dims, norm_names)
-        values = self._source.read(norm_key, key_slice)
-        norm_coords, _names, _extra = self._source.load_axes(norm_key, xkeys, key_slice)
-        kept = kept_axes(key_slice)
-        return labelled_array(
-            values,
-            [norm_names[axis] for axis in kept],
-            coords={
-                norm_names[axis]: np.asarray(norm_coords[axis]) for axis in kept
-            },
-            name=norm_key,
+        return self._source.load(
+            norm_key, key_slice, xkeys=xkeys, dims=norm_names
         )
 
     def _plane_frame(
@@ -502,12 +487,12 @@ class RunFetch:
         if plane_axes is None:
             raise ValueError("cannot resolve the plot plane for an ROI fetch")
         row_axis, col_axis = plane_axes
-        axes, _names, _extra = self._source.load_axes(
-            request.ykey, list(request.xkeys), request.view.base_slice()
-        )
         names = request.dims
-        rows = np.atleast_1d(np.asarray(axes[row_axis]))
-        cols = np.atleast_1d(np.asarray(axes[col_axis]))
+        coords = self._source.load_coords(
+            request.ykey, request.view.base_slice(), request.xkeys, dims=names
+        )
+        rows = np.atleast_1d(np.asarray(coords[names[row_axis]].values))
+        cols = np.atleast_1d(np.asarray(coords[names[col_axis]].values))
         plane_shape = (int(rows.size), int(cols.size))
         render_mode = classify_render_mode(
             plane_shape,

@@ -5,7 +5,7 @@ Frozen ROI-derived spectra registered as synthetic keys on RunSource.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -234,28 +234,6 @@ class FrozenSpectrum:
             hinted=False,
         )
 
-    def plot_axis_names(self, xkeys: List[str]) -> Tuple[str, ...]:
-        """
-        Return the axis names to plot this key under an X selection.
-
-        The selection does not reach a frozen payload: its axes are whatever
-        the reduction produced and stored, so this is the description's answer
-        unchanged. The method exists so that both sources answer the same
-        protocol and ``RunSource`` picks between them once.
-
-        Parameters
-        ----------
-        xkeys : list of str
-            Selected X-axis keys, ignored.
-
-        Returns
-        -------
-        tuple of str
-            One name per storage axis.
-        """
-        del xkeys
-        return self.describe().dims
-
     def load(
         self, slice_info: Optional[tuple] = None, *, coords: bool = True
     ) -> xr.DataArray:
@@ -281,53 +259,46 @@ class FrozenSpectrum:
         xarray.DataArray
             Labelled frozen array.
         """
-        storage_dims = self.describe().dims
         values = self.get_data(slice_info)
-        dims = surviving_dims(storage_dims, slice_info)
-        if not coords:
-            return labelled_array(values, dims, name=self.key)
-        axis_arrays, _names = _storage_axes_from_bundle(self.bundle)
-        items = _normalize_slice_info(slice_info, len(storage_dims))
-        coords = {}
-        for axis, (name, item) in enumerate(zip(storage_dims, items)):
-            if name not in dims or axis >= len(axis_arrays):
-                continue
-            coord = _slice_axis_array(axis_arrays[axis], item)
-            if coord.shape[0] == values.shape[dims.index(name)]:
-                coords[name] = coord
-        return labelled_array(values, dims, coords=coords, name=self.key)
+        dims = surviving_dims(self.describe().dims, slice_info)
+        return labelled_array(
+            values,
+            dims,
+            coords=self.load_coords(slice_info) if coords else {},
+            name=self.key,
+        )
 
-    def get_dimension_axes(
-        self,
-        xkeys: List[str],
-        slice_info: Optional[tuple] = None,
-    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
+    def load_coords(
+        self, slice_info: Optional[tuple] = None
+    ) -> Dict[str, np.ndarray]:
         """
-        Return frozen axis coordinates from the stored bundle.
+        Return the coordinates ``load`` attaches, without the values.
 
-        Used for local profiles and as a fallback when no X keys are
-        selected. Stack spectra plotted as Y resolve catalog X keys in
-        :meth:`RunSource.load_axes` instead.
+        The same question a catalog key answers, so the plot layer can label
+        an axis from either source. A stack spectrum plotted against a
+        catalog X key is the one case where these are not the answer, and
+        that is ``RunSource``'s business: it needs both sources at once.
 
         Parameters
         ----------
-        xkeys : list of str
-            Selected X-axis catalog keys (ignored here).
         slice_info : tuple, optional
-            Per-axis slice tuple applied to storage and axis arrays.
+            Per-axis slice tuple, same convention as catalog ``getData``.
 
         Returns
         -------
-        tuple
-            ``(axis_arrays, axis_names, associated_data)`` like catalog runs.
+        dict of str to ndarray
+            Stored coordinate values by dimension name.
         """
-        del xkeys
-        axis_arrays, axis_names = _storage_axes_from_bundle(self.bundle)
-        ndim = len(axis_arrays)
-        if slice_info is not None:
-            items = _normalize_slice_info(slice_info, ndim)
-            axis_arrays = [
-                _slice_axis_array(axis, item)
-                for axis, item in zip(axis_arrays, items)
-            ]
-        return axis_arrays, axis_names, {}
+        info = self.describe()
+        axis_arrays, _names = _storage_axes_from_bundle(self.bundle)
+        items = _normalize_slice_info(slice_info, info.ndim)
+        coords: Dict[str, np.ndarray] = {}
+        for axis, ((name, length), item) in enumerate(
+            zip(info.axes.items(), items)
+        ):
+            if isinstance(item, (int, np.integer)) or axis >= len(axis_arrays):
+                continue
+            coord = _slice_axis_array(axis_arrays[axis], item)
+            if coord.shape[0] == len(range(length)[item]):
+                coords[name] = coord
+        return coords

@@ -530,22 +530,39 @@ class DimensionControl(QWidget):
                 associated_data.get(dim_name, {}),
             )
 
-    def _axis_coordinates_for_run(self, run_model, ykey, x_keys, shape, placeholders):
+    def _axis_coordinates_for_run(self, run_model, ykey, x_keys, names, shape):
         """
-        Return axis coordinate arrays, preferring loaded data over index placeholders.
+        Return each axis's coordinates, and the other X keys riding on it.
+
+        The coordinates are read from the 1-D keys the Y key's description
+        names, never from the Y key itself. A further selected X key living
+        on an axis arrives as a non-dimension coordinate there, and becomes a
+        readout beside that axis's slider.
         """
+        placeholders = index_placeholders(shape)
         try:
-            axis_arrays, _, associated_data = run_model.load_axes(ykey, x_keys)
+            coords = run_model.load_coords(ykey, None, x_keys)
         except Exception:
             return list(placeholders), {}
 
         aligned = []
-        for i, size in enumerate(shape):
-            arr = np.asarray(axis_arrays[i], dtype=float).ravel()
-            if arr.size == size:
-                aligned.append(arr)
-            else:
-                aligned.append(placeholders[i])
+        for i, (name, size) in enumerate(zip(names, shape)):
+            arr = (
+                np.asarray(coords[name].values, dtype=float).ravel()
+                if name in coords
+                else np.array([])
+            )
+            aligned.append(arr if arr.size == size else placeholders[i])
+
+        associated_data = {}
+        for name, coord in coords.items():
+            if name in coord.dims:
+                continue
+            entry = associated_data.setdefault(
+                coord.dims[0], {"arrays": [], "names": []}
+            )
+            entry["arrays"].append(np.asarray(coord.values))
+            entry["names"].append(name)
         return aligned, associated_data
 
     def get_shape_info(self):
@@ -589,11 +606,7 @@ class DimensionControl(QWidget):
                         )
                         axis_arrays, associated_data = (
                             self._axis_coordinates_for_run(
-                                run_model,
-                                ykey,
-                                x_keys,
-                                shape,
-                                index_placeholders(shape),
+                                run_model, ykey, x_keys, axis_names, shape
                             )
                         )
 

@@ -451,13 +451,7 @@ class PlotSession(QObject):
         """
         trace_key = TraceKey(run_model.uid, xkey, ykey)
         shape = run_model.get_shape(ykey)
-        try:
-            names = run_model.plot_axis_names(ykey, [xkey] if xkey else [])
-        except Exception:
-            # The key's own dimension names: static and valid, just not
-            # renamed after the X selection. The request carries whichever
-            # names the projection was chosen against.
-            names = run_model.describe(ykey).dims
+        names = run_model.plot_axis_names(ykey, [xkey] if xkey else [])
         intent = self._intent
         # A key that cannot fill the session plot still plots on its own
         # terms rather than dropping out: a 1-D spectrum beside a 2-D image

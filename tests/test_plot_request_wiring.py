@@ -385,3 +385,24 @@ def test_the_fetch_takes_the_names_from_the_request():
     assert plan_fetch(req).dims == VPPEM_NAMES
     model.fetch.get_plot_bundle(req)
     assert "PCOEdge_image" not in asked
+
+
+def test_a_request_may_name_an_axis_only_after_its_x_key():
+    """
+    Carried names are checked, not re-derived, and not trusted blindly.
+
+    An axis named after a key is plotted against that key, so a request
+    calling the event axis ``i0`` while plotting against the voltage would
+    otherwise plot against ``i0`` without a word.
+    """
+    model = RunSource(make_vppem_run())
+    req = build_plot_request(
+        uid=VPPEM_UID,
+        xkeys=["sampleVoltage_VSource"],
+        ykey="PCOEdge_image",
+        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=("i0", "dim_1", "dim_2"),
+    )
+
+    with pytest.raises(ValueError, match="neither its own name nor the X key"):
+        model.fetch.get_plot_bundle(req)

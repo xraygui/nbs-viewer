@@ -19,7 +19,7 @@ source once.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 import xarray as xr
@@ -79,38 +79,20 @@ class CatalogKey:
         """
         return self.run.load(self.key, slice_info, coords=coords)
 
-    def plot_axis_names(self, xkeys: Sequence[str]) -> Tuple[str, ...]:
+    def load_coords(
+        self, slice_info: Optional[tuple] = None
+    ) -> Dict[str, np.ndarray]:
         """
-        Return the axis names to plot this key under an X selection.
+        Return the coordinates ``load`` would attach, without the values.
 
         Parameters
         ----------
-        xkeys : sequence of str
-            Selected X-axis keys.
-
-        Returns
-        -------
-        tuple of str
-            One name per storage axis.
-        """
-        return self.run.plot_axis_names(self.key, xkeys)
-
-    def get_dimension_axes(
-        self, xkeys: Sequence[str], slice_info: Optional[tuple] = None
-    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Any]]:
-        """
-        Return real axis coordinates for each dimension of the key.
-
-        Parameters
-        ----------
-        xkeys : sequence of str
-            Selected X-axis keys.
         slice_info : tuple, optional
             Per-axis slice tuple.
 
         Returns
         -------
-        tuple
-            ``(axis_arrays, axis_names, associated_data)``.
+        dict of str to ndarray
+            Coordinate values by dimension name, where the key has them.
         """
-        return self.run.get_dimension_axes(self.key, list(xkeys), slice_info)
+        return self.run.load_coords(self.key, slice_info)

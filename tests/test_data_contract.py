@@ -151,6 +151,32 @@ def test_describe_answers_the_same_thing_every_time():
         assert len(source.plot_axis_names("detector_cube", xkeys)) == 3
 
 
+def test_the_description_says_where_each_coordinate_comes_from():
+    """
+    Which key supplies an axis's coordinate is static, so it is described.
+
+    A consumer that only needs to label an axis can then read that 1-D key
+    and nothing else. Two sources: a plot hint naming one, and a key of the
+    axis's own name. An axis with neither has only its index.
+    """
+    from tests.fixtures.catalog_recipes import mca_scan_run
+
+    assert dict(image_scan_run(0).describe("detector_cube").coords) == {
+        "time": ("time",),
+        "pixel": ("pixel",),
+        "dim_2": ("dim_2",),
+    }
+    assert dict(make_vppem_run().describe("PCOEdge_image").coords) == {
+        "time": ("time",)
+    }
+    assert dict(mca_scan_run().describe("mca").coords) == {
+        "time": ("time",),
+        "dim_1": ("mca_energies",),
+    }
+    walked = ("config", "mca", "mca_energies")
+    assert mca_scan_run(hint_path=walked).describe("mca").coords["dim_1"] == walked
+
+
 def test_load_names_every_axis_and_attaches_the_coordinates_it_has():
     """
     A dimension gets a coordinate when the run holds a 1-D key of that name.
@@ -231,6 +257,35 @@ def test_a_normalization_divides_by_coordinate_and_not_by_luck():
     np.testing.assert_allclose(
         ratio.values, image.values / norm.values[None, :]
     )
+
+
+@pytest.mark.parametrize(
+    "hint_path", [("mca_energies",), ("config", "mca", "mca_energies")]
+)
+@pytest.mark.parametrize("xkeys", [[], ["en_energy"]])
+def test_a_plot_hint_supplies_the_coordinate_of_the_axis_it_names(
+    hint_path, xkeys, qapp
+):
+    """
+    Plot-hint ``axes`` give a detector axis its coordinate.
+
+    Every backend implements this path and, until this fixture, nothing
+    exercised it. ``mca``'s bins have no key of their own name; the run's plot
+    hints say ``mca_energies`` supplies them. Plotted along its bins, the line
+    must run against those energies -- unevenly spaced, so an index range in
+    their place does not pass -- whatever is selected as X, since X lives on
+    the event axis.
+    """
+    from tests.fixtures.catalog_recipes import mca_scan_run
+    from tests.test_run_source import _plot_request
+
+    run = mca_scan_run(hint_path=hint_path)
+    model = RunSource(run)
+
+    bundle = model.fetch.get_plot_bundle(_plot_request(model, xkeys, "mca"))
+
+    np.testing.assert_allclose(bundle.x_line, run.getData("mca_energies"))
+    np.testing.assert_allclose(bundle.y, run.getData("mca")[0])
 
 
 # ---------------------------------------------------------------------------

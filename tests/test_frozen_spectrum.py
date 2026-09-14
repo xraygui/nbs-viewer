@@ -285,12 +285,8 @@ def test_synthetic_norm_without_get_data_for_norm_key(qapp):
     model.register_frozen_spectrum(norm_entry)
 
     model._run.getData = MagicMock(return_value=np.array([4.0, 8.0, 12.0]))
-    model._run.get_dimension_axes = MagicMock(
-        return_value=(
-            [np.array([0.0, 1.0, 2.0])],
-            ["en_energy"],
-            {},
-        )
+    model._run.load_coords = MagicMock(
+        return_value={"time": np.array([0.0, 1.0, 2.0])}
     )
 
     bundle = model.fetch.get_plot_bundle(

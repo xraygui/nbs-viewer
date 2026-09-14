@@ -21,6 +21,7 @@ import pytest
 
 from nbs_viewer.models.data.bluesky import BlueskyRun
 from nbs_viewer.models.data.memory import MemoryRun
+from nbs_viewer.models.plot.run_source import RunSource
 from tests.fixtures.catalog_recipes import _base_metadata, image_scan_run
 
 
@@ -231,7 +232,7 @@ def test_with_no_x_key_selected_a_key_keeps_its_declared_dimensions(ykey):
     run = _ucal_shaped_run()
     declared, _ = run.get_dims(ykey, [])
 
-    analyzed = run.plot_axis_names(ykey, [])
+    analyzed = RunSource(run).plot_axis_names(ykey, [])
 
     assert tuple(analyzed) == declared
     assert analyzed[0] == "time"
@@ -248,7 +249,7 @@ def test_a_declared_cube_keeps_its_own_names_with_nothing_selected():
     run = image_scan_run(0)
     declared, _ = run.get_dims("detector_cube", [])
 
-    analyzed = run.plot_axis_names("detector_cube", [])
+    analyzed = RunSource(run).plot_axis_names("detector_cube", [])
 
     assert tuple(analyzed) == declared == ("time", "pixel", "dim_2")
 
@@ -264,28 +265,98 @@ def test_no_two_axes_of_one_key_are_given_the_same_name():
     are what normalization aligns by, so the second ``pixel`` is a silent
     wrong answer waiting for a norm key.
     """
-    run = image_scan_run(0)
+    run = RunSource(image_scan_run(0))
 
-    # Through the public call a duplicate now also raises, in
-    # ``KeyInfo.from_dims``; either way this fails.
+    # The X rule refuses a key whose name is already an axis, so a duplicate
+    # cannot be produced; this pins that it is not.
     for xkeys in ([], ["pixel"], ["en_energy"], ["time"], ["row"]):
         for ykey in ("detector_cube", "detector_image"):
             names = run.plot_axis_names(ykey, xkeys)
             assert len(set(names)) == len(names), (ykey, xkeys, names)
 
 
+def _second_detector_axis_run():
+    """
+    A cube whose detector axes are both selectable keys of their own.
+
+    No shipped fixture and no real run seen so far has this, which is why
+    bug 16 went unnoticed: ``b`` names the cube's *second* detector axis, and
+    selecting it as X moved its name ahead of ``a``'s.
+    """
+    n_time, n_a, n_b = 3, 4, 5
+    data = {
+        "time": np.arange(n_time, dtype=float),
+        "a": np.linspace(0.0, 1.0, n_a),
+        "b": 10.0 + np.arange(n_b, dtype=float) ** 2,
+        "cube": np.arange(n_time * n_a * n_b, dtype=float).reshape(
+            n_time, n_a, n_b
+        ),
+    }
+    metadata = _base_metadata(
+        0,
+        plan_name="second_axis",
+        dims={
+            "time": ("time",),
+            "a": ("a",),
+            "b": ("b",),
+            "cube": ("time", "a", "b"),
+        },
+    )
+    return MemoryRun(metadata, data)
+
+
+@pytest.mark.parametrize("xkeys", [[], ["a"], ["b"], ["time"]])
+def test_selecting_a_detector_axis_as_x_never_reorders_the_names(xkeys, qapp):
+    """
+    Bug 16: each name stays on the storage axis it describes.
+
+    The ordering rule put ``time`` first, then any selected X key that was
+    also a dimension, then the rest -- so selecting ``b`` labelled storage
+    axis 1, length 4, as ``b``. ``KeyInfo.from_dims`` checks the count and
+    uniqueness of names, not their order, so nothing downstream saw it.
+    """
+    model = RunSource(_second_detector_axis_run())
+
+    assert model.plot_axis_names("cube", xkeys) == ("time", "a", "b")
+
+
+def test_a_profile_against_the_second_detector_axis_has_its_values(qapp):
+    """
+    The consequence of bug 16, through the fetch.
+
+    Plotted against ``b``, the line must run along the axis that is ``b``:
+    five points carrying ``b``'s values. With the names reordered, the axis
+    wearing ``b``'s name was ``a``'s, four long.
+    """
+    from nbs_viewer.models.plot.view_intent import ViewIntent
+    from tests.test_run_source import _plot_request
+
+    run = _second_detector_axis_run()
+    model = RunSource(run)
+    names = model.plot_axis_names("cube", ["b"])
+    view = ViewIntent(plot_ndim=1, xkey="b").project(3, (3, 4, 5), names)
+
+    bundle = model.fetch.get_plot_bundle(
+        _plot_request(model, ["b"], "cube", projection=view)
+    )
+
+    np.testing.assert_allclose(bundle.x_line, run.getData("b"))
+    np.testing.assert_allclose(bundle.y, run.getData("cube")[0, 0, :])
+
+
 def test_a_motor_that_names_no_existing_axis_still_renames_the_event_axis():
     """
-    The de-duplication guard must not disable the rename it guards.
+    The refusal must not disable the rule it guards.
 
-    Naming the event axis after the selected X key is what the pipeline does
-    today, and separating "which axis this is" from "what we plot against it"
-    is the coordinate work, not this step. ``row`` lives on the event axis and
-    collides with nothing, so it still replaces ``time``.
+    ``row`` lives on the event axis and collides with nothing, so selecting it
+    plots that axis against it, under its name. The array's dimension is
+    still ``time`` -- its description says so whatever is selected -- and the
+    name is the plot layer's choice of coordinate.
     """
     run = image_scan_run(0)
 
-    names = run.plot_axis_names("detector_cube", ["row"])
+    names = RunSource(run).plot_axis_names("detector_cube", ["row"])
+    assert run.describe("detector_cube").dims == ("time", "pixel", "dim_2")
 
     assert tuple(names) == ("row", "pixel", "dim_2")
     assert np.shape(run.getData("detector_cube"))[0] == len(run.getData("row"))

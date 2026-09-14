@@ -175,8 +175,8 @@ def make_vppem_run(
     Build a 3-D fixture run modeled on vppem scan 102.
 
     The run carries a motor-scanned leading axis and two detector axes, so
-    :meth:`CatalogRun.plot_axis_names` resolves ``time`` to
-    ``sampleVoltage_VSource`` and reports
+    with ``sampleVoltage_VSource`` selected as X, which lives on ``time``,
+    :meth:`RunSource.plot_axis_names` reports
     ``[sampleVoltage_VSource, dim_1, dim_2]``. Y keys of rank 1
     (``PCOEdge_stats``) and rank 3 (``PCOEdge_image``) are both present, along
     with a normalization key (``i0``).

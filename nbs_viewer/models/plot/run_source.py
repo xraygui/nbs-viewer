@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Any, Union
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from qtpy.QtCore import QObject, Signal
 import numpy as np
@@ -14,6 +14,48 @@ from .run_identity import RunIdentity
 from nbs_viewer.utils import print_debug
 
 
+def x_dimension(y: KeyInfo, x: Optional[KeyInfo]) -> Optional[str]:
+    """
+    Return the dimension of ``y`` that ``x`` is a coordinate along, or None.
+
+    **The X selection rule, and the only place it is decided.** Choosing X
+    changes nothing about the data: a scanned motor is a 1-D key whose own
+    dimension is the event axis -- a labelled run declares ``en_energy`` as
+    ``('time',)`` -- so it is one more coordinate that axis can be plotted
+    against. X's dimension is ``x.dims[0]``. When ``y`` has that dimension,
+    X becomes its coordinate and the dimension carries X's name, which is
+    ``swap_dims`` in xarray's terms.
+
+    It is refused, and ``y`` keeps its own names, when X's name is already a
+    dimension of ``y`` -- which includes X being that dimension's own
+    coordinate, as ``time`` is -- or when the lengths differ. Nothing is ever
+    reordered: a dimension keeps its storage position whatever it is called.
+    The analysis this replaced put a selected detector axis's name second,
+    and so named the wrong axis after it (bug 16).
+
+    Parameters
+    ----------
+    y : KeyInfo
+        Description of the key being plotted.
+    x : KeyInfo or None
+        Description of the selected X key; None when nothing is selected or
+        the run does not hold it.
+
+    Returns
+    -------
+    str or None
+        The storage dimension of ``y`` that X attaches to.
+    """
+    if x is None or x.ndim != 1:
+        return None
+    dim = x.dims[0]
+    if dim not in y.axes or x.name in y.axes:
+        return None
+    if x.axes[dim] != y.axes[dim]:
+        return None
+    return dim
+
+
 class RunSource(QObject):
     """
     The union of a catalog run and its frozen synthetic keys, under one key
@@ -23,12 +65,14 @@ class RunSource(QObject):
     This is a higher-level object rather than a near-duplicate of it, and
     :meth:`_source` is where the difference lives: one place decides which
     source holds a key, and everything else either delegates to what it
-    returns or reads a fact off the key's description. Only one thing needs
-    both sources at once -- a frozen stack spectrum plotted against the
-    catalog's X keys -- and that is this class's own business.
+    returns or reads a fact off the key's description. Two things are this
+    class's own business rather than either source's: applying the X
+    selection, which needs a second key's description, and the one case that
+    needs both sources at once -- a frozen stack spectrum plotted against the
+    catalog's X keys.
 
     The RunSource surface is ``key_table``, ``identity``, ``describe``,
-    ``load``, ``read``, ``plot_axis_names`` and ``load_axes``, plus
+    ``load``, ``load_coords``, ``read`` and ``plot_axis_names``, plus
     ``fetch``, which turns a plot request into a bundle. Selection,
     visibility, and transform live on :class:`PlotSession`.
 
@@ -219,30 +263,53 @@ class RunSource(QObject):
             return entry
         return CatalogKey(self._run, key)
 
-    def load(self, key: str, slice_info=None, *, coords: bool = True) -> xr.DataArray:
+    def load(
+        self,
+        key: str,
+        slice_info=None,
+        *,
+        coords: bool = True,
+        xkeys: Sequence[str] = (),
+        dims: Optional[Sequence[str]] = None,
+    ) -> xr.DataArray:
         """
-        Return a labelled array for a catalog or frozen key.
+        Return a labelled array for a catalog or frozen key, under an X choice.
 
-        The one place the two sources are joined. Both answer ``load``
-        themselves, so this dispatches once rather than unpacking two
-        differently-shaped answers.
+        Both sources answer ``load`` themselves and say nothing about X, so
+        this dispatches once and then applies the selection: the dimensions
+        take their plot names, and the coordinates are :meth:`load_coords`'s.
 
         Parameters
         ----------
         key : str
             Data key.
         slice_info : tuple, optional
-            Per-axis slice tuple.
+            Per-axis slice tuple, in storage order.
         coords : bool, optional
             Attach coordinate values as well as dimension names.
+        xkeys : sequence of str, optional
+            Selected X keys.
+        dims : sequence of str, optional
+            Plot name per storage axis, when the caller already has them. A
+            request carries the names its projection was chosen against, so
+            the fetch passes those rather than having them derived again.
 
         Returns
         -------
         xarray.DataArray
-            Storage array with named dimensions, and its coordinates when
-            asked for.
+            Storage-ordered array named for plotting against ``xkeys``, with
+            its coordinates when asked for.
         """
-        return self._source(key).load(slice_info, coords=coords)
+        data = self._source(key).load(slice_info, coords=False)
+        names = self._plot_names(key, xkeys, dims)
+        renamed = {dim: names[dim] for dim in data.dims if names[dim] != dim}
+        if renamed:
+            data = data.rename(renamed)
+        if coords:
+            data = data.assign_coords(
+                self.load_coords(key, slice_info, xkeys, dims=dims)
+            )
+        return data
 
     def read(self, key: str, slice_info=None) -> np.ndarray:
         """
@@ -300,134 +367,249 @@ class RunSource(QObject):
             return info
         return self._source(key).describe()
 
+    def _describe_x(self, xkey: str) -> Optional[KeyInfo]:
+        """
+        Describe an X key, or return None when this run does not hold it.
+
+        The X selection is shared by every run on a plot, so a key one run
+        lacks is the ordinary case rather than an error: that run plots
+        against its own axes.
+
+        Parameters
+        ----------
+        xkey : str
+            Selected X key.
+
+        Returns
+        -------
+        KeyInfo or None
+            Its description, when there is one.
+        """
+        try:
+            return self.describe(xkey)
+        except Exception:
+            return None
+
     def plot_axis_names(
         self, ykey: str, xkeys: Sequence[str]
     ) -> Tuple[str, ...]:
         """
         Return the axis names to plot a key under a given X selection.
 
-        Deliberately *not* part of ``describe``, which is static. This answers
-        a different question, and the difference is the one bug 15 was made
-        of: a key's dimensions are fixed, while the selected X key renames the
-        event axis after whatever is being plotted against it. A UCAL run says
-        the scanned motor is a key *on* the event axis rather than a name of
-        it, so the rename is a display choice rather than a fact about the
-        array.
+        The key's own dimensions, in storage order, with the one the first X
+        key lives on named after it -- :func:`x_dimension` decides which, from
+        the two descriptions, reading nothing. The projection locates the X
+        key's storage axis by this name, which is why it is carried on the
+        request rather than asked for again.
 
-        It is kept because the projection rule locates the X key's storage
-        axis *by name* -- default axis order would stop working without it.
-        Step 4 replaces it: with coordinates on the array, choosing what to
-        plot against is ``swap_dims`` on a non-dimension coordinate, and the
-        dimension keeps its own name throughout. Each source answers it: a
-        frozen payload's axes are whatever the reduction produced, so the
-        selection does not reach them.
+        A frozen payload's axes are whatever the reduction produced, so no
+        catalog key lives on them and its names come back unchanged. A stack
+        spectrum is still plotted against the catalog's X; that is a
+        coordinate, attached by :meth:`load_coords`, not a name.
 
         Parameters
         ----------
         ykey : str
             Y data key.
         xkeys : sequence of str
-            Selected X-axis keys.
+            Selected X-axis keys. Only the first can name an axis, which is
+            the one the default axis order follows.
 
         Returns
         -------
         tuple of str
             One name per storage axis.
         """
-        return self._source(ykey).plot_axis_names(list(xkeys))
+        info = self.describe(ykey)
+        xkeys = list(xkeys)
+        dim = x_dimension(info, self._describe_x(xkeys[0])) if xkeys else None
+        if dim is None:
+            return info.dims
+        return tuple(xkeys[0] if name == dim else name for name in info.dims)
 
-    def load_axes(
-        self, ykey: str, xkeys: Sequence[str], slice_info=None
-    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Any]]:
-        """
-        Return real axis coordinates for a catalog or frozen Y key.
-
-        Stack spectra resolve X from the selected catalog keys so the
-        same frozen Y can be plotted against any scan-length independent
-        (``time``, motor position, etc.). Local profiles keep the frozen
-        profile-axis coordinates from the reduction.
-
-        Parameters
-        ----------
-        ykey : str
-            Y data key.
-        xkeys : sequence of str
-            Selected X-axis keys.
-        slice_info : tuple, optional
-            Per-axis slice tuple.
-
-        Returns
-        -------
-        tuple
-            ``(axis_arrays, axis_names, associated_data)``.
-
-        Raises
-        ------
-        ValueError
-            If a catalog X key length does not match the frozen spectrum.
-        """
-        xkey_list = list(xkeys)
-        source = self._source(ykey)
-        # The one thing that is genuinely this class's own business rather
-        # than either source's: a frozen Y plotted against the *catalog's* X
-        # keys is the only case that needs both at once. The branch is on the
-        # kind a source declares itself to be, not on which class it is.
-        if source.kind == "stack_spectrum" and xkey_list:
-            return self._stack_spectrum_dimension_axes(
-                source, xkey_list, slice_info
-            )
-        return source.get_dimension_axes(xkey_list, slice_info)
-
-    def _stack_spectrum_dimension_axes(
+    def _plot_names(
         self,
-        entry: FrozenSpectrum,
-        xkeys: List[str],
-        slice_info=None,
-    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Any]]:
+        key: str,
+        xkeys: Sequence[str],
+        dims: Optional[Sequence[str]],
+    ) -> Dict[str, str]:
         """
-        Resolve catalog X coordinates for a frozen stack spectrum.
+        Map each storage dimension of a key to its plot name.
+
+        From the caller's names when it has them, and otherwise from
+        :meth:`plot_axis_names`. Names a caller carries are checked rather
+        than re-derived: an axis may be called by its own name or by the
+        first X key's, and by nothing else, since an axis named after a key
+        is plotted against that key.
 
         Parameters
         ----------
-        entry : FrozenSpectrum
-            Registered stack-spectrum entry.
-        xkeys : list of str
-            Selected catalog X keys.
-        slice_info : tuple, optional
-            Per-axis slice applied to Y and each X array.
+        key : str
+            Data key.
+        xkeys : sequence of str
+            Selected X keys.
+        dims : sequence of str or None
+            Plot name per storage axis, if the caller has them.
 
         Returns
         -------
-        tuple
-            ``(axis_arrays, axis_names, associated_data)``.
+        dict of str to str
+            Plot name by storage dimension.
 
         Raises
         ------
         ValueError
-            If any X key is not length-compatible with the frozen Y.
+            If the carried names do not fit the key, or name an axis after
+            something other than the X key.
         """
-        y_full = np.asarray(entry.get_data(None))
-        if y_full.ndim != 1:
+        info = self.describe(key)
+        if dims is None:
+            dims = self.plot_axis_names(key, xkeys)
+        dims = tuple(dims)
+        if len(dims) != info.ndim:
             raise ValueError(
-                f"stack spectrum {entry.key!r} must be 1-D, got shape {y_full.shape}"
+                f"{len(dims)} axis names {dims} for {key!r}, which has "
+                f"dimensions {info.dims}"
             )
-        n_full = int(y_full.shape[0])
-        x_slice = slice(None)
-        if slice_info is not None and len(slice_info) > 0:
-            x_slice = slice_info[0]
-        axis_arrays: List[np.ndarray] = []
-        axis_names: List[str] = []
-        for xkey in xkeys:
-            raw_full = np.asarray(self.read(xkey), dtype=float).ravel()
-            if raw_full.size != n_full:
+        xkey = xkeys[0] if len(xkeys) else None
+        for dim, name in zip(info.dims, dims):
+            if name != dim and name != xkey:
                 raise ValueError(
-                    f"X key {xkey!r} length {raw_full.size} does not match "
-                    f"frozen spectrum {entry.label!r} length {n_full}"
+                    f"{key!r} axis {dim!r} is named {name!r}, which is "
+                    f"neither its own name nor the X key {xkey!r}"
                 )
-            raw = np.atleast_1d(np.asarray(raw_full[x_slice], dtype=float))
-            axis_arrays.append(raw)
-            axis_names.append(xkey)
-        return axis_arrays, axis_names, {}
+        return dict(zip(info.dims, dims))
+
+    def load_coords(
+        self,
+        key: str,
+        slice_info=None,
+        xkeys: Sequence[str] = (),
+        *,
+        dims: Optional[Sequence[str]] = None,
+    ) -> xr.Coordinates:
+        """
+        Return the coordinates of a key's surviving axes, under an X choice.
+
+        What anything that labels an axis needs -- the fetch, the frame an ROI
+        is compiled against, the dimension sliders -- and it reads none of
+        the key's values, only the 1-D keys its description names. Per
+        surviving dimension, under its plot name:
+
+        - an axis named after the X key carries that key's values;
+        - any other carries the coordinate its source holds for it, or else
+          its storage index, sliced like the data, so a cropped plane keeps
+          the positions it was cropped from rather than restarting at zero;
+        - a further X key living on an axis rides there as a *non-dimension*
+          coordinate. Only one key can name an axis, and the others are what
+          a slider shows beside its own value.
+
+        Parameters
+        ----------
+        key : str
+            Data key.
+        slice_info : tuple, optional
+            Per-axis slice tuple, in storage order.
+        xkeys : sequence of str, optional
+            Selected X keys.
+        dims : sequence of str, optional
+            Plot name per storage axis, when the caller already has them.
+
+        Returns
+        -------
+        xarray.Coordinates
+            Ready to assign to the key's array loaded under the same names.
+
+        Raises
+        ------
+        ValueError
+            If the carried names do not fit the key, or a stack spectrum is
+            plotted against an X key of another length.
+        """
+        info = self.describe(key)
+        source = self._source(key)
+        names = self._plot_names(key, xkeys, dims)
+        items = list(slice_info or ())[: info.ndim]
+        items += [slice(None)] * (info.ndim - len(items))
+        kept = {
+            dim: item
+            for dim, item in zip(info.dims, items)
+            if not isinstance(item, (int, np.integer))
+        }
+        found = source.load_coords(slice_info)
+        coords = {}
+        for dim, item in kept.items():
+            name = names[dim]
+            if name != dim:
+                values = self.read(name, (item,))
+            else:
+                values = found.get(dim)
+                if values is None:
+                    values = np.arange(info.axes[dim], dtype=float)[item]
+            coords[name] = (name, np.asarray(values))
+
+        xkeys = list(xkeys)
+        # Branched on the kind a source declares itself to be, not on its
+        # class: a frozen per-event quantity is plotted against the catalog's
+        # X, and only this class holds both.
+        if xkeys and source.kind == "stack_spectrum":
+            dim = info.dims[0]
+            if dim in kept:
+                values = self._stack_spectrum_x(info, xkeys[0], kept[dim])
+                coords[dim] = (dim, values)
+            return xr.Coordinates(coords)
+
+        for xkey in xkeys[1:]:
+            if xkey in coords:
+                continue
+            dim = x_dimension(info, self._describe_x(xkey))
+            if dim is None or dim not in kept:
+                continue
+            values = np.asarray(self.read(xkey, (kept[dim],)))
+            coords[xkey] = (names[dim], values)
+        return xr.Coordinates(coords)
+
+    def _stack_spectrum_x(
+        self, info: KeyInfo, xkey: str, item
+    ) -> np.ndarray:
+        """
+        Read a catalog X key as the coordinate of a frozen stack spectrum.
+
+        A stack spectrum is a per-event quantity, so the X it was committed
+        against is not the only one it can be plotted against: any key as
+        long as the scan will do. Its axis keeps the frozen label either way.
+
+        Parameters
+        ----------
+        info : KeyInfo
+            The stack spectrum's description.
+        xkey : str
+            Catalog X key.
+        item : slice
+            Slice of the spectrum's one axis.
+
+        Returns
+        -------
+        ndarray
+            The X key's values, sliced like the spectrum.
+
+        Raises
+        ------
+        ValueError
+            If the spectrum is not 1-D or the X key is another length.
+        """
+        if info.ndim != 1:
+            raise ValueError(
+                f"stack spectrum {info.name!r} must be 1-D, got shape "
+                f"{info.shape}"
+            )
+        full = np.asarray(self.read(xkey), dtype=float).ravel()
+        if full.size != info.shape[0]:
+            raise ValueError(
+                f"X key {xkey!r} length {full.size} does not match "
+                f"frozen spectrum {info.label!r} length {info.shape[0]}"
+            )
+        return np.atleast_1d(full[item])
 
     def get_shape(self, key: str) -> Tuple[int, ...]:
         """

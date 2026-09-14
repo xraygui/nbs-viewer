@@ -46,13 +46,16 @@ def _request(
     norm_keys=(),
     transform="",
 ) -> PlotRequest:
+    # The names are the plot layer's answer; a bare run describes its keys
+    # but knows nothing of the X selection.
+    source = run if isinstance(run, RunSource) else RunSource(run)
     return PlotRequest(
         uid=run.uid,
         xkeys=tuple(xkeys),
         ykey=ykey,
         norm_keys=tuple(norm_keys),
         view=view,
-        dims=run.plot_axis_names(ykey, xkeys),
+        dims=source.plot_axis_names(ykey, xkeys),
         transform=transform,
     )
 
@@ -247,6 +250,13 @@ def test_2d_crop_on_view_spec(qapp):
     expected = a[4] * b[2:8, None] * c[None, 3:10]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
+    # The detector axes have no coordinate key, so they are labelled by their
+    # storage index -- sliced with the data, so the crop keeps the positions
+    # it was cut from rather than restarting at zero.
+    left, right, bottom, top = bundle.extent
+    assert sorted((left, right)) == pytest.approx([2.5, 9.5])
+    assert sorted((bottom, top)) == pytest.approx([1.5, 7.5])
+
 
 def test_mesh_when_plot_y_is_nonuniform_voltage(qapp):
     model = _model()
@@ -382,17 +392,35 @@ def test_sum_role_matches_closed_form(qapp):
 
 def _count_reads(run):
     """
-    Record every ``RunSource.read`` call, returning the list they land in.
+    Record every key the run loads, returning the list they land in.
+
+    ``RunSource.load`` is where every read goes -- ``read`` is a load without
+    coordinates -- so this sees the block, its norms, and the X key a load is
+    plotted against. Counting ``read`` alone would now see only the last.
     """
     calls = []
-    original = run.read
+    original = run.load
 
-    def counted(key, slice_info=None):
+    def counted(key, slice_info=None, **kwargs):
         calls.append((key, slice_info))
-        return original(key, slice_info)
+        return original(key, slice_info, **kwargs)
 
-    run.read = counted
+    run.load = counted
     return calls
+
+
+def _coordinate_at(run, key, position):
+    """
+    An evenly spaced coordinate's value at a fractional index position.
+
+    The image-scan planes are labelled by real coordinates: the requests here
+    plot against ``en_energy``, which the fixture declares on the ``pixel``
+    axis, and ``dim_2`` is its own axis's key. An ROI is geometry in data
+    coordinates, so a region meant as "cells 1 to 2" is written through the
+    key of the axis it lies along.
+    """
+    values = np.asarray(run.run.getData(key), dtype=float)
+    return float(values[0] + position * (values[1] - values[0]))
 
 
 def _image_request(run, ykey="detector_image", **kwargs):
@@ -481,12 +509,30 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
         view=view,
         dims=run.plot_axis_names("detector_cube", ("en_energy",)),
     )
+    # The plane is (en_energy, dim_2): rows along the energies, columns
+    # along dim_2.
+    def at(key, position):
+        return _coordinate_at(run, key, position)
+
     wide = replace(
         parent,
-        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        region=RectRegion(
+            x0=at("dim_2", 0.4),
+            x1=at("dim_2", 2.6),
+            y0=at("en_energy", 1.5),
+            y1=at("en_energy", 9.5),
+        ),
         profile_axis=2,
     )
-    inner = replace(wide, region=RectRegion(x0=0.9, x1=2.1, y0=3.5, y1=7.5))
+    inner = replace(
+        wide,
+        region=RectRegion(
+            x0=at("dim_2", 0.9),
+            x1=at("dim_2", 2.1),
+            y0=at("en_energy", 3.5),
+            y1=at("en_energy", 7.5),
+        ),
+    )
 
     run.fetch.get_plot_bundle(wide)
     calls = _count_reads(run)
@@ -520,7 +566,9 @@ def test_toggling_a_norm_reads_the_norm_and_never_the_block():
 
     calls = _count_reads(run)
     on = run.fetch.get_plot_bundle(normed)
-    assert [key for key, _slice in calls] == ["i0"]
+    # The norm, and the X key its event axis is plotted against -- read for
+    # it exactly as for the block. Never the block.
+    assert [key for key, _slice in calls] == ["i0", "sampleVoltage_VSource"]
 
     del calls[:]
     off = run.fetch.get_plot_bundle(plain)
@@ -697,7 +745,12 @@ def test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached():
 
     roi = replace(
         parent,
-        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        region=RectRegion(
+            x0=_coordinate_at(run, "en_energy", 0.4),
+            x1=_coordinate_at(run, "en_energy", 2.6),
+            y0=1.5,
+            y1=9.5,
+        ),
         profile_axis=1,
     )
     from_cache = run.fetch.get_plot_bundle(roi, cached_plane=plane)
@@ -739,7 +792,13 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
 
     roi = replace(
         parent,
-        region=RectRegion(x0=0.4, x1=2.6, y0=1.5, y1=9.5),
+        # The plane is (en_energy, dim_2), as above.
+        region=RectRegion(
+            x0=_coordinate_at(run, "dim_2", 0.4),
+            x1=_coordinate_at(run, "dim_2", 2.6),
+            y0=_coordinate_at(run, "en_energy", 1.5),
+            y1=_coordinate_at(run, "en_energy", 9.5),
+        ),
         profile_axis=2,
     )
     scaled = run.fetch.get_plot_bundle(roi)
@@ -823,15 +882,18 @@ def test_a_norm_read_from_the_wrong_window_raises_instead_of_dividing():
     assert norms[0].sizes["time"] == block.sizes["time"]
 
     model = _image_scan_model()
-    original = model._run.get_dimension_axes
+    original = model._run.load_coords
 
-    def shifted(ykey, xkeys, slice_info=None):
-        arrays, names, extra = original(ykey, xkeys, slice_info)
-        if ykey == "row":
-            arrays = [np.asarray(a, dtype=float) + 0.5 for a in arrays]
-        return arrays, names, extra
+    def shifted(key, slice_info=None):
+        coords = original(key, slice_info)
+        if key == "row":
+            coords = {
+                dim: np.asarray(values, dtype=float) + 0.5
+                for dim, values in coords.items()
+            }
+        return coords
 
-    model._run.get_dimension_axes = shifted
+    model._run.load_coords = shifted
 
     # Loading holds the block and the norm apart; the divide is where they
     # meet, so that is where the guard fires -- through the whole pipeline.

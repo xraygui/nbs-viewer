@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import DimRole, Projection
@@ -17,7 +18,7 @@ from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
-from nbs_viewer.models.plot.run_source import RunSource
+from nbs_viewer.models.plot.run_source import RunSource, x_dimension
 from tests.fixtures.catalog_recipes import image_scan_run
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_UID,
@@ -158,16 +159,105 @@ def test_describe_and_plot_axis_names_answer_different_questions(qapp):
     )
 
 
-def test_load_axes_matches_catalog_dimension_axes(qapp):
-    model = RunSource(make_vppem_run())
-    xkeys = ["sampleVoltage_VSource"]
-    loaded = model.load_axes("PCOEdge_image", xkeys)
-    catalog = model.run.get_dimension_axes("PCOEdge_image", xkeys)
+def _info(name, **axes):
+    return KeyInfo.from_dims(name, tuple(axes), tuple(axes.values()))
 
-    assert loaded[1] == catalog[1]
-    assert loaded[1] == ["sampleVoltage_VSource", "dim_1", "dim_2"]
-    for left, right in zip(loaded[0], catalog[0]):
-        np.testing.assert_allclose(left, right)
+
+@pytest.mark.parametrize(
+    "x, expected",
+    [
+        (_info("en_energy", time=5), "time"),  # a motor on the event axis
+        (_info("mca_energies", pixel=3), "pixel"),  # on a detector axis
+        (_info("time", time=5), None),  # the axis's own coordinate
+        (_info("pixel", time=5), None),  # its name is already an axis
+        (_info("en_energy", time=4), None),  # another length
+        (_info("en_energy", other=5), None),  # on an axis the key lacks
+        (_info("grid", time=5, pixel=3), None),  # not 1-D
+        (None, None),  # nothing selected, or not on this run
+    ],
+)
+def test_the_x_rule_is_a_function_of_two_descriptions(x, expected):
+    """
+    X attaches to its own dimension, or to nothing; nothing is reordered.
+
+    Every refusal leaves the key its own names. The name-already-an-axis case
+    is bug 15's second trigger, where renaming the event axis after ``pixel``
+    gave a cube two axes called ``pixel``.
+    """
+    y = _info("det", time=5, pixel=3)
+
+    assert x_dimension(y, x) == expected
+
+
+def test_load_coords_reads_the_axis_keys_and_never_the_key(qapp):
+    """
+    What labels an axis is a 1-D read of the key its description names.
+
+    The dimension sliders and the frame an ROI is compiled against both need
+    coordinates, and a camera stack is the last thing to read for them. Under
+    the X selection the event axis carries the motor's values and name; the
+    detector axes, which have no key of their own, carry their indices.
+    """
+    model = RunSource(make_vppem_run())
+    read = []
+    original = model.run.getData
+
+    def recording(key, slice_info=None):
+        read.append(key)
+        return original(key, slice_info)
+
+    model.run.getData = recording
+    coords = model.load_coords(
+        "PCOEdge_image", None, ["sampleVoltage_VSource"]
+    )
+
+    assert "PCOEdge_image" not in read
+    assert set(coords) == {"sampleVoltage_VSource", "dim_1", "dim_2"}
+    np.testing.assert_allclose(
+        coords["sampleVoltage_VSource"].values,
+        original("sampleVoltage_VSource"),
+    )
+    np.testing.assert_allclose(coords["dim_2"].values, np.arange(32.0))
+
+
+def test_a_second_x_key_rides_along_as_a_non_dimension_coordinate(qapp):
+    """
+    Only one key can name an axis; another on the same axis is kept beside it.
+
+    The dimension sliders show it next to the axis's own value -- what the
+    analysis this replaced called associated data.
+    """
+    model = RunSource(make_vppem_run())
+
+    coords = model.load_coords(
+        "PCOEdge_image", None, ["sampleVoltage_VSource", "i0"]
+    )
+
+    assert coords["sampleVoltage_VSource"].dims == ("sampleVoltage_VSource",)
+    assert coords["i0"].dims == ("sampleVoltage_VSource",)
+    np.testing.assert_allclose(coords["i0"].values, model.run.getData("i0"))
+
+
+def test_an_x_key_on_a_detector_axis_names_that_axis(qapp):
+    """
+    The rule follows X's own dimension, whichever it is.
+
+    ``en_energy`` is declared on this fixture's ``pixel`` axis, so selecting
+    it plots the columns against energy. The analysis this replaced only ever
+    renamed ``time``, so it left them plotted against their index.
+    """
+    run = image_scan_run(0, n_y=6, n_x=5)
+    model = RunSource(run)
+
+    assert model.plot_axis_names("detector_image", ["en_energy"]) == (
+        "time",
+        "en_energy",
+    )
+    bundle = model.fetch.get_plot_bundle(
+        _plot_request(model, ["en_energy"], "detector_image")
+    )
+    np.testing.assert_allclose(bundle.x_line, run.getData("en_energy"))
+    np.testing.assert_allclose(bundle.y, run.getData("detector_image")[0])
 
 
 def test_get_plot_bundle_1d_closed_form(qapp):

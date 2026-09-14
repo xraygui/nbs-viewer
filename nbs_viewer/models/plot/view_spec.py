@@ -396,7 +396,7 @@ def resolve_axis_order(
         1 for line plots, 2 for image plots.
     dim_names : sequence of str, optional
         Dimension name per storage axis, as returned by
-        ``RunSource.describe_axes``. Without it only the trailing-axis
+        ``RunSource.plot_axis_names``. Without it only the trailing-axis
         default can be expressed.
     dim_order : sequence of str, optional
         Manual arrangement as dimension names, outermost first.

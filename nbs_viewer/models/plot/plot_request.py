@@ -136,7 +136,8 @@ class PlotRequest:
     uid : str
         Run uid the data is read from.
     xkeys : tuple of str
-        X-axis key selection used for dimension analysis.
+        Selected X key. When it is a coordinate along one of ``ykey``'s
+        dimensions, that dimension is plotted against it and named after it.
     ykey : str
         Y data key.
     norm_keys : tuple of str
