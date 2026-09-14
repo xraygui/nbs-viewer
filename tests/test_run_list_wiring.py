@@ -14,9 +14,9 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
 )
-from nbs_viewer.models.plot.bundle import prepare_1d_bundle
+from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 
 from tests.fixtures.session import HeadlessSession
 

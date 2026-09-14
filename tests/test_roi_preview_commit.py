@@ -15,8 +15,8 @@ from nbs_viewer.models.plot.view_spec import (
     Projection,
 )
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.roi_set import RoiOperation
 from nbs_viewer.models.plot.run_source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
@@ -43,7 +43,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     bundle = plot_data.get_plot_bundle()
 
     frame = frame_from_bundle(bundle)
-    from nbs_viewer.models.plot.plot_view_frame import (
+    from nbs_viewer.models.plot.geometry.frame import (
         cell_x_bounds_mesh,
         cell_y_bounds_mesh,
     )
@@ -180,7 +180,10 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.region import PolygonRegion, compile_with_mask_mode
+    from nbs_viewer.models.plot.geometry.region import (
+        PolygonRegion,
+        compile_with_mask_mode,
+    )
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 
     plot_model, _ = make_plot_session()

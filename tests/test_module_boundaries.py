@@ -26,6 +26,7 @@ from tools.module_graph import (
     function_local_imports,
     read_package,
     runtime_edges,
+    working_set,
 )
 
 PACKAGE = "nbs_viewer/models/plot"
@@ -35,8 +36,9 @@ PACKAGE = "nbs_viewer/models/plot"
 #:
 #: Empty, and meant to stay that way. It held three entries when this file
 #: was written, all of them reaching into ``region_mesh`` for cell geometry
-#: and together making up the whole ``plot_view_frame`` <-> ``region_mesh``
-#: runtime cycle; moving that geometry onto the frame removed all three at
+#: and together making up the whole frame <-> mask runtime cycle (then
+#: ``plot_view_frame`` and ``region_mesh``); moving that geometry onto the
+#: frame removed all three at
 #: once. Adding an entry back is a decision to keep a cycle, not a way to
 #: get a red suite green.
 KNOWN_FUNCTION_LOCAL_IMPORTS = frozenset()
@@ -91,12 +93,12 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
     """
     The rule is about siblings, not about every deferred import.
 
-    ``region_mesh.mask_from_vertices`` imports ``matplotlib.path`` in its
+    ``geometry.mask.mask_from_vertices`` imports ``matplotlib.path`` in its
     body to keep a heavy optional dependency off the module's import path.
     That is a cost decision about a third-party package, not a cycle being
     concealed, so it must not be reported.
     """
-    source = facts["region_mesh"].path.read_text()
+    source = facts["geometry.mask"].path.read_text()
     assert "    from matplotlib.path import Path" in source, (
         "this test is only meaningful while region_mesh still defers a "
         "third-party import into a function body"
@@ -104,7 +106,7 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
     bodies = [
         imp
         for imp in function_local_imports(facts)
-        if imp.module == "region_mesh"
+        if imp.module == "geometry.mask"
     ]
     assert bodies == []
 
@@ -304,3 +306,49 @@ def test_a_package_init_is_a_module_like_any_other(tmp_path):
     )
     facts = read_package(package)
     assert find_cycles(runtime_edges(facts)) == [["geo", "geo.frame"]]
+
+
+def test_a_working_set_counts_through_a_re_export_surface(tmp_path):
+    """
+    A name taken from a package door is credited to the module behind it.
+
+    Without this, moving files into subpackages would drive every working set
+    toward zero while the reader's job got no smaller -- the diagnostic would
+    report a win for the reorganisation that produced it. Classes still do
+    not count, whichever way they are imported.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "geo/__init__.py": "from .bundle import Bundle, pack\n",
+            "geo/bundle.py": """
+                class Bundle:
+                    pass
+
+
+                def pack():
+                    return Bundle()
+                """,
+            "caller.py": "from .geo import Bundle, pack\n",
+        },
+    )
+    facts = read_package(package)
+    functions, sources = working_set(facts, "caller")
+    assert functions == {"pack"}
+    assert sources == {"geo.bundle"}
+
+
+def test_a_re_export_chain_does_not_loop_forever(tmp_path):
+    """
+    Two surfaces re-exporting from each other terminate rather than recurse.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "a/__init__.py": "from ..b import thing\n",
+            "b/__init__.py": "from ..a import thing\n",
+            "caller.py": "from .a import thing\n",
+        },
+    )
+    facts = read_package(package)
+    assert working_set(facts, "caller") == (set(), set())

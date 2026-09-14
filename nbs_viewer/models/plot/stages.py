@@ -20,17 +20,20 @@ import xarray as xr
 from asteval import Interpreter
 
 from ..data.array_contract import REDUCE_SKIPNA
-from .bundle import PlotBundle, prepare_1d_bundle
-from .plot_axes import PlotAxes
-from .plot_request import PlotRequest
-from .plot_view_frame import (
+from .geometry import (
+    MaskMode,
+    PlotBundle,
     PlotViewFrame,
+    RegionDefinition,
     cell_x_bounds_mesh,
     cell_y_bounds_mesh,
+    compile_with_mask_mode,
     frame_from_bundle,
     mesh_separable_edge_grids,
+    prepare_1d_bundle,
 )
-from .region import MaskMode, RegionDefinition, compile_with_mask_mode
+from .plot_axes import PlotAxes
+from .plot_request import PlotRequest
 from .view_spec import (
     DimRole,
     PlotAxisName,

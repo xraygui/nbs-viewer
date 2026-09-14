@@ -15,7 +15,7 @@ from nbs_viewer.models.plot.stages import (
     slice_info_for_key,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.sources.fixtures import (

@@ -37,8 +37,7 @@ from nbs_viewer.models.plot.view_spec import (
     scan_profile_storage_axis,
     storage_axis_to_plot_axis,
 )
-from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame
-from nbs_viewer.models.plot.region import RegionDefinition
+from nbs_viewer.models.plot.geometry import PlotViewFrame, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiEntry, RoiOperation
 
 from .preview_canvas import RoiPreviewCanvas, RoiPreviewWorker

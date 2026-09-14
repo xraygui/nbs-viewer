@@ -14,7 +14,7 @@ import xarray as xr
 from ..data.array_contract import labelled_array, surviving_dims
 from ..data.key_info import KeyInfo
 from ..data.synthetic_keys import SYNTHETIC_KEY_PREFIX, is_synthetic_key
-from .bundle import PlotBundle
+from .geometry import PlotBundle
 from .plot_request import PlotRequest
 
 __all__ = [

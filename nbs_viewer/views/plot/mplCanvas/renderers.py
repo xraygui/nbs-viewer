@@ -13,8 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 
-from nbs_viewer.models.plot.bundle import PlotBundle
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry import PlotBundle, frame_from_bundle
 from nbs_viewer.utils import print_debug
 
 

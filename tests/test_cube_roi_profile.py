@@ -16,12 +16,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.plot_view_frame import (
+from nbs_viewer.models.plot.geometry.frame import (
     cell_x_bounds_mesh,
     cell_y_bounds_mesh,
     frame_from_bundle,
 )
-from nbs_viewer.models.plot.region import RectRegion, compile_with_mask_mode
+from nbs_viewer.models.plot.geometry.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.roi_set import RoiOperation
 from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.plot.view_spec import eligible_profile_axes

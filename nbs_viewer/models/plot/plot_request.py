@@ -15,14 +15,15 @@ from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple
 
 from .plot_axes import PlotAxes
-from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
-from .region import (
+from .geometry import (
     MaskMode,
+    PlotViewFrame,
     RectRegion,
     RegionDefinition,
     compile_covering_rect,
     compile_with_mask_mode,
     expand_region_for_profile,
+    region_frame_for_bbox,
 )
 from .view_spec import (
     DimRole,

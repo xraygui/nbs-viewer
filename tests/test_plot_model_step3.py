@@ -13,7 +13,7 @@ from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
 )
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.plot_request import TraceKey
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.plot_session import PlotSession

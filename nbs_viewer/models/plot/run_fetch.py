@@ -32,10 +32,15 @@ from .stages import (
     reduce_to_plane,
     slice_info_for_key,
 )
-from .bundle import PlotBundle, build_plot_bundle
-from .orientation import classify_render_mode, display_flips
+from .geometry import (
+    PlotBundle,
+    PlotViewFrame,
+    build_plot_bundle,
+    classify_render_mode,
+    display_flips,
+    frame_for_plane,
+)
 from .plot_request import FetchPlan, PlotRequest, plan_fetch
-from .plot_view_frame import PlotViewFrame, frame_for_plane
 from nbs_viewer.utils import print_debug
 
 if TYPE_CHECKING:

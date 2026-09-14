@@ -11,13 +11,13 @@ from nbs_viewer.models.plot.view_spec import (
     eligible_profile_axes,
     profile_view_spec,
 )
-from nbs_viewer.models.plot.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.plot_view_frame import (
+from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.geometry.frame import (
     cell_x_bounds_mesh,
     cell_y_bounds_mesh,
     frame_from_bundle,
 )
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.plot_axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
 

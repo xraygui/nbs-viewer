@@ -11,12 +11,12 @@ from nbs_viewer.models.plot.view_spec import (
     Projection,
 )
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
-from nbs_viewer.models.plot.plot_view_frame import (
+from nbs_viewer.models.plot.geometry.frame import (
     cell_x_bounds_mesh,
     cell_y_bounds_mesh,
     frame_from_bundle,
 )
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.roi_set import RoiOperation
 
 from tests.fixtures.session import HeadlessSession

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
 
-from .region import (
+from .geometry import (
     EllipseRegion,
     MaskMode,
     PolygonRegion,

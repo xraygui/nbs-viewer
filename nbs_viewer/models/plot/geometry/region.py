@@ -14,9 +14,9 @@ from typing import ClassVar, Dict, Literal, Tuple, Type
 
 import numpy as np
 
-from .plot_view_frame import PlotViewFrame, data_limits
-from .view_spec import PlotAxisName
-from .region_mesh import (
+from .frame import PlotViewFrame, data_limits
+from ..view_spec import PlotAxisName
+from .mask import (
     cell_mask_at_point,
     mask_covering_data_rect,
     mask_from_axis_slice,

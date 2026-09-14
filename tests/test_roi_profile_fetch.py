@@ -11,14 +11,14 @@ from nbs_viewer.models.plot.view_spec import (
     storage_axis_to_plot_axis,
 )
 from nbs_viewer.models.plot.stages import reduce_cached_plane
-from nbs_viewer.models.plot.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
     plan_fetch,
     roi_profile_request,
 )
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import (
+from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
     compile_with_mask_mode,
@@ -72,7 +72,7 @@ def test_cached_plane_profile_mesh():
     plane = prepare_2d_bundle(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
-    from nbs_viewer.models.plot.plot_view_frame import (
+    from nbs_viewer.models.plot.geometry.frame import (
         cell_x_bounds_mesh,
         cell_y_bounds_mesh,
     )

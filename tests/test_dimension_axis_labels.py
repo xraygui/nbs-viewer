@@ -6,8 +6,8 @@ from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
 )
-from nbs_viewer.models.plot.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 
 
 def test_swapping_plot_rows_swaps_the_roles():

@@ -11,7 +11,7 @@ from nbs_viewer.models.plot.plot_request import (
     plan_fetch,
     roi_profile_request,
 )
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 
 from tests.fixtures.display_plane import (
     display_bundle,

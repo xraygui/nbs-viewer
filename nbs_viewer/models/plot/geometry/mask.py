@@ -17,7 +17,7 @@ from typing import Tuple
 
 import numpy as np
 
-from .plot_view_frame import (
+from .frame import (
     PlotViewFrame,
     data_limits,
     mesh_cell_bounds,

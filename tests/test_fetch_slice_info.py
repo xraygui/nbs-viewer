@@ -17,8 +17,8 @@ from nbs_viewer.models.plot.plot_request import (
     plan_fetch,
     roi_profile_request,
 )
-from nbs_viewer.models.plot.plot_view_frame import region_frame_for_bbox
-from nbs_viewer.models.plot.region import (
+from nbs_viewer.models.plot.geometry.frame import region_frame_for_bbox
+from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
     compile_with_mask_mode,

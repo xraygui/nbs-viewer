@@ -26,7 +26,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - annotation only
-    from .region import MaskMode
+    from .geometry import MaskMode
 
 
 # The one definition of each. ``SliceItem`` had three in this package,

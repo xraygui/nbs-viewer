@@ -34,12 +34,14 @@ from .plot_request import (
     crop_from_region,
     roi_profile_request,
 )
-from .plot_view_frame import (
+from .geometry import (
     PlotViewFrame,
+    RectRegion,
+    RegionDefinition,
+    expand_region_for_profile,
     frame_from_bundle,
     view_fingerprint_from_bundle,
 )
-from .region import RectRegion, RegionDefinition, expand_region_for_profile
 from .roi_set import RoiEntry, RoiSetModel
 from .trace import Trace
 from .view_spec import (
@@ -53,7 +55,7 @@ from .view_spec import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from .frozen_spectrum import FrozenSpectrum
-    from .bundle import PlotBundle
+    from .geometry import PlotBundle
     from .plot_session import PlotSession
 
 

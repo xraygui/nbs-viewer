@@ -3,15 +3,15 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
-from nbs_viewer.models.plot.region import (
+from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry.region import (
     AxisSliceRegion,
     EllipseRegion,
     PolygonRegion,
     RectRegion,
 )
-from nbs_viewer.models.plot.region_mesh import mask_from_data_rect
+from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
 from nbs_viewer.models.plot.stages import materialize_view
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
@@ -46,7 +46,7 @@ def test_frame_from_mesh_bundle_axes():
 
 
 def test_rect_on_non_uniform_col_selects_cells():
-    from nbs_viewer.models.plot.plot_view_frame import (
+    from nbs_viewer.models.plot.geometry.frame import (
         cell_x_bounds_mesh,
         cell_y_bounds_mesh,
     )
@@ -79,7 +79,7 @@ def test_profile_along_en_energy_sums_over_tes_band():
     bundle = _tes_like_mesh_bundle()
     y = np.arange(bundle.y.size, dtype=float).reshape(bundle.y.shape)
     frame = frame_from_bundle(bundle)
-    from nbs_viewer.models.plot.plot_view_frame import cell_x_bounds_mesh, data_limits
+    from nbs_viewer.models.plot.geometry.frame import cell_x_bounds_mesh, data_limits
 
     _, _, y_lo, y_hi = data_limits(frame)
     x0, _ = cell_x_bounds_mesh(frame, 100, 0)
@@ -145,8 +145,8 @@ def test_image_rect_mask_shape():
 
 
 def test_cell_centers_image_shape_and_order():
-    from nbs_viewer.models.plot.region_mesh import cell_centers
-    from nbs_viewer.models.plot.plot_view_frame import data_limits
+    from nbs_viewer.models.plot.geometry.mask import cell_centers
+    from nbs_viewer.models.plot.geometry.frame import data_limits
 
     ny, nx = 4, 5
     bundle = prepare_2d_bundle(
@@ -169,8 +169,8 @@ def test_image_mask_at_plot_top_selects_storage_row_zero():
     """
     Regression: row 0 must map to the top of the axes under origin='upper'.
     """
-    from nbs_viewer.models.plot.region_mesh import mask_from_data_rect
-    from nbs_viewer.models.plot.plot_view_frame import data_limits
+    from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
+    from nbs_viewer.models.plot.geometry.frame import data_limits
 
     ny, nx = 10, 12
     bundle = prepare_2d_bundle(
@@ -189,7 +189,7 @@ def test_image_rect_mask_matches_imshow_origin_upper():
     """
     ROI rows must follow imshow origin='upper' (row 0 at top of axes).
     """
-    from nbs_viewer.models.plot.plot_view_frame import image_cell_bounds
+    from nbs_viewer.models.plot.geometry.frame import image_cell_bounds
 
     ny, nx = 20, 30
     y = np.arange(ny * nx, dtype=float).reshape(ny, nx)
@@ -309,7 +309,7 @@ def test_cell_bounds_vary_with_index_on_an_image_frame():
     with the reference index on image frames, so every plot-Y index returned
     the bounds of the same cell.
     """
-    from nbs_viewer.models.plot.plot_view_frame import (
+    from nbs_viewer.models.plot.geometry.frame import (
         cell_x_bounds_mesh,
         cell_y_bounds_mesh,
     )

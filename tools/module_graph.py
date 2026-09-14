@@ -507,6 +507,13 @@ def working_set(
     it does to this number. Annotation-only imports do not count: a name
     used in a type hint says what a value is, not what this module does.
 
+    A name taken from a package's re-export surface is followed to the module
+    that defines it. Without that, moving files into subpackages would drive
+    every working set toward zero while the reader's job got no smaller --
+    the exact gaming this count is supposed to be read in spite of. The home
+    reported is where the function actually lives, not the door it came
+    through.
+
     Parameters
     ----------
     facts : dict
@@ -524,18 +531,41 @@ def working_set(
     for imp in facts[name].imports:
         if imp.scope == "type_checking":
             continue
-        target = facts.get(imp.target)
-        if target is None:
-            continue
-        hits = {
-            imported
-            for imported in imp.names
-            if imported in target.free_functions
-        }
-        if hits:
-            functions |= hits
-            sources.add(imp.target)
+        for imported in imp.names:
+            home = _defining_module(facts, imp.target, imported)
+            if home is not None and home != name:
+                functions.add(imported)
+                sources.add(home)
     return functions, sources
+
+
+def _defining_module(
+    facts: Dict[str, ModuleFacts],
+    target: str,
+    name: str,
+    _seen: Optional[Set[str]] = None,
+) -> Optional[str]:
+    """
+    Return the module defining ``name`` as a free function, or None.
+
+    Follows re-export surfaces: asked for ``prepare_1d_bundle`` from
+    ``geometry``, it reports ``geometry.bundle``. Anything that is not a
+    module-level function -- a class, a type alias, a name from outside the
+    package -- returns None, which is how classes stay out of the count.
+    """
+    module = facts.get(target)
+    if module is None:
+        return None
+    if name in module.free_functions:
+        return target
+    _seen = (_seen or set()) | {target}
+    for imp in module.imports:
+        if imp.target in _seen or name not in imp.names:
+            continue
+        found = _defining_module(facts, imp.target, name, _seen)
+        if found is not None:
+            return found
+    return None
 
 
 def import_sites(package_dir) -> Dict[str, int]:
@@ -564,7 +594,11 @@ def import_sites(package_dir) -> Dict[str, int]:
     if not package_dir.is_absolute():
         package_dir = REPO_ROOT / package_dir
     dotted = ".".join(package_dir.relative_to(REPO_ROOT).parts)
-    own = {path.resolve() for path in package_dir.glob("*.py")}
+    own = {
+        path.resolve()
+        for path in package_dir.rglob("*.py")
+        if "__pycache__" not in path.parts
+    }
 
     skip = {".git", ".pixi", ".pytest_cache", "build", "dist", "oldtests"}
     counts: Dict[str, int] = {}
@@ -682,24 +716,29 @@ def format_report(
         locals_here = sum(
             1 for imp in facts[name].imports if imp.scope == "function"
         )
+        # A package's re-export surface imports names on purpose; its count
+        # measures the size of the door, not a smeared procedure.
+        label = name + (
+            " (surface)" if facts[name].path.name == "__init__.py" else ""
+        )
         measured.append((len(functions), name, facts[name].code_lines,
-                         len(sources), locals_here, sorted(functions)))
+                         len(sources), locals_here, sorted(functions), label))
     measured.sort(key=lambda row: (-row[0], row[1]))
 
     lines.append("Working sets -- sibling free functions imported")
     lines.append(
-        f"{'module':<20}{'code':>6}{'free fns':>10}"
+        f"{'module':<28}{'code':>7}{'free fns':>10}"
         f"{'modules':>9}{'fn-local':>10}"
     )
     zero = []
-    for count, name, code, sources, locals_here, functions in measured:
+    for count, name, code, sources, locals_here, functions, label in measured:
         if count == 0 and locals_here == 0:
             zero.append(name)
             continue
         lines.append(
-            f"{name:<20}{code:>6}{count:>10}{sources:>9}{locals_here:>10}"
+            f"{label:<28}{code:>7}{count:>10}{sources:>9}{locals_here:>10}"
         )
-        lines.append(f"{'':<20}{', '.join(functions)}")
+        lines.append(f"{'':<28}{', '.join(functions)}")
     if zero:
         lines.append("")
         lines.append(f"zero ({len(zero)}): {', '.join(zero)}")

@@ -36,7 +36,7 @@ from .orientation import (
 if TYPE_CHECKING:  # pragma: no cover - annotation only
     import xarray as xr
 
-    from .plot_request import PlotRequest
+    from ..plot_request import PlotRequest
 
 
 @dataclass

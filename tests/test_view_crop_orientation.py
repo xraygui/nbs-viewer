@@ -2,10 +2,10 @@
 
 import numpy as np
 
-from nbs_viewer.models.plot.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.orientation import display_flips
+from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.geometry.orientation import display_flips
 from tests.fixtures.display_plane import orient_block
-from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
+from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 
 
 def _oriented_plane(y, row_axis, col_axis):

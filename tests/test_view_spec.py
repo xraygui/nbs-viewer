@@ -12,7 +12,7 @@ from nbs_viewer.models.plot.view_spec import (
     spec_from_slice_info,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
-from nbs_viewer.models.plot.region import RectRegion
+from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
 
