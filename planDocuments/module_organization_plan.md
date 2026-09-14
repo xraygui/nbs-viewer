@@ -3,7 +3,7 @@
 Reorganising `models/plot` so a reader holds less in their head at once.
 
 **Status:** drafted 2026-09-10, **re-derived 2026-09-14** at `f50633a` after
-[`data_contract_plan.md`](data_contract_plan.md) completed. The draft's
+[`data_contract_plan.md`](archive/data_contract_plan.md) completed. The draft's
 measurements were taken at `9ecbe11` and are superseded; its step 1 is half
 done. Written to the conventions in
 [`data_contract_review.md`](data_contract_review.md): steps name their files,
@@ -18,17 +18,35 @@ It is **not a rewrite**. No behaviour changes and no function bodies rewritten:
 code moves between files, and names change so that where something lives tells
 you what altitude it is at. It produces more files and probably more lines.
 
-> **Invariant.** Every step names, before and after, the **reader's working
-> set** of each file it touches — the number of sibling *free functions* it
-> imports. A step that lowers no working set is not a step in this plan.
+> **What every step must do.** Make some file easier to read and maintain, and
+> say how — which data now sits with the behaviour that operates on it, or
+> which name now tells the truth about what it holds.
 >
-> Two absolutes: **no runtime import cycles inside `models/plot`**, and **no
-> function-local import used to dodge one**.
+> **Two hard rules**, because these are hazards rather than preferences: no
+> runtime import cycles inside `models/plot`, and no function-local import
+> used to dodge one.
 
-Classes do not count toward a working set; free functions do. Importing
-`RunCollection` and calling a method costs a reader nothing. Importing
-`reduce_before_mask`, `mask_to_profile` and `materialize_view` means going to
-read another module to know what this one does.
+### The working-set count is a diagnostic, not a target
+
+A file's **working set** is the number of sibling *free functions* it imports.
+It is useful for *locating* problems: importing `reduce_before_mask`,
+`mask_to_profile` and `materialize_view` from three modules means a reader must
+go elsewhere to learn what this file does, which usually means a procedure has
+been smeared across the package.
+
+It must not be optimized, because it is trivially gameable: moving those
+functions into a class that is only a namespace would drive every count to
+zero and improve nothing. **A class is better than a pile of free functions
+when it encapsulates — when the data and the methods that operate on it live
+together, and the methods really do belong to that data.** That is the win;
+the count is only a way of noticing where it is missing.
+
+Two consequences for this plan. A high count is not automatically a defect:
+`region`'s seven functions come from *one* partner module, which is a cohesive
+pair and needs nothing done to it. And a file that cannot honestly be improved
+is left alone and said so — some of this code is genuinely complex, and
+reshuffling it to move a number would be the poor optimization this plan is
+supposed to avoid.
 
 ---
 
@@ -118,16 +136,16 @@ Settled here so no step has to stop and ask. Each is reversible; none blocks.
 
 ### Step 1 — the boundary guard
 
-- [ ] `tests/test_module_boundaries.py`, asserting three things by AST over
-  `nbs_viewer/models/plot/*.py`: no runtime import cycle; no function-local
-  import of a sibling, with an allowlist seeded at exactly the three known
-  offenders above; and each file's working set at or below a recorded ceiling,
-  seeded at today's numbers (`run_fetch` 12, `region_controller` 9, `region` 7,
-  `plot_bundle` 6, `plot_request` 6, `plot_view_frame` 2, `trace` 2, the rest
-  ≤ 1).
-- [ ] Deletes nothing. It is the measurement every later step is checked
-  against, and the allowlist is what step 2 empties.
-- **Out of scope:** changing any ceiling. The seed is today's state.
+- [ ] `tests/test_module_boundaries.py`, asserting **the two hard rules** by
+  AST over `nbs_viewer/models/plot/*.py`: no runtime import cycle, and no
+  function-local import of a sibling — with an allowlist seeded at exactly the
+  three known offenders above, which step 2 empties.
+- [ ] A script, **not a test**, that prints the working-set table so a step can
+  report what moved. It is a diagnostic: nothing fails when a number rises,
+  because a step may legitimately concentrate related functions in one place.
+- [ ] Deletes nothing.
+- **Out of scope:** enforcing a working-set ceiling. A threshold would make the
+  count a target, and the count is gameable.
 
 ### Step 2 — break the runtime cycle and declare the mask surface
 
