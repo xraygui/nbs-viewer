@@ -215,7 +215,11 @@ numpy (`renderers.py`, `image_grid_canvas.py`, `dimension.py`,
 `single_canvas.py`), which is the signal worth chasing first: numpy in a view
 is either presentation arithmetic (fine) or domain computation (not).
 
-### 7. Four definitions of one concept
+### 7. Four definitions of one concept — **closed**
+
+Closed by module-organization step 5. `SliceItem`, `SpatialReduce` and
+`PlotAxisName` have one definition each in `view_spec.py`; `MaskMode` has one
+in `region.py`, beside the `compile_with_mask_mode` it configures.
 
 ```
 MaskMode       region.py (Literal)  plot_bundle.py (Literal)  roi_set.py (= str)

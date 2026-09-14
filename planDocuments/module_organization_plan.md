@@ -238,13 +238,19 @@ What is left is a defect, and it is this step:
   which is what let the wrong branch look plausible; that is a data-contract
   question, not a file-organisation one.
 
-### Step 5 — one definition per type alias
+### Step 5 — one definition per type alias — **landed**
 
-- [ ] One home for `SliceItem` (5 definitions today), `MaskMode` (3),
-  `SpatialReduce` (2), `PlotAxisName` (2).
-- [ ] Delete `roi_set.py`'s `MaskMode = str` and `SpatialReduce = str`, which
-  widen two of them to "any string" under the same name.
-- [ ] Closes item 7 of [`post_refactor_review.md`](post_refactor_review.md).
+- [x] One home each: `SliceItem`, `SpatialReduce` and `PlotAxisName` in
+  `view_spec.py`, `MaskMode` in `region.py` beside the
+  `compile_with_mask_mode` it configures. Splitting `MaskMode` from the other
+  three is deliberate — it is not part of how an array is sliced or oriented,
+  and step 6 sends `region.py` to `geometry/` where the rest of its users go.
+- [x] Deletes five definitions: `region.py`'s `PlotAxisName`, `stages.py`'s
+  `SliceItem` and `MaskMode`, `plot_request.py`'s `SliceItem`, and
+  `roi_set.py`'s `MaskMode = str` and `SpatialReduce = str`, which widened two
+  of them to "any string" under the same name. Two `typing` imports go with
+  them.
+- [x] Closes item 7 of [`post_refactor_review.md`](post_refactor_review.md).
 - **Out of scope:** `models/cache`'s two `SliceItem` definitions — a different
   package with no dependency either way.
 
@@ -299,6 +305,7 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Step 5 landed. Four aliases, one definition each, and five deleted. No behaviour change: `PlotRequest.__post_init__` already validated both `mask_mode` and `spatial_reduce`, so `roi_set`'s widening to `str` was invisible to the interpreter — which is why it survived, and why narrowing it back is free. It adds one mutual pair, `region ↔ view_spec`: `region` now imports `PlotAxisName` at runtime while `view_spec` still names `MaskMode` under `TYPE_CHECKING` for `default_profile_label`. Not a runtime cycle, and it dissolves in step 6 when that function leaves for `roi/`. 522 tests. |
 | 2026-09-14 | Step 4 landed. `view_spec` now imports one name from one sibling, `MaskMode` under `TYPE_CHECKING`, which leaves with `default_profile_label` in step 6. Making the spec required turned a silent fall-through into a raise for a 1-D projection, whose single plot axis had been passing the old `len(plot_order) >= 2` test and reaching the frame; the two ROI-window plane guards now ask `is_plot_plane_storage_axis`, which answers False without a plane, and two tests pin both. One precondition deliberately left alone: `profile_axis_for_roi_span` still refuses to answer without a frame, even though the mapping no longer needs one. Removing it would change when the ROI span axis gets corrected — `set_profile_context` can be handed a spec with no frame — and the plan's goal forbids behaviour changes, so it is recorded here instead of fixed. 522 tests. |
 | 2026-09-14 | Step 4 re-scoped before starting, because its `view_spec` bullet sorted 14 functions by syntactic form into one destination and would have encapsulated nothing. Grouped by what they answer, they are five different things, and all but four already have a home in step 6 or step 7, so the step creates no new file. What survives is one defect the draft had not noticed: `storage_axis_to_plot_axis` holds two implementations of one mapping, and its own docstring says the frame branch answers wrong. That branch turns out to be dead at all five call sites, so the step is a deletion. Also measured: the `plot_axis_names` collision is three test call sites, not the wide rename the draft implied, and the free function has no production caller at all — `ViewIntent` names it as the overplot-compatibility check, so it is unwired rather than dead and keeps its test. |
 | 2026-09-14 | Step 3 landed. `RenderMode` moved to `orientation.py` rather than `bundle.py` — recorded above with the reason, which is the plan's own first hard rule. Three extent and mesh-grid helpers became public because `bundle` crosses into them. The two test files were renamed with the modules they cover, `test_plot_geometry.py` → `test_bundle.py` and `test_plot_bundle.py` → `test_stages.py`; `test_bundle.py` keeps the render-mode classification tests next to the packing tests rather than splitting them into a `test_orientation.py`, because packing is where classification is applied and the two halves verify one behaviour. One finding about the diagnostic: `run_fetch`'s "from N modules" rose 4 → 5 without its working set changing at all, purely because one file it imports became two. The second column is even more gameable than the first, and neither is a target. `bundle` itself now imports 5 free functions from exactly one partner, which is the cohesive-pair shape the plan already excuses for `region`. 23 modules, 4806 code lines, both hard rules holding, 520 tests passing. |

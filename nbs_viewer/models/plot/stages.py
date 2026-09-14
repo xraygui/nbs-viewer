@@ -13,7 +13,7 @@ without a run.
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import xarray as xr
@@ -30,15 +30,13 @@ from .plot_view_frame import (
     frame_from_bundle,
     mesh_separable_edge_grids,
 )
-from .region import RegionDefinition, compile_with_mask_mode
+from .region import MaskMode, RegionDefinition, compile_with_mask_mode
 from .view_spec import (
     DimRole,
     PlotAxisName,
     Projection,
+    SliceItem,
 )
-
-SliceItem = Union[int, slice]
-MaskMode = Literal["inside", "outside"]
 
 
 def _plane_axis_arrays(

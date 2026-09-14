@@ -15,6 +15,7 @@ from typing import ClassVar, Dict, Literal, Tuple, Type
 import numpy as np
 
 from .plot_view_frame import PlotViewFrame, data_limits
+from .view_spec import PlotAxisName
 from .region_mesh import (
     cell_mask_at_point,
     mask_covering_data_rect,
@@ -24,7 +25,6 @@ from .region_mesh import (
     mask_from_vertices,
 )
 
-PlotAxisName = Literal["plot_x", "plot_y"]
 MaskMode = Literal["inside", "outside"]
 ReduceOp = Literal["sum", "mean"]
 

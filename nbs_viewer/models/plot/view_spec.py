@@ -29,6 +29,11 @@ if TYPE_CHECKING:  # pragma: no cover - annotation only
     from .region import MaskMode
 
 
+# The one definition of each. ``SliceItem`` had three in this package,
+# ``PlotAxisName`` two, and ``SpatialReduce`` two -- one of them widened to
+# plain ``str`` under the same name, so two modules disagreed about whether
+# "insid" was a value. ``MaskMode`` lives in :mod:`region` with
+# ``compile_with_mask_mode``, which is the thing it configures.
 SliceItem = Union[int, slice]
 SpatialReduce = Literal["sum", "mean"]
 PlotAxisName = Literal["plot_x", "plot_y"]

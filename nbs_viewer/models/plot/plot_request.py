@@ -12,7 +12,7 @@ are identified by :class:`TraceKey`, a subset of the request, so view / crop
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 from .plot_axes import PlotAxes
 from .plot_view_frame import PlotViewFrame, region_frame_for_bbox
@@ -26,6 +26,7 @@ from .region import (
 )
 from .view_spec import (
     DimRole,
+    SliceItem,
     SpatialReduce,
     ViewCrop,
     Projection,
@@ -33,7 +34,6 @@ from .view_spec import (
     storage_axis_to_plot_axis,
 )
 
-SliceItem = Union[int, slice]
 
 
 def build_plot_request(
