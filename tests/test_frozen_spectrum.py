@@ -20,7 +20,7 @@ from nbs_viewer.models.plot.frozen_spectrum import (
     copy_plot_bundle,
     is_synthetic_key,
 )
-from nbs_viewer.models.plot.plot_geometry import prepare_1d_bundle
+from nbs_viewer.models.plot.bundle import prepare_1d_bundle
 from nbs_viewer.models.plot.plot_request import PlotRequest, build_plot_request
 from nbs_viewer.models.plot.region import RectRegion
 from nbs_viewer.models.plot.run_source import RunSource

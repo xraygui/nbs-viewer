@@ -1,4 +1,4 @@
-"""Tests for the request-to-bundle pipeline."""
+"""Tests for the pipeline stages, from a request to a packed bundle."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.plot_bundle import (
+from nbs_viewer.models.plot.stages import (
     apply_normalization,
     apply_transform,
     slice_info_for_key,

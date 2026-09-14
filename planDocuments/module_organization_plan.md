@@ -169,17 +169,27 @@ Settled here so no step has to stop and ask. Each is reversible; none blocks.
 - [x] Deletes: the runtime cycle (**1 → 0**), the allowlist, and the
   `plot_view_frame ↔ region_mesh` pair, which is now one-way.
 
-### Step 3 — `plot_geometry` and `plot_bundle` stop lying about their contents
+### Step 3 — `plot_geometry` and `plot_bundle` stop lying about their contents — **landed**
 
-- [ ] `bundle.py`: `PlotBundle`, `RenderMode`, `prepare_1d_bundle`,
-  `prepare_2d_bundle`, `build_plot_bundle`.
-- [ ] `orientation.py`: `classify_render_mode`, `display_flips`, the extent and
-  mesh-grid builders.
-- [ ] `stages.py`: `apply_normalization`, `apply_transform`, `reduce_to_plane`,
+- [x] `bundle.py`: `PlotBundle`, `prepare_1d_bundle`, `prepare_2d_bundle`,
+  `build_plot_bundle`.
+- [x] `orientation.py`: `classify_render_mode`, `display_flips`, the extent and
+  mesh-grid builders — **and `RenderMode`**, which the draft put in
+  `bundle.py`. It travels with the function that produces it because the
+  alternative breaks a hard rule: `classify_render_mode` returns one, so
+  `orientation` would have to import the alias back from `bundle` and close a
+  runtime cycle, and the only way out would be the annotation-only dodge the
+  second hard rule exists to forbid.
+- [x] `stages.py`: `apply_normalization`, `apply_transform`, `reduce_to_plane`,
   `reduce_before_mask`, `mask_to_profile`, `materialize_view`,
   `reduce_cached_plane`, `slice_info_for_key` — the whole `DataArray ->
   DataArray` set, which is one concept and one file.
-- [ ] `plot_bundle.py` and `plot_geometry.py` cease to exist.
+- [x] `plot_bundle.py` and `plot_geometry.py` cease to exist. So does
+  `region_controller`'s `from .plot_bundle import PlotBundle`, which named a
+  class that file never defined — the lie this step is named for.
+- [x] `extent_from_uniform_1d`, `pixel_extent` and `build_mesh_grids` lose
+  their underscore, because `bundle` now crosses into them. Same rule as step
+  2: a name that crosses a module boundary is part of a surface.
 - **Out of scope:** the stage bodies, and `PlotBundle`'s fields (open question
   5 in the data-contract plan owns those).
 
@@ -256,5 +266,6 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Step 3 landed. `RenderMode` moved to `orientation.py` rather than `bundle.py` — recorded above with the reason, which is the plan's own first hard rule. Three extent and mesh-grid helpers became public because `bundle` crosses into them. The two test files were renamed with the modules they cover, `test_plot_geometry.py` → `test_bundle.py` and `test_plot_bundle.py` → `test_stages.py`; `test_bundle.py` keeps the render-mode classification tests next to the packing tests rather than splitting them into a `test_orientation.py`, because packing is where classification is applied and the two halves verify one behaviour. One finding about the diagnostic: `run_fetch`'s "from N modules" rose 4 → 5 without its working set changing at all, purely because one file it imports became two. The second column is even more gameable than the first, and neither is a target. `bundle` itself now imports 5 free functions from exactly one partner, which is the cohesive-pair shape the plan already excuses for `region`. 23 modules, 4806 code lines, both hard rules holding, 520 tests passing. |
 | 2026-09-14 | Steps 1 and 2 landed. The guard and the diagnostic share one implementation, `tools/module_graph.py`, run as a script and imported by `tests/test_module_boundaries.py`; it reproduces every measurement in this plan (22 modules, 4791 code lines, each working-set row, and 64 inside / 178 `tests/` / 24 `views/` import sites), which is what lets a later step quote a before and an after. Two of this plan's derived totals are off and are corrected above: 12 files sit at zero, not 13, and the import sites measure 268 across 75 files rather than 267 across 74. The guard carries self-tests on throwaway packages, because a silently broken detector is a guard that passes forever. Step 2 moved eight functions rather than four — the four named cannot leave without the four they call, and leaving those behind would have re-pointed the same cycle the other way. `region_mesh`'s working set rose 0 → 3 and `plot_view_frame`'s fell 2 → 1: the rise is the point, since a rasterizer asking a frame where its cells are is the direction that was backwards before. Both hard rules now hold with an empty allowlist, and 520 tests pass. |
 | 2026-09-14 | Re-derived at `f50633a` after the data-contract refactor. Measurements retaken: 22 files, 4791 code lines, 267 import sites, and a working-set table in which `run_fetch` has replaced `run_source` as the worst file. Step 1's split is done; what remains of it is the guard. Two function-local imports the draft missed are recorded, the `plot_geometry ↔ plot_request` cycle is closed, and `run/`'s contents changed because `KeyInfo` moved to `models/data` while `FrozenSpectrum` stayed. The draft's six open questions are settled as decisions, and the type-alias consolidation from the previous review is now a step, because it is the one part of this plan that deletes something. |

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 import numpy as np
 import xarray as xr
 
-from .plot_bundle import (
+from .stages import (
     apply_normalization,
     apply_transform,
     mask_to_profile,
@@ -32,12 +32,8 @@ from .plot_bundle import (
     reduce_to_plane,
     slice_info_for_key,
 )
-from .plot_geometry import (
-    PlotBundle,
-    build_plot_bundle,
-    classify_render_mode,
-    display_flips,
-)
+from .bundle import PlotBundle, build_plot_bundle
+from .orientation import classify_render_mode, display_flips
 from .plot_request import FetchPlan, PlotRequest, plan_fetch
 from .plot_view_frame import PlotViewFrame, frame_for_plane
 from nbs_viewer.utils import print_debug

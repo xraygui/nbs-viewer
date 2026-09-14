@@ -7,7 +7,7 @@ order, per-axis roles, and the indices for axes held at one value. Crop rides
 along as integer storage bounds on the plot plane; it is applied by
 ``plot_request.plan_fetch``, never here.
 
-Applying a projection to loaded arrays lives in ``plot_bundle.py``. This
+Applying a projection to loaded arrays lives in ``stages.py``. This
 module only describes and queries it.
 """
 

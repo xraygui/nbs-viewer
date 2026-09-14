@@ -23,7 +23,8 @@ from .frozen_spectrum import (
     FrozenSpectrum,
     copy_plot_bundle,
 )
-from .plot_geometry import PlotBundle, RenderMode
+from .bundle import PlotBundle
+from .orientation import RenderMode
 from .plot_request import PlotRequest, TraceKey
 from .view_spec import Projection
 

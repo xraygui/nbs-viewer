@@ -15,7 +15,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .plot_geometry import PlotBundle, RenderMode, prepare_2d_bundle
+from .bundle import PlotBundle, prepare_2d_bundle
+from .orientation import RenderMode
 
 
 @dataclass(frozen=True)

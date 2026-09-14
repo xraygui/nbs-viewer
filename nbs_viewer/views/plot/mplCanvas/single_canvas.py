@@ -19,7 +19,8 @@ from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from nbs_viewer.models.plot.view_spec import Projection
-from nbs_viewer.models.plot.plot_geometry import PlotBundle, RenderMode
+from nbs_viewer.models.plot.bundle import PlotBundle
+from nbs_viewer.models.plot.orientation import RenderMode
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
 from nbs_viewer.models.plot.region import EllipseRegion, RectRegion, RegionDefinition
 from nbs_viewer.models.plot.roi_set import RoiSetModel

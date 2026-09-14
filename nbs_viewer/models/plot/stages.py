@@ -1,8 +1,14 @@
 """
-Request-to-bundle helpers: reduce, normalize, transform, and pack.
+The pipeline stages, every one of them a labelled array in and one out.
 
-Orchestration lives on ``RunFetch.get_plot_bundle``. These functions are
-pure in the arrays they receive so they can be tested without a run.
+Normalize, transform, reduce to a plane, mask, profile: the order they run
+in is the pipeline, and it lives on ``RunFetch.get_plot_bundle``, not here.
+Being uniformly ``DataArray -> DataArray`` is what makes them one concept
+and one file -- they were split across a reduce half and a normalize half
+until the labelled-array contract made the split stop being a boundary.
+
+These functions are pure in the arrays they receive, so they can be tested
+without a run.
 """
 
 from __future__ import annotations
@@ -14,8 +20,8 @@ import xarray as xr
 from asteval import Interpreter
 
 from ..data.array_contract import REDUCE_SKIPNA
+from .bundle import PlotBundle, prepare_1d_bundle
 from .plot_axes import PlotAxes
-from .plot_geometry import PlotBundle, prepare_1d_bundle
 from .plot_request import PlotRequest
 from .plot_view_frame import (
     PlotViewFrame,

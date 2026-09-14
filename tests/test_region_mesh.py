@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
+from nbs_viewer.models.plot.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import (
     AxisSliceRegion,
@@ -12,7 +12,7 @@ from nbs_viewer.models.plot.region import (
     RectRegion,
 )
 from nbs_viewer.models.plot.region_mesh import mask_from_data_rect
-from nbs_viewer.models.plot.plot_bundle import materialize_view
+from nbs_viewer.models.plot.stages import materialize_view
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,

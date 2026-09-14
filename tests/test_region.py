@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
+from nbs_viewer.models.plot.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 from nbs_viewer.models.plot.region import (
     EllipseRegion,

@@ -37,7 +37,7 @@ class SiblingImport:
     Parameters
     ----------
     module : str
-        Stem of the importing file, e.g. ``plot_bundle``.
+        Stem of the importing file, e.g. ``stages``.
     target : str
         Stem of the imported sibling, e.g. ``region_mesh``.
     names : tuple of str

@@ -12,11 +12,8 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
-from nbs_viewer.models.plot.plot_geometry import (
-    PlotBundle,
-    display_flips,
-    prepare_2d_bundle,
-)
+from nbs_viewer.models.plot.bundle import PlotBundle, prepare_2d_bundle
+from nbs_viewer.models.plot.orientation import display_flips
 from nbs_viewer.models.plot.plot_view_frame import PlotViewFrame, frame_from_bundle
 
 
@@ -164,7 +161,7 @@ def roi_profile_from_block(
     import xarray as xr
 
     from nbs_viewer.models.plot.plot_axes import PlotAxes
-    from nbs_viewer.models.plot.plot_bundle import materialize_view
+    from nbs_viewer.models.plot.stages import materialize_view
 
     axis_names = list(axis_names)
     # The block is what the plan loaded, so an axis the slice indexed away is

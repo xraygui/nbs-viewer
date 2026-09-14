@@ -53,7 +53,7 @@ from .view_spec import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from .frozen_spectrum import FrozenSpectrum
-    from .plot_bundle import PlotBundle
+    from .bundle import PlotBundle
     from .plot_session import PlotSession
 
 

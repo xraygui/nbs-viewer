@@ -2,10 +2,8 @@
 
 import numpy as np
 
-from nbs_viewer.models.plot.plot_geometry import (
-    display_flips,
-    prepare_2d_bundle,
-)
+from nbs_viewer.models.plot.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.orientation import display_flips
 from tests.fixtures.display_plane import orient_block
 from nbs_viewer.models.plot.plot_view_frame import frame_from_bundle
 

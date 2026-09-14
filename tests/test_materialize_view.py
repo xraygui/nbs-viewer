@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.plot_bundle import materialize_view
+from nbs_viewer.models.plot.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
@@ -11,7 +11,7 @@ from nbs_viewer.models.plot.view_spec import (
     eligible_profile_axes,
     profile_view_spec,
 )
-from nbs_viewer.models.plot.plot_geometry import prepare_2d_bundle
+from nbs_viewer.models.plot.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_view_frame import (
     cell_x_bounds_mesh,
     cell_y_bounds_mesh,

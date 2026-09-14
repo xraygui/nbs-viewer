@@ -9,12 +9,8 @@ from nbs_viewer.models.plot.view_spec import (
     plot_axis_to_storage_axis,
     storage_axis_to_plot_axis,
 )
-from nbs_viewer.models.plot.plot_bundle import (
-    reduce_cached_plane,
-)
-from nbs_viewer.models.plot.plot_geometry import (
-    prepare_2d_bundle,
-)
+from nbs_viewer.models.plot.stages import reduce_cached_plane
+from nbs_viewer.models.plot.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
     plan_fetch,

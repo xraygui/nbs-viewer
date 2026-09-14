@@ -16,9 +16,9 @@ def render_mode_hint_for(plot_hints: dict, ykey: str) -> Optional[str]:
     Read an explicit render_mode override from Bluesky plot hints.
 
     Lives in the data layer because it reads run metadata and nothing
-    else; it was in ``plot_geometry`` only because its one caller was
-    there, which made the key table's render hint a plot-layer fact about
-    a run-level record.
+    else; it sat in the plot layer's geometry module only because its one
+    caller was there, which made the key table's render hint a plot-layer
+    fact about a run-level record.
 
     Parameters
     ----------

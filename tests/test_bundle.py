@@ -4,12 +4,11 @@ import numpy as np
 import pytest
 
 from tests.fixtures.display_plane import orient_block
-from nbs_viewer.models.plot.plot_geometry import (
+from nbs_viewer.models.plot.bundle import prepare_1d_bundle, prepare_2d_bundle
+from nbs_viewer.models.plot.orientation import (
     classify_render_mode,
     display_flips,
     is_uniform_1d,
-    prepare_2d_bundle,
-    prepare_1d_bundle,
 )
 
 
@@ -243,7 +242,7 @@ def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descendin
     All four orientations are checked because three of them are flips, and a
     reversal applied to the wrong axis is a silently plausible image.
     """
-    from nbs_viewer.models.plot.plot_geometry import build_plot_bundle
+    from nbs_viewer.models.plot.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)
@@ -272,7 +271,7 @@ def test_the_pack_leaves_a_mesh_alone():
     """
     A mesh carries its own coordinate grids, so nothing is ever reordered.
     """
-    from nbs_viewer.models.plot.plot_geometry import build_plot_bundle
+    from nbs_viewer.models.plot.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)
