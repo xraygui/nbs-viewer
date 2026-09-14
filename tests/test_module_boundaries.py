@@ -117,11 +117,17 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
 def _write_package(root, files):
     """
     Write a throwaway package and return its directory.
+
+    Keys may name a subdirectory (``"geo/frame.py"``), so a test can build a
+    nested package and check that a relative import climbing out of it is
+    resolved against the importing module's own position.
     """
     package = root / "sample_pkg"
     package.mkdir()
     for name, source in files.items():
-        (package / name).write_text(textwrap.dedent(source))
+        path = package / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(source))
     return package
 
 
@@ -223,3 +229,78 @@ def test_an_absolute_self_import_counts_as_a_sibling(tmp_path):
     )
     facts = read_package(package)
     assert find_cycles(runtime_edges(facts)) == [["left", "right"]]
+
+
+def test_a_subpackage_module_is_found_and_named_by_its_path(tmp_path):
+    """
+    Modules below the package root are walked, not skipped.
+
+    This matters because the whole point of phase 2 is to put these modules
+    into subpackages. A guard that only globbed the top level would go quiet
+    exactly when the tree it guards grows.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "top.py": "from .geo.frame import Frame\n",
+            "geo/__init__.py": "",
+            "geo/frame.py": "class Frame:\n    pass\n",
+        },
+    )
+    facts = read_package(package)
+    assert set(facts) == {"top", "geo", "geo.frame"}
+    assert find_cycles(runtime_edges(facts)) == []
+
+
+def test_a_relative_import_climbing_out_of_a_subpackage_resolves(tmp_path):
+    """
+    ``..`` is resolved against the importing module's position, not the root.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "vocab.py": "NAME = 'x'\n",
+            "geo/__init__.py": "",
+            "geo/frame.py": "from ..vocab import NAME\n",
+            "geo/mask.py": "from .frame import NAME\n",
+        },
+    )
+    facts = read_package(package)
+    edges = runtime_edges(facts)
+    assert edges["geo.frame"] == {"vocab"}
+    assert edges["geo.mask"] == {"geo.frame"}
+
+
+def test_a_cycle_across_a_subpackage_boundary_is_caught(tmp_path):
+    """
+    Splitting two modules into different subpackages does not hide a cycle.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "geo/__init__.py": "",
+            "geo/frame.py": "from ..view.spec import Spec\n",
+            "view/__init__.py": "",
+            "view/spec.py": "from ..geo.frame import Frame\n",
+        },
+    )
+    facts = read_package(package)
+    assert find_cycles(runtime_edges(facts)) == [["geo.frame", "view.spec"]]
+
+
+def test_a_package_init_is_a_module_like_any_other(tmp_path):
+    """
+    A surface that re-exports can close a cycle, so it is walked too.
+
+    ``from . import x`` and ``from .geo import x`` both reach the same
+    ``__init__``, which is why it is named by the package.
+    """
+    package = _write_package(
+        tmp_path,
+        {
+            "geo/__init__.py": "from .frame import Frame\n",
+            "geo/frame.py": "from . import Frame\n",
+        },
+    )
+    facts = read_package(package)
+    assert find_cycles(runtime_edges(facts)) == [["geo", "geo.frame"]]

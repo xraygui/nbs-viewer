@@ -119,8 +119,14 @@ class _SiblingImportCollector(ast.NodeVisitor):
     node sits, which a flat walk throws away.
     """
 
-    def __init__(self, module: str, siblings: Set[str], package: str) -> None:
+    def __init__(
+        self, module: str, home: str, siblings: Set[str], package: str
+    ) -> None:
         self.module = module
+        # The subpackage the file sits in, which a relative import counts
+        # dots from. It cannot be derived from ``module``: a package's
+        # ``__init__`` is named by the package it *is*, and also lives in it.
+        self.home = home
         self.siblings = siblings
         self.package = package
         self.found: List[SiblingImport] = []
@@ -165,17 +171,27 @@ class _SiblingImportCollector(ast.NodeVisitor):
 
     def _sibling_of_import_from(self, node: ast.ImportFrom) -> Optional[str]:
         """
-        Return the sibling stem this ``from ... import`` names, or None.
+        Return the module in this package a ``from ... import`` names.
+
+        A relative import is resolved against the importing module's own
+        position, so ``geometry/frame.py`` saying ``from .bundle import X``
+        reaches ``geometry.bundle`` while ``from ..view_spec import Y``
+        reaches ``view_spec``. ``from . import X`` names the package's own
+        ``__init__``, which is a module here like any other.
         """
-        if node.level == 1 and node.module in self.siblings:
-            return node.module
-        if node.level == 0 and node.module:
-            return self._sibling_of_dotted(node.module)
-        return None
+        if node.level == 0:
+            return self._sibling_of_dotted(node.module) if node.module else None
+        parts = self.home.split(".") if self.home else []
+        ascend = node.level - 1
+        if ascend > len(parts):
+            return None
+        base = parts[: len(parts) - ascend] if ascend else parts
+        target = ".".join(base + ([node.module] if node.module else []))
+        return target if target in self.siblings else None
 
     def _sibling_of_dotted(self, dotted: str) -> Optional[str]:
         """
-        Return the sibling stem an absolute dotted path names, or None.
+        Return the module in this package an absolute dotted path names.
         """
         prefix = f"{self.package}."
         if dotted.startswith(prefix):
@@ -279,23 +295,27 @@ def read_package(package_dir) -> Dict[str, ModuleFacts]:
         package_dir = REPO_ROOT / package_dir
     paths = sorted(
         path
-        for path in package_dir.glob("*.py")
-        if path.name != "__init__.py"
+        for path in package_dir.rglob("*.py")
+        if "__pycache__" not in path.parts
     )
     if not paths:
         raise FileNotFoundError(f"No Python modules under {package_dir}")
 
     package = _dotted_name(package_dir)
-    siblings = {path.stem for path in paths}
+    names = {path: _module_name(path, package_dir) for path in paths}
+    siblings = set(names.values())
 
     facts: Dict[str, ModuleFacts] = {}
     for path in paths:
+        name = names[path]
         source = path.read_text()
         tree = ast.parse(source, filename=str(path))
-        collector = _SiblingImportCollector(path.stem, siblings, package)
+        collector = _SiblingImportCollector(
+            name, _home_package(path, package_dir), siblings, package
+        )
         collector.visit(tree)
-        facts[path.stem] = ModuleFacts(
-            name=path.stem,
+        facts[name] = ModuleFacts(
+            name=name,
             path=path,
             code_lines=_count_code_lines(source, tree),
             free_functions={
@@ -306,6 +326,33 @@ def read_package(package_dir) -> Dict[str, ModuleFacts]:
             imports=collector.found,
         )
     return facts
+
+
+def _home_package(path: Path, package_dir: Path) -> str:
+    """
+    Return the dotted subpackage a file sits in, relative to the root.
+
+    ``geometry/frame.py`` and ``geometry/__init__.py`` both sit in
+    ``geometry``; a file at the root sits in ``""``.
+    """
+    return ".".join(path.relative_to(package_dir).parent.parts)
+
+
+def _module_name(path: Path, package_dir: Path) -> str:
+    """
+    Return a module's dotted name below the package root.
+
+    ``geometry/frame.py`` is ``geometry.frame``; a package's ``__init__.py``
+    is named by the package itself, because that is what ``from . import X``
+    and ``from .geometry import X`` both reach.
+    """
+    relative = path.relative_to(package_dir)
+    parts = list(relative.parts)
+    if parts[-1] == "__init__.py":
+        parts.pop()
+    else:
+        parts[-1] = relative.stem
+    return ".".join(parts)
 
 
 def _dotted_name(package_dir: Path) -> str:
