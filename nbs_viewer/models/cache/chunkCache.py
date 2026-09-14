@@ -1654,6 +1654,30 @@ class ChunkCache:
         if self.progress is not None:
             self.progress.clear()
 
+    def shutdown(self, wait: bool = True) -> None:
+        """
+        Stop background work and release both thread pools.
+
+        A cache that is finished with must be shut down explicitly.
+        ``clear`` empties the cache but leaves it usable, and it does not
+        touch ``background_pool`` at all: an L2 materialize job outlives
+        the caller that queued it and keeps writing tiles through Zarr's
+        process-global event loop, holding ``ZarrL2Cache._lock`` across a
+        wait that Zarr itself does not bound. Whatever runs next then
+        queues behind work nobody is waiting for any more.
+
+        Queued jobs are dropped. Jobs already running cannot be cancelled,
+        so ``wait=True`` blocks until they finish -- that is the point:
+        it makes shutdown a real barrier rather than a request.
+
+        Parameters
+        ----------
+        wait : bool, optional
+            Block until in-flight jobs finish, by default True.
+        """
+        self.background_pool.shutdown(wait=wait, cancel_futures=True)
+        self.fetch_pool.shutdown(wait=wait, cancel_futures=True)
+
     def clear(self):
         """Clear all cached data and shutdown the fetch pool."""
         with self.request_lock:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import weakref
 
 # Must be set before qtpy imports Qt: it picks the platform plugin at import
 # time, and "offscreen" is what lets a real QApplication start with no display.
@@ -41,6 +42,43 @@ def qapp():
     if app is None:
         app = QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def shutdown_chunk_caches():
+    """
+    Stop every :class:`ChunkCache` a test created before the next one starts.
+
+    Nothing in the application shuts a cache down, so without this a
+    background L2 materialize job keeps running into later tests. It writes
+    tiles through Zarr's process-global event loop while holding
+    ``ZarrL2Cache._lock``, and Zarr waits on that write with no timeout, so
+    a test that has already reported success can wedge one that runs
+    minutes later. That was a roughly one-in-twenty-five hang of the full
+    suite, and it never reproduced when the cache tests ran on their own --
+    the job that hangs you belongs to a test that has already finished.
+
+    Caches are constructed inside test bodies and inside catalog models, so
+    there is no handle to collect; the fixture wraps the constructor and
+    keeps weak references instead. Shutting down waits for in-flight jobs,
+    which is what turns the test boundary into a real barrier.
+    """
+    from nbs_viewer.models.cache.chunkCache import ChunkCache
+
+    caches: weakref.WeakSet = weakref.WeakSet()
+    original = ChunkCache.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        caches.add(self)
+
+    ChunkCache.__init__ = tracking_init
+    try:
+        yield
+    finally:
+        ChunkCache.__init__ = original
+        for cache in list(caches):
+            cache.shutdown()
 
 
 @pytest.fixture

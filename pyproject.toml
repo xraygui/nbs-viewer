@@ -47,6 +47,17 @@ packages = ["nbs_viewer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# testpaths only covers a bare `pytest`. Any invocation that names a path --
+# `pytest .`, an editor's "run all tests" -- would otherwise collect
+# oldtests/, where test_expression_dialog calls dialog.exec_() and blocks
+# forever with no display to click it, and test/, which holds interactive
+# scripts that talk to the live facility catalog.
+norecursedirs = ["oldtests", "test", "build", "dist", ".pixi"]
+# A wedged run should name the test and dump stacks instead of going quiet.
+# "thread" reports from a watchdog thread, so it survives a deadlocked main
+# thread, unlike the signal-based method.
+timeout = 60
+timeout_method = "thread"
 
 [project.entry-points."nbs_viewer.catalog_models"]
 blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
@@ -70,6 +81,7 @@ nbs-viewer = { path = ".", editable = true }
 nbs-viewer = "nbs-viewer"
 
 [tool.pixi.dependencies]
+pytest-timeout = ">=2.4.0,<3"
 nslsii = ">=0.11.2,<0.12"
 numpy = ">=2.2.6,<3"
 qtpy = ">=2.4.3,<3"
