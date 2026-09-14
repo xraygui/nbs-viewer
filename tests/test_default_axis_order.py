@@ -11,9 +11,7 @@ without a QWidget, which is the cheaper tier to test it in.
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-)
+from nbs_viewer.models.plot.view.spec import DimRole
 from nbs_viewer.models.plot.run_source import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 

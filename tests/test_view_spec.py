@@ -4,7 +4,7 @@ import pytest
 
 from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
+from nbs_viewer.models.plot.view.spec import (
     DimRole,
     Projection,
     ViewCrop,

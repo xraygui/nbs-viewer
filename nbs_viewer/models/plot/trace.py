@@ -17,7 +17,7 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
-from .view_spec import classify_profile_kind
+from .view import Projection, classify_profile_kind
 from .frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,
     FrozenSpectrum,
@@ -25,7 +25,6 @@ from .frozen_spectrum import (
 )
 from .geometry import PlotBundle, RenderMode
 from .plot_request import PlotRequest, TraceKey
-from .view_spec import Projection
 
 
 class Trace(QObject):

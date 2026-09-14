@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.view_spec import DimRole
+from nbs_viewer.models.plot.view.spec import DimRole
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.run_source import RunSource

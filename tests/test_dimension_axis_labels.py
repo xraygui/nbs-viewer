@@ -3,9 +3,7 @@
 import numpy as np
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-)
+from nbs_viewer.models.plot.view.spec import DimRole
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 

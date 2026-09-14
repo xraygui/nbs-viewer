@@ -5,10 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from tests.fixtures.view import apply_projection
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 
 from nbs_viewer.models.plot.plot_session import PlotSession
 from nbs_viewer.models.plot.run_source import RunSource

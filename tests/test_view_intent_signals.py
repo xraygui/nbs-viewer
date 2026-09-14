@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import DimRole, Projection
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 
 
 def _recorder(intent):

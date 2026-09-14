@@ -24,7 +24,7 @@ from nbs_viewer.models.plot.geometry.frame import (
 from nbs_viewer.models.plot.geometry.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run_source import RunSource
-from nbs_viewer.models.plot.view_spec import eligible_profile_axes
+from nbs_viewer.models.plot.view.spec import eligible_profile_axes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.plot_session import make_plot_session
 

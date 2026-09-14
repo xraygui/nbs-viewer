@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
+from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.stages import (
     apply_normalization,
     apply_transform,
@@ -28,7 +28,7 @@ from nbs_viewer.models.sources.fixtures import (
 )
 import xarray as xr
 
-from nbs_viewer.models.plot.plot_axes import PlotAxes
+from nbs_viewer.models.plot.view.axes import PlotAxes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.display_plane import labelled_block
 from tests.test_run_source import _frozen_entry

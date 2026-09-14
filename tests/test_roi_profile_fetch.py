@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.view_spec import (
+from nbs_viewer.models.plot.view.spec import (
     DimRole,
     Projection,
     is_plot_plane_storage_axis,

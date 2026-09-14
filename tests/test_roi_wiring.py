@@ -6,10 +6,7 @@ import numpy as np
 import pytest
 
 from tests.fixtures.view import apply_projection
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.frozen_spectrum import is_synthetic_key
 from nbs_viewer.models.plot.geometry.frame import (
     cell_x_bounds_mesh,

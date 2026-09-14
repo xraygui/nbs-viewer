@@ -28,7 +28,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nbs_viewer.models.plot.view_spec import (
+from nbs_viewer.models.plot.view import (
     Projection,
     eligible_profile_axes,
     is_plot_plane_storage_axis,

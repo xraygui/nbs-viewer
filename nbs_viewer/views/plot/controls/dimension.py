@@ -14,11 +14,7 @@ import numpy as np
 from qtpy.QtCore import Qt, Signal
 
 from nbs_viewer.models.data.array_contract import index_placeholders
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    ROLE_LABELS,
-    SLICE_ROLES,
-)
+from nbs_viewer.models.plot.view import DimRole, ROLE_LABELS, SLICE_ROLES
 from nbs_viewer.utils import print_debug
 from nbs_viewer.views.common.panel import CollapsiblePanel
 

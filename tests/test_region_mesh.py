@@ -13,10 +13,7 @@ from nbs_viewer.models.plot.geometry.region import (
 )
 from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
 from nbs_viewer.models.plot.stages import materialize_view
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-    Projection,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
 

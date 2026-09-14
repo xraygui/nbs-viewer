@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from ..geometry import MaskMode
-from ..view_spec import SpatialReduce
+from ..view import SpatialReduce
 
 
 def default_profile_label(

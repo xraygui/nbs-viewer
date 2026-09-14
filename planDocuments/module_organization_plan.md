@@ -260,7 +260,7 @@ What is left is a defect, and it is this step:
 Mechanical: every hunk is a file rename or an import line. Verified by the
 suite plus step 1's guard.
 
-### Step 6 — `geometry/`, `view/`, `roi/`
+### Step 6 — `geometry/`, `view/`, `roi/` — **landed**
 
 The three with a declared `__init__` surface, done together because their
 surfaces are the point: `geometry/` (bundle, orientation, frame, mask) because
@@ -268,10 +268,24 @@ outsiders currently import private names from it; `view/` because 63 of
 `view_spec`'s 93 name-imports are `Projection`, `DimRole` and `ViewCrop`;
 `roi/` because `views/` legitimately needs its small fixed surface.
 
-`roi/` takes two of the eight functions step 4 sent to it, not eight — see
-the corrected table there. `view_spec.py` now imports nothing from the
-package at all: `PlotViewFrame` went in step 4, and `MaskMode` left with
-`default_profile_label`. Pure vocabulary, which is what `view/` is for.
+`roi/` took two of the eight functions step 4 sent to it, not eight — see the
+corrected table there. `view/` is `spec.py` and `axes.py`, and imports
+nothing else in `models/plot`: `PlotViewFrame` went in step 4 and `MaskMode`
+left with `default_profile_label`. That sink property is what makes it
+vocabulary rather than a layer, so it is now a test rather than a claim —
+and it is a working smell test, since both names that turned out not to
+belong here were found by noticing they wanted a frame or a region.
+
+The three surfaces differ in kind, which is worth saying because only one of
+them hides anything. `geometry/` exports 26 names and hides about 20: the
+`mask_from_*` rasterizers, the per-mode cell bounds, the extent and edge
+builders, all reached through `compile_with_mask_mode` and the frame.
+`view/` exports 19 and hides one private helper — it exists for
+concentration, not concealment, so that the sixty-odd callers who want
+`Projection`, `DimRole` and `ViewCrop` say one short thing. `roi/` exports
+five because that is what `views/` needs. Tests reach past all three to the
+module when they exercise internals, which is deliberate: a test of the
+cell-bounds arithmetic should break when that arithmetic moves.
 
 ### Step 7 — measure `region_controller`, then `fetch/` and `run/`
 
@@ -306,7 +320,8 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
-| 2026-09-14 | Step 6 in progress: the guard was taught to walk subpackages first (it globbed one directory, so the moves would have silenced it), then `geometry/` and `roi/` landed. Two corrections to step 4's predicted redistribution, both recorded in its table: six of the eight functions promised to `roi/` stay in `view_spec`, because each reads a `Projection` and `PlotAxes.to_profile` needs `profile_view_spec` — moving it makes `view` import `roi` while `roi` already imports `view` for `SpatialReduce`, which is a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary, and that is the distinction the step-4 table got wrong. `crop_from_region` and `roi_profile_request` go to `fetch/` in step 7 instead: both build a request, and `crop_from_region` is view cropping, not ROI. `roi/` is therefore two files and a five-name surface. Two diagnostic bugs the first surface exposed are fixed in the tool: `working_set` now follows re-exports to the defining module, without which every count would have drifted toward zero as files moved while no reader's job got smaller, and `import_sites` now recurses. Surface rows are labelled, since their count measures the door. |
+| 2026-09-14 | Step 6 landed. `view/` is `spec.py` + `axes.py` with a 19-name surface, and a test now asserts the package imports nothing else in `models/plot`. One finding: `profile_storage_axis` has no caller anywhere — the seventeen apparent uses are a `RoiOperation` field and a widget method of the same name, which is a third name collision of the kind step 4 fixed for `plot_axis_names`. Left in place, kept off the surface, and flagged rather than deleted. 27 modules, 4900 code lines, no runtime cycles, no function-local sibling imports, 529 tests. |
+| 2026-09-14 | Step 6, first two packages: the guard was taught to walk subpackages first (it globbed one directory, so the moves would have silenced it), then `geometry/` and `roi/` landed. Two corrections to step 4's predicted redistribution, both recorded in its table: six of the eight functions promised to `roi/` stay in `view_spec`, because each reads a `Projection` and `PlotAxes.to_profile` needs `profile_view_spec` — moving it makes `view` import `roi` while `roi` already imports `view` for `SpatialReduce`, which is a runtime cycle. Being asked mostly by ROI code does not make a projection query ROI vocabulary, and that is the distinction the step-4 table got wrong. `crop_from_region` and `roi_profile_request` go to `fetch/` in step 7 instead: both build a request, and `crop_from_region` is view cropping, not ROI. `roi/` is therefore two files and a five-name surface. Two diagnostic bugs the first surface exposed are fixed in the tool: `working_set` now follows re-exports to the defining module, without which every count would have drifted toward zero as files moved while no reader's job got smaller, and `import_sites` now recurses. Surface rows are labelled, since their count measures the door. |
 | 2026-09-14 | Step 5 landed. Four aliases, one definition each, and five deleted. No behaviour change: `PlotRequest.__post_init__` already validated both `mask_mode` and `spatial_reduce`, so `roi_set`'s widening to `str` was invisible to the interpreter — which is why it survived, and why narrowing it back is free. It adds one mutual pair, `region ↔ view_spec`: `region` now imports `PlotAxisName` at runtime while `view_spec` still names `MaskMode` under `TYPE_CHECKING` for `default_profile_label`. Not a runtime cycle, and it dissolves in step 6 when that function leaves for `roi/`. 522 tests. |
 | 2026-09-14 | Step 4 landed. `view_spec` now imports one name from one sibling, `MaskMode` under `TYPE_CHECKING`, which leaves with `default_profile_label` in step 6. Making the spec required turned a silent fall-through into a raise for a 1-D projection, whose single plot axis had been passing the old `len(plot_order) >= 2` test and reaching the frame; the two ROI-window plane guards now ask `is_plot_plane_storage_axis`, which answers False without a plane, and two tests pin both. One precondition deliberately left alone: `profile_axis_for_roi_span` still refuses to answer without a frame, even though the mapping no longer needs one. Removing it would change when the ROI span axis gets corrected — `set_profile_context` can be handed a spec with no frame — and the plan's goal forbids behaviour changes, so it is recorded here instead of fixed. 522 tests. |
 | 2026-09-14 | Step 4 re-scoped before starting, because its `view_spec` bullet sorted 14 functions by syntactic form into one destination and would have encapsulated nothing. Grouped by what they answer, they are five different things, and all but four already have a home in step 6 or step 7, so the step creates no new file. What survives is one defect the draft had not noticed: `storage_axis_to_plot_axis` holds two implementations of one mapping, and its own docstring says the frame branch answers wrong. That branch turns out to be dead at all five call sites, so the step is a deletion. Also measured: the `plot_axis_names` collision is three test call sites, not the wide rename the draft implied, and the free function has no production caller at all — `ViewIntent` names it as the overplot-compatibility check, so it is unwired rather than dead and keeps its test. |

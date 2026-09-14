@@ -44,7 +44,7 @@ from .geometry import (
 )
 from .roi import RoiEntry, RoiSetModel
 from .trace import Trace
-from .view_spec import (
+from .view import (
     Projection,
     ViewCrop,
     classify_profile_kind,

@@ -41,9 +41,7 @@ from .selection import Selection
 from .trace import Trace
 from .trace_set import TraceSet
 from .view_intent import ViewIntent
-from .view_spec import (
-    Projection,
-)
+from .view import Projection
 
 
 class PlotSession(QObject):

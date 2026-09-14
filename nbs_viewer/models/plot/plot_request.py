@@ -14,7 +14,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple
 
-from .plot_axes import PlotAxes
+from .view import (
+    DimRole,
+    PlotAxes,
+    Projection,
+    SliceItem,
+    SpatialReduce,
+    ViewCrop,
+    plot_axis_to_storage_axis,
+    storage_axis_to_plot_axis,
+)
 from .geometry import (
     MaskMode,
     PlotViewFrame,
@@ -24,15 +33,6 @@ from .geometry import (
     compile_with_mask_mode,
     expand_region_for_profile,
     region_frame_for_bbox,
-)
-from .view_spec import (
-    DimRole,
-    SliceItem,
-    SpatialReduce,
-    ViewCrop,
-    Projection,
-    plot_axis_to_storage_axis,
-    storage_axis_to_plot_axis,
 )
 
 

@@ -5,7 +5,7 @@ import pytest
 
 from nbs_viewer.models.plot.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
+from nbs_viewer.models.plot.view.spec import (
     DimRole,
     Projection,
     eligible_profile_axes,
@@ -18,7 +18,7 @@ from nbs_viewer.models.plot.geometry.frame import (
     frame_from_bundle,
 )
 from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.plot_axes import PlotAxes
+from nbs_viewer.models.plot.view.axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
 

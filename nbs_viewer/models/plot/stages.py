@@ -32,14 +32,8 @@ from .geometry import (
     mesh_separable_edge_grids,
     prepare_1d_bundle,
 )
-from .plot_axes import PlotAxes
+from .view import DimRole, PlotAxes, PlotAxisName, Projection, SliceItem
 from .plot_request import PlotRequest
-from .view_spec import (
-    DimRole,
-    PlotAxisName,
-    Projection,
-    SliceItem,
-)
 
 
 def _plane_axis_arrays(

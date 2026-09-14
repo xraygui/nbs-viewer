@@ -8,7 +8,7 @@ from nbs_viewer.models.data.combined import (
     CombinationMethod,
     CombinedRun,
 )
-from nbs_viewer.models.plot.view_spec import DimRole, Projection
+from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.frozen_spectrum import (
     SYNTHETIC_KEY_PREFIX,

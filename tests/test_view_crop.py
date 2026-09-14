@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from nbs_viewer.models.plot.view_spec import DimRole, Projection, ViewCrop
+from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.plot_request import (
     PlotRequest,
     crop_from_region,

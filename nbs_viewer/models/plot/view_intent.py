@@ -14,13 +14,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from qtpy.QtCore import QObject, Signal
 
-from .view_spec import (
-    DimRole,
-    Projection,
-    SLICE_ROLES,
-    ViewCrop,
-    resolve_axis_order,
-)
+from .view import DimRole, Projection, SLICE_ROLES, ViewCrop, resolve_axis_order
 
 
 def _validated_reduce(

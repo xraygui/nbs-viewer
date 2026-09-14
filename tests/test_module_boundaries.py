@@ -111,6 +111,29 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
     assert bodies == []
 
 
+def test_the_view_vocabulary_depends_on_nothing_in_the_package(facts):
+    """
+    ``view/`` is a sink: everything may import it, it imports nothing back.
+
+    This is the property that makes it vocabulary rather than a layer. Every
+    other package here describes data, fetches it or draws it, and all of
+    them need these words -- so the words cannot need anything back without
+    putting a cycle one edit away.
+
+    It is also a useful smell test. Both times something in this package
+    turned out to want a frame or a region, the thing that wanted it was not
+    vocabulary: ``storage_axis_to_plot_axis`` was taking a frame it should
+    never have had, and ``default_profile_label`` was ROI text.
+    """
+    outward = {
+        (imp.module, imp.target)
+        for imp in (i for m in facts.values() for i in m.imports)
+        if imp.module.split(".")[0] == "view"
+        and imp.target.split(".")[0] != "view"
+    }
+    assert outward == set(), f"view/ reaches outside itself: {sorted(outward)}"
+
+
 # ---------------------------------------------------------------------------
 # The detector itself, on a package small enough to read
 # ---------------------------------------------------------------------------

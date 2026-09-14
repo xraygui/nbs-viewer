@@ -20,7 +20,7 @@ from ..geometry import (
     RectRegion,
     RegionDefinition,
 )
-from ..view_spec import SpatialReduce
+from ..view import SpatialReduce
 
 PLACEHOLDER_RECT = RectRegion(x0=0.0, x1=0.0, y0=0.0, y1=0.0)
 PLACEHOLDER_ELLIPSE = EllipseRegion(cx=0.0, cy=0.0, rx=0.0, ry=0.0, angle=0.0)

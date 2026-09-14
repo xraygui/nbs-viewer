@@ -7,9 +7,7 @@ import pytest
 
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view_spec import (
-    DimRole,
-)
+from nbs_viewer.models.plot.view.spec import DimRole, ViewCrop
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import PolygonRegion, compile_with_mask_mode
@@ -19,7 +17,6 @@ from nbs_viewer.models.plot.plot_request import (
     roi_profile_request,
 )
 from nbs_viewer.models.plot.run_source import RunSource
-from nbs_viewer.models.plot.view_spec import ViewCrop
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
     VPPEM_UID,
@@ -114,9 +111,7 @@ def test_run_model_get_plot_bundle_request_with_crop():
 
 
 def test_plot_data_model_holds_request_and_fetches():
-    from nbs_viewer.models.plot.view_spec import (
-    Projection,
-)
+    from nbs_viewer.models.plot.view.spec import Projection
     from nbs_viewer.models.plot.trace import Trace
     from nbs_viewer.models.plot.plot_request import TraceKey, build_plot_request
 

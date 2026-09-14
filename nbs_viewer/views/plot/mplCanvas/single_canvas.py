@@ -18,7 +18,7 @@ from matplotlib.widgets import RectangleSelector
 from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
-from nbs_viewer.models.plot.view_spec import Projection
+from nbs_viewer.models.plot.view import Projection, ViewCrop
 from nbs_viewer.models.plot.geometry import (
     EllipseRegion,
     PlotBundle,
@@ -29,7 +29,6 @@ from nbs_viewer.models.plot.geometry import (
     frame_from_bundle,
 )
 from nbs_viewer.models.plot.roi import RoiSetModel
-from nbs_viewer.models.plot.view_spec import ViewCrop
 from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
 from .plot_worker import PlotWorker, retire_plot_worker

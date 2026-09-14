@@ -1,7 +1,7 @@
 """
 The projection, in the vocabulary of the data.
 
-A :class:`~nbs_viewer.models.plot.view_spec.Projection` describes a view by
+A :class:`~nbs_viewer.models.plot.view.Projection` describes a view by
 *storage axis index*: ``roles[2]`` is the role of the third dimension of the
 stored array. The pipeline's arrays are ``xarray.DataArray``s whose axes are
 named, and whose names survive slicing and reduction while indices do not --
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence, Tuple
 
-from .view_spec import DimRole, Projection, profile_view_spec
+from .spec import DimRole, Projection, profile_view_spec
 
 
 @dataclass(frozen=True)
