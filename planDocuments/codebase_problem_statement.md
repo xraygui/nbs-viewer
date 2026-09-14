@@ -1,11 +1,19 @@
 # Codebase problem statement
 
 **Status: OPEN (2026-09-02).** Written after the ownership refactor closed
-([`model_ownership_headless_plan.md`](model_ownership_headless_plan.md)) and
+(`model_ownership_headless_plan.md`) and
 Phase 2 of the testing plan
 ([`headless_testing_plan.md`](headless_testing_plan.md)) landed, while
-[`plot_package_reorganization.md`](plot_package_reorganization.md) is still
+`plot_package_reorganization.md` is still
 pending.
+
+> **Note, 2026-09-14.** The two documents named above no longer exist: both
+> were deleted in `e28dc07` and absorbed into
+> [`refactor_plan.md`](archive/refactor_plan.md), which completed on
+> 2026-09-10 and is now archived. The package reorganisation they described is
+> carried by [`module_organization_plan.md`](module_organization_plan.md).
+> References to `plot_package_reorganization.md` further down are left as
+> written, since this document is a record of what was true on 2026-09-02.
 
 This document records **what is wrong and why it matters**. It proposes no
 work. The remediation sequence lives in
@@ -368,7 +376,7 @@ already covers filenames; the data-layer method names are a separate,
 larger rename.
 
 **The reorg plan is behind reality.**
-[`plot_package_reorganization.md`](plot_package_reorganization.md) marks
+`plot_package_reorganization.md` (deleted; see the note at the top) marks
 slices 7a and 7d "Not started", but `views/plot/roi/` and
 `views/plot/mplCanvas/` already exist, and `RoiController`, `RoiPanel`, and
 `RoiPreviewController` are gone as separate modules. `views/plot/roi/` today
@@ -466,7 +474,7 @@ property**. This works today only because `all()` over an empty dict is
 
 ## Why the package reorganization does not fix any of this
 
-[`plot_package_reorganization.md`](plot_package_reorganization.md) is
+`plot_package_reorganization.md` (deleted; see the note at the top) is
 explicitly and correctly scoped as behavior-preserving: "moves, import
 updates, and file splits along existing seams — not feature work." Its own
 "Remaining model–view leaks" section already inventories items 6 and 7 above

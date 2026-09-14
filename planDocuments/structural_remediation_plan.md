@@ -9,14 +9,18 @@
 > logging sweep, and repo hygiene. Nothing else covers those.
 
 
-Successor to the closed
-`[model_ownership_headless_plan.md](model_ownership_headless_plan.md)`.
+Successor to the closed `model_ownership_headless_plan.md`.
 Addresses the ranked problems in
 `[codebase_problem_statement.md](codebase_problem_statement.md)` by
 **interleaving** the pending mechanical package moves from
-`[plot_package_reorganization.md](plot_package_reorganization.md)` with small
+`plot_package_reorganization.md` with small
 contract changes at the seams those moves open, then cleaning up what folder
 moves cannot reach.
+
+> **Both documents named above no longer exist.** They were deleted in
+> `e28dc07` and absorbed into [`refactor_plan.md`](archive/refactor_plan.md),
+> which completed on 2026-09-10 and is now archived. The package moves are
+> carried by [`module_organization_plan.md`](module_organization_plan.md).
 
 Testing infrastructure work continues under
 `[headless_testing_plan.md](headless_testing_plan.md)` Phase 3/4; this plan
