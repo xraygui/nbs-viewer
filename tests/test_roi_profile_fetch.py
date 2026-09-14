@@ -6,6 +6,7 @@ import pytest
 from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
+    is_plot_plane_storage_axis,
     plot_axis_to_storage_axis,
     storage_axis_to_plot_axis,
 )
@@ -286,12 +287,10 @@ def test_storage_axis_to_plot_axis_follows_the_spec_not_the_frame():
     frame = frame_from_bundle(plane)
     assert (frame.plot_y_dim, frame.plot_x_dim) == (0, 1)
 
-    assert storage_axis_to_plot_axis(
-        frame, 0, parent_spec=_SELECTION_DRIVEN
-    ) == "plot_x"
-    assert storage_axis_to_plot_axis(
-        frame, 1, parent_spec=_SELECTION_DRIVEN
-    ) == "plot_y"
+    # The opposite of what those display positions say, which is why the
+    # function no longer accepts a frame at all.
+    assert storage_axis_to_plot_axis(_SELECTION_DRIVEN, 0) == "plot_x"
+    assert storage_axis_to_plot_axis(_SELECTION_DRIVEN, 1) == "plot_y"
 
 
 def test_span_full_expands_the_profile_axis_not_the_reduction_axis():
@@ -325,26 +324,52 @@ def test_span_full_expands_the_profile_axis_not_the_reduction_axis():
     assert (expanded.y0, expanded.y1) == pytest.approx((drawn.y0, drawn.y1))
 
 
-def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
-    plane = prepare_2d_bundle(
-        np.arange(100, dtype=float).reshape(10, 10),
-        [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
-        ["dim_1", "dim_2"],
-        render_mode_hint="image",
+def test_a_1d_view_has_no_plot_plane_to_map_onto():
+    """
+    A projection with one plot axis cannot answer plot_x versus plot_y.
+
+    It used to: ``plot_axis_order()`` returns a single axis for a 1-D view, so
+    the old ``len(plot_order) >= 2`` test fell through to the frame and
+    compared the storage axis against a display position. Raising is what
+    lets the ROI window's plane guard be a question about the projection
+    rather than about whether a frame happens to be cached.
+    """
+    spectrum = Projection(
+        ndim=2,
+        plot_ndim=1,
+        roles=(DimRole.INDEX, DimRole.PLOT_X),
+        indices=(0, 0),
     )
-    frame = frame_from_bundle(plane)
+    assert spectrum.plot_axis_order() == (1,)
+    assert not is_plot_plane_storage_axis(spectrum, 1)
+    with pytest.raises(ValueError, match="2D parent spec"):
+        storage_axis_to_plot_axis(spectrum, 1)
+
+
+def test_an_off_plane_storage_axis_has_no_plot_axis():
+    """
+    A slider axis is not on the plane, so it maps to neither plot axis.
+    """
+    cube = Projection(
+        ndim=3,
+        plot_ndim=2,
+        roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0, 0),
+    )
+    assert not is_plot_plane_storage_axis(cube, 0)
+    with pytest.raises(ValueError, match="not on the plot plane"):
+        storage_axis_to_plot_axis(cube, 0)
+
+
+def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
     parent_spec = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0, 0, 0),
     )
-    assert storage_axis_to_plot_axis(
-        frame, 3, parent_spec=parent_spec
-    ) == "plot_x"
-    assert storage_axis_to_plot_axis(
-        frame, 2, parent_spec=parent_spec
-    ) == "plot_y"
+    assert storage_axis_to_plot_axis(parent_spec, 3) == "plot_x"
+    assert storage_axis_to_plot_axis(parent_spec, 2) == "plot_y"
 
 
 def test_stack_profile_fetch_slice_widens_the_profile_axis():

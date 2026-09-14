@@ -189,7 +189,7 @@ Settled here so no step has to stop and ask. Each is reversible; none blocks.
 - **Out of scope:** the stage bodies, and `PlotBundle`'s fields (open question
   5 in the data-contract plan owns those).
 
-### Step 4 — one mapping, one implementation
+### Step 4 — one mapping, one implementation — **landed**
 
 The draft split both files by *form*: types stay, free functions move to a
 file of their own. Measured, that sorts `view_spec`'s fourteen functions —
@@ -209,7 +209,7 @@ its subject instead:
 
 What is left is a defect, and it is this step:
 
-- [ ] Delete `storage_axis_to_plot_axis`'s `frame` parameter and the fallback
+- [x] Delete `storage_axis_to_plot_axis`'s `frame` parameter and the fallback
   branch that reads the mapping off `frame.plot_x_dim` / `plot_y_dim`. Its own
   docstring says that branch "silently inverts the answer" for any view whose
   plot-axis order is not the identity, so the one function has two
@@ -220,10 +220,10 @@ What is left is a defect, and it is this step:
   guard on it being non-`None` first. It then matches
   `plot_axis_to_storage_axis`, which is already the same query on a
   `Projection` alone.
-- [ ] Deletes: the wrong branch, the `frame` parameter, and
+- [x] Deletes: the wrong branch, the `frame` parameter, and
   `view_spec`'s `from .plot_view_frame import PlotViewFrame` — line 737 is its
   only use, so the `view_spec → plot_view_frame` edge goes with it.
-- [ ] Rename `view_spec.plot_axis_names` to `projected_axis_names`. It means
+- [x] Rename `view_spec.plot_axis_names` to `projected_axis_names`. It means
   *the plot axes of a projection* while `RunSource.plot_axis_names` means *a
   name per storage axis* — two things one import apart, recorded in the
   data-contract plan and never fixed. The rename is nearly free: the free
@@ -299,6 +299,7 @@ their own plans.
 | Date | Change |
 |------|--------|
 | 2026-09-10 | Drafted. Shape C (split, then move) and per-package re-export policy chosen by the maintainer. The organising finding — that every large module mixes a zero-coupling vocabulary with all-coupling machinery — comes from mapping each member to the siblings it uses. |
+| 2026-09-14 | Step 4 landed. `view_spec` now imports one name from one sibling, `MaskMode` under `TYPE_CHECKING`, which leaves with `default_profile_label` in step 6. Making the spec required turned a silent fall-through into a raise for a 1-D projection, whose single plot axis had been passing the old `len(plot_order) >= 2` test and reaching the frame; the two ROI-window plane guards now ask `is_plot_plane_storage_axis`, which answers False without a plane, and two tests pin both. One precondition deliberately left alone: `profile_axis_for_roi_span` still refuses to answer without a frame, even though the mapping no longer needs one. Removing it would change when the ROI span axis gets corrected — `set_profile_context` can be handed a spec with no frame — and the plan's goal forbids behaviour changes, so it is recorded here instead of fixed. 522 tests. |
 | 2026-09-14 | Step 4 re-scoped before starting, because its `view_spec` bullet sorted 14 functions by syntactic form into one destination and would have encapsulated nothing. Grouped by what they answer, they are five different things, and all but four already have a home in step 6 or step 7, so the step creates no new file. What survives is one defect the draft had not noticed: `storage_axis_to_plot_axis` holds two implementations of one mapping, and its own docstring says the frame branch answers wrong. That branch turns out to be dead at all five call sites, so the step is a deletion. Also measured: the `plot_axis_names` collision is three test call sites, not the wide rename the draft implied, and the free function has no production caller at all — `ViewIntent` names it as the overplot-compatibility check, so it is unwired rather than dead and keeps its test. |
 | 2026-09-14 | Step 3 landed. `RenderMode` moved to `orientation.py` rather than `bundle.py` — recorded above with the reason, which is the plan's own first hard rule. Three extent and mesh-grid helpers became public because `bundle` crosses into them. The two test files were renamed with the modules they cover, `test_plot_geometry.py` → `test_bundle.py` and `test_plot_bundle.py` → `test_stages.py`; `test_bundle.py` keeps the render-mode classification tests next to the packing tests rather than splitting them into a `test_orientation.py`, because packing is where classification is applied and the two halves verify one behaviour. One finding about the diagnostic: `run_fetch`'s "from N modules" rose 4 → 5 without its working set changing at all, purely because one file it imports became two. The second column is even more gameable than the first, and neither is a target. `bundle` itself now imports 5 free functions from exactly one partner, which is the cohesive-pair shape the plan already excuses for `region`. 23 modules, 4806 code lines, both hard rules holding, 520 tests passing. |
 | 2026-09-14 | Steps 1 and 2 landed. The guard and the diagnostic share one implementation, `tools/module_graph.py`, run as a script and imported by `tests/test_module_boundaries.py`; it reproduces every measurement in this plan (22 modules, 4791 code lines, each working-set row, and 64 inside / 178 `tests/` / 24 `views/` import sites), which is what lets a later step quote a before and an after. Two of this plan's derived totals are off and are corrected above: 12 files sit at zero, not 13, and the import sites measure 268 across 75 files rather than 267 across 74. The guard carries self-tests on throwaway packages, because a silently broken detector is a guard that passes forever. Step 2 moved eight functions rather than four — the four named cannot leave without the four they call, and leaving those behind would have re-pointed the same cycle the other way. `region_mesh`'s working set rose 0 → 3 and `plot_view_frame`'s fell 2 → 1: the rise is the point, since a rasterizer asking a frame where its cells are is the direction that was backwards before. Both hard rules now hold with an empty allowlist, and 520 tests pass. |

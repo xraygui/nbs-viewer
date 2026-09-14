@@ -26,7 +26,6 @@ from typing import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - annotation only
-    from .plot_view_frame import PlotViewFrame
     from .region import MaskMode
 
 
@@ -325,12 +324,16 @@ class Projection:
         return replace(self, roles=tuple(roles))
 
 
-def plot_axis_names(
+def projected_axis_names(
     spec: Projection,
     dim_names: Sequence[str],
 ) -> Tuple[str, ...]:
     """
     Dimension names of the plot axes for cross-key compatibility checks.
+
+    Named apart from ``RunSource.plot_axis_names``, which it used to share a
+    name with: that one returns a name per *storage* axis, this one the names
+    of the axes a projection *plots*. Two different answers one import apart.
 
     Two projected views are compatible for overplotting when their plot-axis
     name tuples match. A rank-1 key whose sole axis is ``sampleVoltage`` is
@@ -734,30 +737,27 @@ def is_plot_plane_storage_axis(
 
 
 def storage_axis_to_plot_axis(
-    frame: PlotViewFrame,
-    profile_storage_axis: int,
-    *,
-    parent_spec: Optional[Projection] = None,
+    parent: Projection, storage_axis: int
 ) -> PlotAxisName:
     """
-    Return the plot axis name for a profile storage dimension.
+    Map a storage dimension index to its plot axis name on a 2D parent spec.
 
-    The view spec decides which storage axis is horizontal, at every rank
-    including two. The frame cannot: since orientation moved to just after
-    the load, ``frame.plot_y_dim`` and ``frame.plot_x_dim`` are always 0 and
-    1 -- display positions, not storage axes -- so comparing a storage axis
-    against them silently inverts the answer for any view whose plot-axis
-    order is not the identity. That is only used as a last resort, when there
-    is no spec to ask and "storage axis" can only mean "display position".
+    The inverse of :func:`plot_axis_to_storage_axis`, and the projection is
+    the only thing that can answer it. A frame cannot: since orientation
+    moved to just after the load, ``frame.plot_y_dim`` and
+    ``frame.plot_x_dim`` are always 0 and 1 -- display positions, not storage
+    axes -- so comparing a storage axis against them inverts the answer for
+    any view whose plot-axis order is not the identity, which is the normal
+    case as soon as the user picks an X key that is not the trailing axis.
+    This function used to take a frame and fall back to exactly that
+    comparison whenever it was handed no spec.
 
     Parameters
     ----------
-    frame : PlotViewFrame
-        Parent 2D view frame.
-    profile_storage_axis : int
+    parent : Projection
+        Parent view with ``plot_ndim == 2``.
+    storage_axis : int
         Storage axis index on the parent projection.
-    parent_spec : Projection, optional
-        Full parent view used to map storage axes to plot X / plot Y.
 
     Returns
     -------
@@ -767,23 +767,16 @@ def storage_axis_to_plot_axis(
     Raises
     ------
     ValueError
-        If the axis is not one of the two plot-plane axes.
+        If the parent is not 2D, or the axis is not on its plot plane.
     """
-    if parent_spec is not None and parent_spec.plot_ndim == 2:
-        plot_order = parent_spec.plot_axis_order()
-        if len(plot_order) >= 2:
-            if profile_storage_axis == plot_order[-1]:
-                return "plot_x"
-            if profile_storage_axis == plot_order[-2]:
-                return "plot_y"
-            raise ValueError(
-                f"profile storage axis {profile_storage_axis} is not on the "
-                f"plot plane {plot_order[-2:]}"
-            )
-    if profile_storage_axis == frame.plot_x_dim:
+    if parent.plot_ndim != 2:
+        raise ValueError("storage_axis_to_plot_axis requires a 2D parent spec")
+    plot_order = parent.plot_axis_order()
+    if storage_axis == plot_order[-1]:
         return "plot_x"
-    if profile_storage_axis == frame.plot_y_dim:
+    if storage_axis == plot_order[-2]:
         return "plot_y"
     raise ValueError(
-        f"profile storage axis {profile_storage_axis} is not on the plot plane"
+        f"storage axis {storage_axis} is not on the plot plane "
+        f"{plot_order[-2:]}"
     )

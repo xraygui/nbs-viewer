@@ -8,7 +8,7 @@ from nbs_viewer.models.plot.view_spec import (
     DimRole,
     Projection,
     ViewCrop,
-    plot_axis_names,
+    projected_axis_names,
     spec_from_slice_info,
 )
 from nbs_viewer.models.plot.plot_request import PlotRequest, plan_fetch
@@ -218,7 +218,7 @@ def test_projection_round_trips_through_the_test_lift():
     assert lifted.project(3, VPPEM_SHAPE) == projected
 
 
-def test_plot_axis_names_compatibility():
+def test_projected_axis_names_compatibility():
     intent_1d = ViewIntent(
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
@@ -228,10 +228,10 @@ def test_plot_axis_names_compatibility():
     image_spec = intent_1d.project(3, VPPEM_SHAPE, VPPEM_NAMES)
     stats_spec = ViewIntent(plot_ndim=1).project(1, (11,))
 
-    image_names = plot_axis_names(
+    image_names = projected_axis_names(
         image_spec, ["sampleVoltage_VSource", "dim_1", "dim_2"]
     )
-    stats_names = plot_axis_names(stats_spec, ["sampleVoltage_VSource"])
+    stats_names = projected_axis_names(stats_spec, ["sampleVoltage_VSource"])
     assert image_names == ("sampleVoltage_VSource",)
     assert image_names == stats_names
 
@@ -241,7 +241,7 @@ def test_plot_axis_names_compatibility():
         reduce_indices=(0, 0),
     )
     detector_spec = detector_intent.project(3, VPPEM_SHAPE, VPPEM_NAMES)
-    detector_names = plot_axis_names(
+    detector_names = projected_axis_names(
         detector_spec, ["sampleVoltage_VSource", "dim_1", "dim_2"]
     )
     assert detector_names == ("dim_2",)

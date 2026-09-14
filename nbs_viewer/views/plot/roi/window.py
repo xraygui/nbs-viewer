@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
 from nbs_viewer.models.plot.view_spec import (
     Projection,
     eligible_profile_axes,
+    is_plot_plane_storage_axis,
     profile_axis_name,
     plot_axis_to_storage_axis,
     scan_profile_storage_axis,
@@ -993,9 +994,7 @@ class RoiWindow(QDialog):
         ):
             try:
                 profile_plot_axis = storage_axis_to_plot_axis(
-                    self._parent_frame,
-                    storage_axis,
-                    parent_spec=self._parent_spec,
+                    self._parent_spec, storage_axis
                 )
             except ValueError:
                 profile_plot_axis = None
@@ -1010,7 +1009,7 @@ class RoiWindow(QDialog):
         if self._parent_spec is None:
             return False
         storage_axis = self.get_profile_storage_axis()
-        return storage_axis in set(self._parent_spec.plot_axis_order())
+        return is_plot_plane_storage_axis(self._parent_spec, storage_axis)
 
     def set_draw_checked(self, checked: bool):
         """
@@ -1156,13 +1155,12 @@ class RoiWindow(QDialog):
         """
         Return the plot axis name for full-height or full-width ROI actions.
         """
+        # The frame no longer answers the mapping, but it is still required
+        # here: dropping it would change when this returns an axis, and
+        # ``set_profile_context`` can be handed a spec with no frame.
         if self._parent_frame is None or self._parent_spec is None:
             return None
         storage_axis = self.get_profile_storage_axis()
-        if storage_axis not in set(self._parent_spec.plot_axis_order()):
+        if not is_plot_plane_storage_axis(self._parent_spec, storage_axis):
             return None
-        return storage_axis_to_plot_axis(
-            self._parent_frame,
-            storage_axis,
-            parent_spec=self._parent_spec,
-        )
+        return storage_axis_to_plot_axis(self._parent_spec, storage_axis)

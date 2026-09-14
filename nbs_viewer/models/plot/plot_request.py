@@ -588,11 +588,7 @@ def roi_profile_request(
         region = expand_region_for_profile(
             plane_frame,
             region,
-            storage_axis_to_plot_axis(
-                plane_frame,
-                profile_axis,
-                parent_spec=parent.view,
-            ),
+            storage_axis_to_plot_axis(parent.view, profile_axis),
         )
     # The transform is inherited, not cleared. An ROI is drawn on what the
     # user sees, and what they see is f(y): clearing it here was why the same

@@ -80,7 +80,7 @@ class ViewIntent(QObject):
     dimension names by :meth:`project`, so a 1-D spectrum and a 1-D
     projection of a 3-D detector can be built from the same state without
     either being reinterpreted. Whether two projected keys may share a plot
-    is a separate check on :func:`plot_axis_names`.
+    is a separate check on :func:`projected_axis_names`.
 
     Axis order is stored as **dimension names**, not as a permutation, and
     that is what makes the intent rank-agnostic: a permutation only means
