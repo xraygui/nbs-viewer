@@ -10,7 +10,6 @@ from ...data.key_info import KeyInfo
 from ...data.key_source import CatalogKey
 from .frozen_spectrum import FrozenSpectrum
 from .pipeline import RunFetch
-from .identity import RunIdentity
 from nbs_viewer.utils import print_debug
 
 
@@ -21,7 +20,8 @@ def x_dimension(y: KeyInfo, x: Optional[KeyInfo]) -> Optional[str]:
     **The X selection rule, and the only place it is decided.** Choosing X
     changes nothing about the data: a scanned motor is a 1-D key whose own
     dimension is the event axis -- a labelled run declares ``en_energy`` as
-    ``('time',)`` -- so it is one more coordinate that axis can be plotted
+    ``('time',
+)`` -- so it is one more coordinate that axis can be plotted
     against. X's dimension is ``x.dims[0]``. When ``y`` has that dimension,
     X becomes its coordinate and the dimension carries X's name, which is
     ``swap_dims`` in xarray's terms.
@@ -59,7 +59,7 @@ def x_dimension(y: KeyInfo, x: Optional[KeyInfo]) -> Optional[str]:
 class RunSource(QObject):
     """
     The union of a catalog run and its frozen synthetic keys, under one key
-    space, plus the key table, identity and signals the plot layer needs.
+    space, plus the key table and signals the plot layer needs.
 
     A :class:`CatalogRun` is one source of labelled arrays for a run's keys.
     This is a higher-level object rather than a near-duplicate of it, and
@@ -218,23 +218,6 @@ class RunSource(QObject):
             self._key_table = self._build_key_table()
         return MappingProxyType(self._key_table)
 
-    def identity(self) -> RunIdentity:
-        """
-        Return a snapshot of run identity fields for views.
-
-        Returns
-        -------
-        RunIdentity
-            uid, scan_id, plan_name, display_name, and metadata.
-        """
-        return RunIdentity(
-            uid=str(self.uid),
-            scan_id=str(self.scan_id),
-            plan_name=str(self.plan_name),
-            display_name=str(self.display_name),
-            metadata=MappingProxyType(dict(self.metadata)),
-        )
-
     def _source(self, key: str) -> Union[FrozenSpectrum, CatalogKey]:
         """
         Return whichever source holds this key, bound to it.
@@ -270,8 +253,8 @@ class RunSource(QObject):
         *,
         coords: bool = True,
         xkeys: Sequence[str] = (),
-        dims: Optional[Sequence[str]] = None,
-    ) -> xr.DataArray:
+        dims: Optional[Sequence[str]] = None
+) -> xr.DataArray:
         """
         Return a labelled array for a catalog or frozen key, under an X choice.
 
@@ -431,8 +414,8 @@ class RunSource(QObject):
         self,
         key: str,
         xkeys: Sequence[str],
-        dims: Optional[Sequence[str]],
-    ) -> Dict[str, str]:
+        dims: Optional[Sequence[str]]
+) -> Dict[str, str]:
         """
         Map each storage dimension of a key to its plot name.
 
@@ -486,8 +469,8 @@ class RunSource(QObject):
         slice_info=None,
         xkeys: Sequence[str] = (),
         *,
-        dims: Optional[Sequence[str]] = None,
-    ) -> xr.Coordinates:
+        dims: Optional[Sequence[str]] = None
+) -> xr.Coordinates:
         """
         Return the coordinates of a key's surviving axes, under an X choice.
 
@@ -541,7 +524,8 @@ class RunSource(QObject):
         for dim, item in kept.items():
             name = names[dim]
             if name != dim:
-                values = self.read(name, (item,))
+                values = self.read(name, (item,
+))
             else:
                 values = found.get(dim)
                 if values is None:
@@ -565,7 +549,8 @@ class RunSource(QObject):
             dim = x_dimension(info, self._describe_x(xkey))
             if dim is None or dim not in kept:
                 continue
-            values = np.asarray(self.read(xkey, (kept[dim],)))
+            values = np.asarray(self.read(xkey, (kept[dim],
+)))
             coords[xkey] = (names[dim], values)
         return xr.Coordinates(coords)
 
@@ -710,8 +695,8 @@ class RunSource(QObject):
         print_debug(
             "RunSource._update_available_keys",
             f"available_keys for {self.uid}: {new_keys} from run {id(self._run)}",
-            "run",
-        )
+            "run"
+)
         keys_changed = set(new_keys) != set(self._catalog_keys)
         self._catalog_keys = new_keys
         self._invalidate_key_table()

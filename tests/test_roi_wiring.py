@@ -7,12 +7,6 @@ import pytest
 
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.run.frozen_spectrum import is_synthetic_key
-from nbs_viewer.models.plot.geometry.frame import (
-    cell_x_bounds_mesh,
-    cell_y_bounds_mesh,
-    frame_from_bundle,
-)
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 
@@ -50,21 +44,21 @@ def _wired_image_scan_with_roi(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     apply_projection(session.session.view_intent, parent_spec)
     session.session.selection.set_selected_keys(["en_energy"], ["detector_image"])
 
     plot_data = session.session.ensure_trace(
-        run_model, "en_energy", "detector_image"
+        run_model, "en_energy", "detector_image",
     )
     bundle = plot_data.get_plot_bundle()
 
-    frame = frame_from_bundle(bundle)
-    x0, _ = cell_x_bounds_mesh(frame, 5, 0)
-    _, x1 = cell_x_bounds_mesh(frame, 35, 0)
-    y0, _ = cell_y_bounds_mesh(frame, 2, 0)
-    _, y1 = cell_y_bounds_mesh(frame, 28, 0)
+    frame = bundle.view_frame()
+    x0, _ = frame.cell_x_bounds(5, 0)
+    _, x1 = frame.cell_x_bounds(35, 0)
+    y0, _ = frame.cell_y_bounds(2, 0)
+    _, y1 = frame.cell_y_bounds(28, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     entry_id = session.session.region.roi_set.add(
         region,
@@ -72,9 +66,9 @@ def _wired_image_scan_with_roi(
             profile_storage_axis=profile_storage_axis,
             spatial_reduce="sum",
             span_full_profile_axis=True,
-            label="test roi",
-        ),
-    )
+            label="test roi"
+)
+)
     if stale:
         session.session.region.roi_set.set_stale(entry_id, True)
 
@@ -90,8 +84,8 @@ def test_preview_roi_profile_on_catalog_selected_run(qapp, app_model):
         entry_id,
         parent_trace=plot_data,
         parent_frame=frame,
-        cached_plane=plot_data.last_bundle,
-    )
+        cached_plane=plot_data.last_bundle
+)
 
     assert bundle.ndim == 1
     assert bundle.render_mode == "line"
@@ -108,10 +102,10 @@ def test_commit_roi_profile_registers_frozen_spectrum(qapp, app_model):
         parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
-        axis_names=("en_energy", "pixel"),
-    )
+        axis_names=("en_energy", "pixel")
+)
 
-    assert is_synthetic_key(frozen.key)
+    assert run_model.is_synthetic_key(frozen.key)
     assert frozen.key in run_model.available_keys
     assert frozen.label == "test roi"
 
@@ -126,8 +120,8 @@ def test_committed_synthetic_key_fetchable_via_fetch_bundle(qapp, app_model):
         parent_trace=plot_data,
         parent_frame=frame,
         cached_plane=plot_data.last_bundle,
-        axis_names=("en_energy", "pixel"),
-    )
+        axis_names=("en_energy", "pixel")
+)
 
     bundle = session.fetch_bundle(["row"], [frozen.key], run=run_model)
 
@@ -146,8 +140,8 @@ def test_preview_rejects_stale_roi_on_wired_session(qapp, app_model):
             entry_id,
             parent_trace=plot_data,
                 parent_frame=frame,
-            cached_plane=plot_data.last_bundle,
-        )
+            cached_plane=plot_data.last_bundle
+)
 
 
 def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
@@ -161,5 +155,5 @@ def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
             parent_trace=plot_data,
                 parent_frame=frame,
             cached_plane=plot_data.last_bundle,
-            axis_names=("en_energy", "pixel"),
-        )
+            axis_names=("en_energy", "pixel")
+)

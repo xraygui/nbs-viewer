@@ -5,7 +5,6 @@ import numpy as np
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view.spec import DimRole
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 
 
 def test_swapping_plot_rows_swaps_the_roles():
@@ -35,9 +34,9 @@ def test_view_frame_plot_dims_are_plane_positions_not_storage_axes():
         np.zeros((4, 6)),
         [np.arange(4.0), np.arange(6.0)],
         ["x", "dim_1"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     assert (frame.plot_y_dim, frame.plot_x_dim) == (0, 1)
 
     # The spec says storage axis 1 is Plot Y after the swap, but the frame

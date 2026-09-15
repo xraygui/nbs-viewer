@@ -17,12 +17,7 @@ from typing import Tuple
 
 import numpy as np
 
-from .frame import (
-    PlotViewFrame,
-    data_limits,
-    mesh_cell_bounds,
-    mesh_separable_edge_grids,
-)
+from .frame import PlotViewFrame
 
 
 def _normalize_rect(
@@ -67,15 +62,15 @@ def cell_centers(frame: PlotViewFrame) -> Tuple[np.ndarray, np.ndarray]:
     """
     ny, nx = frame.shape
     if frame.render_mode == "image":
-        left, right, bottom, top = data_limits(frame)
+        left, right, bottom, top = frame.data_limits()
         dx = (right - left) / nx if nx else 1.0
         dy = (top - bottom) / ny if ny else 1.0
         centers_x = left + (np.arange(nx, dtype=float) + 0.5) * dx
         centers_y = top - (np.arange(ny, dtype=float) + 0.5) * dy
         return (
             np.broadcast_to(centers_x[None, :], (ny, nx)).copy(),
-            np.broadcast_to(centers_y[:, None], (ny, nx)).copy(),
-        )
+            np.broadcast_to(centers_y[:, None], (ny, nx)).copy()
+)
 
     mesh_x = frame.mesh_x
     mesh_y = frame.mesh_y
@@ -235,7 +230,7 @@ def cell_mask_at_point(
     mask = np.zeros(frame.shape, dtype=bool)
     if not (np.isfinite(x) and np.isfinite(y)):
         return mask
-    x_lo, x_hi, y_lo, y_hi = data_limits(frame)
+    x_lo, x_hi, y_lo, y_hi = frame.data_limits()
     if not (x_lo <= x <= x_hi and y_lo <= y <= y_hi):
         return mask
     centers_x, centers_y = cell_centers(frame)
@@ -253,12 +248,12 @@ def _mask_covering_rect_image(
     x0: float,
     x1: float,
     y0: float,
-    y1: float,
+    y1: float
 ) -> np.ndarray:
     """
     Build a rectangular mask on a uniform ``image`` grid using index bounds.
     """
-    left, right, bottom, top = data_limits(frame)
+    left, right, bottom, top = frame.data_limits()
     ny, nx = frame.shape
     dx = (right - left) / nx if nx else 1.0
     dy = (top - bottom) / ny if ny else 1.0
@@ -281,12 +276,12 @@ def _mask_covering_rect_mesh_separable(
     x0: float,
     x1: float,
     y0: float,
-    y1: float,
+    y1: float
 ) -> np.ndarray | None:
     """
     Vectorized rectangular mask for separable ``pcolormesh`` edge grids.
     """
-    edges = mesh_separable_edge_grids(frame)
+    edges = frame.mesh_separable_edge_grids()
     if edges is None:
         return None
     x_edges, y_edges = edges
@@ -314,7 +309,7 @@ def _mask_covering_rect_mesh_bbox(
     x0: float,
     x1: float,
     y0: float,
-    y1: float,
+    y1: float
 ) -> np.ndarray:
     """
     Build a mesh mask by scanning only a row/column bounding box.
@@ -331,7 +326,7 @@ def _mask_covering_rect_mesh_bbox(
         return mask
     for row in rows:
         for col in cols:
-            cx0, cx1, cy0, cy1 = mesh_cell_bounds(frame, int(row), int(col))
+            cx0, cx1, cy0, cy1 = frame.mesh_cell_bounds(int(row), int(col))
             if _intervals_overlap(x0, x1, cx0, cx1) and _intervals_overlap(
                 y0, y1, cy0, cy1
             ):
@@ -344,7 +339,7 @@ def mask_covering_data_rect(
     x0: float,
     x1: float,
     y0: float,
-    y1: float,
+    y1: float
 ) -> np.ndarray:
     """
     Build a boolean mask for cells intersecting a data-coordinate rectangle.

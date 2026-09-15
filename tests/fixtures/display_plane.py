@@ -14,7 +14,7 @@ import numpy as np
 
 from nbs_viewer.models.plot.geometry.bundle import PlotBundle, prepare_2d_bundle
 from nbs_viewer.models.plot.geometry.orientation import display_flips
-from nbs_viewer.models.plot.geometry.frame import PlotViewFrame, frame_from_bundle
+from nbs_viewer.models.plot.geometry.frame import PlotViewFrame
 
 
 def orient_block(
@@ -81,8 +81,8 @@ def oriented_plane(
     y, (row_axis, col_axis) = orient_block(
         y,
         [row_axis, col_axis],
-        [axis for axis, flip in enumerate((row_reversed, col_reversed)) if flip],
-    )
+        [axis for axis, flip in enumerate((row_reversed, col_reversed)) if flip]
+)
     return y, row_axis, col_axis, (row_reversed, col_reversed)
 
 
@@ -91,7 +91,7 @@ def display_bundle(
     row_axis: np.ndarray,
     col_axis: np.ndarray,
     axis_names: Sequence[str] = ("dim_0", "dim_1"),
-    render_mode: str = "image",
+    render_mode: str = "image"
 ) -> PlotBundle:
     """
     Orient a storage plane and pack it into a bundle.
@@ -105,8 +105,8 @@ def display_bundle(
         list(axis_names),
         render_mode_hint=render_mode,
         row_reversed=row_reversed,
-        col_reversed=col_reversed,
-    )
+        col_reversed=col_reversed
+)
 
 
 def display_frame(
@@ -119,9 +119,9 @@ def display_frame(
     """
     Orient a storage plane and return the frame the user would draw on.
     """
-    return frame_from_bundle(
-        display_bundle(y, row_axis, col_axis, axis_names, render_mode)
-    )
+    return display_bundle(
+        y, row_axis, col_axis, axis_names, render_mode
+    ).view_frame()
 
 
 def roi_profile_from_block(
@@ -178,8 +178,8 @@ def roi_profile_from_block(
         coords={
             axis_names[axis]: np.asarray(axis_arrays[axis])
             for axis in surviving
-        },
-    )
+        }
+)
     axes = PlotAxes.of(
         request.view,
         axis_names,
@@ -188,23 +188,23 @@ def roi_profile_from_block(
             if plan.plane_axes is None
             else (
                 axis_names[plan.plane_axes[0]],
-                axis_names[plan.plane_axes[1]],
-            )
-        ),
-    ).to_profile(request.profile_axis, request.spatial_reduce)
+                axis_names[plan.plane_axes[1]]
+)
+        )
+).to_profile(request.profile_axis, request.spatial_reduce)
     profile = materialize_view(
         data,
         axes,
         region=request.region,
         mask_mode=request.mask_mode,
-        region_frame=plan.region_frame,
-    )
+        region_frame=plan.region_frame
+)
     dim = profile.dims[0]
     return (
         profile.values,
         [np.asarray(profile.coords[dim].values)],
-        [str(dim)],
-    )
+        [str(dim)]
+)
 
 
 def labelled_block(y, axis_arrays, axis_names):
@@ -239,8 +239,8 @@ def labelled_block(y, axis_arrays, axis_names):
         coords={
             name: np.asarray(array)
             for name, array in zip(names, axis_arrays)
-        },
-    )
+        }
+)
 
 
 def profile_axes(

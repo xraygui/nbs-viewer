@@ -1,10 +1,8 @@
 """
-The set of ROIs a user has drawn, and the words shown for one.
+The set of ROIs a user has drawn.
 
 :mod:`set` owns the entries, the selection, and the per-entry stale flags;
 the canvas renders from that model rather than holding geometry itself.
-:mod:`labels` turns a mask mode, a reduce op and an axis into legend and
-dropdown text.
 
 This package is deliberately small, and smaller than the plan predicted. Six
 profile-axis queries were slated to move here because the ROI feature is what
@@ -17,13 +15,10 @@ The surface is what the ``views/`` layer needs, which is the whole reason
 this package has one.
 """
 
-from .labels import default_profile_label, profile_axis_name
 from .set import RoiEntry, RoiOperation, RoiSetModel
 
 __all__ = [
     "RoiEntry",
     "RoiOperation",
     "RoiSetModel",
-    "default_profile_label",
-    "profile_axis_name",
 ]

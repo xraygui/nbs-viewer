@@ -24,6 +24,7 @@ from typing import (
 
 import numpy as np
 
+from .frame import PlotViewFrame
 from .orientation import (
     RenderMode,
     build_mesh_grids,
@@ -82,6 +83,64 @@ class PlotBundle:
     row_reversed: bool = False
     col_reversed: bool = False
 
+    def view_frame(self) -> PlotViewFrame:
+        """
+        Build a view frame from this prepared 2D bundle.
+
+        Returns
+        -------
+        PlotViewFrame
+            Frame describing the displayed plane.
+
+        Raises
+        ------
+        ValueError
+            If this bundle is not 2D image or mesh.
+        """
+        if self.ndim != 2 or self.render_mode not in ("image", "mesh"):
+            raise ValueError(
+                f"view_frame requires a 2D image or mesh bundle, got "
+                f"ndim={self.ndim} mode={self.render_mode}"
+            )
+
+        names = list(self.axis_names)
+        while len(names) < 2:
+            names.append(f"dim_{len(names)}")
+
+        shape = (int(self.y.shape[0]), int(self.y.shape[1]))
+
+        return PlotViewFrame(
+            shape=shape,
+            render_mode=self.render_mode,
+            axis_names=names[-2:],
+            plot_x_dim=1,
+            plot_y_dim=0,
+            extent=self.extent if self.render_mode == "image" else None,
+            mesh_x=(
+                np.asarray(self.mesh_x, dtype=float)
+                if self.render_mode == "mesh"
+                else None
+            ),
+            mesh_y=(
+                np.asarray(self.mesh_y, dtype=float)
+                if self.render_mode == "mesh"
+                else None
+            ),
+            row_reversed=self.row_reversed,
+            col_reversed=self.col_reversed,
+        )
+
+    def view_fingerprint(self) -> tuple:
+        """
+        Return a hashable fingerprint of this bundle's 2D coordinate frame.
+
+        Returns
+        -------
+        tuple
+            Fingerprint of shape, axis assignment, and coordinate limits.
+        """
+        return self.view_frame().fingerprint()
+
 
 def prepare_1d_bundle(
     y: np.ndarray,
@@ -112,8 +171,8 @@ def prepare_1d_bundle(
         y=np.asarray(y),
         render_mode="line",
         axis_names=names,
-        x_line=x_line,
-    )
+        x_line=x_line
+)
 
 
 def prepare_2d_bundle(
@@ -188,8 +247,8 @@ def prepare_2d_bundle(
             axis_names=names[-2:],
             extent=extent,
             row_reversed=row_reversed,
-            col_reversed=col_reversed,
-        )
+            col_reversed=col_reversed
+)
 
     mesh_axes = [np.asarray(axis) for axis in x_axes[-2:]]
     mesh_x, mesh_y = build_mesh_grids(y, mesh_axes)
@@ -201,8 +260,8 @@ def prepare_2d_bundle(
         mesh_x=mesh_x,
         mesh_y=mesh_y,
         row_reversed=row_reversed,
-        col_reversed=col_reversed,
-    )
+        col_reversed=col_reversed
+)
 
 
 def build_plot_bundle(
@@ -289,6 +348,6 @@ def build_plot_bundle(
             names,
             render_mode_hint=render_mode,
             row_reversed=row_reversed,
-            col_reversed=col_reversed,
-        )
+            col_reversed=col_reversed
+)
     raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")

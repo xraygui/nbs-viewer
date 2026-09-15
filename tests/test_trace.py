@@ -37,8 +37,8 @@ def test_trace_holds_no_artist_api():
         "clear",
         "remove_artist_from_axes",
         "add_artist_to_axes",
-        "move_artist_to_axes",
-    ):
+        "move_artist_to_axes"
+):
         assert not hasattr(Trace, name), f"Trace still exposes {name}"
 
 
@@ -50,8 +50,8 @@ def test_trace_drops_the_compatibility_properties():
         "_norm_keys",
         "_indices",
         "_cube_view_spec",
-        "_dimension",
-    ):
+        "_dimension"
+):
         assert not hasattr(Trace, name), f"Trace still exposes {name}"
 
 

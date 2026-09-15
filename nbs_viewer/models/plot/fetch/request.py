@@ -6,75 +6,19 @@ frozen and hashable so it can serve as the fingerprint of a fetch; what to
 *read* for one is :mod:`plan` next door. Long-lived traces are identified by
 :class:`TraceKey`, a subset of the request, so view / crop / transform
 changes reuse the artist.
-
-The two functions that build a request from something a user drew are here
-with it: a committed crop rectangle, and an ROI profile.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
-from ..view import DimRole, PlotAxes, Projection, SpatialReduce, ViewCrop
+from ..view import DimRole, PlotAxes, Projection, SpatialReduce
 from ..geometry import (
     MaskMode,
     PlotViewFrame,
-    RectRegion,
-    RegionDefinition,
-    compile_covering_rect,
-    expand_region_for_profile,
+    RegionDefinition
 )
-
-
-def build_plot_request(
-    *,
-    uid: str,
-    xkeys: Sequence[str],
-    ykey: str,
-    projection: Projection,
-    dims: Sequence[str],
-    norm_keys: Optional[Sequence[str]] = None,
-    transform: str = "",
-) -> "PlotRequest":
-    """
-    Assemble a :class:`PlotRequest` around an already-chosen projection.
-
-    Choosing the projection is ``ViewIntent.project``'s job and happens
-    exactly once, in the session; this only packages it with run identity.
-
-    Parameters
-    ----------
-    uid : str
-        Run uid.
-    xkeys : sequence of str
-        X-axis keys.
-    ykey : str
-        Y data key.
-    projection : Projection
-        Rank-bound view for this key, crop included.
-    dims : sequence of str
-        Dimension name per storage axis of ``ykey`` under ``xkeys`` -- the
-        names the projection was chosen against.
-    norm_keys : sequence of str, optional
-        Normalization keys.
-    transform : str
-        Effective transform expression.
-
-    Returns
-    -------
-    PlotRequest
-        Frozen request for the fetch path.
-    """
-    return PlotRequest(
-        uid=uid,
-        xkeys=tuple(xkeys),
-        ykey=ykey,
-        norm_keys=tuple(norm_keys or ()),
-        view=projection,
-        dims=tuple(dims),
-        transform=transform or "",
-    )
 
 
 @dataclass(frozen=True)
@@ -167,9 +111,9 @@ class PlotRequest:
     uid: str
     xkeys: Tuple[str, ...]
     ykey: str
-    norm_keys: Tuple[str, ...]
     view: Projection
     dims: Tuple[str, ...]
+    norm_keys: Tuple[str, ...] = ()
     region: Optional[RegionDefinition] = None
     mask_mode: MaskMode = "inside"
     profile_axis: Optional[int] = None
@@ -177,6 +121,9 @@ class PlotRequest:
     transform: str = ""
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "xkeys", tuple(self.xkeys))
+        object.__setattr__(self, "dims", tuple(self.dims))
+        object.__setattr__(self, "norm_keys", tuple(self.norm_keys or ()))
         if not self.uid:
             raise ValueError("uid must be non-empty")
         if not self.ykey:
@@ -294,8 +241,79 @@ class PlotRequest:
             region=None,
             mask_mode="inside",
             profile_axis=None,
-            spatial_reduce="sum",
-        )
+            spatial_reduce="sum"
+)
+
+    def with_roi_profile(
+        self,
+        region: RegionDefinition,
+        *,
+        profile_axis,
+        spatial_reduce: SpatialReduce = "sum",
+        mask_mode: MaskMode = "inside",
+        plane_frame: Optional[PlotViewFrame] = None,
+        span_full: bool = False
+) -> "PlotRequest":
+        """
+        Derive an ROI profile request from this plane request.
+
+        This request already names the run, the keys, the projection and the
+        crop, so a profile is that plus the four things a reduction adds: the
+        region, the mask mode, the axis the profile runs along, and how the
+        masked cells collapse.
+
+        Parameters
+        ----------
+        region : RegionDefinition
+            ROI in data coordinates on this plane.
+        profile_axis : int or str
+            Storage axis for the profile, or ``plot_x`` / ``plot_y``.
+        spatial_reduce : str
+            ``sum`` or ``mean`` within the ROI.
+        mask_mode : str
+            ``inside`` or ``outside`` the ROI.
+        plane_frame : PlotViewFrame, optional
+            Frame of the parent plane. Required for ``span_full``.
+        span_full : bool
+            Expand the ROI to the full plot extent along an in-plane profile
+            axis. Ignored for shapes that are not separable along it.
+
+        Returns
+        -------
+        PlotRequest
+            Profile request for the fetch path.
+
+        Raises
+        ------
+        ValueError
+            If this request has no 2-D plane.
+        """
+        plane_axes = self.plane_axes
+        if plane_axes is None:
+            raise ValueError("an ROI profile needs a 2-D parent plane")
+        if not isinstance(profile_axis, int):
+            profile_axis = self.view.storage_axis_for(profile_axis)
+        if (
+            span_full
+            and region.separable_for_profile
+            and profile_axis in plane_axes
+            and plane_frame is not None
+        ):
+            region = region.expand_for_profile(
+                plane_frame,
+                self.view.plot_axis_for(profile_axis)
+)
+        # The transform is inherited, not cleared. An ROI is drawn on what the
+        # user sees, and what they see is f(y): clearing it here was why the same
+        # ROI on a cube came back transformed along the two plane axes and
+        # untransformed along the slider axis.
+        return replace(
+            self,
+            region=region,
+            mask_mode=mask_mode,
+            profile_axis=int(profile_axis),
+            spatial_reduce=spatial_reduce
+)
 
     def trace_key(self, fan_out_index: Optional[int] = None) -> TraceKey:
         """
@@ -316,126 +334,5 @@ class PlotRequest:
             uid=self.uid,
             xkey=xkey,
             ykey=self.ykey,
-            fan_out_index=fan_out_index,
-        )
-
-
-def crop_from_region(
-    region: RectRegion,
-    plane_frame: PlotViewFrame,
-    plane_axes: Tuple[int, int],
-) -> ViewCrop:
-    """
-    Commit a drawn rectangle to the storage-index crop of a request.
-
-    Cell-intersects selection is used here rather than the cell-center rule
-    used for ROI reduction, so the cropped plane still covers what was drawn.
-
-    Parameters
-    ----------
-    region : RectRegion
-        Rectangle in data coordinates on the oriented plot plane.
-    plane_frame : PlotViewFrame
-        Frame of the full plane, before the crop.
-    plane_axes : tuple of int
-        ``(plot_y_axis, plot_x_axis)`` storage axes of that plane.
-
-    Returns
-    -------
-    ViewCrop
-        Storage-index crop to attach to a view.
-
-    Raises
-    ------
-    ValueError
-        If the rectangle selects no cells.
-    """
-    compiled = compile_covering_rect(plane_frame, region)
-    if compiled.pixel_count == 0:
-        raise ValueError("Crop region does not cover any cells")
-    r0, r1, c0, c1 = compiled.bbox
-    if r1 <= r0 or c1 <= c0:
-        raise ValueError("Crop bounding box is empty")
-    plot_y_axis, plot_x_axis = plane_axes
-    return ViewCrop(
-        storage_bbox=plane_frame.storage_bbox(compiled.bbox),
-        plot_y_axis=int(plot_y_axis),
-        plot_x_axis=int(plot_x_axis),
-    )
-
-
-def roi_profile_request(
-    parent: PlotRequest,
-    region: RegionDefinition,
-    *,
-    profile_axis,
-    spatial_reduce: SpatialReduce = "sum",
-    mask_mode: MaskMode = "inside",
-    plane_frame: Optional[PlotViewFrame] = None,
-    span_full: bool = False,
-) -> PlotRequest:
-    """
-    Derive an ROI profile request from the request that drew the plane.
-
-    The parent request already names the run, the keys, the projection and
-    the crop, so a profile is that request plus the four things a reduction
-    adds: the region, the mask mode, the axis the profile runs along, and how
-    the masked cells collapse.
-
-    Parameters
-    ----------
-    parent : PlotRequest
-        Request for the parent 2-D plane.
-    region : RegionDefinition
-        ROI in data coordinates on that plane.
-    profile_axis : int or str
-        Storage axis for the profile, or ``plot_x`` / ``plot_y``.
-    spatial_reduce : str
-        ``sum`` or ``mean`` within the ROI.
-    mask_mode : str
-        ``inside`` or ``outside`` the ROI.
-    plane_frame : PlotViewFrame, optional
-        Frame of the parent plane. Required for ``span_full``.
-    span_full : bool
-        Expand the ROI to the full plot extent along an in-plane profile
-        axis. Ignored for shapes that are not separable along it.
-
-    Returns
-    -------
-    PlotRequest
-        Profile request for the fetch path.
-
-    Raises
-    ------
-    ValueError
-        If the parent request has no 2-D plane.
-    """
-    plane_axes = parent.plane_axes
-    if plane_axes is None:
-        raise ValueError("an ROI profile needs a 2-D parent plane")
-    if not isinstance(profile_axis, int):
-        profile_axis = parent.view.storage_axis_for(profile_axis)
-    if (
-        span_full
-        and region.separable_for_profile
-        and profile_axis in plane_axes
-        and plane_frame is not None
-    ):
-        region = expand_region_for_profile(
-            plane_frame,
-            region,
-            parent.view.plot_axis_for(profile_axis),
-        )
-    # The transform is inherited, not cleared. An ROI is drawn on what the
-    # user sees, and what they see is f(y): clearing it here was why the same
-    # ROI on a cube came back transformed along the two plane axes and
-    # untransformed along the slider axis.
-    return replace(
-        parent,
-        region=region,
-        mask_mode=mask_mode,
-        profile_axis=int(profile_axis),
-        spatial_reduce=spatial_reduce,
-    )
-
-
+            fan_out_index=fan_out_index
+)

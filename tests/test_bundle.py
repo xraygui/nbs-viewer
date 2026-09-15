@@ -34,8 +34,8 @@ def _packed_for_display(y, row_axis, col_axis, axis_names, render_mode):
         axis_names,
         render_mode_hint=render_mode,
         row_reversed=row_reversed,
-        col_reversed=col_reversed,
-    )
+        col_reversed=col_reversed
+)
 
 
 def test_is_uniform_1d_uniform():
@@ -167,17 +167,19 @@ def _screen_position(bundle, value):
     Works for either render mode so the two can be compared directly.
     """
     arr = np.asarray(bundle.y)
-    (row,), (col,) = np.where(arr == value)
+    (row,
+), (col,
+) = np.where(arr == value)
     if bundle.render_mode == "image":
         left, right, bottom, top = bundle.extent
         return (
             left + (col + 0.5) * (right - left) / arr.shape[1],
-            top - (row + 0.5) * (top - bottom) / arr.shape[0],
-        )
+            top - (row + 0.5) * (top - bottom) / arr.shape[0]
+)
     return (
         float(np.mean(bundle.mesh_x[row : row + 2, col : col + 2])),
-        float(np.mean(bundle.mesh_y[row : row + 2, col : col + 2])),
-    )
+        float(np.mean(bundle.mesh_y[row : row + 2, col : col + 2]))
+)
 
 
 def test_image_and_mesh_agree_on_axis_placement():
@@ -214,16 +216,18 @@ def test_image_and_mesh_agree_on_axis_placement():
 
 def _plain_2d_request():
     """A 2-D request with no region, for the packing step."""
-    from nbs_viewer.models.plot.fetch.request import build_plot_request
+    from nbs_viewer.models.plot.fetch.request import PlotRequest
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
-    return build_plot_request(
+    return PlotRequest(
         uid="uid",
-        xkeys=["x"],
+        xkeys=("x",
+),
         ykey="det",
-        projection=ViewIntent(plot_ndim=2).project(2, (4, 5)),
-        dims=("dim_0", "dim_1"),
-    )
+        norm_keys=(),
+        view=ViewIntent(plot_ndim=2).project(2, (4, 5)),
+        dims=("dim_0", "dim_1")
+)
 
 
 @pytest.mark.parametrize("row_descending", [False, True], ids=["row asc", "row desc"])

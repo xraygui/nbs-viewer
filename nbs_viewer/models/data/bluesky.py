@@ -4,7 +4,6 @@ import logging
 from .base import CatalogRun
 from typing import Dict, List, Tuple, Any, Optional, Union
 import numpy as np
-from .synthetic_keys import is_synthetic_key
 from nbs_viewer.utils import print_debug, time_function
 
 
@@ -219,10 +218,6 @@ class BlueskyRun(CatalogRun):
         tuple
             The shape of the data
         """
-        if is_synthetic_key(key):
-            raise KeyError(
-                f"Synthetic key {key!r} must be accessed via RunSource, not CatalogRun"
-            )
         t_start = time.time()
         if key not in self._shape_cache:
             logging.debug(f"Getting shape for key {key}")
@@ -358,8 +353,8 @@ class BlueskyRun(CatalogRun):
                 "BlueskyRun.getData",
                 f"chunk_cache {key} slice={slice_info} "
                 f"{time.time() - t0:.4f}s",
-                category="cache",
-            )
+                category="cache"
+)
             return result
         except Exception as e:
             print(f"Error reading chunked data for key {key}: {e}")
@@ -436,8 +431,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             "Getting run['/'.join(['primary', 'data'])].keys()",
-            category="catalog",
-        )
+            category="catalog"
+)
         try:
             all_keys = list(self._run["/".join(["primary", "data"])].keys())
             self._has_data = True
@@ -451,8 +446,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s",
-            category="catalog",
-        )
+            category="catalog"
+)
 
         # Initialize dictionaries
         xkeys = {}
@@ -470,8 +465,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Getting dimension hints took: {time.time() - t1:.3f}s",
-            category="catalog",
-        )
+            category="catalog"
+)
         t2 = time.time()
         # Try to get object keys from descriptors
         object_keys = {}
@@ -488,8 +483,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Getting dimension hints from descriptors took: {time.time() - t1:.3f}s",
-            category="catalog",
-        )
+            category="catalog"
+)
 
         # Process dimension hints
         for i, dimension in enumerate(xkeyhints):
@@ -524,8 +519,8 @@ class BlueskyRun(CatalogRun):
                 print_debug(
                     "BlueskyRun.getRunKeys",
                     f"Could not get shape for {key}, treating as rank 1: {e}",
-                    category="catalog",
-                )
+                    category="catalog"
+)
                 ndim = 1
             ykeys.setdefault(max(ndim, 1), []).append(key)
         # print(f"xkeys: {xkeys}")
@@ -533,8 +528,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Total getRunKeys took: {time.time() - t_start:.3f}s",
-            category="catalog",
-        )
+            category="catalog"
+)
         self._run_keys_cache = (xkeys, ykeys)
         return self._run_keys_cache
 
@@ -680,9 +675,12 @@ class BlueskyRun(CatalogRun):
         detector-internal and can only be given placeholders. Inference runs
         only when Tiled supplied no ``dims``, so its job is to reproduce what a
         labelled run would have said. A UCAL run that labels its dims is the
-        ground truth: ``nexafs_sc`` (72,) is ``('time',)`` and
+        ground truth: ``nexafs_sc`` (72,
+) is ``('time',
+)`` and
         ``tes_mca_spectrum`` (72, 800) is ``('time', 'tes_mca_energies')``.
-        This produces ``('time',)`` and ``('time', 'dim_1')`` -- the same rank
+        This produces ``('time',
+)`` and ``('time', 'dim_1')`` -- the same rank
         with the same leading name, degrading to a placeholder only where the
         name is genuinely unknowable without Tiled's metadata.
 
@@ -703,7 +701,8 @@ class BlueskyRun(CatalogRun):
             return ()
 
         if key == "time":
-            return ("time",)
+            return ("time",
+)
 
         has_time_key = False
         try:
@@ -715,8 +714,10 @@ class BlueskyRun(CatalogRun):
 
         if has_time_key:
             if ndim == 1:
-                return ("time",)
-            return ("time",) + tuple(f"dim_{i}" for i in range(1, ndim))
+                return ("time",
+)
+            return ("time",
+) + tuple(f"dim_{i}" for i in range(1, ndim))
 
         return tuple(f"dim_{i}" for i in range(ndim))
 
@@ -742,8 +743,8 @@ class BlueskyRun(CatalogRun):
             print_debug(
                 "BlueskyRun._resolve_dims",
                 f"Could not read dims for {key}: {ex}",
-                category="catalog",
-            )
+                category="catalog"
+)
 
         if raw_dims:
             return tuple(raw_dims)
@@ -752,8 +753,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun._resolve_dims",
             f"Inferred dims for {key} shape {shape}: {inferred}",
-            category="catalog",
-        )
+            category="catalog"
+)
         return inferred
 
     def get_dims(

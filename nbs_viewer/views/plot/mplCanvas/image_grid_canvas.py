@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QSizePolicy
 
 from nbs_viewer.models.data.array_contract import index_placeholders
 from nbs_viewer.models.plot.trace import Trace
-from nbs_viewer.models.plot.fetch.request import TraceKey, build_plot_request
+from nbs_viewer.models.plot.fetch.request import TraceKey, PlotRequest
 from nbs_viewer.models.plot.view import Projection
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker
@@ -435,15 +435,14 @@ class ImageGridCanvas(FigureCanvasQTAgg):
             transform = ""
             if self.plot_model.transform.get("enabled"):
                 transform = self.plot_model.transform.get("text", "") or ""
-            request = build_plot_request(
+            dims = run_model.plot_axis_names(y_key, [xkey] if xkey else [])
+            request = PlotRequest(
                 uid=run_model.uid,
-                xkeys=[xkey] if xkey else (),
+                xkeys=(xkey,) if xkey else (),
                 ykey=y_key,
-                norm_keys=norm_keys,
-                projection=Projection.from_slice_info(tuple(slice_info), 2),
-                dims=run_model.plot_axis_names(
-                    y_key, [xkey] if xkey else []
-                ),
+                norm_keys=tuple(norm_keys or ()),
+                view=Projection.from_slice_info(tuple(slice_info), 2),
+                dims=tuple(dims),
                 transform=transform,
             )
             trace = Trace(

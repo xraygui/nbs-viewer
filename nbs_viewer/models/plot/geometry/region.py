@@ -14,8 +14,8 @@ from typing import ClassVar, Dict, Literal, Tuple, Type
 
 import numpy as np
 
-from .frame import PlotViewFrame, data_limits
-from ..view import PlotAxisName
+from .frame import PlotViewFrame
+from ..view import PlotAxisName, ViewCrop
 from .mask import (
     cell_mask_at_point,
     mask_covering_data_rect,
@@ -64,8 +64,8 @@ def _bbox_from_mask(mask: np.ndarray) -> Tuple[int, int, int, int]:
         int(row_idx[0]),
         int(row_idx[-1]) + 1,
         int(col_idx[0]),
-        int(col_idx[-1]) + 1,
-    )
+        int(col_idx[-1]) + 1
+)
 
 
 def _compiled_from_mask(mask: np.ndarray) -> CompiledRegion:
@@ -75,8 +75,8 @@ def _compiled_from_mask(mask: np.ndarray) -> CompiledRegion:
     return CompiledRegion(
         mask=mask,
         bbox=_bbox_from_mask(mask),
-        pixel_count=int(mask.sum()),
-    )
+        pixel_count=int(mask.sum())
+)
 
 
 REGION_TYPES: Dict[str, Type["RegionDefinition"]] = {}
@@ -292,12 +292,72 @@ class RectRegion(RegionDefinition):
         uses the drawn band on plot Y (e.g. tes_mca_energies).
         """
         x0, x1, y0, y1 = self.data_bounds()
-        x_lo, x_hi, y_lo, y_hi = data_limits(frame)
+        x_lo, x_hi, y_lo, y_hi = frame.data_limits()
         if profile_axis == "plot_x":
             return RectRegion(x0=x_lo, x1=x_hi, y0=y0, y1=y1).normalized()
         if profile_axis == "plot_y":
             return RectRegion(x0=x0, x1=x1, y0=y_lo, y1=y_hi).normalized()
         raise ValueError(f"Unknown profile axis {profile_axis!r}")
+
+    def compile_covering(self, frame: PlotViewFrame) -> CompiledRegion:
+        """
+        Compile using cell-intersects semantics for view cropping.
+
+        Crop is 2D-to-2D extraction, so the result must still cover the drawn
+        rectangle. ROI reduction uses :meth:`compile` (cell centers) instead.
+
+        Parameters
+        ----------
+        frame : PlotViewFrame
+            View frame for the plane being cropped.
+
+        Returns
+        -------
+        CompiledRegion
+            Compiled mask covering every touched cell.
+        """
+        x0, x1, y0, y1 = self.data_bounds()
+        return _compiled_from_mask(
+            mask_covering_data_rect(frame, x0, x1, y0, y1)
+        )
+
+    def to_view_crop(
+        self,
+        frame: PlotViewFrame,
+        plane_axes: Tuple[int, int]
+) -> ViewCrop:
+        """
+        Commit this rectangle to the storage-index crop of a request.
+
+        Parameters
+        ----------
+        frame : PlotViewFrame
+            Frame of the full plane, before the crop.
+        plane_axes : tuple of int
+            ``(plot_y_axis, plot_x_axis)`` storage axes of that plane.
+
+        Returns
+        -------
+        ViewCrop
+            Storage-index crop to attach to a view.
+
+        Raises
+        ------
+        ValueError
+            If the rectangle selects no cells.
+        """
+        compiled = self.compile_covering(frame)
+        if compiled.pixel_count == 0:
+            raise ValueError("Crop region does not cover any cells")
+        r0, r1, c0, c1 = compiled.bbox
+        if r1 <= r0 or c1 <= c0:
+            raise ValueError("Crop bounding box is empty")
+        plot_y_axis, plot_x_axis = plane_axes
+        return ViewCrop(
+            storage_bbox=frame.storage_bbox(compiled.bbox),
+            plot_y_axis=int(plot_y_axis),
+            plot_x_axis=int(plot_x_axis)
+)
 
 
 @register_region_type
@@ -335,8 +395,8 @@ class EllipseRegion(RegionDefinition):
             cy=float(self.cy),
             rx=abs(float(self.rx)),
             ry=abs(float(self.ry)),
-            angle=float(self.angle),
-        )
+            angle=float(self.angle)
+)
 
     def compile(self, frame: PlotViewFrame) -> CompiledRegion:
         """
@@ -349,8 +409,8 @@ class EllipseRegion(RegionDefinition):
             region.cy,
             region.rx,
             region.ry,
-            region.angle,
-        )
+            region.angle
+)
         return self._compile_mask(frame, mask)
 
     def data_bounds(self) -> Tuple[float, float, float, float]:
@@ -367,8 +427,8 @@ class EllipseRegion(RegionDefinition):
             region.cx - half_w,
             region.cx + half_w,
             region.cy - half_h,
-            region.cy + half_h,
-        )
+            region.cy + half_h
+)
 
     def describe(self) -> str:
         """
@@ -561,62 +621,6 @@ def compile_with_mask_mode(
     if mask_mode == "outside":
         return _compiled_from_mask(~compiled.mask)
     raise ValueError(f"Unknown mask_mode {mask_mode!r}")
-
-
-def compile_covering_rect(
-    frame: PlotViewFrame,
-    region: RectRegion,
-) -> CompiledRegion:
-    """
-    Compile a rectangle using cell-intersects semantics for view cropping.
-
-    Crop is 2D-to-2D extraction, so the result must still cover the drawn
-    rectangle. ROI reduction uses :func:`compile_with_mask_mode` instead.
-
-    Parameters
-    ----------
-    frame : PlotViewFrame
-        View frame for the plane being cropped.
-    region : RectRegion
-        Rectangle in matplotlib data coordinates.
-
-    Returns
-    -------
-    CompiledRegion
-        Compiled mask covering every touched cell.
-    """
-    x0, x1, y0, y1 = region.data_bounds()
-    return _compiled_from_mask(mask_covering_data_rect(frame, x0, x1, y0, y1))
-
-
-def expand_region_for_profile(
-    frame: PlotViewFrame,
-    region: RegionDefinition,
-    profile_axis: PlotAxisName,
-) -> RegionDefinition:
-    """
-    Expand a region to the full plot extent along the profile axis.
-
-    Non-separable shapes are returned unchanged, since their own extent is
-    the intended limit of the reduction.
-
-    Parameters
-    ----------
-    frame : PlotViewFrame
-        View frame for the parent 2D plot.
-    region : RegionDefinition
-        User-drawn region in data coordinates.
-    profile_axis : str
-        ``plot_x`` or ``plot_y``.
-
-    Returns
-    -------
-    RegionDefinition
-        Region with one axis expanded to data limits where applicable.
-    """
-    if not region.separable_for_profile:
-        return region
-    return region.expand_for_profile(frame, profile_axis)
 
 
 def reduce_masked_plane(

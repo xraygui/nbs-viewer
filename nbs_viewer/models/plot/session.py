@@ -30,7 +30,7 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     aggregate_tiled_fetch_label,
 )
 
-from .fetch.request import TraceKey, build_plot_request
+from .fetch.request import TraceKey, PlotRequest
 from .region_controller import RegionController
 from .run.collection import RunCollection
 from .run.source import RunSource
@@ -64,14 +64,14 @@ class PlotSession(QObject):
         self,
         is_main_display: bool = False,
         single_selection_mode: bool = False,
-        parent: Optional[QObject] = None,
-    ):
+        parent: Optional[QObject] = None
+):
         super().__init__(parent)
         self._collection = RunCollection(
             is_main_display=is_main_display,
             single_selection_mode=single_selection_mode,
-            parent=self,
-        )
+            parent=self
+)
         # Constructed before anything else subscribes, so the selection
         # settles against new membership before the session rebuilds on it.
         self._selection = Selection(self._collection, parent=self)
@@ -174,8 +174,8 @@ class PlotSession(QObject):
         print_debug(
             "PlotSession._on_selection_changed",
             f"request_plot_update x={x_keys} y={y_keys} norm={norm_keys}",
-            category="plots",
-        )
+            category="plots"
+)
         self.request_plot_update.emit()
 
     def _on_frozen_spectra_changed(self) -> None:
@@ -233,8 +233,8 @@ class PlotSession(QObject):
         print_debug(
             "PlotSession.set_transform",
             "applied (request refresh via transform_changed)",
-            category="plots",
-        )
+            category="plots"
+)
 
     @property
     def traces(self) -> TraceSet:
@@ -424,8 +424,8 @@ class PlotSession(QObject):
         run_model: "RunSource",
         xkey: str,
         ykey: str,
-        norm_keys: Optional[List[str]] = None,
-    ):
+        norm_keys: Optional[List[str]] = None
+):
         """
         Assemble a :class:`PlotRequest` from session view state.
 
@@ -454,29 +454,30 @@ class PlotSession(QObject):
         # rank avoids manufacturing a throwaway intent, which a mutable
         # model cannot supply.
         plot_ndim = len(shape) if 0 < len(shape) < intent.plot_ndim else None
-        return build_plot_request(
+        return PlotRequest(
             uid=run_model.uid,
-            xkeys=[xkey] if xkey else (),
+            xkeys=(xkey,
+) if xkey else (),
             ykey=ykey,
-            norm_keys=norm_keys,
-            projection=intent.project(
+            norm_keys=tuple(norm_keys or ()),
+            view=intent.project(
                 len(shape),
                 shape,
                 names,
                 crop=self._region.crop_for_trace(trace_key),
-                plot_ndim=plot_ndim,
-            ),
-            dims=names,
-            transform=self._effective_transform_text(run_model),
-        )
+                plot_ndim=plot_ndim
+),
+            dims=tuple(names),
+            transform=self._effective_transform_text(run_model)
+)
 
     def ensure_trace(
         self,
         run_model: "RunSource",
         xkey: str,
         ykey: str,
-        norm_keys: Optional[List[str]] = None,
-    ) -> Trace:
+        norm_keys: Optional[List[str]] = None
+) -> Trace:
         """
         Return the trace for ``(xkey, ykey, run uid)``, creating it.
 
@@ -506,8 +507,8 @@ class PlotSession(QObject):
             print_debug(
                 "PlotSession.ensure_trace",
                 f"create {xkey}/{ykey}",
-                category="plots",
-            )
+                category="plots"
+)
         return trace
 
     def iter_visible_traces(self):
@@ -591,8 +592,8 @@ class PlotSession(QObject):
             source,
             key.xkey,
             key.ykey,
-            list(sel.norm),
-        )
+            list(sel.norm)
+)
 
     def _dispose_trace(self, key: TraceKey) -> None:
         """
@@ -643,8 +644,8 @@ class PlotSession(QObject):
                 print_debug(
                     "PlotSession.rebuild",
                     f"create {key.xkey}/{key.ykey} uid={key.uid}",
-                    category="plots",
-                )
+                    category="plots"
+)
 
     def _attach_run_model(self, run_model: RunSource) -> None:
         if run_model.uid in self._connected_run_uids:

@@ -5,7 +5,6 @@ import numpy as np
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.geometry.orientation import display_flips
 from tests.fixtures.display_plane import orient_block
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 
 
 def _oriented_plane(y, row_axis, col_axis):
@@ -25,8 +24,8 @@ def _oriented_plane(y, row_axis, col_axis):
         ["dim_0", "dim_1"],
         render_mode_hint="image",
         row_reversed=row_reversed,
-        col_reversed=col_reversed,
-    )
+        col_reversed=col_reversed
+)
 
 
 def test_narrowed_load_orients_to_the_same_rows_as_the_full_load():
@@ -40,7 +39,7 @@ def test_narrowed_load_orients_to_the_same_rows_as_the_full_load():
     y_full = np.arange(y_count * x_count, dtype=float).reshape(y_count, x_count)
 
     full = _oriented_plane(y_full, row_axis, col_axis)
-    frame = frame_from_bundle(full)
+    frame = full.view_frame()
     assert frame.row_reversed and not frame.col_reversed
 
     display_bbox = (4, 13, 5, 15)
@@ -63,9 +62,9 @@ def test_storage_bbox_is_its_own_inverse():
     bundle = _oriented_plane(
         np.zeros((10, 12)),
         np.arange(10, dtype=float),
-        np.arange(12, dtype=float)[::-1],
-    )
-    frame = frame_from_bundle(bundle)
+        np.arange(12, dtype=float)[::-1]
+)
+    frame = bundle.view_frame()
     assert frame.row_reversed and frame.col_reversed
 
     display_bbox = (2, 6, 1, 5)

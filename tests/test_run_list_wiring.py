@@ -47,8 +47,8 @@ def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectr
     bundle = prepare_1d_bundle(
         np.array([1.0, 2.0, 3.0], dtype=float),
         [np.array([0.0, 1.0, 2.0], dtype=float)],
-        ["profile"],
-    )
+        ["profile"]
+)
     return FrozenSpectrum(
         key=f"{SYNTHETIC_KEY_PREFIX}{key_suffix}",
         label="mean(in ROI) · en_energy",
@@ -58,22 +58,23 @@ def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectr
         committed_xkey="en_energy",
         request=PlotRequest(
             uid=run_model.uid,
-            xkeys=("en_energy",),
+            xkeys=("en_energy",
+),
             ykey="detector_image",
             norm_keys=(),
             view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-                indices=(0, 0),
-            ),
+                indices=(0, 0)
+),
             dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
-            spatial_reduce="mean",
-        ),
-        source_key=("en_energy", "detector_image", run_model.uid),
-    )
+            spatial_reduce="mean"
+),
+        source_key=("en_energy", "detector_image", run_model.uid)
+)
 
 
 def test_combine_runs_on_catalog_selected_runs(qapp, app_model):
@@ -84,8 +85,8 @@ def test_combine_runs_on_catalog_selected_runs(qapp, app_model):
 
     combined = session.session.collection.combine(
         [first, second],
-        method=CombinationMethod.SUM,
-    )
+        method=CombinationMethod.SUM
+)
 
     assert isinstance(combined.run, CombinedRun)
     assert combined in session.session.collection.available_models
@@ -94,7 +95,8 @@ def test_combine_runs_on_catalog_selected_runs(qapp, app_model):
     assert combined.run.source_runs == [first.run, second.run]
 
     bundle = session.fetch_bundle(["time"], ["y"], run=combined)
-    assert bundle.y.shape == (100,)
+    assert bundle.y.shape == (100,
+)
     assert np.isfinite(bundle.y).all()
 
 
@@ -115,7 +117,8 @@ def test_freeze_runs_on_catalog_selected_runs(qapp, app_model):
 
     for item in frozen:
         bundle = session.fetch_bundle(["time"], ["y"], run=item)
-        assert bundle.y.shape == (100,)
+        assert bundle.y.shape == (100,
+)
 
 
 def test_frozen_spectra_changed_refreshes_run_list(qapp, app_model):

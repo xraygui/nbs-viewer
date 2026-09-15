@@ -16,7 +16,6 @@ from typing import List, Optional, Sequence, Tuple
 from ..geometry import (
     PlotViewFrame,
     compile_with_mask_mode,
-    region_frame_for_bbox,
 )
 from ..view import SliceItem
 from .request import PlotRequest
@@ -196,8 +195,8 @@ def plan_fetch(
         items[col_axis].start,
         items[col_axis].stop,
     )
-    region_frame = region_frame_for_bbox(
-        plane_frame, plane_frame.storage_bbox(loaded)
+    region_frame = plane_frame.region_for_bbox(
+        plane_frame.storage_bbox(loaded)
     )
     return FetchPlan(
         ykey=request.ykey,

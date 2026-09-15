@@ -16,15 +16,14 @@ from nbs_viewer.models.plot.run.frozen_spectrum import (
 from nbs_viewer.models.data.key_info import KeyInfo
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest, build_plot_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource, x_dimension
 from tests.fixtures.catalog_recipes import image_scan_run
 from nbs_viewer.models.sources.fixtures import (
-    VPPEM_UID,
     make_vppem_run,
     vppem_factors,
-    vppem_image,
+    vppem_image
 )
 
 
@@ -45,36 +44,39 @@ def _frozen_entry(model, key_suffix="abc", y=None, label=None):
         committed_xkey="sampleVoltage_VSource",
         request=PlotRequest(
             uid=model.uid,
-            xkeys=("sampleVoltage_VSource",),
+            xkeys=("sampleVoltage_VSource",
+),
             ykey="PCOEdge_image",
             norm_keys=(),
             view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-                indices=(0, 0),
-            ),
+                indices=(0, 0)
+),
             dims=("dim_1", "dim_2"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
-            spatial_reduce="mean",
-        ),
-        source_key=("sampleVoltage_VSource", "PCOEdge_image", model.uid),
-    )
+            spatial_reduce="mean"
+),
+        source_key=("sampleVoltage_VSource", "PCOEdge_image", model.uid)
+)
 
 
 def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
     shape = model.get_shape(ykey)
     if projection is None:
         projection = ViewIntent(plot_ndim=plot_ndim).project(len(shape), shape)
-    return build_plot_request(
+    return PlotRequest(
         uid=model.uid,
-        xkeys=xkeys,
+        xkeys=tuple(xkeys),
         ykey=ykey,
-        projection=projection,
-        dims=model.plot_axis_names(ykey, xkeys),
-        **kwargs,
-    )
+        norm_keys=tuple(kwargs.pop("norm_keys", ()) or ()),
+        view=projection,
+        dims=tuple(model.plot_axis_names(ykey, xkeys)),
+        transform=kwargs.pop("transform", "") or "",
+        **kwargs
+)
 
 
 def test_run_source_alias():
@@ -110,18 +112,9 @@ def test_key_table_catalog_and_frozen(qapp):
     assert frozen_info.synthetic is True
     assert frozen_info.hinted is False
     assert frozen_info.label == entry.label
-    assert frozen_info.shape == (3,)
+    assert frozen_info.shape == (3,
+)
     assert frozen_info.render_hint is None
-
-
-def test_identity_matches_fixture(qapp):
-    model = RunSource(make_vppem_run())
-    ident = model.identity()
-    assert ident.uid == VPPEM_UID
-    assert ident.scan_id == "102"
-    assert ident.plan_name == "nd_scan"
-    assert ident.display_name == model.display_name
-    assert ident.metadata["uid"] == VPPEM_UID
 
 
 def test_read_frozen_skips_catalog_get_data(qapp):
@@ -155,8 +148,8 @@ def test_describe_and_plot_axis_names_answer_different_questions(qapp):
     assert model.plot_axis_names("PCOEdge_image", xkeys) == (
         "sampleVoltage_VSource",
         "dim_1",
-        "dim_2",
-    )
+        "dim_2"
+)
 
 
 def _info(name, **axes):
@@ -215,8 +208,8 @@ def test_load_coords_reads_the_axis_keys_and_never_the_key(qapp):
     assert set(coords) == {"sampleVoltage_VSource", "dim_1", "dim_2"}
     np.testing.assert_allclose(
         coords["sampleVoltage_VSource"].values,
-        original("sampleVoltage_VSource"),
-    )
+        original("sampleVoltage_VSource")
+)
     np.testing.assert_allclose(coords["dim_2"].values, np.arange(32.0))
 
 
@@ -233,8 +226,10 @@ def test_a_second_x_key_rides_along_as_a_non_dimension_coordinate(qapp):
         "PCOEdge_image", None, ["sampleVoltage_VSource", "i0"]
     )
 
-    assert coords["sampleVoltage_VSource"].dims == ("sampleVoltage_VSource",)
-    assert coords["i0"].dims == ("sampleVoltage_VSource",)
+    assert coords["sampleVoltage_VSource"].dims == ("sampleVoltage_VSource",
+)
+    assert coords["i0"].dims == ("sampleVoltage_VSource",
+)
     np.testing.assert_allclose(coords["i0"].values, model.run.getData("i0"))
 
 
@@ -251,8 +246,8 @@ def test_an_x_key_on_a_detector_axis_names_that_axis(qapp):
 
     assert model.plot_axis_names("detector_image", ["en_energy"]) == (
         "time",
-        "en_energy",
-    )
+        "en_energy"
+)
     bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["en_energy"], "detector_image")
     )
@@ -280,16 +275,16 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(4, 0, 0),
-    )
+        indices=(4, 0, 0)
+)
     bundle = model.fetch.get_plot_bundle(
         _plot_request(
             model,
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=2,
-            projection=spec,
-        )
+            projection=spec
+)
     )
     expected = vppem_image()[4]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
@@ -302,16 +297,16 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
         plot_ndim=1,
         roles=(DimRole.MEAN, DimRole.MEAN, DimRole.MEAN),
         indices=(0, 0, 0),
-        axis_order=(1, 2, 0),
-    )
+        axis_order=(1, 2, 0)
+)
     cube_bundle = model.fetch.get_plot_bundle(
         _plot_request(
             model,
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=1,
-            projection=spec,
-        )
+            projection=spec
+)
     )
     stats_bundle = model.fetch.get_plot_bundle(
         _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats")
@@ -366,8 +361,8 @@ def test_a_declared_render_mode_reaches_the_bundle(qapp):
                 ]
             },
         },
-        {key: np.asarray(plain.getData(key)) for key in plain.available_keys},
-    )
+        {key: np.asarray(plain.getData(key)) for key in plain.available_keys}
+)
 
     assert declared.render_mode_hint("detector_image") == "mesh"
     assert declared.describe("detector_image").render_hint == "mesh"
@@ -425,14 +420,16 @@ def test_a_frozen_norm_follows_the_event_axis_index(qapp):
     assert projection.base_slice() == (0, 0, slice(None))
 
     bundle = model.fetch.get_plot_bundle(
-        build_plot_request(
+        PlotRequest(
             uid=model.uid,
-            xkeys=["pixel"],
+            xkeys=("pixel",
+),
             ykey="detector_cube",
-            projection=projection,
-            dims=model.plot_axis_names("detector_cube", ["pixel"]),
-            norm_keys=[entry.key],
-        )
+            norm_keys=(entry.key,
+),
+            view=projection,
+            dims=tuple(model.plot_axis_names("detector_cube", ["pixel"]))
+)
     )
 
     # cube[0, 0, :] is [0, 30, 60]; the frozen norm at event 0 is 2.0.

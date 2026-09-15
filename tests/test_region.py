@@ -4,21 +4,19 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import (
     EllipseRegion,
     PolygonRegion,
     RectRegion,
-    expand_region_for_profile,
     reduce_masked_plane,
-    region_from_dict,
+    region_from_dict
 )
 
 
 def test_reduce_masked_plane_sum():
     y = np.array([[1.0, 2.0], [3.0, 4.0]])
     bundle = prepare_2d_bundle(y, [np.arange(2.0), np.arange(2.0)], ["a", "b"])
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     region = RectRegion(x0=-0.5, x1=1.5, y0=-0.5, y1=1.5)
     compiled = region.compile(frame)
     value = reduce_masked_plane(bundle.y, compiled, "sum")
@@ -33,19 +31,19 @@ def test_rect_region_normalizes_corners():
     assert region.y1 == 4.0
 
 
-def test_expand_region_for_profile_spans_profile_axis():
+def test_expand_for_profile_spans_profile_axis():
     y = np.ones((4, 6))
     bundle = prepare_2d_bundle(
         y, [np.linspace(0.0, 3.0, 4), np.linspace(0.0, 5.0, 6)], ["a", "b"]
     )
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     narrow = RectRegion(x0=1.0, x1=2.0, y0=1.0, y1=2.0)
-    along_x = expand_region_for_profile(frame, narrow, "plot_x")
+    along_x = narrow.expand_for_profile(frame, "plot_x")
     assert along_x.y0 == pytest.approx(1.0)
     assert along_x.y1 == pytest.approx(2.0)
     assert along_x.x0 == pytest.approx(-0.5)
     assert along_x.x1 == pytest.approx(5.5)
-    along_y = expand_region_for_profile(frame, narrow, "plot_y")
+    along_y = narrow.expand_for_profile(frame, "plot_y")
     assert along_y.x0 == pytest.approx(1.0)
     assert along_y.x1 == pytest.approx(2.0)
     assert along_y.y0 == pytest.approx(-0.5)
@@ -65,9 +63,9 @@ def test_subcell_rect_selects_centroid_cell():
         y,
         [np.arange(4.0), np.arange(4.0)],
         ["a", "b"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     tiny = RectRegion(x0=1.4, x1=1.45, y0=2.4, y1=2.45)
     compiled = tiny.compile(frame)
     assert compiled.pixel_count == 1
@@ -79,9 +77,9 @@ def _image_frame(ny=8, nx=8):
         y,
         [np.arange(float(ny)), np.arange(float(nx))],
         ["a", "b"],
-        render_mode_hint="image",
-    )
-    return frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    return bundle.view_frame()
 
 
 def test_ellipse_region_compile_image():
@@ -91,7 +89,7 @@ def test_ellipse_region_compile_image():
     assert compiled.pixel_count > 0
     assert compiled.pixel_count < compiled.mask.size
     assert not region.separable_for_profile
-    assert expand_region_for_profile(frame, region, "plot_x") is region
+    assert region.expand_for_profile(frame, "plot_x") is region
 
 
 def test_ellipse_circle_and_dict_round_trip():

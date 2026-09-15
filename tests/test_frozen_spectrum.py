@@ -12,11 +12,10 @@ from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.run.frozen_spectrum import (
     FrozenSpectrum,
     SYNTHETIC_KEY_PREFIX,
-    copy_plot_bundle,
-    is_synthetic_key,
+    copy_plot_bundle
 )
 from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest, build_plot_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run
@@ -47,22 +46,23 @@ def _frozen_entry(model, key_suffix="abc", y=None):
         committed_xkey="en_energy",
         request=PlotRequest(
             uid=model.uid,
-            xkeys=("en_energy",),
+            xkeys=("en_energy",
+),
             ykey="detector_image",
             norm_keys=(),
             view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-                indices=(0, 0),
-            ),
+                indices=(0, 0)
+),
             dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
-            spatial_reduce="mean",
-        ),
-        source_key=("en_energy", "detector_image", model.uid),
-    )
+            spatial_reduce="mean"
+),
+        source_key=("en_energy", "detector_image", model.uid)
+)
 
 
 def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
@@ -72,19 +72,16 @@ def _plot_request(model, xkeys, ykey, plot_ndim=1, projection=None, **kwargs):
         # its own rank rather than dropping out.
         plot_ndim = min(plot_ndim, len(shape))
         projection = ViewIntent(plot_ndim=plot_ndim).project(len(shape), shape)
-    return build_plot_request(
+    return PlotRequest(
         uid=model.uid,
-        xkeys=xkeys,
+        xkeys=tuple(xkeys),
         ykey=ykey,
-        projection=projection,
-        dims=model.plot_axis_names(ykey, xkeys),
-        **kwargs,
-    )
-
-
-def test_is_synthetic_key():
-    assert is_synthetic_key(f"{SYNTHETIC_KEY_PREFIX}abc")
-    assert not is_synthetic_key("en_energy")
+        norm_keys=tuple(kwargs.pop("norm_keys", ()) or ()),
+        view=projection,
+        dims=tuple(model.plot_axis_names(ykey, xkeys)),
+        transform=kwargs.pop("transform", "") or "",
+        **kwargs
+)
 
 
 def test_scan_profile_storage_axis_4d():
@@ -95,10 +92,10 @@ def test_scan_profile_storage_axis_4d():
             DimRole.INDEX,
             DimRole.INDEX,
             DimRole.PLOT_Y,
-            DimRole.PLOT_X,
-        ),
-        indices=(0, 0, 0, 0),
-    )
+            DimRole.PLOT_X
+),
+        indices=(0, 0, 0, 0)
+)
     assert spec.scan_axis == 0
     assert spec.profile_kind(0) == "stack_spectrum"
     assert spec.profile_kind(1) == "local_profile"
@@ -110,8 +107,8 @@ def test_scan_profile_storage_axis_2d_mesh():
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     assert spec.scan_axis == 0
     assert spec.profile_kind(0) == "stack_spectrum"
     assert spec.profile_kind(1) == "local_profile"
@@ -125,10 +122,10 @@ def test_scan_profile_storage_axis_unchanged_after_swap():
             DimRole.INDEX,
             DimRole.INDEX,
             DimRole.PLOT_Y,
-            DimRole.PLOT_X,
-        ),
-        indices=(0, 0, 0, 0),
-    )
+            DimRole.PLOT_X
+),
+        indices=(0, 0, 0, 0)
+)
     swapped = spec.swap_rows(1)
     assert swapped.scan_axis == 0
 
@@ -151,9 +148,11 @@ def test_register_and_available_keys(qapp):
 
 def test_frozen_get_data_respects_slice_info():
     entry = _frozen_entry(RunSource(line_scan_run(0)), y=[10.0, 20.0, 30.0])
-    np.testing.assert_allclose(entry.get_data((1,)), [20.0])
+    np.testing.assert_allclose(entry.get_data((1,
+)), [20.0])
     np.testing.assert_allclose(
-        entry.get_data((slice(None),)), [10.0, 20.0, 30.0]
+        entry.get_data((slice(None),
+)), [10.0, 20.0, 30.0]
     )
 
 
@@ -161,8 +160,10 @@ def test_run_model_get_data_delegates_to_frozen(qapp):
     model = _run_model()
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
-    np.testing.assert_allclose(model.read(entry.key, (0,)), [10.0])
-    np.testing.assert_allclose(model.get_shape(entry.key), (3,))
+    np.testing.assert_allclose(model.read(entry.key, (0,
+)), [10.0])
+    np.testing.assert_allclose(model.get_shape(entry.key), (3,
+))
 
 
 def test_run_source_describes_a_frozen_key(qapp):
@@ -178,11 +179,14 @@ def test_run_source_describes_a_frozen_key(qapp):
     model.register_frozen_spectrum(entry)
 
     info = model.describe(entry.key)
-    assert info.shape == (3,)
-    assert info.dims == (entry.label,)
+    assert info.shape == (3,
+)
+    assert info.dims == (entry.label,
+)
     assert info.axes == {entry.label: 3}
     assert info.synthetic is True
-    assert model.plot_axis_names(entry.key, ["en_energy"]) == (entry.label,)
+    assert model.plot_axis_names(entry.key, ["en_energy"]) == (entry.label,
+)
 
 
 def test_synthetic_y_fetch_ignores_catalog_get_data(qapp):
@@ -248,22 +252,23 @@ def test_local_profile_keeps_frozen_x(qapp):
         committed_xkey="dim_2",
         request=PlotRequest(
             uid=model.uid,
-            xkeys=("en_energy",),
+            xkeys=("en_energy",
+),
             ykey="detector_image",
             norm_keys=(),
             view=Projection(
                 ndim=2,
                 plot_ndim=2,
                 roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-                indices=(0, 0),
-            ),
+                indices=(0, 0)
+),
             dims=("time", "pixel"),
             region=RectRegion(x0=0.0, x1=1.0, y0=0.0, y1=1.0),
             profile_axis=1,
-            spatial_reduce="mean",
-        ),
-        source_key=("en_energy", "detector_image", model.uid),
-    )
+            spatial_reduce="mean"
+),
+        source_key=("en_energy", "detector_image", model.uid)
+)
     model.register_frozen_spectrum(entry)
     get_data = MagicMock()
     model._run.getData = get_data

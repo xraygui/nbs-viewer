@@ -28,19 +28,15 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
 
-from .fetch.request import PlotRequest, TraceKey, crop_from_region, roi_profile_request
+from .fetch.request import PlotRequest, TraceKey
 from .geometry import (
     PlotViewFrame,
     RectRegion,
-    RegionDefinition,
-    expand_region_for_profile,
-    frame_from_bundle,
-    view_fingerprint_from_bundle,
+    RegionDefinition
 )
 from .roi import RoiEntry, RoiSetModel
 from .trace import Trace
 from .view import Projection, ViewCrop
-from .roi import default_profile_label
 
 if TYPE_CHECKING:  # pragma: no cover
     from .run.frozen_spectrum import FrozenSpectrum
@@ -123,8 +119,8 @@ class RegionController(QObject):
     def set_view_crop(
         self,
         crop: Optional[ViewCrop],
-        source_key: Optional[tuple] = None,
-    ) -> bool:
+        source_key: Optional[tuple] = None
+) -> bool:
         """
         Set or clear the persistent view crop.
 
@@ -164,8 +160,8 @@ class RegionController(QObject):
         self,
         region: RegionDefinition,
         *,
-        trace: Optional[Trace] = None,
-    ) -> ViewCrop:
+        trace: Optional[Trace] = None
+) -> ViewCrop:
         """
         Commit a drawn rectangle to the persistent view crop.
 
@@ -207,7 +203,7 @@ class RegionController(QObject):
         bundle = trace.last_bundle
         if bundle is None or bundle.ndim != 2:
             raise ValueError("Select a single 2D dataset")
-        crop = crop_from_region(region, frame_from_bundle(bundle), plane_axes)
+        crop = region.to_view_crop(bundle.view_frame(), plane_axes)
         self.set_view_crop(crop, trace.trace_key.as_tuple())
         return crop
 
@@ -286,8 +282,8 @@ class RegionController(QObject):
         plot_order = parent_spec.plot_axis_order()
         if (plot_order[-2], plot_order[-1]) != (
             crop.plot_y_axis,
-            crop.plot_x_axis,
-        ):
+            crop.plot_x_axis
+):
             self.set_view_crop(None)
             return "plot axes changed"
         return None
@@ -323,7 +319,7 @@ class RegionController(QObject):
         if trace is None or trace.last_bundle is None:
             return None
         try:
-            return view_fingerprint_from_bundle(trace.last_bundle)
+            return trace.last_bundle.view_fingerprint()
         except ValueError:
             return None
 
@@ -370,8 +366,8 @@ class RegionController(QObject):
         self,
         _xkeys=None,
         _ykeys=None,
-        _normkeys=None,
-    ) -> None:
+        _normkeys=None
+) -> None:
         """
         Drop all geometry when the plotted fields change.
 
@@ -483,8 +479,8 @@ class RegionController(QObject):
 
     def resolve_parent_frame(
         self,
-        trace: Optional[Trace] = None,
-    ) -> Optional[PlotViewFrame]:
+        trace: Optional[Trace] = None
+) -> Optional[PlotViewFrame]:
         """
         Return the view frame for the visible 2D trace.
 
@@ -501,14 +497,14 @@ class RegionController(QObject):
         if trace is None or trace.last_bundle is None:
             return None
         try:
-            return frame_from_bundle(trace.last_bundle)
+            return trace.last_bundle.view_frame()
         except ValueError:
             return None
 
     def cached_parent_bundle_for_preview(
         self,
-        trace: Trace,
-    ) -> Optional["PlotBundle"]:
+        trace: Trace
+) -> Optional["PlotBundle"]:
         """
         Return the loaded plot plane when it still matches the session view.
 
@@ -563,8 +559,8 @@ class RegionController(QObject):
             entry.id,
             region,
             view_fingerprint=self.resolve_current_view_fingerprint(),
-            clear_stale=True,
-        )
+            clear_stale=True
+)
 
     def apply_expanded_roi_profile_span(self, profile_axis: str) -> None:
         """
@@ -589,7 +585,7 @@ class RegionController(QObject):
         frame = self.resolve_parent_frame()
         if frame is None:
             raise ValueError("Select a single 2D dataset")
-        expanded = expand_region_for_profile(frame, region, profile_axis)
+        expanded = region.expand_for_profile(frame, profile_axis)
         self.apply_roi_region_to_selected(expanded)
 
     def build_roi_profile_request(
@@ -599,8 +595,8 @@ class RegionController(QObject):
         trace: Optional[Trace] = None,
         parent_frame=None,
         span_full_override: Optional[bool] = None,
-        default_profile_axis=None,
-    ) -> PlotRequest:
+        default_profile_axis=None
+) -> PlotRequest:
         """
         Build the profile request for an ROI entry.
 
@@ -647,22 +643,21 @@ class RegionController(QObject):
             if span_full_override is None
             else span_full_override
         )
-        return roi_profile_request(
-            parent,
+        return parent.with_roi_profile(
             entry.region,
             profile_axis=profile_axis,
             spatial_reduce=entry.operation.spatial_reduce,
             mask_mode=entry.operation.mask_mode,
             plane_frame=parent_frame,
-            span_full=span_full,
-        )
+            span_full=span_full
+)
 
     def _commit_span_full(
         self,
         parent_spec: Projection,
         profile_storage_axis: int,
-        span_full: bool,
-    ) -> bool:
+        span_full: bool
+) -> bool:
         if parent_spec.profile_kind(profile_storage_axis) != "stack_spectrum":
             return span_full
         if parent_spec.is_plot_plane_axis(profile_storage_axis):
@@ -679,8 +674,8 @@ class RegionController(QObject):
         cached_plane: Optional["PlotBundle"] = None,
         span_full_override: Optional[bool] = None,
         default_profile_axis=None,
-        request: Optional[PlotRequest] = None,
-    ) -> "PlotBundle":
+        request: Optional[PlotRequest] = None
+) -> "PlotBundle":
         """
         Preview an ROI profile for an entry on the parent trace.
 
@@ -720,8 +715,8 @@ class RegionController(QObject):
                 trace=trace,
                 parent_frame=parent_frame,
                 span_full_override=span_full_override,
-                default_profile_axis=default_profile_axis,
-            )
+                default_profile_axis=default_profile_axis
+)
         if cached_plane is None:
             cached_plane = self.cached_parent_bundle_for_preview(trace)
         return trace.preview_roi_profile(
@@ -735,8 +730,8 @@ class RegionController(QObject):
         trace: Optional[Trace] = None,
         parent_frame=None,
         axis_names=None,
-        default_profile_axis=None,
-    ) -> Tuple[bool, PlotRequest]:
+        default_profile_axis=None
+) -> Tuple[bool, PlotRequest]:
         """
         Validate an ROI commit and build its profile request.
 
@@ -788,15 +783,15 @@ class RegionController(QObject):
         span_full = self._commit_span_full(
             spec,
             profile_axis,
-            entry.operation.span_full_profile_axis,
-        )
+            entry.operation.span_full_profile_axis
+)
         request = self.build_roi_profile_request(
             entry,
             trace=trace,
             parent_frame=parent_frame,
             span_full_override=span_full,
-            default_profile_axis=default_profile_axis,
-        )
+            default_profile_axis=default_profile_axis
+)
         return span_full, request
 
     def finalize_roi_commit(
@@ -806,10 +801,9 @@ class RegionController(QObject):
         request: PlotRequest,
         *,
         parent_trace: Optional[Trace] = None,
-        axis_names=None,
         cube_fingerprint=None,
-        committed_xkey: Optional[str] = None,
-    ) -> "FrozenSpectrum":
+        committed_xkey: Optional[str] = None
+) -> "FrozenSpectrum":
         """
         Build and register a frozen spectrum from a fetched ROI profile bundle.
 
@@ -823,8 +817,6 @@ class RegionController(QObject):
             Request used for the fetch.
         parent_trace : Trace, optional
             Parent trace. Defaults to the sole visible 2D trace.
-        axis_names : sequence of str, optional
-            Storage axis names for default labels.
         cube_fingerprint : tuple, optional
             Slice / cube-view snapshot. Defaults to this plot's state.
         committed_xkey : str, optional
@@ -838,17 +830,7 @@ class RegionController(QObject):
         trace = parent_trace or self._resolve_trace()
         if trace is None:
             raise ValueError("Select a single 2D dataset")
-        names = tuple(axis_names or ())
-        label = (
-            entry.operation.label
-            or entry.display_label
-            or default_profile_label(
-                request.mask_mode,
-                request.spatial_reduce,
-                request.profile_axis,
-                names,
-            )
-        )
+        label = entry.operation.label or entry.display_label
         if committed_xkey is None:
             default_x = self._session.selection.get_selected_keys()[0]
             committed_xkey = default_x[0] if default_x else ""
@@ -862,8 +844,8 @@ class RegionController(QObject):
             label=label,
             parent_spec=parent_spec,
             cube_fingerprint=cube_fingerprint,
-            committed_xkey=committed_xkey,
-        )
+            committed_xkey=committed_xkey
+)
         trace.run.register_frozen_spectrum(frozen)
         return frozen
 
@@ -878,8 +860,8 @@ class RegionController(QObject):
         axis_names=None,
         default_profile_axis=None,
         cube_fingerprint=None,
-        committed_xkey: Optional[str] = None,
-    ) -> "FrozenSpectrum":
+        committed_xkey: Optional[str] = None
+) -> "FrozenSpectrum":
         """
         Preview, build, and register an ROI profile on the parent run.
 
@@ -896,7 +878,7 @@ class RegionController(QObject):
         cached_plane : PlotBundle, optional
             Plot plane already in memory.
         axis_names : sequence of str, optional
-            Axis names for default labels.
+            Axis names used in local-profile error hints.
         default_profile_axis : str or int, optional
             Fallback profile axis.
         cube_fingerprint : tuple, optional
@@ -924,20 +906,19 @@ class RegionController(QObject):
             trace=trace,
             parent_frame=parent_frame,
             axis_names=axis_names,
-            default_profile_axis=default_profile_axis,
-        )
+            default_profile_axis=default_profile_axis
+)
         bundle = self.preview_roi_profile(
             entry=entry,
             parent_trace=trace,
             cached_plane=cached_plane,
-            request=request,
-        )
+            request=request
+)
         return self.finalize_roi_commit(
             entry,
             bundle,
             request,
             parent_trace=trace,
-            axis_names=axis_names,
             cube_fingerprint=cube_fingerprint,
-            committed_xkey=committed_xkey,
-        )
+            committed_xkey=committed_xkey
+)

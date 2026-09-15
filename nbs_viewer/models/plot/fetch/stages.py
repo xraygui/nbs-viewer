@@ -25,12 +25,8 @@ from ..geometry import (
     PlotBundle,
     PlotViewFrame,
     RegionDefinition,
-    cell_x_bounds_mesh,
-    cell_y_bounds_mesh,
     compile_with_mask_mode,
-    frame_from_bundle,
-    mesh_separable_edge_grids,
-    prepare_1d_bundle,
+    prepare_1d_bundle
 )
 from ..view import DimRole, PlotAxes, PlotAxisName, Projection, SliceItem
 from .request import PlotRequest
@@ -116,7 +112,7 @@ def reduce_cached_plane(
     if plane_axes is None or request.profile_axis not in plane_axes:
         raise ValueError("cached_plane cannot serve an off-plane profile")
 
-    frame = frame_from_bundle(plane)
+    frame = plane.view_frame()
     bundle_profile_axis = 0 if request.profile_axis == plane_axes[0] else 1
     plane_view = Projection(
         ndim=2,
@@ -356,7 +352,7 @@ def _profile_coords(
     Return profile bin-center coordinates along one plot axis.
     """
     if frame.render_mode == "mesh":
-        edges = mesh_separable_edge_grids(frame)
+        edges = frame.mesh_separable_edge_grids()
         if edges is not None:
             x_edges, y_edges = edges
             axis_edges = x_edges if profile_axis == "plot_x" else y_edges
@@ -391,9 +387,9 @@ def _coord_for_profile_index(
 
     if frame.render_mode == "mesh":
         if profile_axis == "plot_x":
-            x0, x1 = cell_x_bounds_mesh(frame, index, 0)
+            x0, x1 = frame.cell_x_bounds(index, 0)
             return 0.5 * (x0 + x1)
-        y0, y1 = cell_y_bounds_mesh(frame, index, 0)
+        y0, y1 = frame.cell_y_bounds(index, 0)
         return 0.5 * (y0 + y1)
 
     if profile_axis == "plot_x":

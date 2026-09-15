@@ -148,8 +148,8 @@ def _image_session(qapp):
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     apply_projection(plot_model.view_intent, parent)
     plot_data = plot_model.ensure_trace(
         run_model, "pixel", "detector_image"
@@ -158,8 +158,8 @@ def _image_session(qapp):
         np.zeros((5, 6)),
         np.arange(5, dtype=float),
         np.arange(6, dtype=float),
-        ["row", "pixel"],
-    )
+        ["row", "pixel"]
+)
     return plot_model, run_model, plot_data
 
 

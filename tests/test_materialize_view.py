@@ -7,11 +7,6 @@ from nbs_viewer.models.plot.fetch.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.frame import (
-    cell_x_bounds_mesh,
-    cell_y_bounds_mesh,
-    frame_from_bundle,
-)
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.view.axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
@@ -23,15 +18,17 @@ def test_materialize_view_sum_over_axis():
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.SUM, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     out = materialize_view(
         labelled_block(y, [np.arange(2), np.arange(5)], ["row", "col"]),
-        PlotAxes.of(spec, ["row", "col"]),
-    )
-    assert out.shape == (5,)
+        PlotAxes.of(spec, ["row", "col"])
+)
+    assert out.shape == (5,
+)
     assert np.allclose(out.values, 2.0)
-    assert out.dims == ("col",)
+    assert out.dims == ("col",
+)
     np.testing.assert_array_equal(out.coords["col"].values, np.arange(5))
 
 
@@ -41,12 +38,12 @@ def test_materialize_view_mean_and_2d_plot():
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     out = materialize_view(
         labelled_block(y, [np.arange(3), np.arange(4)], ["y", "x"]),
-        PlotAxes.of(spec, ["y", "x"]),
-    )
+        PlotAxes.of(spec, ["y", "x"])
+)
     assert out.shape == (3, 4)
     assert out.dims == ("y", "x")
     np.testing.assert_array_equal(out.values, y)
@@ -59,8 +56,8 @@ def test_materialize_view_rejects_region_without_frame():
         materialize_view(
             labelled_block(np.ones((5, 5)), [np.arange(5), np.arange(5)], ["y", "x"]),
             PlotAxes.of(spec, ["y", "x"]),
-            region=region,
-        )
+            region=region
+)
 
 
 def test_profile_view_spec_in_plane_roles():
@@ -68,8 +65,8 @@ def test_profile_view_spec_in_plane_roles():
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     output = parent.to_profile(profile_storage_axis=1, spatial_reduce="sum")
     assert output.plot_ndim == 1
     assert output.roles == (DimRole.SUM, DimRole.PLOT_X)
@@ -84,9 +81,9 @@ def test_materialize_in_plane_profile_image():
         y,
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
         ["y", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     region = RectRegion(x0=2.5, x1=6.5, y0=2.5, y1=6.5)
     compiled = region.compile(frame)
     expected = np.array(
@@ -102,20 +99,21 @@ def test_materialize_in_plane_profile_image():
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     out = materialize_view(
         labelled_block(
             bundle.y,
             [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
-            ["y", "x"],
-        ),
+            ["y", "x"]
+),
         profile_axes(parent, ["y", "x"], 1, "sum"),
         region=region,
-        region_frame=frame,
-    )
+        region_frame=frame
+)
     np.testing.assert_allclose(out.values, expected, rtol=1e-5, equal_nan=True)
-    assert out.dims == ("x",)
+    assert out.dims == ("x",
+)
 
 
 def test_materialize_in_plane_profile_mesh():
@@ -125,11 +123,11 @@ def test_materialize_in_plane_profile_mesh():
     bundle = prepare_2d_bundle(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
-    frame = frame_from_bundle(bundle)
-    x0, _ = cell_x_bounds_mesh(frame, 10, 0)
-    _, x1 = cell_x_bounds_mesh(frame, 20, 0)
-    y0, _ = cell_y_bounds_mesh(frame, 5, 0)
-    _, y1 = cell_y_bounds_mesh(frame, 8, 0)
+    frame = bundle.view_frame()
+    x0, _ = frame.cell_x_bounds(10, 0)
+    _, x1 = frame.cell_x_bounds(20, 0)
+    y0, _ = frame.cell_y_bounds(5, 0)
+    _, y1 = frame.cell_y_bounds(8, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     compiled = region.compile(frame)
     expected = np.array(
@@ -145,8 +143,8 @@ def test_materialize_in_plane_profile_mesh():
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     names = ["en_energy", "tes_mca_energies"]
     out = materialize_view(
         labelled_block(bundle.y, [row_axis, col_axis], names),
@@ -155,13 +153,14 @@ def test_materialize_in_plane_profile_mesh():
             names,
             0,
             "sum",
-            plane_axes=(frame.plot_y_dim, frame.plot_x_dim),
-        ),
+            plane_axes=(frame.plot_y_dim, frame.plot_x_dim)
+),
         region=region,
-        region_frame=frame,
-    )
+        region_frame=frame
+)
     np.testing.assert_allclose(out.values, expected, rtol=1e-5, equal_nan=True)
-    assert out.dims == ("en_energy",)
+    assert out.dims == ("en_energy",
+)
 
 
 def test_profile_view_spec_stack_roles():
@@ -169,8 +168,8 @@ def test_profile_view_spec_stack_roles():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(1, 0, 0, 0),
-    )
+        indices=(1, 0, 0, 0)
+)
     output = parent.to_profile(profile_storage_axis=0, spatial_reduce="mean")
     assert output.plot_ndim == 1
     assert output.roles[0] == DimRole.PLOT_X
@@ -186,8 +185,8 @@ def test_eligible_profile_axes_excludes_sum_mean():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0, 0),
-    )
+        indices=(0, 0, 0, 0)
+)
     axes = parent.eligible_profile_axes()
     assert 0 in axes
     assert 2 in axes
@@ -208,23 +207,23 @@ def test_materialize_stack_profile_4d():
             + np.arange(y_count)[None, None, :, None] * 10
             + np.arange(x_count)[None, None, None, :]
         ).astype(float),
-        (e_count, s_count, y_count, x_count),
-    ).copy()
+        (e_count, s_count, y_count, x_count)
+).copy()
 
     parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(1, 0, 0, 0),
-    )
+        indices=(1, 0, 0, 0)
+)
     y_parent = y.sum(axis=1)[1]
     bundle = prepare_2d_bundle(
         y_parent,
         [np.arange(y_count), np.arange(x_count)],
         ["y", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
 
     e_axis = np.linspace(200.0, 500.0, e_count)
@@ -233,12 +232,12 @@ def test_materialize_stack_profile_4d():
         labelled_block(
             y,
             [e_axis, np.arange(s_count), np.arange(y_count), np.arange(x_count)],
-            names,
-        ),
+            names
+),
         profile_axes(parent, names, 0, "sum", plane_axes=(2, 3)),
         region=region,
-        region_frame=frame,
-    )
+        region_frame=frame
+)
 
     compiled = region.compile(frame)
     expected = np.full(e_count, np.nan, dtype=float)
@@ -249,7 +248,8 @@ def test_materialize_stack_profile_4d():
 
     np.testing.assert_allclose(out.values, expected, rtol=1e-5, equal_nan=True)
     np.testing.assert_allclose(out.coords["en_energy"].values, e_axis, rtol=1e-5)
-    assert out.dims == ("en_energy",)
+    assert out.dims == ("en_energy",
+)
 
 
 def test_materialize_in_plane_profile_outside_roi():
@@ -258,24 +258,25 @@ def test_materialize_in_plane_profile_outside_roi():
         y,
         [np.arange(6), np.arange(8)],
         ["y", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     region = RectRegion(x0=2.5, x1=4.5, y0=1.5, y1=3.5)
     parent = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     out = materialize_view(
         labelled_block(bundle.y, [np.arange(6), np.arange(8)], ["y", "x"]),
         profile_axes(parent, ["y", "x"], 1, "sum"),
         region=region,
         mask_mode="outside",
-        region_frame=frame,
-    )
-    assert out.shape == (8,)
+        region_frame=frame
+)
+    assert out.shape == (8,
+)
     assert np.isfinite(out.values).any()
 
 
@@ -300,14 +301,14 @@ def test_a_swapped_axis_order_transposes_the_plane():
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
-        axis_order=(1, 0),
-    )
+        axis_order=(1, 0)
+)
     y = np.arange(12.0).reshape(3, 4)
 
     out = materialize_view(
         labelled_block(y, [np.arange(3.0), np.arange(4.0)], names),
-        PlotAxes.of(spec, names),
-    )
+        PlotAxes.of(spec, names)
+)
 
     assert out.dims == ("col", "row")
     np.testing.assert_array_equal(out.values, y.T)
@@ -329,15 +330,15 @@ def test_the_projection_reduce_is_not_nan_aware():
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.SUM, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     y = np.ones((2, 5))
     y[0, 2] = np.nan
 
     out = materialize_view(
         labelled_block(y, [np.arange(2.0), np.arange(5.0)], names),
-        PlotAxes.of(spec, names),
-    )
+        PlotAxes.of(spec, names)
+)
 
     np.testing.assert_array_equal(np.isnan(out.values), [0, 0, 1, 0, 0])
     np.testing.assert_allclose(out.values[[0, 1, 3, 4]], 2.0)
@@ -362,9 +363,9 @@ def test_the_roi_mask_aligns_by_name_not_by_position():
         cube[0],
         [np.arange(n_row, dtype=float), np.arange(n_col, dtype=float)],
         ["row", "col"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
     compiled = region.compile(frame)
 
@@ -373,8 +374,8 @@ def test_the_roi_mask_aligns_by_name_not_by_position():
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0),
-    )
+        indices=(0, 0, 0)
+)
     out = materialize_view(
         labelled_block(
             cube,
@@ -383,15 +384,16 @@ def test_the_roi_mask_aligns_by_name_not_by_position():
                 np.arange(n_row, dtype=float),
                 np.arange(n_col, dtype=float),
             ],
-            names,
-        ),
+            names
+),
         profile_axes(parent, names, 0, "sum", plane_axes=(1, 2)),
         region=region,
-        region_frame=frame,
-    )
+        region_frame=frame
+)
 
     expected = np.array(
         [np.nansum(np.where(compiled.mask, cube[i], np.nan)) for i in range(n_stack)]
     )
-    assert out.dims == ("stack",)
+    assert out.dims == ("stack",
+)
     np.testing.assert_allclose(out.values, expected)

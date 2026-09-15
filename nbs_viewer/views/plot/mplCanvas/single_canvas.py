@@ -26,8 +26,7 @@ from nbs_viewer.models.plot.geometry import (
     RectRegion,
     RegionDefinition,
     RenderMode,
-    frame_from_bundle,
-)
+    )
 from nbs_viewer.models.plot.roi import RoiSetModel
 from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
@@ -413,7 +412,7 @@ class MplCanvas(FigureCanvasQTAgg):
         bundle = self.get_active_plot_bundle()
         if bundle is None:
             raise ValueError("No active 2D plot bundle for ROI")
-        return frame_from_bundle(bundle)
+        return bundle.view_frame()
 
     def region_controls_enabled(self):
         """
@@ -827,14 +826,14 @@ class MplCanvas(FigureCanvasQTAgg):
                 artist = self._render_image(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "image"
-                self._last_view_frame = frame_from_bundle(bundle)
+                self._last_view_frame = bundle.view_frame()
                 self._apply_aspect()
             elif bundle.render_mode == "mesh":
                 self._prepare_2d_axes(model_key)
                 artist = self._render_mesh(bundle, plotData, artist)
                 self.currentDim = 2
                 self._active_render_mode = "mesh"
-                self._last_view_frame = frame_from_bundle(bundle)
+                self._last_view_frame = bundle.view_frame()
                 self._apply_aspect()
         except Exception as e:
             print(f"[MplCanvas._handle_plot_data] Error: {e}")

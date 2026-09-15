@@ -15,8 +15,8 @@ its coordinates, these say where it goes on screen.
 **What this surface exports** is what production code outside the package
 imports, completed so that no family is half-exported: ``prepare_2d_bundle``
 joins its 1-D twin, ``AxisSliceRegion`` joins the other three shapes,
-``CompiledRegion`` names what the two compilers return, and
-``region_from_dict`` is the inverse of the shapes' own serialization.
+``CompiledRegion`` names what the compilers return, and ``region_from_dict``
+is the inverse of the shapes' own serialization.
 
 **What it hides** is the arithmetic. The four ``mask_from_*`` rasterizers,
 the per-mode cell bounds, the extent and edge builders, and the uniformity
@@ -35,16 +35,7 @@ from .bundle import (
     prepare_1d_bundle,
     prepare_2d_bundle,
 )
-from .frame import (
-    PlotViewFrame,
-    cell_x_bounds_mesh,
-    cell_y_bounds_mesh,
-    frame_for_plane,
-    frame_from_bundle,
-    mesh_separable_edge_grids,
-    region_frame_for_bbox,
-    view_fingerprint_from_bundle,
-)
+from .frame import PlotViewFrame
 from .orientation import RenderMode, classify_render_mode, display_flips
 from .region import (
     AxisSliceRegion,
@@ -54,10 +45,8 @@ from .region import (
     PolygonRegion,
     RectRegion,
     RegionDefinition,
-    compile_covering_rect,
     compile_with_mask_mode,
-    expand_region_for_profile,
-    region_from_dict,
+    region_from_dict
 )
 
 __all__ = [
@@ -72,19 +61,10 @@ __all__ = [
     "RegionDefinition",
     "RenderMode",
     "build_plot_bundle",
-    "cell_x_bounds_mesh",
-    "cell_y_bounds_mesh",
     "classify_render_mode",
-    "compile_covering_rect",
     "compile_with_mask_mode",
     "display_flips",
-    "expand_region_for_profile",
-    "frame_for_plane",
-    "frame_from_bundle",
-    "mesh_separable_edge_grids",
     "prepare_1d_bundle",
     "prepare_2d_bundle",
-    "region_frame_for_bbox",
     "region_from_dict",
-    "view_fingerprint_from_bundle",
 ]

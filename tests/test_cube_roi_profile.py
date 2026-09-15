@@ -16,11 +16,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.geometry.frame import (
-    cell_x_bounds_mesh,
-    cell_y_bounds_mesh,
-    frame_from_bundle,
-)
 from nbs_viewer.models.plot.geometry.region import RectRegion, compile_with_mask_mode
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run.source import RunSource
@@ -63,22 +58,22 @@ def _add_roi(session, trace, profile_storage_axis):
     """
     Add an ROI covering the interior of the current plane.
     """
-    frame = frame_from_bundle(trace.last_bundle)
+    frame = trace.last_bundle.view_frame()
     n_rows, n_cols = trace.last_bundle.y.shape
-    x0, _ = cell_x_bounds_mesh(frame, 1, 0)
-    _, x1 = cell_x_bounds_mesh(frame, n_cols - 2, 0)
-    y0, _ = cell_y_bounds_mesh(frame, 1, 0)
-    _, y1 = cell_y_bounds_mesh(frame, n_rows - 2, 0)
+    x0, _ = frame.cell_x_bounds(1, 0)
+    _, x1 = frame.cell_x_bounds(n_cols - 2, 0)
+    y0, _ = frame.cell_y_bounds(1, 0)
+    _, y1 = frame.cell_y_bounds(n_rows - 2, 0)
     entry_id = session.region.roi_set.add(
         RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
         operation=RoiOperation(
             profile_storage_axis=profile_storage_axis,
             spatial_reduce="sum",
             span_full_profile_axis=True,
-            label="roi",
-        ),
-        view_fingerprint=session.region.resolve_current_view_fingerprint(),
-    )
+            label="roi"
+),
+        view_fingerprint=session.region.resolve_current_view_fingerprint()
+)
     return entry_id, frame
 
 
@@ -134,10 +129,11 @@ def test_every_eligible_profile_axis_previews_on_a_cube(
             entry_id,
             parent_trace=trace,
             parent_frame=frame,
-            cached_plane=trace.last_bundle,
-        )
+            cached_plane=trace.last_bundle
+)
         assert bundle.y.ndim == 1
-        assert bundle.y.shape == (sizes[storage_axis],)
+        assert bundle.y.shape == (sizes[storage_axis],
+)
         session.region.roi_set.remove(entry_id)
 
 
@@ -156,10 +152,11 @@ def test_a_cube_profile_along_the_slider_axis_reads_every_slab(qapp):
         entry_id,
         parent_trace=trace,
         parent_frame=frame,
-        cached_plane=trace.last_bundle,
-    )
+        cached_plane=trace.last_bundle
+)
 
-    assert bundle.y.shape == (N_Z,)
+    assert bundle.y.shape == (N_Z,
+)
     # Slabs differ by a strictly increasing factor, so a sum over the same
     # ROI must increase with depth. Equal values would mean one slab was
     # read N_Z times.
@@ -213,8 +210,8 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
         entry_id,
         parent_trace=trace,
         parent_frame=frame,
-        cached_plane=trace.last_bundle,
-    )
+        cached_plane=trace.last_bundle
+)
 
     session.set_transform({"enabled": True, "text": "y * 2"})
     trace.get_plot_bundle()
@@ -222,8 +219,8 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
         entry_id,
         parent_trace=trace,
         parent_frame=frame,
-        cached_plane=trace.last_bundle,
-    )
+        cached_plane=trace.last_bundle
+)
 
     np.testing.assert_allclose(doubled.y, 2.0 * plain.y)
 

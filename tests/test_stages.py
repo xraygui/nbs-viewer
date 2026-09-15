@@ -56,8 +56,8 @@ def _request(
         norm_keys=tuple(norm_keys),
         view=view,
         dims=source.plot_axis_names(ykey, xkeys),
-        transform=transform,
-    )
+        transform=transform
+)
 
 
 def _model():
@@ -68,13 +68,14 @@ def test_slice_info_for_key_by_name():
     slice_info = (4, slice(None), slice(1, 8))
     y_names = ["voltage", "dim_1", "dim_2"]
     got = slice_info_for_key(slice_info, y_names, ["voltage"])
-    assert got == (4,)
+    assert got == (4,
+)
 
 
 def _line_axes(names):
     """Name a 1-D view over the given dimension names."""
     return PlotAxes.of(
-        ViewIntent(plot_ndim=1).project(len(names)), list(names)
+        ViewIntent(plot_ndim=1).project(len(names)), list(names),
     )
 
 
@@ -84,8 +85,8 @@ def test_apply_normalization_rank1_onto_rank2():
     norm = np.array([2.0, 3.0, 4.0])
     out = apply_normalization(
         labelled_block(y, [np.arange(3.0), np.arange(4.0)], ["voltage", "dim_2"]),
-        [xr.DataArray(norm, dims=["voltage"])],
-    )
+        [xr.DataArray(norm, dims=["voltage"])]
+)
     np.testing.assert_allclose(out.values, y / norm[:, None])
     assert out.dims == ("voltage", "dim_2")
 
@@ -167,18 +168,19 @@ def test_rank1_projection_needs_no_frozen_short_circuit(qapp):
     intent = ViewIntent(
         plot_ndim=1,
         reduce_roles=(DimRole.INDEX, DimRole.MEAN),
-        reduce_indices=(4, 0),
-    )
+        reduce_indices=(4, 0)
+)
     view = intent.project(1)
     assert view.ndim == 1
-    assert view.roles == (DimRole.PLOT_X,)
+    assert view.roles == (DimRole.PLOT_X,
+)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     assert bundle.y.ndim == 1
 
@@ -188,16 +190,18 @@ def test_2d_image_index_slice(qapp):
     a, b, c = vppem_factors()
     view = ViewIntent(
         plot_ndim=2,
-        reduce_roles=(DimRole.INDEX,),
-        reduce_indices=(4,),
-    ).project(3, (11, 24, 32), VPPEM_NAMES)
+        reduce_roles=(DimRole.INDEX,
+),
+        reduce_indices=(4,
+)
+).project(3, (11, 24, 32), VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     expected = a[4] * b[:, None] * c[None, :]
     assert bundle.render_mode == "image"
@@ -211,15 +215,15 @@ def test_3d_mean_detectors_line_vs_voltage(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
-    ).project(3, dim_names=VPPEM_NAMES)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
+).project(3, dim_names=VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean())
     np.testing.assert_allclose(bundle.x_line, voltage_axis(len(a)))
@@ -232,20 +236,22 @@ def test_2d_crop_on_view_spec(qapp):
     crop = ViewCrop(
         storage_bbox=(2, 8, 3, 10),
         plot_y_axis=1,
-        plot_x_axis=2,
-    )
+        plot_x_axis=2
+)
     view = ViewIntent(
         plot_ndim=2,
-        reduce_roles=(DimRole.INDEX,),
-        reduce_indices=(4,),
-    ).project(3, (11, 24, 32), VPPEM_NAMES, crop=crop)
+        reduce_roles=(DimRole.INDEX,
+),
+        reduce_indices=(4,
+)
+).project(3, (11, 24, 32), VPPEM_NAMES, crop=crop)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     expected = a[4] * b[2:8, None] * c[None, 3:10]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
@@ -262,17 +268,19 @@ def test_mesh_when_plot_y_is_nonuniform_voltage(qapp):
     model = _model()
     view = ViewIntent(
         plot_ndim=2,
-        reduce_roles=(DimRole.MEAN,),
-        reduce_indices=(0,),
-        dim_order=("dim_1", "sampleVoltage_VSource", "dim_2"),
-    ).project(3, dim_names=VPPEM_NAMES)
+        reduce_roles=(DimRole.MEAN,
+),
+        reduce_indices=(0,
+),
+        dim_order=("dim_1", "sampleVoltage_VSource", "dim_2")
+).project(3, dim_names=VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     assert bundle.render_mode == "mesh"
     assert bundle.y.ndim == 2
@@ -289,8 +297,9 @@ def test_normalize_stats_by_i0(qapp):
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view,
-            norm_keys=("i0",),
-        )
+            norm_keys=("i0",
+)
+)
     )
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean() / i0)
 
@@ -301,17 +310,20 @@ def test_normalize_cube_by_i0_index_slice(qapp):
     i0 = np.linspace(2.0, 3.0, len(a))
     view = ViewIntent(
         plot_ndim=2,
-        reduce_roles=(DimRole.INDEX,),
-        reduce_indices=(4,),
-    ).project(3, (11, 24, 32), VPPEM_NAMES)
+        reduce_roles=(DimRole.INDEX,
+),
+        reduce_indices=(4,
+)
+).project(3, (11, 24, 32), VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view,
-            norm_keys=("i0",),
-        )
+            norm_keys=("i0",
+)
+)
     )
     expected = (a[4] * b[:, None] * c[None, :]) / i0[4]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
@@ -325,16 +337,17 @@ def test_normalize_cube_by_i0_mean_detectors(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.MEAN, DimRole.MEAN),
         reduce_indices=(0, 0),
-        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
-    ).project(3, dim_names=VPPEM_NAMES)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
+).project(3, dim_names=VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view,
-            norm_keys=("i0",),
-        )
+            norm_keys=("i0",
+)
+)
     )
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean() / i0)
 
@@ -349,8 +362,8 @@ def test_transform_from_request(qapp):
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view,
-            transform="y = y * 2",
-        )
+            transform="y = y * 2"
+)
     )
     np.testing.assert_allclose(bundle.y, 2.0 * a * b.mean() * c.mean())
 
@@ -364,8 +377,8 @@ def test_empty_request_transform_leaves_data_unscaled(qapp):
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean())
 
@@ -377,15 +390,15 @@ def test_sum_role_matches_closed_form(qapp):
         plot_ndim=1,
         reduce_roles=(DimRole.SUM, DimRole.SUM),
         reduce_indices=(0, 0),
-        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource"),
-    ).project(3, dim_names=VPPEM_NAMES)
+        dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
+).project(3, dim_names=VPPEM_NAMES)
     bundle = model.fetch.get_plot_bundle(
         _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
-            view,
-        )
+            view
+)
     )
     np.testing.assert_allclose(bundle.y, a * b.sum() * c.sum())
 
@@ -429,16 +442,18 @@ def _image_request(run, ykey="detector_image", **kwargs):
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(0, 0),
-        **kwargs,
-    )
+        **kwargs
+)
     return PlotRequest(
         uid=run.uid,
-        xkeys=("en_energy",),
+        xkeys=("en_energy",
+),
         ykey=ykey,
         norm_keys=(),
         view=view,
-        dims=run.plot_axis_names(ykey, ("en_energy",)),
-    )
+        dims=run.plot_axis_names(ykey, ("en_energy",
+))
+)
 
 
 def test_a_transform_change_reads_nothing_and_still_changes_the_values():
@@ -474,8 +489,8 @@ def test_a_crop_inside_an_already_loaded_box_reads_nothing():
 
     cropped = _image_request(
         run,
-        crop=ViewCrop(storage_bbox=(2, 8, 3, 11), plot_y_axis=0, plot_x_axis=1),
-    )
+        crop=ViewCrop(storage_bbox=(2, 8, 3, 11), plot_y_axis=0, plot_x_axis=1)
+)
     calls = _count_reads(run)
     from_cache = run.fetch.get_plot_bundle(cropped)
     assert calls == []
@@ -499,16 +514,18 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X, DimRole.INDEX),
-        indices=(0, 0, 0),
-    )
+        indices=(0, 0, 0)
+)
     parent = PlotRequest(
         uid=run.uid,
-        xkeys=("en_energy",),
+        xkeys=("en_energy",
+),
         ykey="detector_cube",
         norm_keys=(),
         view=view,
-        dims=run.plot_axis_names("detector_cube", ("en_energy",)),
-    )
+        dims=run.plot_axis_names("detector_cube", ("en_energy",
+))
+)
     # The plane is (en_energy, dim_2): rows along the energies, columns
     # along dim_2.
     def at(key, position):
@@ -520,19 +537,19 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
             x0=at("dim_2", 0.4),
             x1=at("dim_2", 2.6),
             y0=at("en_energy", 1.5),
-            y1=at("en_energy", 9.5),
-        ),
-        profile_axis=2,
-    )
+            y1=at("en_energy", 9.5)
+),
+        profile_axis=2
+)
     inner = replace(
         wide,
         region=RectRegion(
             x0=at("dim_2", 0.9),
             x1=at("dim_2", 2.1),
             y0=at("en_energy", 3.5),
-            y1=at("en_energy", 7.5),
-        ),
-    )
+            y1=at("en_energy", 7.5)
+)
+)
 
     run.fetch.get_plot_bundle(wide)
     calls = _count_reads(run)
@@ -558,10 +575,11 @@ def test_toggling_a_norm_reads_the_norm_and_never_the_block():
         ndim=3,
         plot_ndim=1,
         roles=(DimRole.SUM, DimRole.INDEX, DimRole.PLOT_X),
-        indices=(0, 2, 0),
-    )
+        indices=(0, 2, 0)
+)
     plain = _request(run, "PCOEdge_image", ["sampleVoltage_VSource"], view)
-    normed = replace(plain, norm_keys=("i0",))
+    normed = replace(plain, norm_keys=("i0",
+))
     run.fetch.get_plot_bundle(plain)
 
     calls = _count_reads(run)
@@ -603,8 +621,9 @@ def test_a_crop_inside_a_loaded_box_narrows_the_norms_with_the_block():
         "PCOEdge_image",
         ["sampleVoltage_VSource"],
         cube,
-        norm_keys=("PCOEdge_flat",),
-    )
+        norm_keys=("PCOEdge_flat",
+)
+)
     run.fetch.get_plot_bundle(full)
 
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
@@ -653,8 +672,8 @@ def test_a_transform_that_assigns_in_place_leaves_the_held_block_alone():
         run,
         "PCOEdge_stats",
         ["sampleVoltage_VSource"],
-        ViewIntent(plot_ndim=1).project(1),
-    )
+        ViewIntent(plot_ndim=1).project(1)
+)
     plain = run.fetch.get_plot_bundle(line)
     y_before, x_before = plain.y.copy(), plain.x_line.copy()
 
@@ -681,8 +700,8 @@ def test_a_data_change_clears_the_block_before_traces_refetch(qapp):
         run,
         "PCOEdge_stats",
         ["sampleVoltage_VSource"],
-        ViewIntent(plot_ndim=1).project(1),
-    )
+        ViewIntent(plot_ndim=1).project(1)
+)
     before = run.fetch.get_plot_bundle(line).y.copy()
 
     data["PCOEdge_stats"] = 2.0 * np.asarray(data["PCOEdge_stats"])
@@ -713,15 +732,16 @@ def test_a_norm_key_varying_along_a_reduced_axis_divides_before_the_reduce():
         ndim=3,
         plot_ndim=1,
         roles=(DimRole.SUM, DimRole.INDEX, DimRole.PLOT_X),
-        indices=(0, 2, 0),
-    )
+        indices=(0, 2, 0)
+)
     request = _request(
         run,
         "PCOEdge_image",
         ["sampleVoltage_VSource"],
         view,
-        norm_keys=("i0",),
-    )
+        norm_keys=("i0",
+)
+)
 
     bundle = run.fetch.get_plot_bundle(request)
 
@@ -749,10 +769,10 @@ def test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached():
             x0=_coordinate_at(run, "en_energy", 0.4),
             x1=_coordinate_at(run, "en_energy", 2.6),
             y0=1.5,
-            y1=9.5,
-        ),
-        profile_axis=1,
-    )
+            y1=9.5
+),
+        profile_axis=1
+)
     from_cache = run.fetch.get_plot_bundle(roi, cached_plane=plane)
 
     fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
@@ -777,17 +797,19 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X, DimRole.INDEX),
-        indices=(0, 0, 0),
-    )
+        indices=(0, 0, 0)
+)
     parent = PlotRequest(
         uid=run.uid,
-        xkeys=("en_energy",),
+        xkeys=("en_energy",
+),
         ykey="detector_cube",
         norm_keys=(),
         view=view,
-        dims=run.plot_axis_names("detector_cube", ("en_energy",)),
-        transform="y * len(x)",
-    )
+        dims=run.plot_axis_names("detector_cube", ("en_energy",
+)),
+        transform="y * len(x)"
+)
     assert run.fetch.get_plot_bundle(parent).ndim == 2
 
     roi = replace(
@@ -797,10 +819,10 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
             x0=_coordinate_at(run, "dim_2", 0.4),
             x1=_coordinate_at(run, "dim_2", 2.6),
             y0=_coordinate_at(run, "en_energy", 1.5),
-            y1=_coordinate_at(run, "en_energy", 9.5),
-        ),
-        profile_axis=2,
-    )
+            y1=_coordinate_at(run, "en_energy", 9.5)
+),
+        profile_axis=2
+)
     scaled = run.fetch.get_plot_bundle(roi)
     plain = run.fetch.get_plot_bundle(replace(roi, transform=""))
 
@@ -818,21 +840,21 @@ def _image_scan_model():
 
 def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
     """Run the load boundary and return ``(request, block, norm arrays)``."""
-    from nbs_viewer.models.plot.fetch.request import build_plot_request
+    from nbs_viewer.models.plot.fetch.request import PlotRequest
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     shape = model.get_shape(ykey)
     view = ViewIntent(plot_ndim=min(plot_ndim, len(shape))).project(
         len(shape), shape
     )
-    request = build_plot_request(
+    request = PlotRequest(
         uid=model.uid,
-        xkeys=xkeys,
+        xkeys=tuple(xkeys),
         ykey=ykey,
-        projection=view,
-        dims=model.plot_axis_names(ykey, xkeys),
-        norm_keys=norm_keys,
-    )
+        norm_keys=tuple(norm_keys or ()),
+        view=view,
+        dims=tuple(model.plot_axis_names(ykey, xkeys))
+)
     block, norms, _plan = model.fetch._load_block(request)
     return request, block, norms
 
@@ -857,7 +879,8 @@ def test_a_norm_arrives_with_the_same_coordinates_as_the_block():
 
     assert len(norms) == 1
     norm = norms[0]
-    assert norm.dims == ("time",)
+    assert norm.dims == ("time",
+)
     assert "time" in norm.coords
     np.testing.assert_array_equal(
         norm.coords["time"].values, block.coords["time"].values
@@ -878,7 +901,8 @@ def test_a_norm_read_from_the_wrong_window_raises_instead_of_dividing():
     _request, block, norms = _norms_for(
         _image_scan_model(), "detector_image", ["en_energy"], ["row"]
     )
-    assert norms[0].dims == ("time",)
+    assert norms[0].dims == ("time",
+)
     assert norms[0].sizes["time"] == block.sizes["time"]
 
     model = _image_scan_model()

@@ -38,7 +38,7 @@ from ..geometry import (
     build_plot_bundle,
     classify_render_mode,
     display_flips,
-    frame_for_plane,
+    prepare_2d_bundle,
 )
 from ..fetch.request import PlotRequest
 from ..fetch.plan import FetchPlan, plan_fetch
@@ -502,15 +502,17 @@ class RunFetch:
             render_mode_hint=self._render_hint(request.ykey),
         )
         row_reversed, col_reversed = display_flips(rows, cols, render_mode)
-        return frame_for_plane(
-            plane_shape,
-            rows[::-1] if row_reversed else rows,
-            cols[::-1] if col_reversed else cols,
+        return prepare_2d_bundle(
+            np.broadcast_to(np.float64(0.0), plane_shape),
+            [
+                rows[::-1] if row_reversed else rows,
+                cols[::-1] if col_reversed else cols,
+            ],
             [names[row_axis], names[col_axis]],
             render_mode_hint=render_mode,
             row_reversed=row_reversed,
             col_reversed=col_reversed,
-        )
+        ).view_frame()
 
     def _render_hint(self, ykey: str) -> Optional[str]:
         """

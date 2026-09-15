@@ -29,7 +29,6 @@ from qtpy.QtWidgets import (
 )
 
 from nbs_viewer.models.plot.view import Projection
-from nbs_viewer.models.plot.roi import profile_axis_name
 from nbs_viewer.models.plot.geometry import PlotViewFrame, RegionDefinition
 from nbs_viewer.models.plot.roi import RoiEntry, RoiOperation
 
@@ -41,6 +40,27 @@ from .types import (
     get_roi_type,
     iter_roi_types,
 )
+
+
+def _profile_axis_name(storage_axis: int, axis_names: Sequence[str]) -> str:
+    """
+    Return a display name for a profile axis dropdown entry.
+
+    Parameters
+    ----------
+    storage_axis : int
+        Storage dimension index.
+    axis_names : sequence of str
+        Names per storage axis.
+
+    Returns
+    -------
+    str
+        Axis label for UI display.
+    """
+    if storage_axis < len(axis_names):
+        return axis_names[storage_axis]
+    return f"axis {storage_axis}"
 
 
 class RoiWindow(QDialog):
@@ -629,7 +649,6 @@ class RoiWindow(QDialog):
                 bundle,
                 request,
                 parent_trace=trace,
-                axis_names=self._dimension_axis_names(),
             )
         except ValueError as exc:
             self.set_status(str(exc))
@@ -1079,7 +1098,7 @@ class RoiWindow(QDialog):
 
             self.profile_axis_combo.clear()
             for storage_axis in eligible:
-                name = profile_axis_name(storage_axis, self._axis_names)
+                name = _profile_axis_name(storage_axis, self._axis_names)
                 self.profile_axis_combo.addItem(f"Along {name}", storage_axis)
 
             selected_idx = -1

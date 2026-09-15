@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import (
     AxisSliceRegion,
     EllipseRegion,
@@ -27,7 +26,7 @@ def _tes_like_mesh_bundle():
 def test_frame_from_mesh_bundle_axes():
     bundle = _tes_like_mesh_bundle()
     assert bundle.render_mode == "mesh"
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     assert frame.shape == bundle.y.shape
     # Mesh frames use the same display convention as images: display rows are
     # plot Y, display columns are plot X, in storage order. Which dimension a
@@ -43,17 +42,12 @@ def test_frame_from_mesh_bundle_axes():
 
 
 def test_rect_on_non_uniform_col_selects_cells():
-    from nbs_viewer.models.plot.geometry.frame import (
-        cell_x_bounds_mesh,
-        cell_y_bounds_mesh,
-    )
-
     bundle = _tes_like_mesh_bundle()
-    frame = frame_from_bundle(bundle)
-    x0, _ = cell_x_bounds_mesh(frame, 50, 0)
-    _, x1 = cell_x_bounds_mesh(frame, 60, 0)
-    y0, _ = cell_y_bounds_mesh(frame, 5, 0)
-    _, y1 = cell_y_bounds_mesh(frame, 15, 0)
+    frame = bundle.view_frame()
+    x0, _ = frame.cell_x_bounds(50, 0)
+    _, x1 = frame.cell_x_bounds(60, 0)
+    y0, _ = frame.cell_y_bounds(5, 0)
+    _, y1 = frame.cell_y_bounds(15, 0)
     mask = mask_from_data_rect(frame, x0, x1, y0, y1)
     assert mask.shape == bundle.y.shape
     assert mask.sum() > 0
@@ -62,7 +56,7 @@ def test_rect_on_non_uniform_col_selects_cells():
 
 def test_axis_slice_plot_y_band():
     bundle = _tes_like_mesh_bundle()
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     y_lo = float(np.min(frame.mesh_y))
     y_hi = float(np.max(frame.mesh_y))
     mid = (y_lo + y_hi) / 2.0
@@ -75,20 +69,19 @@ def test_axis_slice_plot_y_band():
 def test_profile_along_en_energy_sums_over_tes_band():
     bundle = _tes_like_mesh_bundle()
     y = np.arange(bundle.y.size, dtype=float).reshape(bundle.y.shape)
-    frame = frame_from_bundle(bundle)
-    from nbs_viewer.models.plot.geometry.frame import cell_x_bounds_mesh, data_limits
+    frame = bundle.view_frame()
 
-    _, _, y_lo, y_hi = data_limits(frame)
-    x0, _ = cell_x_bounds_mesh(frame, 100, 0)
-    _, x1 = cell_x_bounds_mesh(frame, 150, 0)
+    _, _, y_lo, y_hi = frame.data_limits()
+    x0, _ = frame.cell_x_bounds(100, 0)
+    _, x1 = frame.cell_x_bounds(150, 0)
     region = RectRegion(x0=x0, x1=x1, y0=y_lo, y1=y_hi)
     compiled = region.compile(frame)
     parent = Projection(
         ndim=2,
         plot_ndim=2,
         roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
+        indices=(0, 0)
+)
     # Cell centres, not the edge grids. ``mesh_y`` and ``mesh_x`` carry
     # ``n + 1`` edges per axis; passing those as coordinates used to go
     # unnoticed because nothing compared them against the array, and the
@@ -105,14 +98,16 @@ def test_profile_along_en_energy_sums_over_tes_band():
             names,
             0,
             "sum",
-            plane_axes=(frame.plot_y_dim, frame.plot_x_dim),
-        ),
+            plane_axes=(frame.plot_y_dim, frame.plot_x_dim)
+),
         region=region,
-        region_frame=frame,
-    )
+        region_frame=frame
+)
     profile = out.values
-    assert out.dims == ("en_energy",)
-    assert profile.shape == (bundle.y.shape[0],)
+    assert out.dims == ("en_energy",
+)
+    assert profile.shape == (bundle.y.shape[0],
+)
     assert np.isfinite(profile).any()
     expected = np.array(
         [
@@ -130,10 +125,10 @@ def test_image_rect_mask_shape():
     bundle = prepare_2d_bundle(
         y,
         [np.linspace(0, 10, 50), np.linspace(0, 99, 100)],
-        ["y", "x"],
-    )
+        ["y", "x"]
+)
     assert bundle.render_mode == "image"
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     assert frame.shape == (50, 100)
     assert frame.plot_x_dim == 1
     region = RectRegion(x0=10.0, x1=20.0, y0=2.0, y1=4.0)
@@ -143,20 +138,19 @@ def test_image_rect_mask_shape():
 
 def test_cell_centers_image_shape_and_order():
     from nbs_viewer.models.plot.geometry.mask import cell_centers
-    from nbs_viewer.models.plot.geometry.frame import data_limits
 
     ny, nx = 4, 5
     bundle = prepare_2d_bundle(
         np.zeros((ny, nx)),
         [np.arange(ny, dtype=float), np.arange(nx, dtype=float)],
         ["y", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(bundle)
+        render_mode_hint="image"
+)
+    frame = bundle.view_frame()
     centers_x, centers_y = cell_centers(frame)
     assert centers_x.shape == (ny, nx)
     assert centers_y.shape == (ny, nx)
-    left, right, bottom, top = data_limits(frame)
+    left, right, bottom, top = frame.data_limits()
     assert centers_x[0, 0] == pytest.approx(left + 0.5 * (right - left) / nx)
     assert centers_y[0, 0] == pytest.approx(top - 0.5 * (top - bottom) / ny)
     assert centers_y[-1, 0] < centers_y[0, 0]
@@ -167,16 +161,15 @@ def test_image_mask_at_plot_top_selects_storage_row_zero():
     Regression: row 0 must map to the top of the axes under origin='upper'.
     """
     from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
-    from nbs_viewer.models.plot.geometry.frame import data_limits
 
     ny, nx = 10, 12
     bundle = prepare_2d_bundle(
         np.zeros((ny, nx)),
         [np.linspace(0.0, 9.0, ny), np.linspace(0.0, 11.0, nx)],
-        ["dim_1", "dim_2"],
-    )
-    frame = frame_from_bundle(bundle)
-    left, right, bottom, top = data_limits(frame)
+        ["dim_1", "dim_2"]
+)
+    frame = bundle.view_frame()
+    left, right, bottom, top = frame.data_limits()
     mask = mask_from_data_rect(frame, left, right, top - 0.6, top)
     assert mask[0, :].any()
     assert not mask[ny - 1, :].any()
@@ -186,17 +179,16 @@ def test_image_rect_mask_matches_imshow_origin_upper():
     """
     ROI rows must follow imshow origin='upper' (row 0 at top of axes).
     """
-    from nbs_viewer.models.plot.geometry.frame import image_cell_bounds
 
     ny, nx = 20, 30
     y = np.arange(ny * nx, dtype=float).reshape(ny, nx)
     row_axis = np.linspace(100.0, 200.0, ny)
     col_axis = np.linspace(0.0, 29.0, nx)
     bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["dim_1", "dim_2"])
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     row, col0, col_last = 3, 5, 7
-    x0, _, y0, y1 = image_cell_bounds(frame, row, col0)
-    _, x1, _, _ = image_cell_bounds(frame, row, col_last)
+    x0, _, y0, y1 = frame.image_cell_bounds(row, col0)
+    _, x1, _, _ = frame.image_cell_bounds(row, col_last)
     region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
     compiled = region.compile(frame)
     assert compiled.mask[row, col0 : col_last + 1].all()
@@ -208,7 +200,7 @@ def test_image_rect_mask_matches_imshow_origin_upper():
 
 def test_ellipse_on_non_uniform_mesh_selects_cells():
     bundle = _tes_like_mesh_bundle()
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     x_lo = float(np.nanmin(frame.mesh_x))
     x_hi = float(np.nanmax(frame.mesh_x))
     y_lo = float(np.nanmin(frame.mesh_y))
@@ -218,8 +210,8 @@ def test_ellipse_on_non_uniform_mesh_selects_cells():
         cy=0.5 * (y_lo + y_hi),
         rx=0.2 * (x_hi - x_lo),
         ry=0.15 * (y_hi - y_lo),
-        angle=25.0,
-    )
+        angle=25.0
+)
     compiled = region.compile(frame)
     assert compiled.mask.shape == bundle.y.shape
     assert compiled.pixel_count > 0
@@ -228,7 +220,7 @@ def test_ellipse_on_non_uniform_mesh_selects_cells():
 
 def test_polygon_on_non_uniform_mesh_selects_cells():
     bundle = _tes_like_mesh_bundle()
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     x_lo = float(np.nanmin(frame.mesh_x))
     x_hi = float(np.nanmax(frame.mesh_x))
     y_lo = float(np.nanmin(frame.mesh_y))
@@ -240,8 +232,8 @@ def test_polygon_on_non_uniform_mesh_selects_cells():
             (x_lo + 0.1 * (x_hi - x_lo), y_mid),
             (x_mid, y_lo + 0.1 * (y_hi - y_lo)),
             (x_hi - 0.1 * (x_hi - x_lo), y_mid),
-            (x_mid, y_hi - 0.1 * (y_hi - y_lo)),
-        )
+            (x_mid, y_hi - 0.1 * (y_hi - y_lo))
+)
     )
     compiled = region.compile(frame)
     assert compiled.mask.shape == bundle.y.shape
@@ -265,14 +257,14 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
 
     bundle = prepare_2d_bundle(plane, [row_axis, col_axis], ["row", "col"])
     assert bundle.render_mode == "mesh"
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
 
     region = RectRegion(
         x0=float(col_axis[2]) - 0.1,
         x1=float(col_axis[3]) + 0.1,
         y0=float(row_axis[1]) - 0.1,
-        y1=float(row_axis[2]) + 0.1,
-    )
+        y1=float(row_axis[2]) + 0.1
+)
     compiled = region.compile(frame)
     assert compiled.pixel_count == 4
 
@@ -280,8 +272,8 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0),
-    )
+        indices=(0, 0, 0)
+)
     names = ["stack", "row", "col"]
     profile = materialize_view(
         labelled_block(
@@ -289,8 +281,8 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
         ),
         profile_axes(parent, names, 0, "sum", plane_axes=(1, 2)),
         region=region,
-        region_frame=frame,
-    ).values
+        region_frame=frame
+).values
 
     expected = np.array(
         [np.nansum(np.where(compiled.mask, cube[i], np.nan)) for i in range(n_stack)]
@@ -306,21 +298,16 @@ def test_cell_bounds_vary_with_index_on_an_image_frame():
     with the reference index on image frames, so every plot-Y index returned
     the bounds of the same cell.
     """
-    from nbs_viewer.models.plot.geometry.frame import (
-        cell_x_bounds_mesh,
-        cell_y_bounds_mesh,
-    )
-
     bundle = prepare_2d_bundle(
         np.zeros((10, 12)),
         [np.arange(10.0), np.arange(12.0)],
         ["y", "x"],
         render_mode_hint="image",
     )
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
 
-    assert cell_y_bounds_mesh(frame, 2, 0) != cell_y_bounds_mesh(frame, 7, 0)
-    assert cell_x_bounds_mesh(frame, 3, 0) != cell_x_bounds_mesh(frame, 9, 0)
+    assert frame.cell_y_bounds(2, 0) != frame.cell_y_bounds(7, 0)
+    assert frame.cell_x_bounds(3, 0) != frame.cell_x_bounds(9, 0)
     # display row 0 is the top of an origin="upper" image, so plot Y descends
-    assert cell_y_bounds_mesh(frame, 2, 0) > cell_y_bounds_mesh(frame, 7, 0)
-    assert cell_x_bounds_mesh(frame, 3, 0) == (2.5, 3.5)
+    assert frame.cell_y_bounds(2, 0) > frame.cell_y_bounds(7, 0)
+    assert frame.cell_x_bounds(3, 0) == (2.5, 3.5)

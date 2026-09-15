@@ -9,9 +9,8 @@ from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.view.spec import DimRole, ViewCrop
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import PolygonRegion, compile_with_mask_mode
-from nbs_viewer.models.plot.fetch.request import build_plot_request, roi_profile_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest
 from nbs_viewer.models.plot.fetch.plan import plan_fetch
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.fixtures import (
@@ -26,7 +25,8 @@ from nbs_viewer.models.sources.fixtures import (
 # What ``RunSource.plot_axis_names`` answers for the VPPEM keys under the
 # voltage selection: the event axis wears the X key's name.
 VPPEM_NAMES = ("sampleVoltage_VSource", "dim_1", "dim_2")
-STATS_NAMES = ("sampleVoltage_VSource",)
+STATS_NAMES = ("sampleVoltage_VSource",
+)
 
 
 def test_a_low_rank_key_projects_on_its_own_terms():
@@ -38,7 +38,9 @@ def test_a_low_rank_key_projects_on_its_own_terms():
     a 2-D image gets a 1-D projection, not a discarded one.
     """
     intent = ViewIntent(
-        plot_ndim=2, reduce_roles=(DimRole.INDEX,), reduce_indices=(4,)
+        plot_ndim=2, reduce_roles=(DimRole.INDEX,
+), reduce_indices=(4,
+)
     )
     image = intent.project(3, VPPEM_SHAPE)
     assert image.plot_ndim == 2
@@ -47,22 +49,25 @@ def test_a_low_rank_key_projects_on_its_own_terms():
 
     # The mixed-rank case projects at an overridden rank rather than
     # manufacturing a throwaway intent, which is what production does too.
-    line = intent.project(1, (11,), plot_ndim=1)
+    line = intent.project(1, (11,
+), plot_ndim=1)
     assert line.ndim == 1
     assert line.plot_ndim == 1
-    assert line.roles == (DimRole.PLOT_X,)
+    assert line.roles == (DimRole.PLOT_X,
+)
 
 
 def test_plan_fetch_narrows_the_load_with_the_request_crop():
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
-    req = build_plot_request(
+    req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=("sampleVoltage_VSource",),
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=replace(cube, crop=crop),
-        dims=VPPEM_NAMES,
-    )
+        view=replace(cube, crop=crop),
+        dims=VPPEM_NAMES
+)
     assert req.view.base_slice() == (4, slice(None), slice(None))
     assert plan_fetch(req).slice_info == (4, slice(2, 10), slice(4, 20))
 
@@ -75,13 +80,13 @@ def test_run_model_get_plot_bundle_from_request():
     xkeys = ["sampleVoltage_VSource"]
     ykey = "PCOEdge_image"
 
-    req = build_plot_request(
+    req = PlotRequest(
         uid=run.uid,
         xkeys=xkeys,
         ykey=ykey,
-        projection=cube,
-        dims=VPPEM_NAMES,
-    )
+        view=cube,
+        dims=VPPEM_NAMES
+)
     via_request = model.fetch.get_plot_bundle(req)
 
     assert via_request.render_mode == "image"
@@ -95,13 +100,14 @@ def test_run_model_get_plot_bundle_request_with_crop():
     a, b, c = vppem_factors()
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
-    req = build_plot_request(
+    req = PlotRequest(
         uid=run.uid,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=replace(cube, crop=crop),
-        dims=VPPEM_NAMES,
-    )
+        view=replace(cube, crop=crop),
+        dims=VPPEM_NAMES
+)
     bundle = model.fetch.get_plot_bundle(req)
     expected = (a[4] * np.outer(b, c))[2:10, 4:20]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
@@ -110,7 +116,7 @@ def test_run_model_get_plot_bundle_request_with_crop():
 def test_plot_data_model_holds_request_and_fetches():
     from nbs_viewer.models.plot.view.spec import Projection
     from nbs_viewer.models.plot.trace import Trace
-    from nbs_viewer.models.plot.fetch.request import TraceKey, build_plot_request
+    from nbs_viewer.models.plot.fetch.request import TraceKey, PlotRequest
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -119,15 +125,16 @@ def test_plot_data_model_holds_request_and_fetches():
         plot_ndim=1,
         roles=(DimRole.PLOT_X, DimRole.MEAN, DimRole.MEAN),
         indices=(0, 0, 0),
-        axis_order=(1, 2, 0),
-    )
-    request = build_plot_request(
+        axis_order=(1, 2, 0)
+)
+    request = PlotRequest(
         uid=run.uid,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=cube,
-        dims=VPPEM_NAMES,
-    )
+        view=cube,
+        dims=VPPEM_NAMES
+)
     plot_data = Trace(model, request)
     assert plot_data.trace_key == TraceKey(
         run.uid, "sampleVoltage_VSource", "PCOEdge_image"
@@ -143,33 +150,38 @@ def test_set_request_keeps_trace_key():
     run = make_vppem_run()
     model = RunSource(run)
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
-    first = build_plot_request(
+    first = PlotRequest(
         uid=run.uid,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=cube,
-        dims=VPPEM_NAMES,
-    )
+        view=cube,
+        dims=VPPEM_NAMES
+)
     plot_data = Trace(model, first)
     key = plot_data.trace_key
-    second = build_plot_request(
+    second = PlotRequest(
         uid=run.uid,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
         transform="y = y * 2",
-        projection=cube.with_index(0, 5),
-        dims=VPPEM_NAMES,
-    )
+        view=cube.with_index(0, 5),
+        dims=VPPEM_NAMES
+)
     assert plot_data.set_request(second)
     assert plot_data.trace_key is key
     assert plot_data.request.transform == "y = y * 2"
-    other = build_plot_request(
+    other = PlotRequest(
         uid=run.uid,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_stats",
-        projection=ViewIntent(plot_ndim=1).project(len((11,)), (11,)),
-        dims=STATS_NAMES,
-    )
+        view=ViewIntent(plot_ndim=1).project(len((11,
+)), (11,
+)),
+        dims=STATS_NAMES
+)
     with pytest.raises(ValueError, match="does not match"):
         plot_data.set_request(other)
 
@@ -205,7 +217,7 @@ def _vppem_frame(model, req):
     """
     Return the display frame of the parent 2-D plane for an ROI request.
     """
-    return frame_from_bundle(model.fetch.get_plot_bundle(req))
+    return model.fetch.get_plot_bundle(req).view_frame()
 
 
 def test_get_plot_bundle_records_the_display_reversal():
@@ -214,16 +226,17 @@ def test_get_plot_bundle_records_the_display_reversal():
     out afterwards: ``extent`` is normalised so bottom < top either way.
     """
     model = RunSource(make_vppem_run())
-    req = build_plot_request(
+    req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
-        dims=VPPEM_NAMES,
-    )
+        view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES
+)
 
     bundle = model.fetch.get_plot_bundle(req)
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
 
     assert bundle.row_reversed is True
     assert bundle.col_reversed is False
@@ -243,17 +256,18 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     model = RunSource(run)
     a, b, c = vppem_factors()
     parent_spec = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
-    parent_req = build_plot_request(
+    parent_req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=parent_spec,
-        dims=VPPEM_NAMES,
-    )
+        view=parent_spec,
+        dims=VPPEM_NAMES
+)
     frame = _vppem_frame(model, parent_req)
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
-    profile_req = roi_profile_request(parent_req, roi, profile_axis=0)
+    profile_req = parent_req.with_roi_profile(roi, profile_axis=0)
     bundle = model.fetch.get_plot_bundle(profile_req)
 
     mask = compile_with_mask_mode(frame, roi, "inside").mask
@@ -275,23 +289,24 @@ def test_an_in_plane_roi_profile_masks_the_display_plane(along):
     came back as the dark band at the top.
     """
     model = RunSource(make_vppem_run())
-    parent_req = build_plot_request(
+    parent_req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
-        dims=VPPEM_NAMES,
-    )
+        view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES
+)
     plane = model.fetch.get_plot_bundle(parent_req)
     assert plane.row_reversed
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
     bundle = model.fetch.get_plot_bundle(
-        roi_profile_request(parent_req, roi, profile_axis=along),
-        cached_plane=plane,
-    )
+        parent_req.with_roi_profile(roi, profile_axis=along),
+        cached_plane=plane
+)
 
-    mask = compile_with_mask_mode(frame_from_bundle(plane), roi, "inside").mask
+    mask = compile_with_mask_mode(plane.view_frame(), roi, "inside").mask
     shown = np.where(mask, np.asarray(plane.y), np.nan)
     across = 0 if along == "plot_x" else 1
     expected = np.nansum(shown, axis=across)[mask.any(axis=across)]
@@ -313,14 +328,16 @@ def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
     model = RunSource(MemoryRun(make_vppem_metadata(), data))
     a, b, c = vppem_factors()
 
-    req = build_plot_request(
+    req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        norm_keys=["PCOEdge_flat"],
-        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
-        dims=VPPEM_NAMES,
-    )
+        norm_keys=("PCOEdge_flat",
+),
+        view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES
+)
     bundle = model.fetch.get_plot_bundle(req)
 
     expected = (a[4] * np.outer(b, c) / flat)[::-1, :]
@@ -338,13 +355,14 @@ def test_a_request_rejects_names_that_disagree_with_its_view():
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
 
     def build(dims):
-        return build_plot_request(
+        return PlotRequest(
             uid=VPPEM_UID,
-            xkeys=["sampleVoltage_VSource"],
+            xkeys=("sampleVoltage_VSource",
+),
             ykey="PCOEdge_image",
-            projection=cube,
-            dims=dims,
-        )
+            view=cube,
+            dims=dims
+)
 
     with pytest.raises(ValueError, match="rank-3"):
         build(("dim_1", "dim_2"))
@@ -366,13 +384,14 @@ def test_the_fetch_takes_the_names_from_the_request():
         return original(ykey, xkeys)
 
     model.plot_axis_names = counted
-    req = build_plot_request(
+    req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
-        dims=VPPEM_NAMES,
-    )
+        view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=VPPEM_NAMES
+)
 
     assert plan_fetch(req).dims == VPPEM_NAMES
     model.fetch.get_plot_bundle(req)
@@ -388,13 +407,14 @@ def test_a_request_may_name_an_axis_only_after_its_x_key():
     otherwise plot against ``i0`` without a word.
     """
     model = RunSource(make_vppem_run())
-    req = build_plot_request(
+    req = PlotRequest(
         uid=VPPEM_UID,
-        xkeys=["sampleVoltage_VSource"],
+        xkeys=("sampleVoltage_VSource",
+),
         ykey="PCOEdge_image",
-        projection=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
-        dims=("i0", "dim_1", "dim_2"),
-    )
+        view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
+        dims=("i0", "dim_1", "dim_2")
+)
 
     with pytest.raises(ValueError, match="neither its own name nor the X key"):
         model.fetch.get_plot_bundle(req)

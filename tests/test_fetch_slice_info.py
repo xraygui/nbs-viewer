@@ -12,9 +12,8 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.fetch.request import PlotRequest, roi_profile_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest
 from nbs_viewer.models.plot.fetch.plan import plan_fetch
-from nbs_viewer.models.plot.geometry.frame import region_frame_for_bbox
 from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
@@ -76,21 +75,21 @@ def _plane_request(parent=PARENT):
     """
     return PlotRequest(
         uid="uid",
-        xkeys=("x",),
+        xkeys=("x",
+),
         ykey="y",
         norm_keys=(),
         view=parent,
-        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim)),
-    )
+        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim))
+)
 
 
 def _profile_request(profile_axis=0, spatial_reduce="sum", region=ROI):
-    return roi_profile_request(
-        _plane_request(),
+    return _plane_request().with_roi_profile(
         region,
         profile_axis=profile_axis,
-        spatial_reduce=spatial_reduce,
-    )
+        spatial_reduce=spatial_reduce
+)
 
 
 def _ground_truth_profile(stack, row_axis, col_axis, frame):
@@ -150,8 +149,8 @@ def test_roi_profile_matches_ground_truth_in_every_orientation(
         axis_arrays,
         ["en_energy", "scan", "y", "x"],
         request,
-        plan,
-    )
+        plan
+)
 
     np.testing.assert_allclose(profile, expected)
 
@@ -219,7 +218,7 @@ def test_region_frame_for_bbox_matches_crop_shape():
         np.arange(10, dtype=float),
         ["y", "x"],
     )
-    cropped = region_frame_for_bbox(frame, (2, 5, 3, 7))
+    cropped = frame.region_for_bbox((2, 5, 3, 7))
     assert cropped.shape == (3, 4)
 
 
@@ -233,7 +232,7 @@ def test_region_frame_for_bbox_image_extent_keeps_bottom_below_top():
     )
     region = RectRegion(x0=34.77, x1=94.99, y0=40.36, y1=57.37)
     compiled = compile_with_mask_mode(frame, region.normalized(), "inside")
-    cropped = region_frame_for_bbox(frame, compiled.bbox)
+    cropped = frame.region_for_bbox(compiled.bbox)
 
     assert cropped.extent is not None
     left, right, bottom, top = cropped.extent
@@ -249,14 +248,14 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(10, 0, 0, 0),
-    )
+        indices=(10, 0, 0, 0)
+)
     row_axis = np.arange(y_count, dtype=float)
     col_axis = np.arange(x_count, dtype=float)
     frame = display_frame(stack[10, 0], row_axis, col_axis, ["dim_1", "dim_2"])
     region = RectRegion(x0=34.77, x1=94.99, y0=40.36, y1=57.37)
-    request = roi_profile_request(
-        _plane_request(parent), region, profile_axis=0
+    request = _plane_request(parent).with_roi_profile(
+        region, profile_axis=0
     )
 
     plan = plan_fetch(request, plane_frame=frame)
@@ -272,8 +271,9 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
         axis_arrays,
         ["en_energy", "dim_0", "dim_1", "dim_2"],
         request,
-        plan,
-    )
+        plan
+)
 
-    assert profile.shape == (e_count,)
+    assert profile.shape == (e_count,
+)
     assert np.isfinite(profile).all()

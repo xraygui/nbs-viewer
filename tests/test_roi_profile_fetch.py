@@ -6,9 +6,8 @@ import pytest
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from nbs_viewer.models.plot.fetch.stages import reduce_cached_plane
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest, roi_profile_request
+from nbs_viewer.models.plot.fetch.request import PlotRequest
 from nbs_viewer.models.plot.fetch.plan import plan_fetch
-from nbs_viewer.models.plot.geometry.frame import frame_from_bundle
 from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
@@ -28,24 +27,24 @@ def _plane_request(parent: Projection) -> PlotRequest:
     """
     return PlotRequest(
         uid="uid",
-        xkeys=("x",),
+        xkeys=("x",
+),
         ykey="y",
         norm_keys=(),
         view=parent,
-        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim)),
-    )
+        dims=tuple(f"dim_{axis}" for axis in range(parent.ndim))
+)
 
 
 def _profile_request(parent, region, *, profile_axis, reduce="sum"):
     """
     Build the ROI profile request the fetch path would carry.
     """
-    return roi_profile_request(
-        _plane_request(parent),
+    return _plane_request(parent).with_roi_profile(
         region,
         profile_axis=profile_axis,
-        spatial_reduce=reduce,
-    )
+        spatial_reduce=reduce
+)
 
 
 _PLANE_2D = Projection(
@@ -63,22 +62,17 @@ def test_cached_plane_profile_mesh():
     plane = prepare_2d_bundle(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
-    from nbs_viewer.models.plot.geometry.frame import (
-        cell_x_bounds_mesh,
-        cell_y_bounds_mesh,
-    )
-
-    frame = frame_from_bundle(plane)
-    x0, _ = cell_x_bounds_mesh(frame, 10, 0)
-    _, x1 = cell_x_bounds_mesh(frame, 20, 0)
-    y0, _ = cell_y_bounds_mesh(frame, 5, 0)
-    _, y1 = cell_y_bounds_mesh(frame, 8, 0)
+    frame = plane.view_frame()
+    x0, _ = frame.cell_x_bounds(10, 0)
+    _, x1 = frame.cell_x_bounds(20, 0)
+    y0, _ = frame.cell_y_bounds(5, 0)
+    _, y1 = frame.cell_y_bounds(8, 0)
 
     request = _profile_request(
         _PLANE_2D,
         RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
-        profile_axis=frame.plot_y_dim,
-    )
+        profile_axis=frame.plot_y_dim
+)
     bundle = reduce_cached_plane(plane, request, label="test roi")
 
     assert bundle.render_mode == "line"
@@ -91,18 +85,17 @@ def test_span_full_expands_an_in_plane_profile_only():
     plane = prepare_2d_bundle(
         np.ones((10, 20)),
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 19.0, 20)],
-        ["a", "b"],
-    )
-    frame = frame_from_bundle(plane)
+        ["a", "b"]
+)
+    frame = plane.view_frame()
     narrow = RectRegion(x0=5.0, x1=8.0, y0=3.0, y1=4.0)
 
-    expanded = roi_profile_request(
-        _plane_request(_PLANE_2D),
+    expanded = _plane_request(_PLANE_2D).with_roi_profile(
         narrow,
         profile_axis=1,
         plane_frame=frame,
-        span_full=True,
-    ).region
+        span_full=True
+).region
     assert expanded.y0 == pytest.approx(3.0)
     assert expanded.y1 == pytest.approx(4.0)
     assert expanded.x0 == pytest.approx(-0.5)
@@ -112,15 +105,14 @@ def test_span_full_expands_an_in_plane_profile_only():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0, 0),
-    )
-    unchanged = roi_profile_request(
-        _plane_request(stack_parent),
+        indices=(0, 0, 0, 0)
+)
+    unchanged = _plane_request(stack_parent).with_roi_profile(
         narrow,
         profile_axis=0,
         plane_frame=frame,
-        span_full=True,
-    ).region
+        span_full=True
+).region
     assert unchanged.x0 == narrow.x0
     assert unchanged.y0 == narrow.y0
 
@@ -131,24 +123,25 @@ def test_cached_plane_profile_with_4d_parent_spec():
         y,
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
         ["dim_1", "dim_2"],
-        render_mode_hint="image",
-    )
+        render_mode_hint="image"
+)
     parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0, 0),
-    )
+        indices=(0, 0, 0, 0)
+)
     request = _profile_request(
         parent,
         RectRegion(x0=2.5, x1=6.5, y0=2.5, y1=6.5),
-        profile_axis=parent.storage_axis_for("plot_x"),
-    )
+        profile_axis=parent.storage_axis_for("plot_x")
+)
 
     bundle = reduce_cached_plane(plane, request)
 
     assert bundle.render_mode == "line"
-    assert bundle.y.shape == (10,)
+    assert bundle.y.shape == (10,
+)
     assert np.isfinite(bundle.y).any()
 
 
@@ -165,7 +158,7 @@ def _display_profile(bundle, region, along):
     is what the user sees and the mask is compiled on the frame they drew
     on, so no orientation is involved at all.
     """
-    frame = frame_from_bundle(bundle)
+    frame = bundle.view_frame()
     mask = compile_with_mask_mode(frame, region, "inside").mask
     shown = np.where(mask, np.asarray(bundle.y), np.nan)
     left, right, bottom, top = frame.extent
@@ -230,14 +223,14 @@ def test_cached_plane_refuses_an_off_plane_profile():
         np.ones((6, 7)),
         [np.arange(6, dtype=float), np.arange(7, dtype=float)],
         ["dim_1", "dim_2"],
-        render_mode_hint="image",
-    )
+        render_mode_hint="image"
+)
     parent = Projection(
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(1, 0, 0, 0),
-    )
+        indices=(1, 0, 0, 0)
+)
     request = _profile_request(
         parent, RectRegion(x0=1.5, x1=4.5, y0=0.5, y1=3.5), profile_axis=0
     )
@@ -263,7 +256,7 @@ def test_storage_axis_to_plot_axis_follows_the_spec_not_the_frame():
     The view spec decides which storage axis is horizontal, at rank 2 too.
 
     Since orientation moved to just after the load, every frame built by
-    ``frame_from_bundle`` has ``plot_y_dim == 0`` and ``plot_x_dim == 1``:
+    ``PlotBundle.view_frame()`` has ``plot_y_dim == 0`` and ``plot_x_dim == 1``:
     display positions, not storage axes. Reading the mapping off the frame
     inverted the answer for any view whose plot-axis order is not the
     identity -- which is the normal case as soon as the user picks an X key
@@ -273,9 +266,9 @@ def test_storage_axis_to_plot_axis_follows_the_spec_not_the_frame():
         np.zeros((32, 100)),
         [np.arange(32, dtype=float), np.linspace(0.0, np.pi, 100)],
         ["dim_1", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(plane)
+        render_mode_hint="image"
+)
+    frame = plane.view_frame()
     assert (frame.plot_y_dim, frame.plot_x_dim) == (0, 1)
 
     # The opposite of what those display positions say, which is why the
@@ -297,18 +290,17 @@ def test_span_full_expands_the_profile_axis_not_the_reduction_axis():
         np.zeros((32, 100)),
         [np.arange(32, dtype=float), np.linspace(0.0, np.pi, 100)],
         ["dim_1", "x"],
-        render_mode_hint="image",
-    )
-    frame = frame_from_bundle(plane)
+        render_mode_hint="image"
+)
+    frame = plane.view_frame()
     drawn = RectRegion(x0=0.6641, x1=2.618, y0=22.55, y1=27.42)
 
-    expanded = roi_profile_request(
-        _plane_request(_SELECTION_DRIVEN),
+    expanded = _plane_request(_SELECTION_DRIVEN).with_roi_profile(
         drawn,
         profile_axis=0,
         plane_frame=frame,
-        span_full=True,
-    ).region
+        span_full=True
+).region
 
     left, right, bottom, top = frame.extent
     assert (expanded.x0, expanded.x1) == pytest.approx((left, right))
@@ -329,9 +321,10 @@ def test_a_1d_view_has_no_plot_plane_to_map_onto():
         ndim=2,
         plot_ndim=1,
         roles=(DimRole.INDEX, DimRole.PLOT_X),
-        indices=(0, 0),
-    )
-    assert spectrum.plot_axis_order() == (1,)
+        indices=(0, 0)
+)
+    assert spectrum.plot_axis_order() == (1,
+)
     assert not spectrum.is_plot_plane_axis(1)
     with pytest.raises(ValueError, match="2D projection"):
         spectrum.plot_axis_for(1)
@@ -345,8 +338,8 @@ def test_an_off_plane_storage_axis_has_no_plot_axis():
         ndim=3,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0),
-    )
+        indices=(0, 0, 0)
+)
     assert not cube.is_plot_plane_axis(0)
     with pytest.raises(ValueError, match="not on the plot plane"):
         cube.plot_axis_for(0)
@@ -357,8 +350,8 @@ def test_storage_axis_to_plot_axis_maps_nd_storage_indices():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 0, 0, 0),
-    )
+        indices=(0, 0, 0, 0)
+)
     assert parent_spec.plot_axis_for(3) == "plot_x"
     assert parent_spec.plot_axis_for(2) == "plot_y"
 
@@ -373,20 +366,20 @@ def test_stack_profile_fetch_slice_widens_the_profile_axis():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(0, 1, 0, 0),
-    )
+        indices=(0, 1, 0, 0)
+)
     frame = display_frame(
         np.zeros((y_count, x_count)),
         np.arange(y_count, dtype=float),
         np.arange(x_count, dtype=float),
-        ["dim_1", "dim_2"],
-    )
+        ["dim_1", "dim_2"]
+)
     request = _profile_request(
         parent,
         RectRegion(x0=1.5, x1=4.5, y0=0.5, y1=3.5),
         profile_axis=0,
-        reduce="mean",
-    )
+        reduce="mean"
+)
 
     slice_info = plan_fetch(request, plane_frame=frame).slice_info
 
@@ -409,20 +402,20 @@ def test_roi_profile_along_dim1_matches_plane_means():
         ndim=4,
         plot_ndim=2,
         roles=(DimRole.INDEX, DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
-        indices=(en_idx, 0, 0, 0),
-    )
+        indices=(en_idx, 0, 0, 0)
+)
     frame = display_frame(
         y_full[en_idx, 0],
         np.arange(y_count, dtype=float),
         np.arange(x_count, dtype=float),
-        ["dim_1", "dim_2"],
-    )
+        ["dim_1", "dim_2"]
+)
     request = _profile_request(
         parent,
         RectRegion(x0=1.5, x1=6.5, y0=1.5, y1=5.5),
         profile_axis=1,
-        reduce="mean",
-    )
+        reduce="mean"
+)
 
     plan = plan_fetch(request, plane_frame=frame)
     fetch_slice = plan.slice_info
@@ -440,8 +433,8 @@ def test_roi_profile_along_dim1_matches_plane_means():
         axis_arrays,
         ["en_energy", "dim_0", "dim_1", "dim_2"],
         request,
-        plan,
-    )
+        plan
+)
     manual = np.array(
         [
             float(np.mean(y_full[en_idx, d, fetch_slice[2], fetch_slice[3]]))

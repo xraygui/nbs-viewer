@@ -13,13 +13,13 @@ import xarray as xr
 
 from ...data.array_contract import labelled_array, surviving_dims
 from ...data.key_info import KeyInfo
-from ...data.synthetic_keys import SYNTHETIC_KEY_PREFIX, is_synthetic_key
 from ..geometry import PlotBundle
 from ..fetch.request import PlotRequest
 
+SYNTHETIC_KEY_PREFIX = "__roi__/"
+
 __all__ = [
     "SYNTHETIC_KEY_PREFIX",
-    "is_synthetic_key",
     "FrozenSpectrum",
     "copy_plot_bundle",
 ]
@@ -136,8 +136,8 @@ def copy_plot_bundle(bundle: PlotBundle) -> PlotBundle:
         ),
         mesh_y=(
             None if bundle.mesh_y is None else np.array(bundle.mesh_y, copy=True)
-        ),
-    )
+        )
+)
 
 
 @dataclass(frozen=True)
@@ -231,8 +231,8 @@ class FrozenSpectrum:
             shape,
             label=self.label,
             synthetic=True,
-            hinted=False,
-        )
+            hinted=False
+)
 
     def load(
         self, slice_info: Optional[tuple] = None, *, coords: bool = True
@@ -265,8 +265,8 @@ class FrozenSpectrum:
             values,
             dims,
             coords=self.load_coords(slice_info) if coords else {},
-            name=self.key,
-        )
+            name=self.key
+)
 
     def load_coords(
         self, slice_info: Optional[tuple] = None
