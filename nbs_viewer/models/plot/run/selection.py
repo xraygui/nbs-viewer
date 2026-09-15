@@ -23,7 +23,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, TYPE_CHECKIN
 from qtpy.QtCore import QObject, Signal
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .run_collection import RunCollection
+    from .collection import RunCollection
 
 
 @dataclass(frozen=True)

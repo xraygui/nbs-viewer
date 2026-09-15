@@ -11,7 +11,7 @@ pending.
 > were deleted in `e28dc07` and absorbed into
 > [`refactor_plan.md`](archive/refactor_plan.md), which completed on
 > 2026-09-10 and is now archived. The package reorganisation they described is
-> carried by [`module_organization_plan.md`](module_organization_plan.md).
+> carried by [`module_organization_plan.md`](archive/module_organization_plan.md).
 > References to `plot_package_reorganization.md` further down are left as
 > written, since this document is a record of what was true on 2026-09-02.
 

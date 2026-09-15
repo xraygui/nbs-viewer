@@ -13,7 +13,7 @@ from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.fetch.request import TraceKey
 from nbs_viewer.models.plot.trace import Trace
-from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.models.plot.session import PlotSession
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run, line_scan_run

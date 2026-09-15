@@ -10,7 +10,7 @@ from qtpy.QtGui import QStandardItem, QStandardItemModel
 from ...models.plot.run.source import RunSource
 
 if TYPE_CHECKING:
-    from ...models.plot.run_collection import RunCollection
+    from ...models.plot.run.collection import RunCollection
 
 
 class RunListItemModel(QStandardItemModel):

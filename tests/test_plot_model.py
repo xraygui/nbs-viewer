@@ -1,6 +1,6 @@
 """Tests for PlotSession ownership of RoiSetModel."""
 
-from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.geometry.region import RectRegion
 from nbs_viewer.models.plot.view.spec import ViewCrop
 from tests.fixtures.plot_session import make_plot_session

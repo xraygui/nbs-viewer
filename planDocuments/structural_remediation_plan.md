@@ -20,7 +20,7 @@ moves cannot reach.
 > **Both documents named above no longer exist.** They were deleted in
 > `e28dc07` and absorbed into [`refactor_plan.md`](archive/refactor_plan.md),
 > which completed on 2026-09-10 and is now archived. The package moves are
-> carried by [`module_organization_plan.md`](module_organization_plan.md).
+> carried by [`module_organization_plan.md`](archive/module_organization_plan.md).
 
 Testing infrastructure work continues under
 `[headless_testing_plan.md](headless_testing_plan.md)` Phase 3/4; this plan

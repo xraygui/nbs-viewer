@@ -32,9 +32,9 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
 
 from .fetch.request import TraceKey, build_plot_request
 from .region_controller import RegionController
-from .run_collection import RunCollection
+from .run.collection import RunCollection
 from .run.source import RunSource
-from .selection import Selection
+from .run.selection import Selection
 from .trace import Trace
 from .trace_set import TraceSet
 from .view_intent import ViewIntent

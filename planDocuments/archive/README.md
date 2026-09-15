@@ -17,6 +17,7 @@ commit that landed it, so these documents are a record, not a reference.
 | `derived_spectra_plan.md` | Shipped — frozen ROI spectra are synthetic keys on a run (`FrozenSpectrum`) — though its boxes were never ticked |
 | `roi_workbench_plan.md` | Shipped — the ROI window (`views/plot/roi/window.py`) and the multi-ROI set (`RoiSetModel`) exist |
 | `zarr_l2_cache_plan.md` | Phases 1–1c implemented (`models/cache/zarr_l2_cache.py`); phase 2 onward never started |
+| `module_organization_plan.md` | Complete 2026-09-15, steps 1–8. Its own terms stopped fitting at step 7; what that uncovered is items 5 and 10 of [`post_refactor_review.md`](../post_refactor_review.md) |
 
 The last four were archived on 2026-09-14 at the maintainer's direction, as
 complete, stale or superseded. Each note above is drawn from that document's
@@ -30,4 +31,7 @@ Two things worth knowing before reading any of them:
   shipped without anyone ticking a box. Keeping the documents is how that stays
   findable.
 - **The reviews stay at the top level**, because they carry the open-item
-  lists that current work still draws on.
+  lists that current work still draws on. `module_organization_plan.md` is
+  the clearest case: it finished, but the thing it ran into — where the data
+  load and the pipeline live — is recorded as review items rather than left
+  in the archived plan, because that is work still to be done.

@@ -1,8 +1,8 @@
 from typing import Dict, List, Optional, Union
 from qtpy.QtCore import QObject, Signal
 from ...models.data.base import CatalogRun
-from ...models.plot.plot_session import PlotSession
-from ...models.plot.run.source import RunSource
+from ..plot.session import PlotSession
+from ..plot.run.source import RunSource
 from ...utils import print_debug
 from .presenter import PlotPresenter
 

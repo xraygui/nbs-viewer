@@ -178,7 +178,7 @@ maintainer's instruction, since it addresses a real problem. Widget tests are
 plan's step 1 is half-complete; the `plot_geometry ↔ plot_request` cycle it
 wanted removed is already gone; and `run/`'s contents changed, because
 `KeyInfo` moved to `models/data` and `FrozenSpectrum` did not move at all.
-Re-derived in [`module_organization_plan.md`](module_organization_plan.md).
+Re-derived in [`module_organization_plan.md`](archive/module_organization_plan.md).
 
 ---
 

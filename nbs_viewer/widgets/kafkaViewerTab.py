@@ -8,7 +8,7 @@ from ..views.catalog.kafka import KafkaView
 from ..models.catalog.kafka import KafkaCatalog
 
 from ..views.dataSource.run_list_item_model import RunListItemModel
-from ..models.plot.plot_session import PlotSession
+from ..models.plot.session import PlotSession
 from ..views.plot.plotWidget import PlotWidget
 
 from qtpy.QtCore import Signal

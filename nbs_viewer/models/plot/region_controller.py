@@ -45,7 +45,7 @@ from .roi import default_profile_label
 if TYPE_CHECKING:  # pragma: no cover
     from .run.frozen_spectrum import FrozenSpectrum
     from .geometry import PlotBundle
-    from .plot_session import PlotSession
+    from .session import PlotSession
 
 
 class RegionController(QObject):

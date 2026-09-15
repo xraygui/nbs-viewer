@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
-from .plot.display_manager import DisplayManager
+from .displays.manager import DisplayManager
 
 
 class ConfigModel(QObject):

@@ -1,6 +1,6 @@
 from typing import Optional
 from qtpy.QtCore import QObject, Signal
-from ...models.plot.plot_session import PlotSession
+from ..plot.session import PlotSession
 
 
 class PlotPresenter(QObject):

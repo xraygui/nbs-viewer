@@ -15,15 +15,15 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from nbs_viewer.models.plot.plot_session import PlotSession
-from nbs_viewer.models.plot.run_collection import RunCollection
+from nbs_viewer.models.plot.session import PlotSession
+from nbs_viewer.models.plot.run.collection import RunCollection
 from nbs_viewer.models.plot.run.source import RunSource
-from nbs_viewer.models.plot.selection import Selection
+from nbs_viewer.models.plot.run.selection import Selection
 from tests.fixtures.catalog_recipes import line_scan_run, motor_scan_run
 from tests.fixtures.plot_session import make_plot_session
 
 SESSION_SOURCE = Path(__file__).resolve().parents[1] / (
-    "nbs_viewer/models/plot/plot_session.py"
+    "nbs_viewer/models/plot/session.py"
 )
 
 

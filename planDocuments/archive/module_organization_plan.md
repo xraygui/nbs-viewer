@@ -3,10 +3,10 @@
 Reorganising `models/plot` so a reader holds less in their head at once.
 
 **Status:** drafted 2026-09-10, **re-derived 2026-09-14** at `f50633a` after
-[`data_contract_plan.md`](archive/data_contract_plan.md) completed. The draft's
+[`data_contract_plan.md`](data_contract_plan.md) completed. The draft's
 measurements were taken at `9ecbe11` and are superseded; its step 1 is half
 done. Written to the conventions in
-[`data_contract_review.md`](data_contract_review.md): steps name their files,
+[`data_contract_review.md`](../data_contract_review.md): steps name their files,
 functions and call sites, and no step states a count it has not measured.
 
 ## The goal
@@ -255,7 +255,7 @@ What is left is a defect, and it is this step:
   `roi_set.py`'s `MaskMode = str` and `SpatialReduce = str`, which widened two
   of them to "any string" under the same name. Two `typing` imports go with
   them.
-- [x] Closes item 7 of [`post_refactor_review.md`](post_refactor_review.md).
+- [x] Closes item 7 of [`post_refactor_review.md`](../post_refactor_review.md).
 - **Out of scope:** `models/cache`'s two `SliceItem` definitions — a different
   package with no dependency either way.
 
@@ -352,21 +352,110 @@ cell-bounds arithmetic should break when that arithmetic moves.
   importing it, invisible because `from __future__ import annotations` makes
   annotations strings.
 
-### Step 8 — top level and the shell
+### Step 8 — top level and the shell — **landed**
 
-- [ ] `plot_session.py` → `session.py`; the other session objects stay put.
-- [ ] `display_manager.py` and `presenter.py` → `models/displays/`.
-- [ ] Record the final layout, per-file working sets, and the import-site count
-  against the 267 measured here.
+- [x] `plot_session.py` → `session.py`.
+- [x] `display_manager.py` and `presenter.py` → `models/displays/`, as
+  `manager.py` and `presenter.py`.
+- [x] **`run_collection.py` → `run/collection.py` and `selection.py` →
+  `run/selection.py`**, added to this step by the maintainer. Both are
+  trivially movable — `collection` imports only `RunSource`, `selection` only
+  names `RunCollection` for an annotation — and `selection`'s own docstring
+  already argued the move: "a selection of keys means nothing without the
+  runs the keys belong to."
+- [x] Final layout and numbers below.
+
+`models/plot` is now five packages and four files:
+
+```
+geometry/  bundle orientation frame region mask          26-name surface
+view/      spec axes                                     10-name surface
+roi/       set labels                                     5-name surface
+fetch/     request plan stages                           no surface
+run/       source pipeline collection selection          no surface
+           identity frozen_spectrum
+           session.py  region_controller.py  trace.py  trace_set.py
+           view_intent.py
+```
+
+| | start (`f50633a`) | end |
+|---|---:|---:|
+| modules | 22 | 28 |
+| code lines | 4 791 | 4 724 |
+| runtime cycles | 1 | **0** |
+| function-local sibling imports | 3 | **0** |
+| import sites naming the package | 268 across 75 files | 268 across 78 files |
+| worst working set | `run_fetch` 12 | `run.pipeline` 12 |
+
+Two numbers are worth reading honestly. The line count fell by 67 despite
+the plan predicting growth, because steps 4, 5 and the `Projection`
+conversion deleted more than the packaging added. And the worst working set
+did not move at all: `run.pipeline` still pulls in the same twelve
+functions, because nothing in this plan changed what it does. That file is
+the subject of the deferred work below, not of this plan.
 
 ---
 
 ## Not in this plan
 
+### Where the data load and the pipeline live
+
+**This plan's terms stopped fitting during step 7, and that should have been
+said then.** Its opening says no behaviour changes and no bodies rewritten,
+and under those terms `run/pipeline.py` got a name that is a lie: it holds
+one class while the stages it is named for sit in `fetch/stages.py`. The
+collision it was dodging was a symptom, not a naming problem. The rule the
+maintainer drew from it: when a rename cannot be made truthful without
+restructuring, say the refactor's conditions do not fit and ask, rather than
+inventing a third name.
+
+What is actually misplaced, measured:
+
+- `fetch/stages.py`'s **only** production consumer is `RunFetch`. Nothing
+  else calls a stage.
+- `fetch/` names itself after the one act none of its three files performs:
+  `request` and `plan` are descriptions, `stages` are pure transforms, and
+  the only code that reads storage is `RunFetch._read_block`.
+- `RunFetch` is **281 of 461 method lines block cache**, the rest
+  orchestration, so no single word names it.
+- `get_plot_bundle` is called from **two** production lines, both in
+  `trace.py`, both reaching through a held `RunSource` to its `.fetch`. The
+  other 75 calls are tests.
+- `RunSource` uses its `RunFetch` for three things only: construct, hand
+  out, `clear()`. Neither delegates to the other; `RunFetch` is a client of
+  five `RunSource` methods.
+
+The candidate shape is to split `RunFetch` on the seam already in it — a
+`BlockCache` the run owns, and `get_plot_bundle` as a function living with
+the stages it sequences, which makes `pipeline.py` true and deletes the
+reach-through as a consequence. Two decisions must be settled **before** any
+code moves, because leaving them to be discovered mid-step is the failure
+mode the data-contract review named: whether the cache is handed out or
+stays private, and whether `request.py` / `plan.py` keep a package.
+
+### `TraceKey` has no owner
+
+Deferred to the same revisit, because it is the same confusion one layer up.
+`Trace` and `TraceSet` sit far from `TraceKey`, which lives in
+`fetch/request.py` because `PlotRequest.trace_key()` derives one. But there
+are three ways to get a `TraceKey` and the dominant one does not involve a
+request at all:
+
+- constructed directly from `(uid, xkey, ykey)` — `session.py` ×3, and
+  `image_grid_canvas.py`
+- derived from a request — `PlotRequest.trace_key()`, used by
+  `Trace.__init__` as its default
+- read off a trace — `trace.trace_key`, which `single_canvas.py` uses at
+  eight sites
+
+So `TraceKey` lives beside the one constructor that is not the main one.
+Settle where a trace key is created, and where it belongs follows.
+
+### Named in the reviews, wanting their own plans
+
 `ImageGridCanvas` and `RunDisplayWidget` key ordering are deferred by the
 maintainer until those widgets are rewritten. `MplCanvas`'s size, the widget
-testing gap (3 of 473 tests), and teardown are named in the reviews and want
-their own plans.
+testing gap (3 of 473 tests), and teardown are named in the reviews.
 
 ---
 

@@ -199,6 +199,30 @@ that this is a *candidate*, not a defect — and the case for it should be made
 on whether the two halves have different reasons to change, not on the line
 count.
 
+**Update 2026-09-15.** The extraction happened, in the data contract refactor:
+`RunFetch` exists, owned by `RunSource` and handed out as `.fetch` with no
+forwarding method. It was half right, and the module reorganisation measured
+the other half:
+
+- `RunFetch` is **281 of 461 method lines block cache**, the rest
+  orchestration. Two jobs with different reasons to change, which is the test
+  this item asked for, so the seam is real rather than a line count.
+- `get_plot_bundle` is called from **two** production lines, both in
+  `trace.py`, both reaching through a held `RunSource` to its `.fetch`. The
+  other 75 callers are tests.
+- The stage functions' **only** production consumer is `RunFetch`, yet they
+  live in `models/plot/fetch/`, whose three files perform no fetching — the
+  only code that reads storage is `RunFetch._read_block`.
+- `RunSource` uses its `RunFetch` for three things: construct, hand out,
+  `clear()`. Neither delegates to the other.
+
+`RunSource` is now 701 lines, so the extraction did not shrink it either. The
+candidate shape is to split `RunFetch` on its own seam — a block cache the
+run owns, and `get_plot_bundle` as a function beside the stages it sequences,
+which deletes the reach-through as a consequence rather than as a patch. Two
+decisions must be settled first: whether the cache is handed out or private,
+and whether the request and plan descriptions keep a package.
+
 ### 6. `MplCanvas` is now the largest object in the tree
 
 1136 code lines, **94 methods** (35 public, 59 private). `views/plot` (5415
@@ -268,6 +292,19 @@ thirteen bugs were silent wrong answers, a render loop that also silences
 
 ---
 
+### 10. `TraceKey` lives beside the one constructor that is not the main one
+
+`Trace` and `TraceSet` sit far from `TraceKey`, which is in
+`models/plot/fetch/request.py` because `PlotRequest.trace_key()` derives one.
+There are three ways to get a trace key, and the dominant one involves no
+request at all: constructed directly from `(uid, xkey, ykey)` in `session.py`
+(three sites) and `image_grid_canvas.py`; derived from a request, which is
+`Trace.__init__`'s default; or read off a trace as `trace.trace_key`, which
+`single_canvas.py` uses at eight sites.
+
+Small, and the same confusion as item 5 one layer up, so it belongs with that
+work: settle where a trace key is created and where it belongs follows.
+
 ## Deferred by decision, and still deferred
 
 These are not oversights. Each was argued and recorded; listing them together
@@ -335,7 +372,7 @@ a plan of its own — `headless_testing_plan.md` phases 3–4 is its home.
    list.
 6. **Decide about `RunSource`.** Make the case on reasons-to-change, not line
    count, and only then split. **Now measured**, in
-   [`module_organization_plan.md`](module_organization_plan.md): the class
+   [`module_organization_plan.md`](archive/module_organization_plan.md): the class
    splits 512 / 569 raw lines with a six-member interface between the halves,
    and the fetch half holds all fifteen of its free-function imports. The case
    is made on coupling rather than size, and it is that plan's step 1.

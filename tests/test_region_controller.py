@@ -13,7 +13,7 @@ import ast
 from pathlib import Path
 
 
-from nbs_viewer.models.plot.plot_session import PlotSession
+from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.region_controller import RegionController
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.plot.view.spec import ViewCrop
@@ -154,7 +154,7 @@ def test_the_session_defines_no_region_methods():
     fingerprints would be a delegating method.
     """
     source = Path(__file__).resolve().parents[1] / (
-        "nbs_viewer/models/plot/plot_session.py"
+        "nbs_viewer/models/plot/session.py"
     )
     tree = ast.parse(source.read_text())
     cls = next(

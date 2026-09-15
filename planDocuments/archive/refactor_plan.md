@@ -295,7 +295,7 @@ them.
   data layer because that is where its logic starts. **Absorbs
   `structural_remediation_plan.md` step 9** and closes bugs 6 and 7 as its
   precondition rather than as a favour. Runs before the module reorganization.
-- **[`module_organization_plan.md`](../module_organization_plan.md)** — the
+- **[`module_organization_plan.md`](module_organization_plan.md)** — the
   follow-on pass, drafted 2026-09-10 and not started: reorganising
   `models/plot` so a reader holds fewer modules open at once. It deliberately
   **replaces invariant 10** for its own steps, since a reorganisation deletes
