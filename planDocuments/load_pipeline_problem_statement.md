@@ -1,0 +1,195 @@
+# Where the data load and the pipeline live
+
+**Status: OPEN (2026-09-15).** Opened after
+[`module_organization_plan.md`](archive/module_organization_plan.md) closed.
+That plan's terms were "no behaviour changes and no function bodies
+rewritten", and at step 7 they stopped fitting: a file had to be given a name
+that is a lie because the code behind it is in the wrong shape. This document
+records the shape.
+
+**It proposes no work.** No steps, no sequence, no checkboxes. Options
+canvassed so far are recorded at the end as *canvassed*, not chosen, and the
+decisions that would have to be settled before any of them are listed
+separately — leaving those to be discovered mid-step is the failure mode
+[`data_contract_review.md`](data_contract_review.md) named.
+
+Summarised as items 5 and 10 of
+[`post_refactor_review.md`](post_refactor_review.md); this is the long form.
+
+---
+
+## The question
+
+Four responsibilities are involved in turning a user's selection into a
+drawn plot. Two objects hold them, and the split runs through the middle of
+one responsibility rather than between two.
+
+| | responsibility | lines | currently in |
+|---|---|---:|---|
+| **A** | **key space** — what keys exist, catalog plus frozen, the key table, identity, metadata | ~350 | `RunSource` |
+| **B** | **key-level access** — `load`, `read`, `describe`, `load_coords`, `plot_axis_names`, `get_shape`, and the `_source(key)` dispatch behind them | ~290 | `RunSource` |
+| **C** | **block cache** — hold one hyperslab and its norm arrays, decide whether a wanted window is contained, read narrowed | 289 | `RunFetch` |
+| **D** | **the pipeline** — plan, load, normalize, reduce to a plane, transform, mask, pack | 174 | `RunFetch` |
+
+`RunSource` is A+B at 635 code lines. `RunFetch` is C+D at 455.
+
+The question this document exists to answer is **where C and D belong, and
+what each is called** — with the constraint that every answer so far has
+produced at least one name that does not describe its contents.
+
+---
+
+## What is measured
+
+Every number below was taken from the tree at the commit that archived the
+module organization plan.
+
+### The stages are separated from their only consumer
+
+`fetch/stages.py` is 583 code lines of `DataArray -> DataArray` functions.
+**Its only production consumer is `RunFetch`.** Not one other file in the
+application calls a stage; the remaining importers are tests.
+
+### `fetch/` is named after the one act none of its files performs
+
+| file | code lines | what it holds | reads storage? |
+|---|---:|---|---|
+| `fetch/request.py` | 293 | `PlotRequest`, `TraceKey`, three builders | no — a description of what to plot |
+| `fetch/plan.py` | 228 | `FetchPlan`, `plan_fetch` | no — a description of what to read |
+| `fetch/stages.py` | 583 | the transforms | no — pure array functions |
+
+The only code that reads storage is `RunFetch._read_block`, which is not in
+this package.
+
+### `RunFetch` is mostly a cache, so no single word names it
+
+**289 of its 463 method lines (62%)** are the block cache: `_load_block`,
+`_held_windows`, `_contained_window`, `_narrowed`, `_read_block`,
+`_norm_array`, `clear`. The remaining 174 are `get_plot_bundle` and two
+helpers. Those two halves have different reasons to change, which is the test
+item 5 of the post-refactor review asked for before any extraction.
+
+### The pipeline is reached through an object that does not own it
+
+`get_plot_bundle` has **two production callers**, both in `trace.py`, both of
+the form `self._run.fetch.get_plot_bundle(request)` — a trace reaching
+through the run it holds to an object hanging off it. The other **75** calls
+are tests, which use `.fetch` because it is the convenient seam, not because
+the application does.
+
+### Neither object delegates to the other
+
+`RunSource` uses its `RunFetch` for exactly three things: construct it in
+`__init__`, return it from the `fetch` property, and call `clear()` on it
+from `_invalidate_key_table` and `_on_data_changed`. `RunFetch` is a client
+of five `RunSource` methods: `describe`, `load`, `load_coords`,
+`plot_axis_names`, `read`.
+
+So this is **layering, not duplication**: `RunFetch._read_block` calls
+`RunSource.load` and adds windowing and caching around it. The one place
+logic is genuinely re-done is `_norm_array`, which repeats dimension naming
+that `RunSource._plot_names` also performs.
+
+### Neither object shrank
+
+The extraction of `RunFetch` out of `RunSource` was supposed to shrink the
+latter. `RunSource` is 635 code lines today, against the 250 that item 5 of
+the post-refactor review recorded as its target.
+
+---
+
+## How this surfaced, and why it was not visible earlier
+
+The module organization plan moved files without changing what they do. Three
+of its steps ran into the same wall from different directions, and only the
+third made it unmistakable:
+
+1. **Step 4** found six `Projection` queries that could not be placed, and
+   concluded they were "already home". That was true of those six, and it
+   trained the wrong reflex — that an unplaceable function means the question
+   is wrong rather than the code.
+2. **Step 6** found the ROI profile queries unplaceable for a second reason,
+   a would-be `view` ↔ `roi` cycle.
+3. **Step 7** hit a name collision between `run/fetch.py` and `fetch/`, and
+   the response was to invent `run/pipeline.py` — a file holding one class,
+   named after stages that live in a different package. That name is in the
+   tree now.
+
+The tell, recorded so it is recognised sooner next time: **needing to invent
+a third name to dodge a clash between two existing ones.** When that happens,
+the two existing names are usually both describing the wrong carving.
+
+---
+
+## Standing constraints
+
+These are settled and are inputs, not open questions.
+
+- **The block cache stays on the run, and stays single-entry.** Moving it
+  onto `Trace` was rejected, and reworking it was declined.
+- **No forwarding models.** A model that mostly re-exposes its children's
+  methods is not a worthwhile extraction. `RunSource` handing out `.fetch`
+  rather than forwarding to it was a deliberate application of this, and any
+  new arrangement is held to the same rule.
+- **No runtime import cycles inside `models/plot`, and no function-local
+  import used to dodge one.** Enforced by `tests/test_module_boundaries.py`.
+
+---
+
+## Options canvassed, none chosen
+
+Recorded so the thinking is not repeated, not because any is preferred.
+
+**1. `RunSource` delegates all data access to `RunFetch`** — move B into
+`RunFetch`. Leaves `RunSource` at A (~350 lines) and `RunFetch` at B+C+D
+(~900), which is larger than the class it was extracted from and holds three
+jobs. B also looks like key-space logic rather than fetch logic: `_source(key)`
+dispatching catalog against frozen answers *what this key is*.
+
+**2. Split `RunFetch` on the seam inside it** — a cache the run owns, and
+`get_plot_bundle` as a function living beside the stages it sequences, which
+would make a file called `pipeline` contain a pipeline and would remove the
+reach-through as a consequence rather than as a patch. Costs 75 test call
+sites; `RunFetch` and `.fetch` cease to exist. Does not re-fatten `RunSource`
+only if the cache stays its own object.
+
+**3. Minimal** — move `stages.py` beside its only consumer and give `Trace`
+the fetch at construction instead of reaching through a run. Two small
+changes, no test churn, and `get_plot_bundle` stays on a class that is 62%
+cache.
+
+---
+
+## Decisions that must be settled before any of them
+
+1. **Is the cache handed out or private?** If a pipeline function needs a
+   block, it needs the cache; whether that is `source.blocks` on the public
+   surface or reached some other way changes what every option looks like.
+2. **Do the request and plan descriptions keep a package?** They fetch
+   nothing, so whatever holds them is not called `fetch`. Flat at the top
+   level and a package named for descriptions are both open.
+3. **Does `.fetch` survive as a name?** 75 tests and two production lines use
+   it. It is cheap to change and the cost is not the reason to keep it.
+4. **Where is a `TraceKey` created?** Item 10 of the post-refactor review:
+   three ways exist to get one, and the dominant one involves no request,
+   which is why `TraceKey` sits in `fetch/request.py` beside the constructor
+   that is not the main one. `Trace` and `TraceSet` are far from it. This is
+   the same confusion one layer up and should be settled with the rest.
+
+---
+
+## Non-goals for this document
+
+- It does not sequence work, and should not grow steps. If work is agreed,
+  the sequence belongs in its own document or in the commits.
+- It does not revisit the block cache's design, which is settled above.
+- It does not cover `MplCanvas`, widget testing, or teardown, which are named
+  in the reviews and want their own treatment.
+
+---
+
+## Modification log
+
+| Date | Change |
+|------|--------|
+| 2026-09-15 | Opened, after the module organization plan closed. Measurements taken at that commit. |

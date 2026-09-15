@@ -199,7 +199,9 @@ that this is a *candidate*, not a defect — and the case for it should be made
 on whether the two halves have different reasons to change, not on the line
 count.
 
-**Update 2026-09-15.** The extraction happened, in the data contract refactor:
+**Update 2026-09-15.** Recorded in full in
+[`load_pipeline_problem_statement.md`](load_pipeline_problem_statement.md).
+The extraction happened, in the data contract refactor:
 `RunFetch` exists, owned by `RunSource` and handed out as `.fetch` with no
 forwarding method. It was half right, and the module reorganisation measured
 the other half:
@@ -303,7 +305,9 @@ request at all: constructed directly from `(uid, xkey, ykey)` in `session.py`
 `single_canvas.py` uses at eight sites.
 
 Small, and the same confusion as item 5 one layer up, so it belongs with that
-work: settle where a trace key is created and where it belongs follows.
+work: settle where a trace key is created and where it belongs follows. Open
+as decision 4 of
+[`load_pipeline_problem_statement.md`](load_pipeline_problem_statement.md).
 
 ## Deferred by decision, and still deferred
 
