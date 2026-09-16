@@ -214,22 +214,6 @@ def test_image_and_mesh_agree_on_axis_placement():
 # ---------------------------------------------------------------------------
 
 
-def _plain_2d_request():
-    """A 2-D request with no region, for the packing step."""
-    from nbs_viewer.models.plot.spec.request import PlotRequest
-    from nbs_viewer.models.plot.view_intent import ViewIntent
-
-    return PlotRequest(
-        uid="uid",
-        xkeys=("x",
-),
-        ykey="det",
-        norm_keys=(),
-        view=ViewIntent(plot_ndim=2).project(2, (4, 5)),
-        dims=("dim_0", "dim_1")
-)
-
-
 @pytest.mark.parametrize("row_descending", [False, True], ids=["row asc", "row desc"])
 @pytest.mark.parametrize("col_descending", [False, True], ids=["col asc", "col desc"])
 def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descending):
@@ -254,7 +238,7 @@ def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descendin
     cols = np.arange(5.0)[::-1] if col_descending else np.arange(5.0)
 
     bundle = build_plot_bundle(
-        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+        labelled_block(y, [rows, cols], ["row", "col"])
     )
 
     # Display order is the order in which the coordinates ascend upward and
@@ -283,7 +267,7 @@ def test_the_pack_leaves_a_mesh_alone():
     cols = np.cumsum(np.linspace(0.1, 0.9, 5))
 
     bundle = build_plot_bundle(
-        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+        labelled_block(y, [rows, cols], ["row", "col"])
     )
 
     assert bundle.render_mode == "mesh"

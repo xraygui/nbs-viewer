@@ -13,11 +13,16 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
+import numpy as np
+import xarray as xr
+
+from ..plane.frame import PlotViewFrame
 from ..plane.roles import DimRole, MaskMode, SpatialReduce
 from .axes import PlotAxes
+from .bundle import PlotBundle, prepare_1d_bundle
 from .projection import Projection
-from ..plane.frame import PlotViewFrame
 from .region import RegionDefinition
+from .stages import materialize_view
 
 
 @dataclass(frozen=True)
@@ -335,3 +340,91 @@ class PlotRequest:
             ykey=self.ykey,
             fan_out_index=fan_out_index
 )
+
+    def reduce_cached_plane(
+        self,
+        plane: "PlotBundle",
+        *,
+        label: str = "",
+    ) -> "PlotBundle":
+        """
+        Reduce an already-loaded display plane to an ROI profile.
+
+        It took the request as its second argument while living beside the
+        stages, which was the only thing tying that module to the chain above
+        it. Everything it reads -- the plane axes, the profile axis, the spatial
+        reduce, the region and the mask mode -- is this request's own.
+
+        The one genuine optimisation in the fetch path: when the profile runs
+        along an axis the plane already shows, the answer is in memory and no
+        database read is needed. The plane is display-ordered and the masking
+        stage works in the order the source stored the data, so the plane is
+        turned back before it is masked.
+
+        Parameters
+        ----------
+        plane : PlotBundle
+            Cached 2-D bundle for this request's ``view`` plot plane.
+        label : str
+            Optional display label for the profile.
+
+        Returns
+        -------
+        PlotBundle
+            1-D profile payload.
+
+        Raises
+        ------
+        ValueError
+            If the plane is not 2-D, the profile axis is off it, or the ROI
+            reduces to nothing.
+        """
+        if plane.ndim != 2:
+            raise ValueError("cached_plane must be a 2-D bundle")
+        plane_axes = self.plane_axes
+        if plane_axes is None or self.profile_axis not in plane_axes:
+            raise ValueError("cached_plane cannot serve an off-plane profile")
+
+        frame = plane.view_frame()
+        bundle_profile_axis = 0 if self.profile_axis == plane_axes[0] else 1
+        plane_view = Projection(
+            ndim=2,
+            plot_ndim=2,
+            roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+            indices=(0, 0),
+        )
+        arrays, names = plane.axis_arrays()
+        values = np.asarray(plane.y)
+        # ``mask_to_profile`` turns the display-ordered mask round to meet a
+        # storage-ordered block, so the plane turns back first, coordinates with
+        # it. Handed over as displayed, the mask was turned twice and an ROI drawn
+        # low on a row-reversed image summed the mirror-image rows at the top.
+        if frame.row_reversed:
+            values = values[::-1, :]
+            arrays[frame.plot_y_dim] = arrays[frame.plot_y_dim][::-1]
+        if frame.col_reversed:
+            values = values[:, ::-1]
+            arrays[frame.plot_x_dim] = arrays[frame.plot_x_dim][::-1]
+        data = xr.DataArray(
+            values,
+            dims=list(names),
+            coords={name: array for name, array in zip(names, arrays)},
+        )
+        axes = PlotAxes.of(plane_view, names).to_profile(
+            bundle_profile_axis, self.spatial_reduce
+        )
+        profile = materialize_view(
+            data,
+            axes,
+            region=self.region,
+            mask_mode=self.mask_mode,
+            region_frame=frame,
+        )
+        if not np.isfinite(profile.values).any():
+            raise ValueError("ROI profile is empty after reduction")
+        profile_dim = profile.dims[0]
+        return prepare_1d_bundle(
+            profile.values,
+            [np.asarray(profile.coords[profile_dim].values)],
+            [label or str(profile_dim)],
+        )

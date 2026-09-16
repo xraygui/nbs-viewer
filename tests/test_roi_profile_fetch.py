@@ -5,7 +5,6 @@ import pytest
 
 from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.plot.spec.projection import Projection
-from nbs_viewer.models.plot.spec.stages import reduce_cached_plane
 from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
 from nbs_viewer.models.plot.spec.request import PlotRequest
 from nbs_viewer.models.plot.spec.plan import plan_fetch
@@ -74,7 +73,7 @@ def test_cached_plane_profile_mesh():
         RectRegion(x0=x0, x1=x1, y0=y0, y1=y1),
         profile_axis=frame.plot_y_dim
 )
-    bundle = reduce_cached_plane(plane, request, label="test roi")
+    bundle = request.reduce_cached_plane(plane, label="test roi")
 
     assert bundle.render_mode == "line"
     assert bundle.ndim == 1
@@ -138,7 +137,7 @@ def test_cached_plane_profile_with_4d_parent_spec():
         profile_axis=parent.storage_axis_for("plot_x")
 )
 
-    bundle = reduce_cached_plane(plane, request)
+    bundle = request.reduce_cached_plane(plane)
 
     assert bundle.render_mode == "line"
     assert bundle.y.shape == (10,
@@ -209,7 +208,7 @@ def test_an_in_plane_profile_masks_the_cells_the_user_drew_on(
         _PLANE_2D, _TRIANGLE, profile_axis=1 if along == "plot_x" else 0
     )
 
-    got = reduce_cached_plane(plane, request)
+    got = request.reduce_cached_plane(plane)
     coords, values = _display_profile(plane, _TRIANGLE, along)
 
     # Pair by coordinate: the order a 1-D profile comes out in is not the
@@ -237,7 +236,7 @@ def test_cached_plane_refuses_an_off_plane_profile():
     )
 
     with pytest.raises(ValueError, match="off-plane"):
-        reduce_cached_plane(plane, request)
+        request.reduce_cached_plane(plane)
 
 
 # The selection-driven default from step 2: X key ``x`` is storage axis 0 and

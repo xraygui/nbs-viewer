@@ -37,8 +37,6 @@ from ..plane.orientation import (
 if TYPE_CHECKING:  # pragma: no cover - annotation only
     import xarray as xr
 
-    from .request import PlotRequest
-
 
 @dataclass
 class PlotBundle:
@@ -83,6 +81,50 @@ class PlotBundle:
     row_reversed: bool = False
     col_reversed: bool = False
 
+    def _padded_names(self) -> List[str]:
+        """
+        Return :attr:`axis_names` grown to at least two entries.
+
+        Both the frame and :meth:`axis_arrays` need two names for a plane and
+        neither can assume the bundle carries them, so the padding lives once
+        here rather than being open-coded by each.
+        """
+        names = list(self.axis_names)
+        while len(names) < 2:
+            names.append(f"dim_{len(names)}")
+        return names
+
+    def axis_arrays(self) -> Tuple[List[np.ndarray], List[str]]:
+        """
+        Return per-axis coordinate arrays and names for this 2-D plane.
+
+        Row first, then column, which is the order a frame reports: display
+        rows are plot Y and columns are plot X in both render modes.
+
+        This was a free function beside the stages that took the bundle *and*
+        its view frame. Every field it read off that frame is on the bundle --
+        the shape is ``y.shape``, the render mode is the bundle's own, and the
+        two plot dims are the constants :meth:`view_frame` supplies -- so the
+        frame was never an argument, only the habit of a function that had no
+        object to live on.
+
+        Returns
+        -------
+        tuple
+            ``(axis_arrays, axis_names)``, row axis first.
+        """
+        names = self._padded_names()
+        ny, nx = int(self.y.shape[0]), int(self.y.shape[1])
+        row_axis = np.arange(ny, dtype=float)
+        col_axis = np.arange(nx, dtype=float)
+        if self.render_mode == "mesh" and self.mesh_x is not None:
+            mesh_x = np.asarray(self.mesh_x, dtype=float)
+            mesh_y = np.asarray(self.mesh_y, dtype=float)
+            if mesh_x.shape == (ny, nx):
+                row_axis = np.nanmean(mesh_y, axis=1)
+                col_axis = np.nanmean(mesh_x, axis=0)
+        return [row_axis, col_axis], [names[0], names[1]]
+
     def view_frame(self) -> PlotViewFrame:
         """
         Build a view frame from this prepared 2D bundle.
@@ -103,9 +145,7 @@ class PlotBundle:
                 f"ndim={self.ndim} mode={self.render_mode}"
             )
 
-        names = list(self.axis_names)
-        while len(names) < 2:
-            names.append(f"dim_{len(names)}")
+        names = self._padded_names()
 
         shape = (int(self.y.shape[0]), int(self.y.shape[1]))
 
@@ -266,8 +306,8 @@ def prepare_2d_bundle(
 
 def build_plot_bundle(
     data: "xr.DataArray",
-    request: "PlotRequest",
     *,
+    is_roi_profile: bool = False,
     render_mode_hint: Optional[str] = None,
     label: str = "",
 ):
@@ -294,8 +334,10 @@ def build_plot_bundle(
     ----------
     data : xarray.DataArray
         Reduced, transformed array in plot order and source orientation.
-    request : PlotRequest
-        Used to detect ROI profile output.
+    is_roi_profile : bool
+        Whether this array is an ROI reduction rather than a plane. It used
+        to be read off a whole ``PlotRequest`` passed in for the purpose,
+        which was the only thing this module wanted from the chain above it.
     render_mode_hint : str, optional
         Declared ``image`` / ``mesh`` override for the key.
     label : str, optional
@@ -319,7 +361,7 @@ def build_plot_bundle(
         else np.arange(data.sizes[dim], dtype=float)
         for dim in names
     ]
-    if request.region is not None:
+    if is_roi_profile:
         if not np.isfinite(y).any():
             raise ValueError("ROI profile is empty after reduction")
         display_label = label or (names[0] if names else "profile")

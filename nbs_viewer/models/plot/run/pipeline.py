@@ -28,7 +28,6 @@ from ..spec.stages import (
     apply_transform,
     mask_to_profile,
     reduce_before_mask,
-    reduce_cached_plane,
     reduce_to_plane,
     slice_info_for_key,
 )
@@ -131,7 +130,7 @@ class RunFetch:
             plane = cached_plane
             if plane is None or plane.ndim != 2:
                 plane = self.get_plot_bundle(request.plane_request)
-            return reduce_cached_plane(plane, request, label=label)
+            return request.reduce_cached_plane(plane, label=label)
 
         data, norms, plan = self._load_block(request)
 
@@ -171,7 +170,7 @@ class RunFetch:
             data = data.rename({data.dims[0]: label or info.label})
         return build_plot_bundle(
             data,
-            request,
+            is_roi_profile=request.region is not None,
             render_mode_hint=self._render_hint(request.ykey),
             label=label,
         )
