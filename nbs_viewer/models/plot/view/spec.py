@@ -15,81 +15,21 @@ package to do so.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from enum import Enum
 from typing import (
     List,
     Literal,
     Optional,
     Sequence,
     Tuple,
-    Union,
 )
-
-# The one definition of each. ``SliceItem`` had three in this package,
-# ``PlotAxisName`` two, and ``SpatialReduce`` two -- one of them widened to
-# plain ``str`` under the same name, so two modules disagreed about whether
-# "insid" was a value. ``MaskMode`` lives in :mod:`region` with
-# ``compile_with_mask_mode``, which is the thing it configures.
-SliceItem = Union[int, slice]
-SpatialReduce = Literal["sum", "mean"]
-PlotAxisName = Literal["plot_x", "plot_y"]
-
-
-class DimRole(str, Enum):
-    """How a storage dimension participates in the projection."""
-
-    INDEX = "index"
-    PLOT_X = "plot_x"
-    PLOT_Y = "plot_y"
-    SUM = "sum"
-    MEAN = "mean"
-
-
-ROLE_LABELS = {
-    DimRole.INDEX: "Index",
-    DimRole.PLOT_X: "Plot X",
-    DimRole.PLOT_Y: "Plot Y",
-    DimRole.SUM: "Sum",
-    DimRole.MEAN: "Mean",
-}
-
-SLICE_ROLES = (DimRole.INDEX, DimRole.SUM, DimRole.MEAN)
-
-
-@dataclass(frozen=True)
-class ViewCrop:
-    """
-    Integer storage-index crop on the 2D plot plane.
-
-    Display-to-storage conversion happens at construction time. Only the
-    bounds needed to narrow a load slice are retained, so the crop is
-    hashable and safe to embed in a ``Projection`` / ``PlotRequest``.
-
-    Parameters
-    ----------
-    storage_bbox : tuple of int
-        Half-open bounding box ``(row_start, row_stop, col_start, col_stop)``
-        on the raw storage plane.
-    plot_y_axis : int
-        Storage axis index mapped to plot Y.
-    plot_x_axis : int
-        Storage axis index mapped to plot X.
-    """
-
-    storage_bbox: Tuple[int, int, int, int]
-    plot_y_axis: int
-    plot_x_axis: int
-
-    def __post_init__(self) -> None:
-        r0, r1, c0, c1 = self.storage_bbox
-        if r1 <= r0 or c1 <= c0:
-            raise ValueError(
-                f"storage_bbox must be non-empty half-open, got {self.storage_bbox}"
-            )
-        if self.plot_y_axis == self.plot_x_axis:
-            raise ValueError("plot_y_axis and plot_x_axis must differ")
-        if self.plot_y_axis < 0 or self.plot_x_axis < 0:
-            raise ValueError("plot axis indices must be non-negative")
+from ..plane.roles import (
+    SLICE_ROLES,
+    DimRole,
+    PlotAxisName,
+    SliceItem,
+    SpatialReduce,
+    ViewCrop,
+)
 
 
 def _resolved_roles(

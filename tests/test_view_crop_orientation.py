@@ -3,7 +3,7 @@
 import numpy as np
 
 from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.orientation import display_flips
+from nbs_viewer.models.plot.plane.orientation import display_flips
 from tests.fixtures.display_plane import orient_block
 
 

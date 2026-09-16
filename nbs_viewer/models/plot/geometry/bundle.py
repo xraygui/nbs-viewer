@@ -24,8 +24,8 @@ from typing import (
 
 import numpy as np
 
-from .frame import PlotViewFrame
-from .orientation import (
+from ..plane.frame import PlotViewFrame
+from ..plane.orientation import (
     RenderMode,
     build_mesh_grids,
     extent_from_uniform_1d,

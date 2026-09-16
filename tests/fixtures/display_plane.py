@@ -13,8 +13,8 @@ from typing import Sequence, Tuple
 import numpy as np
 
 from nbs_viewer.models.plot.geometry.bundle import PlotBundle, prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.orientation import display_flips
-from nbs_viewer.models.plot.geometry.frame import PlotViewFrame
+from nbs_viewer.models.plot.plane.orientation import display_flips
+from nbs_viewer.models.plot.plane.frame import PlotViewFrame
 
 
 def orient_block(

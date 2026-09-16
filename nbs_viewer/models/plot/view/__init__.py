@@ -27,18 +27,17 @@ it decides an axis order *before* any projection exists -- policy rather than
 a question about a value.
 """
 
-from .axes import PlotAxes
-from .spec import (
+from ..plane import (
     ROLE_LABELS,
     SLICE_ROLES,
     DimRole,
     PlotAxisName,
-    Projection,
     SliceItem,
     SpatialReduce,
     ViewCrop,
-    resolve_axis_order,
 )
+from .axes import PlotAxes
+from .spec import Projection, resolve_axis_order
 
 __all__ = [
     "DimRole",

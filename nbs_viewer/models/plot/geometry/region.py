@@ -14,9 +14,9 @@ from typing import ClassVar, Dict, Literal, Tuple, Type
 
 import numpy as np
 
-from .frame import PlotViewFrame
-from ..view import PlotAxisName, ViewCrop
-from .mask import (
+from ..plane.frame import PlotViewFrame
+from ..plane.roles import MaskMode, PlotAxisName, ViewCrop
+from ..plane.mask import (
     cell_mask_at_point,
     mask_covering_data_rect,
     mask_from_axis_slice,
@@ -25,7 +25,6 @@ from .mask import (
     mask_from_vertices,
 )
 
-MaskMode = Literal["inside", "outside"]
 ReduceOp = Literal["sum", "mean"]
 
 

@@ -35,13 +35,17 @@ from .bundle import (
     prepare_1d_bundle,
     prepare_2d_bundle,
 )
-from .frame import PlotViewFrame
-from .orientation import RenderMode, classify_render_mode, display_flips
+from ..plane import (
+    MaskMode,
+    PlotViewFrame,
+    RenderMode,
+    classify_render_mode,
+    display_flips,
+)
 from .region import (
     AxisSliceRegion,
     CompiledRegion,
     EllipseRegion,
-    MaskMode,
     PolygonRegion,
     RectRegion,
     RegionDefinition,

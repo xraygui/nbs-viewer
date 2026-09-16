@@ -5,7 +5,7 @@ import pytest
 
 from tests.fixtures.display_plane import orient_block
 from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle, prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.orientation import (
+from nbs_viewer.models.plot.plane.orientation import (
     classify_render_mode,
     display_flips,
     is_uniform_1d,

@@ -10,7 +10,7 @@ from nbs_viewer.models.plot.geometry.region import (
     PolygonRegion,
     RectRegion,
 )
-from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
+from nbs_viewer.models.plot.plane.mask import mask_from_data_rect
 from nbs_viewer.models.plot.fetch.stages import materialize_view
 from nbs_viewer.models.plot.view.spec import DimRole, Projection
 from tests.fixtures.display_plane import labelled_block, profile_axes
@@ -137,7 +137,7 @@ def test_image_rect_mask_shape():
 
 
 def test_cell_centers_image_shape_and_order():
-    from nbs_viewer.models.plot.geometry.mask import cell_centers
+    from nbs_viewer.models.plot.plane.mask import cell_centers
 
     ny, nx = 4, 5
     bundle = prepare_2d_bundle(
@@ -160,7 +160,7 @@ def test_image_mask_at_plot_top_selects_storage_row_zero():
     """
     Regression: row 0 must map to the top of the axes under origin='upper'.
     """
-    from nbs_viewer.models.plot.geometry.mask import mask_from_data_rect
+    from nbs_viewer.models.plot.plane.mask import mask_from_data_rect
 
     ny, nx = 10, 12
     bundle = prepare_2d_bundle(
