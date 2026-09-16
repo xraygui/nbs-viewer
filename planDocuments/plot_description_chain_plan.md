@@ -22,7 +22,7 @@ hash again.
 | 1 | Make `plane/` the sink, and kill the cycle | **done** | `b1e33b8` |
 | 2 | Form `spec/` | **done** | `f4f9d82` |
 | 3 | Cut the two machinery-to-request edges | **done** | `020cf9d` |
-| 4 | Reverse the chain, free functions onto their types | **open** | |
+| 4 | Reverse the chain, free functions onto their types | **done** | `ee92307` |
 | 5a | Split `RunFetch` into a reader and a cache | **open** | |
 | 5b | Move the sequencer onto the request | **open** | |
 | 6 | Give `Trace` its key | **open** | |
@@ -318,7 +318,16 @@ adds the opposite one. Split across two commits, the first is a cycle.
 
 ### 4. Reverse the chain, and put the free functions on their types
 
-**Open.**
+**Done.** Six free functions became methods and the `plan` -> `request` edge
+reversed: `spec/plan.py` is now `FetchPlan` + `narrow` + `kept_axes` and
+imports nothing from `spec/`, while `spec/request.py` carries the planner.
+`PlotBundle` gained `from_1d`, `from_2d`, `pack`, `storage_axes` and `copy`,
+which makes `run/frozen_spectrum.py` a file about frozen spectra only.
+Two departures from what is written below, both noted in the modification
+log: `_storage_axes_from_bundle` became the public `PlotBundle.storage_axes`
+rather than a private method, because its caller is in another module; and
+`copy()` preserves `row_reversed` / `col_reversed`, which the free function
+silently dropped.
 
 - `plan_fetch(request, *, plane_frame)` → `PlotRequest.plan(*, plane_frame)`.
   Its 96-line body (`spec/plan.py:113–208`) **moves file**, into
@@ -470,5 +479,6 @@ property, which is untouched.
 | 2026-09-16 | Progress markers added: a table near the top, a status line on each step, and a settled marker on gating decisions as they are taken. The document had no way to say which steps had landed, which matters more here than usual because step 6 is independent of 3-5b and may be taken out of order. |
 | 2026-09-16 | Asked whether every link pulls its weight, before any work started. `ViewIntent` is reclassified as the chain's editor rather than a link: it works in names where `Projection` works in indices, and `set_reduce_from` flows state back up. `FetchPlan` is recorded as the weakest genuine rung — five of eight fields are request pass-throughs and its unique behaviour is the cache key — so its survival is tied to the deferred cache decision and listed with it. The `PlotViewFrame` / `PlotBundle` eight-field overlap is recorded as a non-goal: a real duplication, larger than anything on the chain, and out of scope here. |
 | 2026-09-15 | Decision 7 reversed after the maintainer noted that recorded decisions are advisory during a reorganization, not binding. On the merits `MaskMode` is plane vocabulary — four consumers, and its only use in `region.py` is a parameter that step 4 turns into a method — so it moves to `plane/roles.py`. Measuring it also turned up `ReduceOp` and `SpatialReduce` as the same `Literal["sum", "mean"]` under two names in two packages, which the note in `view/spec.py` claims to have cleaned up. Step 1's framing of the two boundary tests is relaxed: they may be xfailed for the length of the step, green by the end of it. |
+| 2026-09-16 | Step 4 landed with two departures. `_storage_axes_from_bundle` became `PlotBundle.storage_axes`, public rather than the private method the step called for, because its only caller is `FrozenSpectrum.load_coords` in another module and a leading underscore there would be a private name crossing a boundary -- the same objection that shaped step 3. It sits beside `axis_arrays` and the docstring says why the two are different questions rather than one written twice: storage order against display order, edges against centres, and 1-D as well as 2-D. Second, `PlotBundle.copy()` now preserves `row_reversed` and `col_reversed`; `copy_plot_bundle` omitted them, so every copied bundle claimed no axis had been reversed. No test covered it because a frozen bundle is re-read through `storage_axes` and `get_data`, neither of which reads the flags. Also cleaned up in passing: `plane/roles.py` carried a duplicate block of three type aliases and an orphaned half-sentence comment, left by step 1's extraction. |
 | 2026-09-15 | Step 3's choice between two awkward options collapsed: the maintainer pointed out that `_plane_axis_arrays` is itself a `PlotBundle` method in the wrong place. Measured and it is stronger than that — its `frame` argument is redundant, every field it reads is on the bundle, and it has one caller and no tests. `reduce_cached_plane` moves onto `PlotRequest` with no private name crossing a boundary, and the step's gating decision is withdrawn. |
 | 2026-09-15 | Reviewed step by step before any work started. Call-site counts were recounted excluding definitions and `__init__` re-exports and were overstated throughout — most importantly `.fetch`, which is 2 production sites and not 15, because the earlier count conflated the property with the `plot.fetch.request` package path. Four substantive changes: step 1 now names the two boundary tests it breaks, and records that the sink property moves to `plane/` rather than being given up; `MaskMode`/`ReduceOp` no longer move, honouring a decision recorded in `view/spec.py`; step 3 records that `reduce_cached_plane` cannot simply become a method, because it uses a module-private helper, and offers two ways out; step 5 splits into 5a and 5b so the 76 test sites churn once, late. `x_dimension` is dropped for leaving the package, and three questions that were being settled mid-step are listed as gating their steps. |
