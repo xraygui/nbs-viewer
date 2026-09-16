@@ -8,6 +8,27 @@ which recorded the shape and proposed no work. Written to the conventions in
 [`data_contract_review.md`](data_contract_review.md): steps name their files,
 functions and call sites, and no step states a count it has not measured.
 
+## Progress
+
+One line per step. A step is **done** only when the whole suite is green at
+its commit; nothing is left `xfail`ed across a step boundary.
+
+| | step | status | commit |
+|---|---|---|---|
+| 1 | Make `plane/` the sink, and kill the cycle | **done** | `b1e33b8` |
+| 2 | Form `spec/` | **done** | `f4f9d82` |
+| 3 | Cut the two machinery-to-request edges | **open** | |
+| 4 | Reverse the chain, free functions onto their types | **open** | |
+| 5a | Split `RunFetch` into a reader and a cache | **open** | |
+| 5b | Move the sequencer onto the request | **open** | |
+| 6 | Give `Trace` its key | **open** | |
+
+Gating decisions still unmade are listed under *Still to decide* below; step
+5a cannot start before its one is settled. Step 6 is independent of 3–5b and
+may be taken at any point.
+
+---
+
 **The block cache is out of scope.** Its three options stay open, and step 5a
 is what makes them cheap to evaluate — today they cannot be, because the cache
 and the pipeline are one class.
@@ -109,7 +130,7 @@ or a region, and `plane/` *is* the frame.
   step 2 is a rename rather than the deletion it claims. Naming modules at the
   import site (`from ..spec.plan import FetchPlan`) is what makes the rung
   visible where it is used, but it turns ~108 mechanical re-points into hand
-  edits. Recommendation: no facade. **Gates step 2.**
+  edits. Recommendation: no facade. **Gated step 2; settled — no facade.**
 - **Does `RunSource` keep the reader surface, or hand out `.reader`?** See
   step 5a. **Gates step 5a.**
 - **Does `FetchPlan` survive the cache decision?** Not gating — no step
@@ -195,6 +216,8 @@ Each step leaves the suite green. Line counts are code lines at `4c93e34`.
 
 ### 1. Make `plane/` the sink, and kill the cycle
 
+**Done** at `b1e33b8`.
+
 Create `plane/`. Move `geometry/frame.py` (377), `geometry/orientation.py`
 (266) and `geometry/mask.py` (357) into it unchanged. Move out of
 `view/spec.py` into a new `plane/roles.py`: `SliceItem`, `SpatialReduce`,
@@ -224,6 +247,8 @@ external importers do not churn yet.
 
 ### 2. Form `spec/`
 
+**Done** at `f4f9d82`.
+
 **Decide the facade question first.** Then move into `spec/`: `view/spec.py` →
 `projection.py`, `view/axes.py` → `axes.py`, `geometry/region.py` →
 `region.py`, `geometry/bundle.py` → `bundle.py`, `fetch/request.py` →
@@ -237,6 +262,8 @@ most of all, since it contains no fetch.
 **Not in this step:** no code moves between modules and no signature changes.
 
 ### 3. Cut the two machinery-to-request edges
+
+**Open.**
 
 Two functions carry the entire dependency of the machinery on the chain.
 
@@ -279,6 +306,8 @@ adds the opposite one. Split across two commits, the first is a cycle.
 
 ### 4. Reverse the chain, and put the free functions on their types
 
+**Open.**
+
 - `plan_fetch(request, *, plane_frame)` → `PlotRequest.plan(*, plane_frame)`.
   Its 96-line body (`plan.py:115–211`) **moves file**, from `plan.py` into
   `request.py`. `plan.py` is then `FetchPlan` + `narrow` + `kept_axes`, ~130
@@ -313,6 +342,8 @@ it and now calls `PlotRequest.plan()`.
 
 ### 5a. Split `RunFetch` into a reader and a cache
 
+**Open**, and gated: see the decision below before starting.
+
 `run/pipeline.py` is 455 code lines; by the problem statement's method-line
 measure, 463: 289 of block cache, 101 of `get_plot_bundle`, 53 of
 `_plane_frame`, 20 of `_render_hint`.
@@ -346,6 +377,8 @@ sites do not churn yet.
 
 ### 5b. Move the sequencer onto the request
 
+**Open.**
+
 `PlotRequest.plot_bundle(reader, *, cached_plane=None, label="")` in
 `spec/request.py` — the 101-line sequencer plus `_plane_frame` as a private
 `PlotRequest.plane_frame(reader)`. The recursion becomes
@@ -369,6 +402,8 @@ badly; do not leave it unexamined.
 **Not in this step:** the cache's key, capacity and location are unchanged.
 
 ### 6. Give `Trace` its key
+
+**Open.** Independent of steps 3–5b.
 
 Independent of steps 3–5b, and cheaper if taken first.
 
@@ -418,6 +453,7 @@ property, which is untouched.
 | Date | Change |
 |------|--------|
 | 2026-09-15 | Drafted at `4c93e34`. |
+| 2026-09-16 | Progress markers added: a table near the top, a status line on each step, and a settled marker on gating decisions as they are taken. The document had no way to say which steps had landed, which matters more here than usual because step 6 is independent of 3-5b and may be taken out of order. |
 | 2026-09-16 | Asked whether every link pulls its weight, before any work started. `ViewIntent` is reclassified as the chain's editor rather than a link: it works in names where `Projection` works in indices, and `set_reduce_from` flows state back up. `FetchPlan` is recorded as the weakest genuine rung — five of eight fields are request pass-throughs and its unique behaviour is the cache key — so its survival is tied to the deferred cache decision and listed with it. The `PlotViewFrame` / `PlotBundle` eight-field overlap is recorded as a non-goal: a real duplication, larger than anything on the chain, and out of scope here. |
 | 2026-09-15 | Decision 7 reversed after the maintainer noted that recorded decisions are advisory during a reorganization, not binding. On the merits `MaskMode` is plane vocabulary — four consumers, and its only use in `region.py` is a parameter that step 4 turns into a method — so it moves to `plane/roles.py`. Measuring it also turned up `ReduceOp` and `SpatialReduce` as the same `Literal["sum", "mean"]` under two names in two packages, which the note in `view/spec.py` claims to have cleaned up. Step 1's framing of the two boundary tests is relaxed: they may be xfailed for the length of the step, green by the end of it. |
 | 2026-09-15 | Step 3's choice between two awkward options collapsed: the maintainer pointed out that `_plane_axis_arrays` is itself a `PlotBundle` method in the wrong place. Measured and it is stronger than that — its `frame` argument is redundant, every field it reads is on the bundle, and it has one caller and no tests. `reduce_cached_plane` moves onto `PlotRequest` with no private name crossing a boundary, and the step's gating decision is withdrawn. |
