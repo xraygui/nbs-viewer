@@ -81,6 +81,225 @@ class PlotBundle:
     row_reversed: bool = False
     col_reversed: bool = False
 
+    @classmethod
+    def from_1d(
+        cls,
+        y: np.ndarray,
+        x_axes: Sequence[np.ndarray],
+        axis_names: Sequence[str],
+    ) -> "PlotBundle":
+        """
+        Build a PlotBundle for 1D line data.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            1D y values.
+        x_axes : sequence of np.ndarray
+            X axis arrays.
+        axis_names : sequence of str
+            Axis dimension names.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared 1D bundle.
+        """
+        x_line = np.asarray(x_axes[0]).ravel() if x_axes else np.arange(y.size)
+        names = list(axis_names) if axis_names else ["index"]
+        return cls(
+            ndim=1,
+            y=np.asarray(y),
+            render_mode="line",
+            axis_names=names,
+            x_line=x_line,
+        )
+
+    @classmethod
+    def from_2d(
+        cls,
+        y: np.ndarray,
+        x_axes: Sequence[np.ndarray],
+        axis_names: Sequence[str],
+        render_mode_hint: Optional[str] = None,
+        *,
+        row_reversed: bool = False,
+        col_reversed: bool = False,
+    ) -> "PlotBundle":
+        """
+        Pack an already display-ordered 2D plane into a PlotBundle.
+
+        Data orientation: row index maps to the vertical axis, column index to
+        the horizontal axis (consistent with matplotlib imshow). This holds for
+        both render modes. Which storage dimension ends up on which screen axis
+        is decided upstream by the projection's plot-axis roles, and the
+        storage-to-display reversal is applied upstream too, by
+        :func:`orient_for_display` immediately after the load; the renderer must
+        not reorder anything again.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            2D data array, in display order.
+        x_axes : sequence of np.ndarray
+            Axis coordinate arrays for non-sliced dimensions, in display order.
+        axis_names : sequence of str
+            Names for each axis dimension.
+        render_mode_hint : str, optional
+            Explicit render mode from plot hints.
+        row_reversed : bool
+            Whether the caller reversed the row axis to reach display order.
+            Recorded on the bundle; it does not change what is packed here.
+        col_reversed : bool
+            Same for the column axis.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared 2D bundle with render mode and coordinates.
+        """
+        y = np.asarray(y)
+        if y.ndim != 2:
+            raise ValueError(f"from_2d expects 2D data, got shape {y.shape}")
+
+        names = list(axis_names) if axis_names else []
+        while len(names) < 2:
+            names.append(f"dim_{len(names)}")
+
+        render_mode = classify_render_mode(
+            y.shape, x_axes, render_mode_hint=render_mode_hint
+        )
+
+        if render_mode == "image":
+            ny, nx = y.shape
+            if len(x_axes) >= 2:
+                row_axis = np.asarray(x_axes[-2]).ravel()
+                col_axis = np.asarray(x_axes[-1]).ravel()
+                if row_axis.size > 1 and col_axis.size > 1:
+                    extent = extent_from_uniform_1d(col_axis, row_axis)
+                else:
+                    extent = pixel_extent(ny, nx)
+            else:
+                extent = pixel_extent(ny, nx)
+
+            return cls(
+                ndim=2,
+                y=y,
+                render_mode="image",
+                axis_names=names[-2:],
+                extent=extent,
+                row_reversed=row_reversed,
+                col_reversed=col_reversed,
+            )
+
+        mesh_axes = [np.asarray(axis) for axis in x_axes[-2:]]
+        mesh_x, mesh_y = build_mesh_grids(y, mesh_axes)
+        return cls(
+            ndim=2,
+            y=y,
+            render_mode="mesh",
+            axis_names=names[-2:],
+            mesh_x=mesh_x,
+            mesh_y=mesh_y,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
+        )
+
+    @classmethod
+    def pack(
+        cls,
+        data: "xr.DataArray",
+        *,
+        is_roi_profile: bool = False,
+        render_mode_hint: Optional[str] = None,
+        label: str = "",
+    ) -> "PlotBundle":
+        """
+        Pack a finished labelled array into a :class:`PlotBundle`.
+
+        **This is where display order begins.** Everything upstream works in
+        the order the source stored the data; the reversal that puts a plane
+        the right way up for ``imshow`` happens here, once, on a finished 2-D
+        plane.
+
+        It used to happen immediately after the load, on the whole N-D block,
+        which meant a normalization array sharing a plot-plane axis had to be
+        reversed to match, the block cache had to mirror its windows, and the
+        render mode had to be classified before the reduce so the flip could be
+        decided. None of that was about the data; it was about a matplotlib
+        convention -- ``origin="upper"`` puts storage row 0 at the top --
+        reaching five stages back into the pipeline.
+
+        The array's trailing dimensions are the plot axes and carry their own
+        coordinates, so names and coordinate arrays are read off it rather than
+        passed alongside.
+
+        Parameters
+        ----------
+        data : xarray.DataArray
+            Reduced, transformed array in plot order and source orientation.
+        is_roi_profile : bool
+            Whether this array is an ROI reduction rather than a plane. It used
+            to be read off a whole ``PlotRequest`` passed in for the purpose,
+            which was the only thing this module wanted from the chain above it.
+        render_mode_hint : str, optional
+            Declared ``image`` / ``mesh`` override for the key.
+        label : str, optional
+            Display name for a 1-D ROI profile.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared payload for the view layer, in display order.
+
+        Raises
+        ------
+        ValueError
+            If an ROI profile is empty, or the output is neither 1-D nor 2-D.
+        """
+        y = np.asarray(data.values)
+        names = [
+            str(dim) for dim in (data.dims[-2:] if y.ndim >= 2 else data.dims)
+        ]
+        coords = [
+            np.asarray(data.coords[dim].values)
+            if dim in data.coords
+            else np.arange(data.sizes[dim], dtype=float)
+            for dim in names
+        ]
+        if is_roi_profile:
+            if not np.isfinite(y).any():
+                raise ValueError("ROI profile is empty after reduction")
+            display_label = label or (names[0] if names else "profile")
+            return cls.from_1d(y, coords, [display_label])
+        if y.ndim == 1:
+            return cls.from_1d(y, coords, names)
+        if y.ndim == 2:
+            # Classified before the flip, which is safe: uniformity is a
+            # property of the coordinate differences, and reversing an array
+            # does not change whether its steps are equal.
+            render_mode = classify_render_mode(
+                y.shape, coords, render_mode_hint=render_mode_hint
+            )
+            row_reversed, col_reversed = display_flips(
+                coords[0], coords[1], render_mode
+            )
+            if row_reversed:
+                y = np.flip(y, axis=0)
+                coords[0] = coords[0][::-1]
+            if col_reversed:
+                y = np.flip(y, axis=1)
+                coords[1] = coords[1][::-1]
+            return cls.from_2d(
+                y,
+                coords,
+                names,
+                render_mode_hint=render_mode,
+                row_reversed=row_reversed,
+                col_reversed=col_reversed,
+            )
+        raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")
+
     def _padded_names(self) -> List[str]:
         """
         Return :attr:`axis_names` grown to at least two entries.
@@ -181,215 +400,96 @@ class PlotBundle:
         """
         return self.view_frame().fingerprint()
 
+    def storage_axes(self) -> Tuple[List[np.ndarray], List[str]]:
+        """
+        Return per-storage-axis coordinate arrays and names for this bundle.
 
-def prepare_1d_bundle(
-    y: np.ndarray,
-    x_axes: Sequence[np.ndarray],
-    axis_names: Sequence[str],
-) -> PlotBundle:
-    """
-    Build a PlotBundle for 1D line data.
+        The storage-order counterpart of :meth:`axis_arrays`, and the two are
+        genuinely different questions rather than one written twice. This one
+        answers for 1-D as well as 2-D, reads mesh coordinates as cell *edges*
+        and reports the midpoints between them, and for a mesh returns the
+        axes under swapped names -- because a frozen bundle is re-read as if
+        it came out of storage, where the plane has not been turned yet.
 
-    Parameters
-    ----------
-    y : np.ndarray
-        1D y values.
-    x_axes : sequence of np.ndarray
-        X axis arrays.
-    axis_names : sequence of str
-        Axis dimension names.
+        Returns
+        -------
+        tuple
+            ``(axis_arrays, axis_names)``, one array per storage axis.
 
-    Returns
-    -------
-    PlotBundle
-        Prepared 1D bundle.
-    """
-    x_line = np.asarray(x_axes[0]).ravel() if x_axes else np.arange(y.size)
-    names = list(axis_names) if axis_names else ["index"]
-    return PlotBundle(
-        ndim=1,
-        y=np.asarray(y),
-        render_mode="line",
-        axis_names=names,
-        x_line=x_line
-)
+        Raises
+        ------
+        ValueError
+            If the bundle is neither 1-D nor 2-D.
+        """
+        y = np.asarray(self.y)
+        ndim = y.ndim
+        names = list(self.axis_names) if self.axis_names else []
+        while len(names) < ndim:
+            names.append(f"dim_{len(names)}")
 
-
-def prepare_2d_bundle(
-    y: np.ndarray,
-    x_axes: Sequence[np.ndarray],
-    axis_names: Sequence[str],
-    render_mode_hint: Optional[str] = None,
-    *,
-    row_reversed: bool = False,
-    col_reversed: bool = False,
-) -> PlotBundle:
-    """
-    Pack an already display-ordered 2D plane into a PlotBundle.
-
-    Data orientation: row index maps to the vertical axis, column index to
-    the horizontal axis (consistent with matplotlib imshow). This holds for
-    both render modes. Which storage dimension ends up on which screen axis
-    is decided upstream by the view spec's plot-axis roles, and the
-    storage-to-display reversal is applied upstream too, by
-    :func:`orient_for_display` immediately after the load; the renderer must
-    not reorder anything again.
-
-    Parameters
-    ----------
-    y : np.ndarray
-        2D data array, in display order.
-    x_axes : sequence of np.ndarray
-        Axis coordinate arrays for non-sliced dimensions, in display order.
-    axis_names : sequence of str
-        Names for each axis dimension.
-    render_mode_hint : str, optional
-        Explicit render mode from plot hints.
-    row_reversed : bool
-        Whether the caller reversed the row axis to reach display order.
-        Recorded on the bundle; it does not change what is packed here.
-    col_reversed : bool
-        Same for the column axis.
-
-    Returns
-    -------
-    PlotBundle
-        Prepared 2D bundle with render mode and coordinates.
-    """
-    y = np.asarray(y)
-    if y.ndim != 2:
-        raise ValueError(f"prepare_2d_bundle expects 2D data, got shape {y.shape}")
-
-    names = list(axis_names) if axis_names else []
-    while len(names) < 2:
-        names.append(f"dim_{len(names)}")
-
-    render_mode = classify_render_mode(
-        y.shape, x_axes, render_mode_hint=render_mode_hint
-    )
-
-    if render_mode == "image":
-        ny, nx = y.shape
-        if len(x_axes) >= 2:
-            row_axis = np.asarray(x_axes[-2]).ravel()
-            col_axis = np.asarray(x_axes[-1]).ravel()
-            if row_axis.size > 1 and col_axis.size > 1:
-                extent = extent_from_uniform_1d(col_axis, row_axis)
+        if ndim == 1:
+            if self.x_line is not None:
+                axis = np.asarray(self.x_line, dtype=float)
             else:
-                extent = pixel_extent(ny, nx)
-        else:
-            extent = pixel_extent(ny, nx)
+                axis = np.arange(y.shape[0], dtype=float)
+            return [axis], names[:1]
 
+        if ndim == 2:
+            if (
+                self.render_mode == "mesh"
+                and self.mesh_x is not None
+                and self.mesh_y is not None
+            ):
+                mesh_x = np.asarray(self.mesh_x, dtype=float)
+                mesh_y = np.asarray(self.mesh_y, dtype=float)
+                if mesh_x.shape[1] > 1:
+                    col_axis = 0.5 * (mesh_x[0, :-1] + mesh_x[0, 1:])
+                else:
+                    col_axis = mesh_x[0]
+                if mesh_y.shape[0] > 1:
+                    row_axis = 0.5 * (mesh_y[:-1, 0] + mesh_y[1:, 0])
+                else:
+                    row_axis = mesh_y[:, 0]
+                storage_names = (
+                    [names[1], names[0]] if len(names) >= 2 else names[:2]
+                )
+                return [
+                    np.asarray(col_axis, dtype=float),
+                    np.asarray(row_axis, dtype=float),
+                ], storage_names
+
+            row_axis = np.arange(y.shape[0], dtype=float)
+            col_axis = np.arange(y.shape[1], dtype=float)
+            return [row_axis, col_axis], names[:2]
+
+        raise ValueError(f"unsupported frozen bundle ndim {ndim}")
+
+    def copy(self) -> "PlotBundle":
+        """
+        Return a deep copy of this bundle's array fields.
+
+        Returns
+        -------
+        PlotBundle
+            Bundle with copied numpy arrays.
+        """
         return PlotBundle(
-            ndim=2,
-            y=y,
-            render_mode="image",
-            axis_names=names[-2:],
-            extent=extent,
-            row_reversed=row_reversed,
-            col_reversed=col_reversed
-)
-
-    mesh_axes = [np.asarray(axis) for axis in x_axes[-2:]]
-    mesh_x, mesh_y = build_mesh_grids(y, mesh_axes)
-    return PlotBundle(
-        ndim=2,
-        y=y,
-        render_mode="mesh",
-        axis_names=names[-2:],
-        mesh_x=mesh_x,
-        mesh_y=mesh_y,
-        row_reversed=row_reversed,
-        col_reversed=col_reversed
-)
-
-
-def build_plot_bundle(
-    data: "xr.DataArray",
-    *,
-    is_roi_profile: bool = False,
-    render_mode_hint: Optional[str] = None,
-    label: str = "",
-):
-    """
-    Pack a finished labelled array into a :class:`PlotBundle`.
-
-    **This is where display order begins.** Everything upstream works in the
-    order the source stored the data; the reversal that puts a plane the right
-    way up for ``imshow`` happens here, once, on a finished 2-D plane.
-
-    It used to happen immediately after the load, on the whole N-D block,
-    which meant a normalization array sharing a plot-plane axis had to be
-    reversed to match, the block cache had to mirror its windows, and the
-    render mode had to be classified before the reduce so the flip could be
-    decided. None of that was about the data; it was about a matplotlib
-    convention -- ``origin="upper"`` puts storage row 0 at the top -- reaching
-    five stages back into the pipeline.
-
-    The array's trailing dimensions are the plot axes and carry their own
-    coordinates, so names and coordinate arrays are read off it rather than
-    passed alongside.
-
-    Parameters
-    ----------
-    data : xarray.DataArray
-        Reduced, transformed array in plot order and source orientation.
-    is_roi_profile : bool
-        Whether this array is an ROI reduction rather than a plane. It used
-        to be read off a whole ``PlotRequest`` passed in for the purpose,
-        which was the only thing this module wanted from the chain above it.
-    render_mode_hint : str, optional
-        Declared ``image`` / ``mesh`` override for the key.
-    label : str, optional
-        Display name for a 1-D ROI profile.
-
-    Returns
-    -------
-    PlotBundle
-        Prepared payload for the view layer, in display order.
-
-    Raises
-    ------
-    ValueError
-        If an ROI profile is empty, or the output is neither 1-D nor 2-D.
-    """
-    y = np.asarray(data.values)
-    names = [str(dim) for dim in (data.dims[-2:] if y.ndim >= 2 else data.dims)]
-    coords = [
-        np.asarray(data.coords[dim].values)
-        if dim in data.coords
-        else np.arange(data.sizes[dim], dtype=float)
-        for dim in names
-    ]
-    if is_roi_profile:
-        if not np.isfinite(y).any():
-            raise ValueError("ROI profile is empty after reduction")
-        display_label = label or (names[0] if names else "profile")
-        return prepare_1d_bundle(y, coords, [display_label])
-    if y.ndim == 1:
-        return prepare_1d_bundle(y, coords, names)
-    if y.ndim == 2:
-        # Classified before the flip, which is safe: uniformity is a property
-        # of the coordinate differences, and reversing an array does not
-        # change whether its steps are equal.
-        render_mode = classify_render_mode(
-            y.shape, coords, render_mode_hint=render_mode_hint
+            ndim=self.ndim,
+            y=np.array(self.y, copy=True),
+            render_mode=self.render_mode,
+            axis_names=list(self.axis_names),
+            x_line=(
+                None
+                if self.x_line is None
+                else np.array(self.x_line, copy=True)
+            ),
+            extent=self.extent,
+            mesh_x=(
+                None if self.mesh_x is None else np.array(self.mesh_x, copy=True)
+            ),
+            mesh_y=(
+                None if self.mesh_y is None else np.array(self.mesh_y, copy=True)
+            ),
+            row_reversed=self.row_reversed,
+            col_reversed=self.col_reversed,
         )
-        row_reversed, col_reversed = display_flips(
-            coords[0], coords[1], render_mode
-        )
-        if row_reversed:
-            y = np.flip(y, axis=0)
-            coords[0] = coords[0][::-1]
-        if col_reversed:
-            y = np.flip(y, axis=1)
-            coords[1] = coords[1][::-1]
-        return prepare_2d_bundle(
-            y,
-            coords,
-            names,
-            render_mode_hint=render_mode,
-            row_reversed=row_reversed,
-            col_reversed=col_reversed
-)
-    raise ValueError(f"Unsupported plot dimensionality: {y.ndim}")

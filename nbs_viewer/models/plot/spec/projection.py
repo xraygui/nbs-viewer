@@ -5,7 +5,7 @@ Rank-agnostic view intent, and the concrete projection it binds to.
 ``Projection`` is the rank-bound snapshot carried by a ``PlotRequest``: axis
 order, per-axis roles, and the indices for axes held at one value. Crop rides
 along as integer storage bounds on the plot plane; it is applied by
-``plan.plan_fetch``, never here.
+``PlotRequest.plan``, never here.
 
 Applying a projection to loaded arrays lives in :mod:`stages`. This
 module only describes and queries it, and reaches no further than the
@@ -172,7 +172,7 @@ class Projection:
 
         INDEX axes become integer indices; every other role requests the full
         axis (``slice(None)``). Crop and ROI narrowing are deliberately *not*
-        applied here -- ``plan.plan_fetch`` is the only place a load
+        applied here -- ``PlotRequest.plan`` is the only place a load
         is narrowed, so the display-to-storage mapping has one owner.
 
         Returns

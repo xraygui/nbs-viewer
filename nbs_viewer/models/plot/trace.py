@@ -18,7 +18,7 @@ from qtpy.QtCore import QObject, Signal
 from nbs_viewer.utils import print_debug
 
 from .spec.projection import Projection
-from .run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX, copy_plot_bundle
+from .run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX
 from .plane.orientation import RenderMode
 from .spec.bundle import PlotBundle
 from .spec.request import PlotRequest, TraceKey
@@ -320,7 +320,7 @@ class Trace(QObject):
         return FrozenSpectrum(
             key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
             label=label,
-            bundle=copy_plot_bundle(bundle),
+            bundle=bundle.copy(),
             kind=kind,
             source_ykey=self.ykey,
             committed_xkey=committed_xkey or "",

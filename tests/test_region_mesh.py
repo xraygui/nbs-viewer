@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.spec.region import (
     AxisSliceRegion,
     EllipseRegion,
@@ -21,7 +21,7 @@ def _tes_like_mesh_bundle():
     y = np.ones((30, 400), dtype=float)
     row_axis = np.linspace(200.0, 1000.0, 30)
     col_axis = np.cumsum(np.linspace(0.1, 0.3, 400))
-    return prepare_2d_bundle(y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"])
+    return PlotBundle.from_2d(y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"])
 
 
 def test_frame_from_mesh_bundle_axes():
@@ -123,7 +123,7 @@ def test_profile_along_en_energy_sums_over_tes_band():
 
 def test_image_rect_mask_shape():
     y = np.zeros((50, 100))
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y,
         [np.linspace(0, 10, 50), np.linspace(0, 99, 100)],
         ["y", "x"]
@@ -141,7 +141,7 @@ def test_cell_centers_image_shape_and_order():
     from nbs_viewer.models.plot.plane.mask import cell_centers
 
     ny, nx = 4, 5
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         np.zeros((ny, nx)),
         [np.arange(ny, dtype=float), np.arange(nx, dtype=float)],
         ["y", "x"],
@@ -164,7 +164,7 @@ def test_image_mask_at_plot_top_selects_storage_row_zero():
     from nbs_viewer.models.plot.plane.mask import mask_from_data_rect
 
     ny, nx = 10, 12
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         np.zeros((ny, nx)),
         [np.linspace(0.0, 9.0, ny), np.linspace(0.0, 11.0, nx)],
         ["dim_1", "dim_2"]
@@ -185,7 +185,7 @@ def test_image_rect_mask_matches_imshow_origin_upper():
     y = np.arange(ny * nx, dtype=float).reshape(ny, nx)
     row_axis = np.linspace(100.0, 200.0, ny)
     col_axis = np.linspace(0.0, 29.0, nx)
-    bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["dim_1", "dim_2"])
+    bundle = PlotBundle.from_2d(y, [row_axis, col_axis], ["dim_1", "dim_2"])
     frame = bundle.view_frame()
     row, col0, col_last = 3, 5, 7
     x0, _, y0, y1 = frame.image_cell_bounds(row, col0)
@@ -246,7 +246,7 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
     """
     An ROI drawn on a mesh plane must reduce the cells it actually covers.
 
-    While ``prepare_2d_bundle`` transposed mesh data, the compiled mask was
+    While the 2-D pack transposed mesh data, the compiled mask was
     shaped for the displayed plane and the array was in storage order, so this
     path raised a shape mismatch rather than producing a profile.
     """
@@ -256,7 +256,7 @@ def test_nd_roi_profile_on_mesh_plane_matches_masked_sum():
     plane = np.arange(n_row)[:, None] * 100.0 + np.arange(n_col)[None, :]
     cube = np.stack([plane, plane * 2.0, plane * 3.0])
 
-    bundle = prepare_2d_bundle(plane, [row_axis, col_axis], ["row", "col"])
+    bundle = PlotBundle.from_2d(plane, [row_axis, col_axis], ["row", "col"])
     assert bundle.render_mode == "mesh"
     frame = bundle.view_frame()
 
@@ -299,7 +299,7 @@ def test_cell_bounds_vary_with_index_on_an_image_frame():
     with the reference index on image frames, so every plot-Y index returned
     the bounds of the same cell.
     """
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         np.zeros((10, 12)),
         [np.arange(10.0), np.arange(12.0)],
         ["y", "x"],

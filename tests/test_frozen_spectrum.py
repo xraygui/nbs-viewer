@@ -13,9 +13,8 @@ from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.run.frozen_spectrum import (
     FrozenSpectrum,
     SYNTHETIC_KEY_PREFIX,
-    copy_plot_bundle
 )
-from nbs_viewer.models.plot.spec.bundle import prepare_1d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.spec.request import PlotRequest
 from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource
@@ -33,7 +32,7 @@ def _run_model(catalog_keys=None):
 def _line_bundle(values, x=None, name="profile"):
     x = np.asarray(values if x is None else x, dtype=float)
     y = np.asarray(values, dtype=float)
-    return prepare_1d_bundle(y, [x], [name])
+    return PlotBundle.from_1d(y, [x], [name])
 
 
 def _frozen_entry(model, key_suffix="abc", y=None):
@@ -131,9 +130,9 @@ def test_scan_profile_storage_axis_unchanged_after_swap():
     assert swapped.scan_axis == 0
 
 
-def test_copy_plot_bundle_is_independent():
+def test_the_bundle_copy_is_independent():
     bundle = _line_bundle([1.0, 2.0])
-    copied = copy_plot_bundle(bundle)
+    copied = bundle.copy()
     copied.y[0] = 99.0
     assert bundle.y[0] == 1.0
 

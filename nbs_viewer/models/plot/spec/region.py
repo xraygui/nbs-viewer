@@ -165,6 +165,42 @@ class RegionDefinition(ABC):
         """
         return False
 
+    def compile_masked(
+        self,
+        frame: PlotViewFrame,
+        mask_mode: MaskMode = "inside",
+    ) -> CompiledRegion:
+        """
+        Compile this region, optionally inverting the mask.
+
+        A concrete method on the base class: every subclass answers it the
+        same way once it has said how to :meth:`compile`, and the inversion
+        is a property of the mask rather than of any one shape.
+
+        Parameters
+        ----------
+        frame : PlotViewFrame
+            View frame for the parent 2D plot.
+        mask_mode : str
+            ``inside`` or ``outside`` the region.
+
+        Returns
+        -------
+        CompiledRegion
+            Compiled mask on the plot plane.
+
+        Raises
+        ------
+        ValueError
+            If ``mask_mode`` is neither ``inside`` nor ``outside``.
+        """
+        compiled = self.compile(frame)
+        if mask_mode == "inside":
+            return compiled
+        if mask_mode == "outside":
+            return _compiled_from_mask(~compiled.mask)
+        raise ValueError(f"Unknown mask_mode {mask_mode!r}")
+
     def has_area(self) -> bool:
         """
         Return whether the region encloses a nonzero data-coordinate area.
@@ -590,36 +626,6 @@ class AxisSliceRegion(RegionDefinition):
         Axis bands are separable along both plot axes.
         """
         return True
-
-
-def compile_with_mask_mode(
-    frame: PlotViewFrame,
-    region: RegionDefinition,
-    mask_mode: MaskMode = "inside",
-) -> CompiledRegion:
-    """
-    Compile any region, optionally inverting the mask.
-
-    Parameters
-    ----------
-    frame : PlotViewFrame
-        View frame for the parent 2D plot.
-    region : RegionDefinition
-        Region in matplotlib data coordinates.
-    mask_mode : str
-        ``inside`` or ``outside`` the region.
-
-    Returns
-    -------
-    CompiledRegion
-        Compiled mask on the plot plane.
-    """
-    compiled = region.compile(frame)
-    if mask_mode == "inside":
-        return compiled
-    if mask_mode == "outside":
-        return _compiled_from_mask(~compiled.mask)
-    raise ValueError(f"Unknown mask_mode {mask_mode!r}")
 
 
 def reduce_masked_plane(

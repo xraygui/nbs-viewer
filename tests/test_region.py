@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
     PolygonRegion,
@@ -15,7 +15,7 @@ from nbs_viewer.models.plot.spec.region import (
 
 def test_reduce_masked_plane_sum():
     y = np.array([[1.0, 2.0], [3.0, 4.0]])
-    bundle = prepare_2d_bundle(y, [np.arange(2.0), np.arange(2.0)], ["a", "b"])
+    bundle = PlotBundle.from_2d(y, [np.arange(2.0), np.arange(2.0)], ["a", "b"])
     frame = bundle.view_frame()
     region = RectRegion(x0=-0.5, x1=1.5, y0=-0.5, y1=1.5)
     compiled = region.compile(frame)
@@ -33,7 +33,7 @@ def test_rect_region_normalizes_corners():
 
 def test_expand_for_profile_spans_profile_axis():
     y = np.ones((4, 6))
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y, [np.linspace(0.0, 3.0, 4), np.linspace(0.0, 5.0, 6)], ["a", "b"]
     )
     frame = bundle.view_frame()
@@ -59,7 +59,7 @@ def test_rect_region_dict_round_trip():
 
 def test_subcell_rect_selects_centroid_cell():
     y = np.zeros((4, 4))
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y,
         [np.arange(4.0), np.arange(4.0)],
         ["a", "b"],
@@ -73,7 +73,7 @@ def test_subcell_rect_selects_centroid_cell():
 
 def _image_frame(ny=8, nx=8):
     y = np.zeros((ny, nx))
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y,
         [np.arange(float(ny)), np.arange(float(nx))],
         ["a", "b"],

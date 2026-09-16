@@ -14,12 +14,7 @@ import pytest
 from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.spec.request import PlotRequest
-from nbs_viewer.models.plot.spec.plan import plan_fetch
-from nbs_viewer.models.plot.spec.region import (
-    PolygonRegion,
-    RectRegion,
-    compile_with_mask_mode,
-)
+from nbs_viewer.models.plot.spec.region import PolygonRegion, RectRegion
 
 from tests.fixtures.display_plane import (
     display_frame,
@@ -103,7 +98,7 @@ def _ground_truth_profile(stack, row_axis, col_axis, frame):
     """
     plane_stack = stack[PARENT.indices[0]].sum(axis=0)
     oriented, _, _, _ = oriented_plane(plane_stack, row_axis, col_axis)
-    mask = compile_with_mask_mode(frame, ROI, "inside").mask
+    mask = ROI.compile_masked(frame, "inside").mask
 
     profile = []
     for step in range(E_COUNT):
@@ -133,7 +128,7 @@ def test_roi_profile_matches_ground_truth_in_every_orientation(
     expected = _ground_truth_profile(stack, row_axis, col_axis, frame)
 
     request = _profile_request()
-    plan = plan_fetch(request, plane_frame=frame)
+    plan = request.plan(plane_frame=frame)
 
     loaded = stack[plan.slice_info]
     axis_arrays = [
@@ -169,9 +164,9 @@ def test_narrowed_fetch_reads_the_cells_the_roi_covers(
     stack = _stack()
     row_axis, col_axis = _axes(row_descending, col_descending)
     frame = display_frame(stack[1].sum(axis=0), row_axis, col_axis, ["y", "x"])
-    compiled = compile_with_mask_mode(frame, ROI, "inside")
+    compiled = ROI.compile_masked(frame, "inside")
 
-    plan = plan_fetch(_profile_request(), plane_frame=frame)
+    plan = _profile_request().plan(plane_frame=frame)
     rows, cols = plan.slice_info[2], plan.slice_info[3]
     covered = np.zeros(frame.shape, dtype=bool)
     covered_storage = np.zeros(frame.shape, dtype=bool)
@@ -194,13 +189,13 @@ def test_profile_along_an_off_plane_axis_reads_that_axis_in_full():
     row_axis, col_axis = _axes(False, False)
     frame = display_frame(stack[1].sum(axis=0), row_axis, col_axis, ["y", "x"])
 
-    plan = plan_fetch(_profile_request(), plane_frame=frame)
+    plan = _profile_request().plan(plane_frame=frame)
 
     assert plan.slice_info[0] == slice(None)
     assert stack[plan.slice_info].shape[0] == E_COUNT
 
 
-def test_plan_fetch_rejects_an_roi_that_covers_no_cells():
+def test_the_plan_rejects_an_roi_that_covers_no_cells():
     row_axis, col_axis = _axes(False, False)
     frame = display_frame(
         np.zeros((NY, NX)), row_axis, col_axis, ["y", "x"]
@@ -209,7 +204,7 @@ def test_plan_fetch_rejects_an_roi_that_covers_no_cells():
         region=RectRegion(x0=100.0, x1=101.0, y0=100.0, y1=101.0)
     )
     with pytest.raises(ValueError, match="does not cover any cells"):
-        plan_fetch(request, plane_frame=frame)
+        request.plan(plane_frame=frame)
 
 
 def test_region_frame_for_bbox_matches_crop_shape():
@@ -232,14 +227,14 @@ def test_region_frame_for_bbox_image_extent_keeps_bottom_below_top():
         ["dim_1", "dim_2"],
     )
     region = RectRegion(x0=34.77, x1=94.99, y0=40.36, y1=57.37)
-    compiled = compile_with_mask_mode(frame, region.normalized(), "inside")
+    compiled = region.normalized().compile_masked(frame, "inside")
     cropped = frame.region_for_bbox(compiled.bbox)
 
     assert cropped.extent is not None
     left, right, bottom, top = cropped.extent
     assert bottom < top
     assert left < right
-    assert compile_with_mask_mode(cropped, region, "inside").pixel_count > 0
+    assert region.compile_masked(cropped, "inside").pixel_count > 0
 
 
 def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
@@ -259,7 +254,7 @@ def test_large_roi_on_a_big_plane_recompiles_on_the_narrowed_frame():
         region, profile_axis=0
     )
 
-    plan = plan_fetch(request, plane_frame=frame)
+    plan = request.plan(plane_frame=frame)
     loaded = stack[plan.slice_info]
     axis_arrays = [
         np.arange(e_count, dtype=float),

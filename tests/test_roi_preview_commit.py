@@ -171,7 +171,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.spec.region import PolygonRegion, compile_with_mask_mode
+    from nbs_viewer.models.plot.spec.region import PolygonRegion
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 
     plot_model, _ = make_plot_session()
@@ -201,7 +201,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     profile = plot_model.region.preview_roi_profile(entry_id)
 
     a, b, c = vppem_factors()
-    mask = compile_with_mask_mode(frame, roi, "inside").mask
+    mask = roi.compile_masked(frame, "inside").mask
     expected = a * float(np.outer(b, c)[::-1, :][mask].sum())
 
     assert profile.ndim == 1

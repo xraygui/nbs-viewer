@@ -4,7 +4,7 @@ import numpy as np
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.plane.roles import DimRole
-from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 
 
 def test_swapping_plot_rows_swaps_the_roles():
@@ -30,7 +30,7 @@ def test_view_frame_plot_dims_are_plane_positions_not_storage_axes():
     gave a fixed Plot X / Plot Y assignment that contradicted the plot once
     the rows were reordered.
     """
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         np.zeros((4, 6)),
         [np.arange(4.0), np.arange(6.0)],
         ["x", "dim_1"],

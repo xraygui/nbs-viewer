@@ -11,15 +11,16 @@ changes reuse the artist.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import xarray as xr
 
 from ..plane.frame import PlotViewFrame
-from ..plane.roles import DimRole, MaskMode, SpatialReduce
+from ..plane.roles import DimRole, MaskMode, SliceItem, SpatialReduce
 from .axes import PlotAxes
-from .bundle import PlotBundle, prepare_1d_bundle
+from .bundle import PlotBundle
+from .plan import FetchPlan, narrow
 from .projection import Projection
 from .region import RegionDefinition
 from .stages import materialize_view
@@ -341,6 +342,101 @@ class PlotRequest:
             fan_out_index=fan_out_index
 )
 
+    def plan(
+        self,
+        *,
+        plane_frame: Optional[PlotViewFrame] = None,
+    ) -> FetchPlan:
+        """
+        Turn this plot description into the array indices that produce it.
+
+        The one planner, and the next rung down the ladder: a request says
+        what ends up on the plot, the :class:`FetchPlan` it returns says what
+        to read. Crop and ROI both narrow the load, through :func:`narrow` and
+        the same display-to-storage mapping, so the three narrowing paths this
+        replaced cannot disagree about orientation again. A profile axis the
+        projection holds at a single index widens the other way: it must be
+        read in full, or the profile is one point long.
+
+        Parameters
+        ----------
+        plane_frame : PlotViewFrame, optional
+            Display frame of the full parent plot plane. Required when
+            :attr:`region` is set, because the region is in data coordinates
+            and has to be compiled against a frame.
+
+        Returns
+        -------
+        FetchPlan
+            Load slices plus the frames the loaded block lands in.
+
+        Raises
+        ------
+        ValueError
+            If a region is requested without a frame, covers no cells, or does
+            not intersect the crop.
+        """
+        view = self.view
+        items: List[SliceItem] = list(view.base_slice())
+        plane_axes = self.plane_axes
+
+        if self.region is not None and self.profile_axis not in plane_axes:
+            items[self.profile_axis] = slice(None)
+
+        crop = view.crop
+        if crop is not None:
+            r0, r1, c0, c1 = crop.storage_bbox
+            items[crop.plot_y_axis] = narrow(items[crop.plot_y_axis], r0, r1)
+            items[crop.plot_x_axis] = narrow(items[crop.plot_x_axis], c0, c1)
+
+        if self.region is None:
+            return FetchPlan(
+                ykey=self.ykey,
+                xkeys=self.xkeys,
+                norm_keys=self.norm_keys,
+                slice_info=tuple(items),
+                dims=self.dims,
+                plane_axes=plane_axes,
+                plane_frame=plane_frame,
+            )
+
+        if plane_frame is None:
+            raise ValueError("plan needs plane_frame when region is set")
+
+        compiled = self.region.compile_masked(plane_frame, self.mask_mode)
+        if compiled.pixel_count == 0:
+            raise ValueError("ROI does not cover any cells")
+        r0, r1, c0, c1 = plane_frame.storage_bbox(compiled.bbox)
+        if r1 <= r0 or c1 <= c0:
+            raise ValueError("ROI bounding box is empty")
+
+        row_axis, col_axis = plane_axes
+        items[row_axis] = narrow(items[row_axis], r0, r1)
+        items[col_axis] = narrow(items[col_axis], c0, c1)
+
+        # The block actually loaded is the ROI box intersected with the crop,
+        # so derive the region frame from the narrowed slices rather than from
+        # the ROI box, or the mask would not match the array it is applied to.
+        loaded = (
+            items[row_axis].start,
+            items[row_axis].stop,
+            items[col_axis].start,
+            items[col_axis].stop,
+        )
+        region_frame = plane_frame.region_for_bbox(
+            plane_frame.storage_bbox(loaded)
+        )
+        return FetchPlan(
+            ykey=self.ykey,
+            xkeys=self.xkeys,
+            norm_keys=self.norm_keys,
+            slice_info=tuple(items),
+            dims=self.dims,
+            plane_axes=plane_axes,
+            plane_frame=plane_frame,
+            region_frame=region_frame,
+        )
+
     def reduce_cached_plane(
         self,
         plane: "PlotBundle",
@@ -423,7 +519,7 @@ class PlotRequest:
         if not np.isfinite(profile.values).any():
             raise ValueError("ROI profile is empty after reduction")
         profile_dim = profile.dims[0]
-        return prepare_1d_bundle(
+        return PlotBundle.from_1d(
             profile.values,
             [np.asarray(profile.coords[profile_dim].values)],
             [label or str(profile_dim)],

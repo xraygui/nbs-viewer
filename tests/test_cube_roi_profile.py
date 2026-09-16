@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.spec.region import RectRegion, compile_with_mask_mode
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
@@ -203,7 +203,7 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
 
     entry_id, frame = _add_roi(session, trace, profile_storage_axis)
     region = session.region.roi_set.get(entry_id).region
-    mask = compile_with_mask_mode(frame, region, "inside").mask
+    mask = region.compile_masked(frame, "inside").mask
     assert mask.any()
 
     plain = session.region.preview_roi_profile(

@@ -9,9 +9,8 @@ from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.spec.region import PolygonRegion, compile_with_mask_mode
+from nbs_viewer.models.plot.spec.region import PolygonRegion
 from nbs_viewer.models.plot.spec.request import PlotRequest
-from nbs_viewer.models.plot.spec.plan import plan_fetch
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
@@ -57,7 +56,7 @@ def test_a_low_rank_key_projects_on_its_own_terms():
 )
 
 
-def test_plan_fetch_narrows_the_load_with_the_request_crop():
+def test_the_plan_narrows_the_load_with_the_request_crop():
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     req = PlotRequest(
@@ -69,7 +68,7 @@ def test_plan_fetch_narrows_the_load_with_the_request_crop():
         dims=VPPEM_NAMES
 )
     assert req.view.base_slice() == (4, slice(None), slice(None))
-    assert plan_fetch(req).slice_info == (4, slice(2, 10), slice(4, 20))
+    assert req.plan().slice_info == (4, slice(2, 10), slice(4, 20))
 
 
 def test_run_model_get_plot_bundle_from_request():
@@ -270,7 +269,7 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     profile_req = parent_req.with_roi_profile(roi, profile_axis=0)
     bundle = model.fetch.get_plot_bundle(profile_req)
 
-    mask = compile_with_mask_mode(frame, roi, "inside").mask
+    mask = roi.compile_masked(frame, "inside").mask
     plane = np.outer(b, c)[::-1, :]
     expected = a * float(plane[mask].sum())
 
@@ -306,7 +305,7 @@ def test_an_in_plane_roi_profile_masks_the_display_plane(along):
         cached_plane=plane
 )
 
-    mask = compile_with_mask_mode(plane.view_frame(), roi, "inside").mask
+    mask = roi.compile_masked(plane.view_frame(), "inside").mask
     shown = np.where(mask, np.asarray(plane.y), np.nan)
     across = 0 if along == "plot_x" else 1
     expected = np.nansum(shown, axis=across)[mask.any(axis=across)]
@@ -393,7 +392,7 @@ def test_the_fetch_takes_the_names_from_the_request():
         dims=VPPEM_NAMES
 )
 
-    assert plan_fetch(req).dims == VPPEM_NAMES
+    assert req.plan().dims == VPPEM_NAMES
     model.fetch.get_plot_bundle(req)
     assert "PCOEdge_image" not in asked
 

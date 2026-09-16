@@ -5,7 +5,7 @@ Frozen ROI-derived spectra registered as synthetic keys on RunSource.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -21,7 +21,6 @@ SYNTHETIC_KEY_PREFIX = "__roi__/"
 __all__ = [
     "SYNTHETIC_KEY_PREFIX",
     "FrozenSpectrum",
-    "copy_plot_bundle",
 ]
 
 
@@ -56,88 +55,6 @@ def _slice_axis_array(axis: np.ndarray, item) -> np.ndarray:
     axis = np.asarray(axis, dtype=float)
     sliced = axis[item]
     return np.atleast_1d(np.asarray(sliced, dtype=float))
-
-
-def _storage_axes_from_bundle(bundle: PlotBundle) -> Tuple[List[np.ndarray], List[str]]:
-    """
-    Build per-storage-dimension coordinate arrays from a frozen bundle.
-    """
-    y = np.asarray(bundle.y)
-    ndim = y.ndim
-    names = list(bundle.axis_names) if bundle.axis_names else []
-    while len(names) < ndim:
-        names.append(f"dim_{len(names)}")
-
-    if ndim == 1:
-        if bundle.x_line is not None:
-            axis = np.asarray(bundle.x_line, dtype=float)
-        else:
-            axis = np.arange(y.shape[0], dtype=float)
-        return [axis], names[:1]
-
-    if ndim == 2:
-        if (
-            bundle.render_mode == "mesh"
-            and bundle.mesh_x is not None
-            and bundle.mesh_y is not None
-        ):
-            mesh_x = np.asarray(bundle.mesh_x, dtype=float)
-            mesh_y = np.asarray(bundle.mesh_y, dtype=float)
-            if mesh_x.shape[1] > 1:
-                col_axis = 0.5 * (mesh_x[0, :-1] + mesh_x[0, 1:])
-            else:
-                col_axis = mesh_x[0]
-            if mesh_y.shape[0] > 1:
-                row_axis = 0.5 * (mesh_y[:-1, 0] + mesh_y[1:, 0])
-            else:
-                row_axis = mesh_y[:, 0]
-            storage_names = (
-                [names[1], names[0]] if len(names) >= 2 else names[:2]
-            )
-            return [
-                np.asarray(col_axis, dtype=float),
-                np.asarray(row_axis, dtype=float),
-            ], storage_names
-
-        row_axis = np.arange(y.shape[0], dtype=float)
-        col_axis = np.arange(y.shape[1], dtype=float)
-        return [row_axis, col_axis], names[:2]
-
-    raise ValueError(f"unsupported frozen bundle ndim {ndim}")
-
-
-def copy_plot_bundle(bundle: PlotBundle) -> PlotBundle:
-    """
-    Return a deep copy of array fields in a plot bundle.
-
-    Parameters
-    ----------
-    bundle : PlotBundle
-        Source bundle.
-
-    Returns
-    -------
-    PlotBundle
-        Bundle with copied numpy arrays.
-    """
-    return PlotBundle(
-        ndim=bundle.ndim,
-        y=np.array(bundle.y, copy=True),
-        render_mode=bundle.render_mode,
-        axis_names=list(bundle.axis_names),
-        x_line=(
-            None
-            if bundle.x_line is None
-            else np.array(bundle.x_line, copy=True)
-        ),
-        extent=bundle.extent,
-        mesh_x=(
-            None if bundle.mesh_x is None else np.array(bundle.mesh_x, copy=True)
-        ),
-        mesh_y=(
-            None if bundle.mesh_y is None else np.array(bundle.mesh_y, copy=True)
-        )
-)
 
 
 @dataclass(frozen=True)
@@ -243,7 +160,7 @@ class FrozenSpectrum:
         The coordinates are the ones the reduction produced and stored, so a
         frozen profile carries the axis it was measured against rather than an
         index range. They are matched to dimensions by storage position:
-        :func:`_storage_axes_from_bundle` returns one array per storage axis,
+        :meth:`PlotBundle.storage_axes` returns one array per storage axis,
         and for a mesh it reports those axes under swapped names, which is a
         separate question from which axis each array belongs to.
 
@@ -290,7 +207,7 @@ class FrozenSpectrum:
             Stored coordinate values by dimension name.
         """
         info = self.describe()
-        axis_arrays, _names = _storage_axes_from_bundle(self.bundle)
+        axis_arrays, _names = self.bundle.storage_axes()
         items = _normalize_slice_info(slice_info, info.ndim)
         coords: Dict[str, np.ndarray] = {}
         for axis, ((name, length), item) in enumerate(

@@ -1,7 +1,7 @@
 """Build display-ordered 2D planes the way the fetch path does.
 
-``prepare_2d_bundle`` packs a plane; it does not reorder one. Orientation is
-a separate step -- ``build_plot_bundle`` turns the finished plane the right
+``PlotBundle.from_2d`` packs a plane; it does not reorder one. Orientation is
+a separate step -- ``PlotBundle.pack`` turns the finished plane the right
 way up at the pack -- so a test that wants a frame matching what the user sees
 has to run it too.
 """
@@ -12,7 +12,7 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
-from nbs_viewer.models.plot.spec.bundle import PlotBundle, prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.plane.orientation import display_flips
 from nbs_viewer.models.plot.plane.frame import PlotViewFrame
 
@@ -99,7 +99,7 @@ def display_bundle(
     y, row_axis, col_axis, (row_reversed, col_reversed) = oriented_plane(
         y, row_axis, col_axis, render_mode
     )
-    return prepare_2d_bundle(
+    return PlotBundle.from_2d(
         y,
         [row_axis, col_axis],
         list(axis_names),

@@ -7,7 +7,6 @@ import numpy as np
 from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
 from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.spec.request import PlotRequest
-from nbs_viewer.models.plot.spec.plan import plan_fetch
 from nbs_viewer.models.plot.spec.region import RectRegion
 
 from tests.fixtures.display_plane import (
@@ -38,7 +37,7 @@ def _plane_request(parent, crop=None):
 )
 
 
-def test_plan_fetch_narrows_plot_plane_axes_with_a_crop():
+def test_the_plan_narrows_plot_plane_axes_with_a_crop():
     parent = Projection(
         ndim=4,
         plot_ndim=2,
@@ -47,7 +46,7 @@ def test_plan_fetch_narrows_plot_plane_axes_with_a_crop():
 )
     crop = ViewCrop(storage_bbox=(1, 3, 2, 5), plot_y_axis=2, plot_x_axis=3)
 
-    narrowed = plan_fetch(_plane_request(parent, crop)).slice_info
+    narrowed = _plane_request(parent, crop).plan().slice_info
 
     assert narrowed[0] == 1
     assert narrowed[1] == slice(None)
@@ -111,7 +110,7 @@ def test_cropped_fetch_matches_full_plane_slice():
     region = RectRegion(x0=1.5, x1=3.5, y0=0.5, y1=2.5)
     crop = region.to_view_crop(full_frame, (2, 3))
 
-    cropped_slice = plan_fetch(_plane_request(parent, crop)).slice_info
+    cropped_slice = _plane_request(parent, crop).plan().slice_info
 
     sr0, sr1, sc0, sc1 = crop.storage_bbox
     assert y[1].sum(axis=0)[sr0:sr1, sc0:sc1].shape == (
@@ -159,7 +158,7 @@ def test_roi_under_a_crop_loads_the_intersection_and_a_matching_frame():
         roi, profile_axis=0
     )
 
-    plan = plan_fetch(request, plane_frame=full_frame)
+    plan = request.plan(plane_frame=full_frame)
     assert plan.slice_info[0] == slice(None)
     y_load = y[tuple(plan.slice_info)]
     assert y_load.shape[-2:] == plan.region_frame.shape

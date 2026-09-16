@@ -548,10 +548,11 @@ def _defining_module(
     """
     Return the module defining ``name`` as a free function, or None.
 
-    Follows re-export surfaces: asked for ``prepare_1d_bundle`` from
-    ``geometry``, it reports ``geometry.bundle``. Anything that is not a
-    module-level function -- a class, a type alias, a name from outside the
-    package -- returns None, which is how classes stay out of the count.
+    Follows re-export surfaces: asked for a name that a package ``__init__``
+    re-exports, it reports the module that actually defines it. Anything that
+    is not a module-level function -- a class, a type alias, a name from
+    outside the package -- returns None, which is how classes stay out of the
+    count.
     """
     module = facts.get(target)
     if module is None:

@@ -22,7 +22,7 @@ from asteval import Interpreter
 from ...data.array_contract import REDUCE_SKIPNA
 from ..plane.frame import PlotViewFrame
 from ..plane.roles import DimRole, MaskMode, PlotAxisName, SliceItem
-from .region import RegionDefinition, compile_with_mask_mode
+from .region import RegionDefinition
 from .axes import PlotAxes
 
 
@@ -448,7 +448,7 @@ def mask_to_profile(
             f"{region_frame.shape}"
         )
 
-    compiled = compile_with_mask_mode(region_frame, region, mask_mode)
+    compiled = region.compile_masked(region_frame, mask_mode)
     if compiled.pixel_count == 0:
         raise ValueError("ROI does not cover any cells")
 

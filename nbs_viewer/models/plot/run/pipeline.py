@@ -33,9 +33,9 @@ from ..spec.stages import (
 )
 from ..plane.frame import PlotViewFrame
 from ..plane.orientation import classify_render_mode, display_flips
-from ..spec.bundle import PlotBundle, build_plot_bundle, prepare_2d_bundle
+from ..spec.bundle import PlotBundle
 from ..spec.request import PlotRequest
-from ..spec.plan import FetchPlan, plan_fetch
+from ..spec.plan import FetchPlan
 from nbs_viewer.utils import print_debug
 
 if TYPE_CHECKING:
@@ -143,7 +143,7 @@ class RunFetch:
         else:
             # Off-plane profile: the plane the user sees is one slice of the
             # block, so reduce to that stack, transform it, and only then
-            # mask. The profile axis is read in full by plan_fetch. The
+            # mask. The profile axis is read in full by the plan. The
             # transform sees the plane's own coordinates either way, so ``x``
             # means the same thing here as when the plane itself is drawn.
             profile = request.profile_axes
@@ -168,7 +168,7 @@ class RunFetch:
         info = self._source.describe(request.ykey)
         if info.synthetic and data.ndim == 1:
             data = data.rename({data.dims[0]: label or info.label})
-        return build_plot_bundle(
+        return PlotBundle.pack(
             data,
             is_roi_profile=request.region is not None,
             render_mode_hint=self._render_hint(request.ykey),
@@ -210,7 +210,7 @@ class RunFetch:
             ``(data, norms, plan)``: the block narrowed to the plan, one norm
             array per ``plan.norm_keys`` in order, and the plan.
         """
-        plan = plan_fetch(request, plane_frame=self._plane_frame(request))
+        plan = request.plan(plane_frame=self._plane_frame(request))
         windows = self._held_windows(plan)
         if windows is None:
             self._block = (plan, self._read_block(plan), {})
@@ -496,7 +496,7 @@ class RunFetch:
             render_mode_hint=self._render_hint(request.ykey),
         )
         row_reversed, col_reversed = display_flips(rows, cols, render_mode)
-        return prepare_2d_bundle(
+        return PlotBundle.from_2d(
             np.broadcast_to(np.float64(0.0), plane_shape),
             [
                 rows[::-1] if row_reversed else rows,

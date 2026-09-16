@@ -5,14 +5,9 @@ import pytest
 
 from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.plot.spec.projection import Projection
-from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.spec.request import PlotRequest
-from nbs_viewer.models.plot.spec.plan import plan_fetch
-from nbs_viewer.models.plot.spec.region import (
-    PolygonRegion,
-    RectRegion,
-    compile_with_mask_mode,
-)
+from nbs_viewer.models.plot.spec.region import PolygonRegion, RectRegion
 
 from tests.fixtures.display_plane import (
     display_bundle,
@@ -59,7 +54,7 @@ def test_cached_plane_profile_mesh():
     y = np.arange(30 * 400, dtype=float).reshape(30, 400)
     col_axis = np.cumsum(np.linspace(0.1, 0.3, 400))
     row_axis = np.linspace(200.0, 1000.0, 30)
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
     frame = plane.view_frame()
@@ -82,7 +77,7 @@ def test_cached_plane_profile_mesh():
 
 
 def test_span_full_expands_an_in_plane_profile_only():
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         np.ones((10, 20)),
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 19.0, 20)],
         ["a", "b"]
@@ -119,7 +114,7 @@ def test_span_full_expands_an_in_plane_profile_only():
 
 def test_cached_plane_profile_with_4d_parent_spec():
     y = np.arange(100, dtype=float).reshape(10, 10)
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         y,
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
         ["dim_1", "dim_2"],
@@ -159,7 +154,7 @@ def _display_profile(bundle, region, along):
     on, so no orientation is involved at all.
     """
     frame = bundle.view_frame()
-    mask = compile_with_mask_mode(frame, region, "inside").mask
+    mask = region.compile_masked(frame, "inside").mask
     shown = np.where(mask, np.asarray(bundle.y), np.nan)
     left, right, bottom, top = frame.extent
     ny, nx = frame.shape
@@ -219,7 +214,7 @@ def test_an_in_plane_profile_masks_the_cells_the_user_drew_on(
 
 
 def test_cached_plane_refuses_an_off_plane_profile():
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         np.ones((6, 7)),
         [np.arange(6, dtype=float), np.arange(7, dtype=float)],
         ["dim_1", "dim_2"],
@@ -262,7 +257,7 @@ def test_storage_axis_to_plot_axis_follows_the_spec_not_the_frame():
     identity -- which is the normal case as soon as the user picks an X key
     that is not the trailing axis.
     """
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         np.zeros((32, 100)),
         [np.arange(32, dtype=float), np.linspace(0.0, np.pi, 100)],
         ["dim_1", "x"],
@@ -286,7 +281,7 @@ def test_span_full_expands_the_profile_axis_not_the_reduction_axis():
     the drawn band of its own axis, while the band being summed over was
     silently expanded to the whole plane.
     """
-    plane = prepare_2d_bundle(
+    plane = PlotBundle.from_2d(
         np.zeros((32, 100)),
         [np.arange(32, dtype=float), np.linspace(0.0, np.pi, 100)],
         ["dim_1", "x"],
@@ -381,7 +376,7 @@ def test_stack_profile_fetch_slice_widens_the_profile_axis():
         reduce="mean"
 )
 
-    slice_info = plan_fetch(request, plane_frame=frame).slice_info
+    slice_info = request.plan(plane_frame=frame).slice_info
 
     assert slice_info[0] == slice(None)
     assert slice_info[1] == 1
@@ -417,7 +412,7 @@ def test_roi_profile_along_dim1_matches_plane_means():
         reduce="mean"
 )
 
-    plan = plan_fetch(request, plane_frame=frame)
+    plan = request.plan(plane_frame=frame)
     fetch_slice = plan.slice_info
     # Sliced with the block, as ``load_axes`` returns them: a coordinate that
     # still spans the full axis does not describe a narrowed load.

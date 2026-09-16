@@ -21,8 +21,8 @@ owned ``ViewCrop`` while the sole thing that builds one,
 ``RectRegion.to_view_crop``, lived a package away.
 
 ``MaskMode`` moved here from ``region.py``, where a note argued it belonged
-beside ``compile_with_mask_mode``, "the thing it configures". That held while
-that function was its only consumer. It now has four, three of them outside
+beside the mask-mode compile, "the thing it configures". That held while that
+function was its only consumer. It now has four, three of them outside
 ``region.py``, and two packages were importing from ``geometry`` purely to
 type a two-valued string.
 """
@@ -37,12 +37,6 @@ SliceItem = Union[int, slice]
 SpatialReduce = Literal["sum", "mean"]
 PlotAxisName = Literal["plot_x", "plot_y"]
 MaskMode = Literal["inside", "outside"]
-
-
-# ``compile_with_mask_mode``, which is the thing it configures.
-SliceItem = Union[int, slice]
-SpatialReduce = Literal["sum", "mean"]
-PlotAxisName = Literal["plot_x", "plot_y"]
 
 
 class DimRole(str, Enum):

@@ -7,7 +7,6 @@ from nbs_viewer.models.plot.view_intent import ViewIntent
 from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
 from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.spec.request import PlotRequest
-from nbs_viewer.models.plot.spec.plan import plan_fetch
 from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
@@ -44,7 +43,7 @@ def test_view_spec_rejects_ndim_below_plot_ndim():
 
 def test_view_spec_base_slice_ignores_crop():
     """
-    A crop rides on the view but is applied by ``plan_fetch``, the one place
+    A crop rides on the view but is applied by ``PlotRequest.plan``, the one place
     a load is narrowed.
     """
     crop = ViewCrop(
@@ -106,7 +105,7 @@ def test_view_spec_crop_axes_must_match_plot_order():
         )
 
 
-def test_plan_fetch_intersects_the_crop_with_an_indexed_axis():
+def test_the_plan_intersects_the_crop_with_an_indexed_axis():
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     view = Projection(
         ndim=3,
@@ -123,7 +122,7 @@ def test_plan_fetch_intersects_the_crop_with_an_indexed_axis():
         view=view,
         dims=VPPEM_NAMES,
     )
-    plan = plan_fetch(request)
+    plan = request.plan()
     assert plan.slice_info == (4, slice(2, 10), slice(4, 20))
     assert plan.plane_axes == (1, 2)
 
