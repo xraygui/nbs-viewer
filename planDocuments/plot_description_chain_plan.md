@@ -112,8 +112,10 @@ or a region, and `plane/` *is* the frame.
    path, never passes it. It stays a keyword argument, documented as an
    ROI-preview optimisation.
 7. **`MaskMode` moves to `plane/roles.py`; `ReduceOp` is a duplicate.**
-   `view/spec.py` records an argument for keeping `MaskMode` beside
-   `compile_with_mask_mode`, "the thing it configures". That was true when
+   `view/spec.py`, now `spec/projection.py`, recorded an argument for keeping
+   `MaskMode` beside `compile_with_mask_mode`, "the thing it configures". The
+   note itself is gone; step 1 carried the surviving half of it to
+   `plane/roles.py`. That was true when
    that function was its only consumer. Measured now: it is used in four
    files, and the only use inside `region.py` is the parameter of
    `compile_with_mask_mode`, which step 4 turns into a method anyway —
@@ -194,7 +196,7 @@ Counts exclude definition lines and `__init__.py` re-exports.
 | | src call sites | test call sites |
 |---|---:|---:|
 | imports naming `view` / `geometry` / `fetch` | 42 | 108 |
-| `.fetch` **property** | **2** (`trace.py:229`, `:266`) | 76 |
+| `.fetch` **property** | **2** (`trace.py:230`, `:267`) | 76 |
 | `plan_fetch` | 8 | 14 |
 | `prepare_2d_bundle` | 4 | 35 |
 | `compile_with_mask_mode` | 5 | 12 |
@@ -212,7 +214,13 @@ not the property.
 
 ## Steps
 
-Each step leaves the suite green. Line counts are code lines at `4c93e34`.
+Each step leaves the suite green.
+
+**Paths and line numbers in open steps are kept current.** Steps 1 and 2 moved
+every file in the package, so an open step citing `fetch/plan.py` would send a
+reader to a path that no longer exists. Open steps below are re-pointed and
+re-measured at `211886d`; steps already done keep the paths they were taken
+against, because that is what they describe. Line counts are code lines.
 
 ### 1. Make `plane/` the sink, and kill the cycle
 
@@ -269,7 +277,7 @@ Two functions carry the entire dependency of the machinery on the chain.
 
 `build_plot_bundle(data, request, *, render_mode_hint, label)` in
 `spec/bundle.py` uses `request` at exactly one line — `request.region is not
-None`, `geometry/bundle.py:322` today. Replace the parameter with
+None`, at `spec/bundle.py:322`. Replace the parameter with
 `is_roi_profile: bool`. 2 src, 4 test call sites; the only production caller
 is `RunFetch.get_plot_bundle`, which has the request in hand.
 
@@ -309,9 +317,10 @@ adds the opposite one. Split across two commits, the first is a cycle.
 **Open.**
 
 - `plan_fetch(request, *, plane_frame)` → `PlotRequest.plan(*, plane_frame)`.
-  Its 96-line body (`plan.py:115–211`) **moves file**, from `plan.py` into
-  `request.py`. `plan.py` is then `FetchPlan` + `narrow` + `kept_axes`, ~130
-  lines, and no longer imports `request.py`. 8 src, 14 test sites.
+  Its 96-line body (`spec/plan.py:113–208`) **moves file**, into
+  `spec/request.py`. `spec/plan.py` is then `FetchPlan` + `narrow` +
+  `kept_axes`, ~130 lines of its current 226, and no longer imports
+  `request.py`. 8 src, 14 test sites.
 - `build_plot_bundle(...)` → `PlotBundle.pack(data, *, is_roi_profile,
   render_mode_hint, label)`. 2 / 4.
 - `prepare_1d_bundle` → `PlotBundle.from_1d` (4 / 4);
@@ -333,7 +342,7 @@ adds the opposite one. Split across two commits, the first is a cycle.
 not a class, so the rule cannot apply. `reduce_masked_plane` has **zero
 production callers** and two test calls — decide separately whether to delete
 it; it is not a put-it-on-its-type item. `x_dimension(y: KeyInfo, ...)` at
-`run/source.py:16` is **dropped from this plan**: `KeyInfo` lives in
+`run/source.py:16`, unmoved, is **dropped from this plan**: `KeyInfo` lives in
 `models/data/key_info.py`, and a plot-package re-carve should not reach into
 the data layer to add a plot-shaped method to a data type.
 
@@ -344,7 +353,7 @@ it and now calls `PlotRequest.plan()`.
 
 **Open**, and gated: see the decision below before starting.
 
-`run/pipeline.py` is 455 code lines; by the problem statement's method-line
+`run/pipeline.py` is 450 code lines; by the problem statement's method-line
 measure, 463: 289 of block cache, 101 of `get_plot_bundle`, 53 of
 `_plane_frame`, 20 of `_render_hint`.
 
@@ -392,8 +401,8 @@ property `RunSource.fetch` and its 2 src / 76 test sites;
 its two uses. `RunSource` drops to roughly 200 method lines against the 250
 that item 5 of the post-refactor review named.
 
-`Trace.get_plot_bundle` (`trace.py:212`) **survives** — it is called from
-`plot_worker.py:96` and `single_canvas.py:397` — and its body becomes
+`Trace.get_plot_bundle` (`trace.py:213`) **survives** — it is called from
+`plot_worker.py:96` and `single_canvas.py:398` — and its body becomes
 `self._request.plot_bundle(self._run.reader, ...)`. Two similar names then
 exist at different altitudes: `Trace.get_plot_bundle` (model state) and
 `PlotRequest.plot_bundle` (the chain). Rename the Trace one if that reads
@@ -411,8 +420,8 @@ Create `trace/`: `key.py` holding `TraceKey` moved out of `spec/request.py`,
 `trace.py` and `set.py` moved from top level.
 
 **Deletes:** `PlotRequest.trace_key`, which is a **method taking
-`fan_out_index`**, not a property — `request.trace_key()` at `trace.py:74` and
-`request.trace_key(self._trace_key.fan_out_index)` at `:158`. Its logic needs
+`fan_out_index`**, not a property — `request.trace_key()` at `trace.py:75` and
+`request.trace_key(self._trace_key.fan_out_index)` at `:159`. Its logic needs
 a home: `TraceKey.of(request, fan_out_index=0)`, a classmethod in
 `trace/key.py`, so `spec/` imports nothing from `trace/`. `trace.py` is the
 only reader; `region_controller.py` uses `trace.trace_key`, the `Trace`
@@ -453,6 +462,7 @@ property, which is untouched.
 | Date | Change |
 |------|--------|
 | 2026-09-15 | Drafted at `4c93e34`. |
+| 2026-09-16 | Paths and line numbers in the open steps re-pointed and re-measured at `211886d`, after steps 1 and 2 moved every file in the package. Done steps keep the paths they were taken against. The convention is stated at the head of the Steps section so it does not have to be rediscovered: an open step must send a reader to a path that exists. |
 | 2026-09-16 | Progress markers added: a table near the top, a status line on each step, and a settled marker on gating decisions as they are taken. The document had no way to say which steps had landed, which matters more here than usual because step 6 is independent of 3-5b and may be taken out of order. |
 | 2026-09-16 | Asked whether every link pulls its weight, before any work started. `ViewIntent` is reclassified as the chain's editor rather than a link: it works in names where `Projection` works in indices, and `set_reduce_from` flows state back up. `FetchPlan` is recorded as the weakest genuine rung — five of eight fields are request pass-throughs and its unique behaviour is the cache key — so its survival is tied to the deferred cache decision and listed with it. The `PlotViewFrame` / `PlotBundle` eight-field overlap is recorded as a non-goal: a real duplication, larger than anything on the chain, and out of scope here. |
 | 2026-09-15 | Decision 7 reversed after the maintainer noted that recorded decisions are advisory during a reorganization, not binding. On the merits `MaskMode` is plane vocabulary — four consumers, and its only use in `region.py` is a parameter that step 4 turns into a method — so it moves to `plane/roles.py`. Measuring it also turned up `ReduceOp` and `SpatialReduce` as the same `Literal["sum", "mean"]` under two names in two packages, which the note in `view/spec.py` claims to have cleaned up. Step 1's framing of the two boundary tests is relaxed: they may be xfailed for the length of the step, green by the end of it. |
