@@ -79,6 +79,8 @@ nbs-viewer = { path = ".", editable = true }
 
 [tool.pixi.tasks]
 nbs-viewer = "nbs-viewer"
+lint = "ruff check nbs_viewer tests"
+lint-fix = "ruff check --fix nbs_viewer tests"
 
 [tool.pixi.dependencies]
 pytest-timeout = ">=2.4.0,<3"
@@ -96,3 +98,25 @@ pyzmq = ">=27.1.0,<28"
 bluesky-tiled-plugins = ">=2.0.3,<3"
 databroker = ">=2.0.0,<3"
 asteval = ">=1.0.6,<2"
+ruff = ">=0.16.7,<0.17"
+
+[tool.ruff]
+# 85 rather than 79, chosen from the tree rather than from habit: the code is
+# written to 79 but a long tail sits a few characters over, and 85 clears all
+# but five lines in models/plot while 79 would churn ninety files.
+line-length = 85
+
+[tool.ruff.lint]
+# Pyflakes plus the real-error subset of pycodestyle, plus bugbear.
+#
+# E501 (line-too-long) is deliberately absent. It is the reformatter's rule,
+# not a reviewer's, and turning it on today reports 176 lines that `ruff
+# format` would rewrite for free. It comes back when the formatting pass does
+# -- which is held until the models/plot refactor lands, so that a
+# whole-tree reformat is one isolated commit for .git-blame-ignore-revs
+# rather than noise spread through every step of a refactor whose whole
+# purpose is making `git blame` answer questions.
+#
+# E1/E2/E3 (whitespace, blank lines, indentation) are absent for the same
+# reason.
+select = ["E4", "E7", "E9", "F", "B"]
