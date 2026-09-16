@@ -13,11 +13,15 @@ functions and call sites, and no step states a count it has not measured.
 One line per step. A step is **done** only when the whole suite is green at
 its commit; nothing is left `xfail`ed across a step boundary.
 
+The commit column is filled in by a follow-up commit, not by the step itself
+-- a commit cannot carry its own hash, and amending one to add it changes the
+hash again.
+
 | | step | status | commit |
 |---|---|---|---|
 | 1 | Make `plane/` the sink, and kill the cycle | **done** | `b1e33b8` |
 | 2 | Form `spec/` | **done** | `f4f9d82` |
-| 3 | Cut the two machinery-to-request edges | **open** | |
+| 3 | Cut the two machinery-to-request edges | **done** | `020cf9d` |
 | 4 | Reverse the chain, free functions onto their types | **open** | |
 | 5a | Split `RunFetch` into a reader and a cache | **open** | |
 | 5b | Move the sequencer onto the request | **open** | |
@@ -271,7 +275,7 @@ most of all, since it contains no fetch.
 
 ### 3. Cut the two machinery-to-request edges
 
-**Open.**
+**Done** at `020cf9d`.
 
 Two functions carry the entire dependency of the machinery on the chain.
 
