@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from nbs_viewer.models.plot.fetch.request import TraceKey
+from nbs_viewer.models.plot.spec.request import TraceKey
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.plot.trace import Trace

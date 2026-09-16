@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.run.source import RunSource
-from nbs_viewer.models.plot.view.spec import DimRole
+from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 

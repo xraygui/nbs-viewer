@@ -3,7 +3,7 @@ from typing import Optional, Set
 
 from qtpy.QtCore import QThread, Signal
 
-from nbs_viewer.models.plot.fetch.request import PlotRequest
+from nbs_viewer.models.plot.spec.request import PlotRequest
 from nbs_viewer.utils import print_debug
 
 

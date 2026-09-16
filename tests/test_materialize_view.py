@@ -3,12 +3,13 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.fetch.stages import materialize_view
+from nbs_viewer.models.plot.spec.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.view.axes import PlotAxes
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.region import RectRegion
+from nbs_viewer.models.plot.spec.axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
 

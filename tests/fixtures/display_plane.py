@@ -12,7 +12,7 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
-from nbs_viewer.models.plot.geometry.bundle import PlotBundle, prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle, prepare_2d_bundle
 from nbs_viewer.models.plot.plane.orientation import display_flips
 from nbs_viewer.models.plot.plane.frame import PlotViewFrame
 
@@ -160,8 +160,8 @@ def roi_profile_from_block(
     """
     import xarray as xr
 
-    from nbs_viewer.models.plot.view.axes import PlotAxes
-    from nbs_viewer.models.plot.fetch.stages import materialize_view
+    from nbs_viewer.models.plot.spec.axes import PlotAxes
+    from nbs_viewer.models.plot.spec.stages import materialize_view
 
     axis_names = list(axis_names)
     # The block is what the plan loaded, so an axis the slice indexed away is
@@ -271,7 +271,7 @@ def profile_axes(
     PlotAxes
         Named profile view.
     """
-    from nbs_viewer.models.plot.view.axes import PlotAxes
+    from nbs_viewer.models.plot.spec.axes import PlotAxes
 
     names = list(axis_names)
     plane = (

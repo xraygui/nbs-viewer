@@ -4,10 +4,11 @@ import pytest
 
 from tests.fixtures.view import intent_from_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.fetch.plan import plan_fetch
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.plan import plan_fetch
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.sources.fixtures import VPPEM_SHAPE, VPPEM_UID
 
 

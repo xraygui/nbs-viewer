@@ -11,9 +11,8 @@ from ..views.dataSource.run_list_item_model import RunListItemModel
 from ..models.plot.session import PlotSession
 from ..views.plot.plotWidget import PlotWidget
 
-from qtpy.QtCore import Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import QWidget, QHBoxLayout, QSplitter
-from qtpy.QtCore import Qt
 
 
 def make_kafka_source(

@@ -28,19 +28,17 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
 
-from .fetch.request import PlotRequest, TraceKey
-from .geometry import (
-    PlotViewFrame,
-    RectRegion,
-    RegionDefinition
-)
+from .spec.request import PlotRequest, TraceKey
+from .plane.frame import PlotViewFrame
+from .spec.region import RectRegion, RegionDefinition
 from .roi import RoiEntry, RoiSetModel
 from .trace import Trace
-from .view import Projection, ViewCrop
+from .plane.roles import ViewCrop
+from .spec.projection import Projection
 
 if TYPE_CHECKING:  # pragma: no cover
     from .run.frozen_spectrum import FrozenSpectrum
-    from .geometry import PlotBundle
+    from .spec.bundle import PlotBundle
     from .session import PlotSession
 
 

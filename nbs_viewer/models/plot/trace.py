@@ -17,10 +17,11 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
-from .view import Projection
+from .spec.projection import Projection
 from .run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX, copy_plot_bundle
-from .geometry import PlotBundle, RenderMode
-from .fetch.request import PlotRequest, TraceKey
+from .plane.orientation import RenderMode
+from .spec.bundle import PlotBundle
+from .spec.request import PlotRequest, TraceKey
 
 
 class Trace(QObject):

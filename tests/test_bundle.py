@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from tests.fixtures.display_plane import orient_block
-from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle, prepare_2d_bundle
+from nbs_viewer.models.plot.spec.bundle import prepare_1d_bundle, prepare_2d_bundle
 from nbs_viewer.models.plot.plane.orientation import (
     classify_render_mode,
     display_flips,
@@ -216,7 +216,7 @@ def test_image_and_mesh_agree_on_axis_placement():
 
 def _plain_2d_request():
     """A 2-D request with no region, for the packing step."""
-    from nbs_viewer.models.plot.fetch.request import PlotRequest
+    from nbs_viewer.models.plot.spec.request import PlotRequest
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     return PlotRequest(
@@ -246,7 +246,7 @@ def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descendin
     All four orientations are checked because three of them are flips, and a
     reversal applied to the wrong axis is a silently plausible image.
     """
-    from nbs_viewer.models.plot.geometry.bundle import build_plot_bundle
+    from nbs_viewer.models.plot.spec.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)
@@ -275,7 +275,7 @@ def test_the_pack_leaves_a_mesh_alone():
     """
     A mesh carries its own coordinate grids, so nothing is ever reordered.
     """
-    from nbs_viewer.models.plot.geometry.bundle import build_plot_bundle
+    from nbs_viewer.models.plot.spec.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)

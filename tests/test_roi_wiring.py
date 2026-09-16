@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from tests.fixtures.view import apply_projection
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 
 from tests.fixtures.session import HeadlessSession

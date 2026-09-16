@@ -3,8 +3,8 @@
 import numpy as np
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
 
 
 def test_swapping_plot_rows_swaps_the_roles():

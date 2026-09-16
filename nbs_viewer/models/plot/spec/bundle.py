@@ -6,7 +6,7 @@ display order, the coordinates that put it on screen, and a record of which
 axes were reversed to get there. Packing one is where display order begins --
 everything upstream works in the order the source stored the data.
 
-The decisions this file records are made next door in :mod:`orientation`.
+The decisions this file records are made below, in :mod:`..plane.orientation`.
 
 Pure numpy logic with no Qt or matplotlib dependencies.
 """
@@ -37,7 +37,7 @@ from ..plane.orientation import (
 if TYPE_CHECKING:  # pragma: no cover - annotation only
     import xarray as xr
 
-    from ..fetch.request import PlotRequest
+    from .request import PlotRequest
 
 
 @dataclass

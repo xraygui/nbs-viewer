@@ -9,9 +9,10 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.fetch.request import TraceKey
+from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
+from nbs_viewer.models.plot.spec.request import TraceKey
 from nbs_viewer.models.plot.trace import Trace
 from nbs_viewer.models.plot.session import PlotSession
 from tests.fixtures.view import apply_projection

@@ -14,7 +14,8 @@ from typing import List, Optional, Sequence, Tuple
 
 from qtpy.QtCore import QObject, Signal
 
-from .view import DimRole, Projection, SLICE_ROLES, ViewCrop, resolve_axis_order
+from .plane.roles import DimRole, SLICE_ROLES, ViewCrop
+from .spec.projection import Projection, resolve_axis_order
 
 
 def _validated_reduce(

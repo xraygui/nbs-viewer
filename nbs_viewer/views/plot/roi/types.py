@@ -29,7 +29,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nbs_viewer.models.plot.geometry import (
+from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
     PolygonRegion,
     RectRegion,

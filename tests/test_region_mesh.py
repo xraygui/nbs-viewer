@@ -3,16 +3,17 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.region import (
+from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.region import (
     AxisSliceRegion,
     EllipseRegion,
     PolygonRegion,
     RectRegion,
 )
 from nbs_viewer.models.plot.plane.mask import mask_from_data_rect
-from nbs_viewer.models.plot.fetch.stages import materialize_view
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
+from nbs_viewer.models.plot.spec.stages import materialize_view
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
 

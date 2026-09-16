@@ -8,14 +8,15 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.fetch.stages import (
+from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.stages import (
     apply_normalization,
     apply_transform,
     slice_info_for_key,
 )
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.sources.fixtures import (
@@ -28,7 +29,7 @@ from nbs_viewer.models.sources.fixtures import (
 )
 import xarray as xr
 
-from nbs_viewer.models.plot.view.axes import PlotAxes
+from nbs_viewer.models.plot.spec.axes import PlotAxes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.display_plane import labelled_block
 from tests.test_run_source import _frozen_entry
@@ -840,7 +841,7 @@ def _image_scan_model():
 
 def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
     """Run the load boundary and return ``(request, block, norm arrays)``."""
-    from nbs_viewer.models.plot.fetch.request import PlotRequest
+    from nbs_viewer.models.plot.spec.request import PlotRequest
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     shape = model.get_shape(ykey)

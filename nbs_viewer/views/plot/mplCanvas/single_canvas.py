@@ -18,15 +18,16 @@ from matplotlib.widgets import RectangleSelector
 from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
-from nbs_viewer.models.plot.view import Projection, ViewCrop
-from nbs_viewer.models.plot.geometry import (
+from nbs_viewer.models.plot.plane.roles import ViewCrop
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.plane.frame import PlotViewFrame
+from nbs_viewer.models.plot.plane.orientation import RenderMode
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
-    PlotBundle,
-    PlotViewFrame,
     RectRegion,
     RegionDefinition,
-    RenderMode,
-    )
+)
 from nbs_viewer.models.plot.roi import RoiSetModel
 from nbs_viewer.utils import print_debug, time_function
 from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists

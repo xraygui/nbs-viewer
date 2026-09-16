@@ -13,8 +13,8 @@ import xarray as xr
 
 from ...data.array_contract import labelled_array, surviving_dims
 from ...data.key_info import KeyInfo
-from ..geometry import PlotBundle
-from ..fetch.request import PlotRequest
+from ..spec.bundle import PlotBundle
+from ..spec.request import PlotRequest
 
 SYNTHETIC_KEY_PREFIX = "__roi__/"
 

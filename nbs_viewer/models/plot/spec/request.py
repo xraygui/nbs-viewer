@@ -13,12 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
-from ..view import DimRole, PlotAxes, Projection, SpatialReduce
-from ..geometry import (
-    MaskMode,
-    PlotViewFrame,
-    RegionDefinition
-)
+from ..plane.roles import DimRole, MaskMode, SpatialReduce
+from .axes import PlotAxes
+from .projection import Projection
+from ..plane.frame import PlotViewFrame
+from .region import RegionDefinition
 
 
 @dataclass(frozen=True)

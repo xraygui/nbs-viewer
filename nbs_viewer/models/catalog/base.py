@@ -1,13 +1,12 @@
 """Base interfaces for catalog models."""
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Dict, Generator, Tuple
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 import collections
 from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points
 from ..data.base import CatalogRun
 from nbs_viewer.utils import print_debug
-from typing import Set
 
 
 def load_catalog_models():

@@ -13,11 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
-from ..geometry import (
-    PlotViewFrame,
-    compile_with_mask_mode,
-)
-from ..view import SliceItem
+from ..plane.frame import PlotViewFrame
+from .region import compile_with_mask_mode
+from ..plane.roles import SliceItem
 from .request import PlotRequest
 
 

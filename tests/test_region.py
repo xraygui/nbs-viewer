@@ -3,13 +3,13 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.region import (
+from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
     PolygonRegion,
     RectRegion,
     reduce_masked_plane,
-    region_from_dict
+    region_from_dict,
 )
 
 

@@ -10,8 +10,9 @@ import pytest
 
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
@@ -170,10 +171,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.geometry.region import (
-        PolygonRegion,
-        compile_with_mask_mode
-)
+    from nbs_viewer.models.plot.spec.region import PolygonRegion, compile_with_mask_mode
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 
     plot_model, _ = make_plot_session()

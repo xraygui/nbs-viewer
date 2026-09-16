@@ -20,15 +20,12 @@ import xarray as xr
 from asteval import Interpreter
 
 from ...data.array_contract import REDUCE_SKIPNA
-from ..geometry import (
-    MaskMode,
-    PlotBundle,
-    PlotViewFrame,
-    RegionDefinition,
-    compile_with_mask_mode,
-    prepare_1d_bundle
-)
-from ..view import DimRole, PlotAxes, PlotAxisName, Projection, SliceItem
+from ..plane.frame import PlotViewFrame
+from ..plane.roles import DimRole, MaskMode, PlotAxisName, SliceItem
+from .bundle import PlotBundle, prepare_1d_bundle
+from .region import RegionDefinition, compile_with_mask_mode
+from .axes import PlotAxes
+from .projection import Projection
 from .request import PlotRequest
 
 

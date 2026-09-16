@@ -5,11 +5,11 @@ Rank-agnostic view intent, and the concrete projection it binds to.
 ``Projection`` is the rank-bound snapshot carried by a ``PlotRequest``: axis
 order, per-axis roles, and the indices for axes held at one value. Crop rides
 along as integer storage bounds on the plot plane; it is applied by
-``plot_request.plan_fetch``, never here.
+``plan.plan_fetch``, never here.
 
-Applying a projection to loaded arrays lives in ``stages.py``. This
-module only describes and queries it, and imports nothing else in the
-package to do so.
+Applying a projection to loaded arrays lives in :mod:`stages`. This
+module only describes and queries it, and reaches no further than the
+vocabulary in :mod:`..plane.roles` to do so.
 """
 
 from __future__ import annotations
@@ -172,7 +172,7 @@ class Projection:
 
         INDEX axes become integer indices; every other role requests the full
         axis (``slice(None)``). Crop and ROI narrowing are deliberately *not*
-        applied here -- ``plot_request.plan_fetch`` is the only place a load
+        applied here -- ``plan.plan_fetch`` is the only place a load
         is narrowed, so the display-to-storage mapping has one owner.
 
         Returns

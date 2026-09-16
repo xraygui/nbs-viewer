@@ -3,12 +3,13 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.fetch.stages import reduce_cached_plane
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.fetch.plan import plan_fetch
-from nbs_viewer.models.plot.geometry.region import (
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.stages import reduce_cached_plane
+from nbs_viewer.models.plot.spec.bundle import prepare_2d_bundle
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.plan import plan_fetch
+from nbs_viewer.models.plot.spec.region import (
     PolygonRegion,
     RectRegion,
     compile_with_mask_mode,
