@@ -227,7 +227,7 @@ class Trace(QObject):
             Prepared plot payload.
         """
         request = plot_request if plot_request is not None else self._request
-        bundle = self._run.fetch.get_plot_bundle(request)
+        bundle = request.plot_bundle(self._run)
         self._fetched_request = request
         self._update_render_mode(bundle)
         self.last_bundle = bundle
@@ -264,8 +264,8 @@ class Trace(QObject):
         PlotBundle
             1D ROI profile payload.
         """
-        return self._run.fetch.get_plot_bundle(
-            request, cached_plane=cached_plane, label=label
+        return request.plot_bundle(
+            self._run, cached_plane=cached_plane, label=label
         )
 
     def build_roi_frozen_spectrum(

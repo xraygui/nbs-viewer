@@ -10,7 +10,6 @@ from ...data.key_info import KeyInfo
 from ...data.key_source import CatalogKey
 from .cache import BlockCache
 from .frozen_spectrum import FrozenSpectrum
-from .pipeline import RunFetch
 from ..spec.plan import FetchPlan
 from nbs_viewer.utils import print_debug
 
@@ -73,10 +72,16 @@ class RunSource(QObject):
     needs both sources at once -- a frozen stack spectrum plotted against the
     catalog's X keys.
 
-    The RunSource surface is ``key_table``, ``identity``, ``describe``,
-    ``load``, ``load_coords``, ``read`` and ``plot_axis_names``, plus
-    ``fetch``, which turns a plot request into a bundle. Selection,
-    visibility, and transform live on :class:`PlotSession`.
+    The RunSource surface is ``key_table`` and ``identity``, plus the six
+    read methods that make it the *reader* for its own key space:
+    ``describe``, ``load``, ``load_coords``, ``read``, ``plot_axis_names``
+    and ``block``. Only ``block`` remembers anything, and it is the only one
+    that delegates -- to the :class:`~.cache.BlockCache` this class owns.
+
+    Turning a plot request into a bundle is no longer here and no longer
+    beside it: that is ``PlotRequest.plot_bundle``, which takes this object
+    as its reader. Selection, visibility, and transform live on
+    :class:`PlotSession`.
 
     Parameters
     ----------
@@ -99,7 +104,6 @@ class RunSource(QObject):
         self._key_table: Optional[Dict[str, KeyInfo]] = None
         # Before the keys load, because loading them clears the cache.
         self._cache = BlockCache(self)
-        self._fetch = RunFetch(self)
         self._update_available_keys()
         self._connect_run()
 
@@ -126,15 +130,6 @@ class RunSource(QObject):
     def run(self) -> CatalogRun:
         """Get the underlying run object."""
         return self._run
-
-    @property
-    def fetch(self) -> RunFetch:
-        """
-        The fetch for this run's keys: plot request in, plot bundle out.
-
-        Handed out rather than forwarded, so callers ask it directly.
-        """
-        return self._fetch
 
     @property
     def metadata(self):

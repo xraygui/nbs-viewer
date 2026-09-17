@@ -195,9 +195,7 @@ def test_synthetic_y_fetch_ignores_catalog_get_data(qapp):
     model.register_frozen_spectrum(entry)
     get_data = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
     model._run.getData = get_data
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["en_energy"], entry.key)
-    )
+    bundle = _plot_request(model, ["en_energy"], entry.key).plot_bundle(model)
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
     np.testing.assert_allclose(bundle.x_line, [0.0, 1.0, 2.0])
@@ -219,15 +217,11 @@ def test_stack_spectrum_uses_selected_catalog_x(qapp):
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
 
-    bundle_time = model.fetch.get_plot_bundle(
-        _plot_request(model, ["time"], entry.key)
-    )
+    bundle_time = _plot_request(model, ["time"], entry.key).plot_bundle(model)
     np.testing.assert_allclose(bundle_time.y, [10.0, 20.0, 30.0])
     np.testing.assert_allclose(bundle_time.x_line, [1.0, 2.0, 3.0])
 
-    bundle_motor = model.fetch.get_plot_bundle(
-        _plot_request(model, ["motor_position"], entry.key)
-    )
+    bundle_motor = _plot_request(model, ["motor_position"], entry.key).plot_bundle(model)
     np.testing.assert_allclose(bundle_motor.x_line, [0.1, 0.2, 0.3])
 
 
@@ -237,7 +231,7 @@ def test_stack_spectrum_x_length_mismatch_raises(qapp):
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0]))
     with pytest.raises(ValueError, match="does not match"):
-        model.fetch.get_plot_bundle(_plot_request(model, ["en_energy"], entry.key))
+        _plot_request(model, ["en_energy"], entry.key).plot_bundle(model)
 
 
 def test_local_profile_keeps_frozen_x(qapp):
@@ -272,9 +266,7 @@ def test_local_profile_keeps_frozen_x(qapp):
     model.register_frozen_spectrum(entry)
     get_data = MagicMock()
     model._run.getData = get_data
-    result = model.fetch.get_plot_bundle(
-        _plot_request(model, ["en_energy"], entry.key)
-    )
+    result = _plot_request(model, ["en_energy"], entry.key).plot_bundle(model)
     np.testing.assert_allclose(result.x_line, [10.0, 20.0, 30.0])
     get_data.assert_not_called()
 
@@ -289,11 +281,9 @@ def test_synthetic_norm_without_get_data_for_norm_key(qapp):
         return_value={"time": np.array([0.0, 1.0, 2.0])}
     )
 
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(
+    bundle = _plot_request(
             model, ["en_energy"], "time", norm_keys=[norm_entry.key]
-        )
-    )
+        ).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, [2.0, 4.0, 6.0])
     model._run.getData.assert_called_once()
 
@@ -305,9 +295,7 @@ def test_frozen_plot_projects_on_its_own_rank(qapp):
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
     # The session downgrades plot_ndim for a key that cannot fill the plot,
     # so a 1-D frozen spectrum never receives the 2-D image's projection.
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["en_energy"], entry.key, plot_ndim=2)
-    )
+    bundle = _plot_request(model, ["en_energy"], entry.key, plot_ndim=2).plot_bundle(model)
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
 
@@ -317,11 +305,9 @@ def test_transform_assignment_updates_y(qapp):
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(
+    bundle = _plot_request(
             model, ["en_energy"], entry.key, transform="y = y * 2"
-        )
-    )
+        ).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, [20.0, 40.0, 60.0])
 
 

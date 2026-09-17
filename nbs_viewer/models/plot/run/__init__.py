@@ -1,17 +1,22 @@
 """
 One run as the plot layer sees it: what it is, and how to read it.
 
-:mod:`source` is ``RunSource``, the object a trace holds. :mod:`pipeline` is
-``RunFetch``, which it owns and hands out as ``.fetch``, and which runs the
-stages between a request and a bundle.
+:mod:`source` is ``RunSource``, the object a trace holds. It is the union of
+a catalog run and its frozen synthetic keys under one key space, and it is
+the *reader* for them -- the six methods anything asks a run for.
 
-It is ``pipeline.py`` and not ``fetch.py``, which is what the plan called it,
-because ``models/plot/spec/`` is the package below holding the request,
-the plan and the stages. Two things called ``fetch`` one directory apart is
-the kind of name this whole reorganisation exists to remove, and the
-distinction is real: that package *describes* a fetch, this class *performs*
-one. It is also the ``pipeline.py`` the plan wanted inside ``spec/`` and
-could find no contents for -- the pipeline is a thing an object does.
+:mod:`cache` is ``BlockCache``, the one block a run holds and the window
+arithmetic that decides whether a new plan needs a read. ``RunSource`` owns
+one and hands its own reads to it, so the cache is a collaborator rather than
+a layer wrapped around the reader; there is no non-caching reader class,
+because the reader is ``RunSource`` itself.
+
+The stages between a request and a bundle used to live here too, as
+``pipeline.RunFetch``. They are now ``PlotRequest.plot_bundle``, in the
+package that holds the rest of the description chain: the sequencer reads
+nine attributes of the request and one of the plan, so it belongs with them.
+Nothing in this package describes a plot any more.
+
 :mod:`frozen_spectrum` is a reduction frozen into a synthetic key so it can
 be plotted beside live data.
 

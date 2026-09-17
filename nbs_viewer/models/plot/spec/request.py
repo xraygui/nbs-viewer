@@ -10,6 +10,7 @@ changes reuse the artist.
 
 from __future__ import annotations
 
+import time as ttime
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple
 
@@ -17,13 +18,22 @@ import numpy as np
 import xarray as xr
 
 from ..plane.frame import PlotViewFrame
+from ..plane.orientation import classify_render_mode, display_flips
 from ..plane.roles import DimRole, MaskMode, SliceItem, SpatialReduce
 from .axes import PlotAxes
 from .bundle import PlotBundle
 from .plan import FetchPlan, narrow
 from .projection import Projection
 from .region import RegionDefinition
-from .stages import materialize_view
+from .stages import (
+    apply_normalization,
+    apply_transform,
+    mask_to_profile,
+    materialize_view,
+    reduce_before_mask,
+    reduce_to_plane,
+)
+from nbs_viewer.utils import print_debug
 
 
 @dataclass(frozen=True)
@@ -341,6 +351,165 @@ class PlotRequest:
             ykey=self.ykey,
             fan_out_index=fan_out_index
 )
+
+    def plot_bundle(
+        self,
+        reader,
+        *,
+        cached_plane: Optional[PlotBundle] = None,
+        label: str = "",
+    ) -> PlotBundle:
+        """
+        Load, normalize, reduce, transform, mask and pack this request.
+
+        The end of the chain, and the only place the reader enters it. A
+        request is the whole description -- the projection, the crop, and for
+        an ROI the region, the profile axis and the spatial reduce -- so what
+        the plot plane's coordinate frame is, and which storage indices to
+        read, are both derived from it here rather than passed in.
+
+        The stage order is the content of the pipeline:
+
+        - Normalization happens first, on the whole block, so a norm key is
+          divided in per element before anything is summed.
+        - The transform runs on the finished plot plane, *before* the ROI
+          mask. The user already sees ``f(y)`` on the image and draws the ROI
+          on what they see, so summing the ROI must sum what they see.
+
+        The load depends only on the fetch plan, so the reader holds the
+        block as read: editing a transform, toggling a normalization already
+        read, or moving an ROI inside a box already read re-runs only the
+        arithmetic.
+
+        Parameters
+        ----------
+        reader : object
+            Whatever reads the run's keys. Three methods are used here --
+            ``describe``, ``load_coords`` and ``block`` -- and in the
+            application it is the ``RunSource`` the request names by ``uid``.
+        cached_plane : PlotBundle, optional
+            Plot plane already in memory for this request's ``view``. Used to
+            skip rebuilding the plane an in-plane ROI profile reduces;
+            ignored otherwise.
+        label : str
+            Optional display label for 1D ROI output.
+
+        Returns
+        -------
+        PlotBundle
+            Prepared plot payload for the view layer.
+        """
+        plane_axes = self.plane_axes
+
+        # An ROI whose profile runs along an axis the plane already shows is
+        # a reduction of the finished plane, so it is served by masking that
+        # plane -- from memory when the caller has one, otherwise by building
+        # it here. One implementation of masking a 2-D plane, and what it
+        # masks is f(y), which is what the ROI was drawn on.
+        if self.region is not None and self.profile_axis in (plane_axes or ()):
+            plane = cached_plane
+            if plane is None or plane.ndim != 2:
+                plane = self.plane_request.plot_bundle(reader)
+            return self.reduce_cached_plane(plane, label=label)
+
+        # The plan comes back from planning rather than being re-derived: it
+        # is not free to make -- an ROI plan compiles the region against the
+        # parent plane -- and the mask stage needs the frame it produced.
+        plan = self.plan(plane_frame=self._plane_frame(reader))
+        data, norms = reader.block(plan)
+
+        t0 = ttime.time()
+        data = apply_normalization(data, norms)
+        if self.region is None:
+            axes = self.axes
+            data = reduce_to_plane(data, axes)
+            data = apply_transform(data, axes, self.transform)
+        else:
+            # Off-plane profile: the plane the user sees is one slice of the
+            # block, so reduce to that stack, transform it, and only then
+            # mask. The profile axis is read in full by the plan. The
+            # transform sees the plane's own coordinates either way, so ``x``
+            # means the same thing here as when the plane itself is drawn.
+            profile = self.profile_axes
+            data = reduce_before_mask(data, profile)
+            data = apply_transform(data, profile, self.transform)
+            data = mask_to_profile(
+                data,
+                profile,
+                self.region,
+                self.mask_mode,
+                plan.region_frame,
+            )
+        t_tail = ttime.time() - t0
+
+        print_debug(
+            "PlotRequest.plot_bundle",
+            f"{self.ykey} shape={data.shape} tail={t_tail:.4f}s",
+            category="plots",
+        )
+
+        info = reader.describe(self.ykey)
+        if info.synthetic and data.ndim == 1:
+            data = data.rename({data.dims[0]: label or info.label})
+        return PlotBundle.pack(
+            data,
+            is_roi_profile=self.region is not None,
+            render_mode_hint=info.render_hint,
+            label=label,
+        )
+
+    def _plane_frame(self, reader) -> Optional[PlotViewFrame]:
+        """
+        Derive the display frame of this request's full plot plane.
+
+        An ROI is geometry in data coordinates, so something has to say which
+        cell each coordinate falls in. That is a pure function of the plane's
+        shape, its two coordinate arrays and the render mode, all of which are
+        1-D and cheap to read, so the frame is derived here rather than passed
+        in from whichever bundle the canvas happened to have drawn.
+
+        Parameters
+        ----------
+        reader : object
+            Whatever reads the run's keys; ``describe`` and ``load_coords``
+            are used.
+
+        Returns
+        -------
+        PlotViewFrame or None
+            Frame of the uncropped plane, or None when there is no region to
+            compile against it.
+        """
+        if self.region is None:
+            return None
+        plane_axes = self.plane_axes
+        if plane_axes is None:
+            raise ValueError("cannot resolve the plot plane for an ROI fetch")
+        row_axis, col_axis = plane_axes
+        names = self.dims
+        coords = reader.load_coords(
+            self.ykey, self.view.base_slice(), self.xkeys, dims=names
+        )
+        rows = np.atleast_1d(np.asarray(coords[names[row_axis]].values))
+        cols = np.atleast_1d(np.asarray(coords[names[col_axis]].values))
+        plane_shape = (int(rows.size), int(cols.size))
+        render_mode = classify_render_mode(
+            plane_shape,
+            [rows, cols],
+            render_mode_hint=reader.describe(self.ykey).render_hint,
+        )
+        row_reversed, col_reversed = display_flips(rows, cols, render_mode)
+        return PlotBundle.from_2d(
+            np.broadcast_to(np.float64(0.0), plane_shape),
+            [
+                rows[::-1] if row_reversed else rows,
+                cols[::-1] if col_reversed else cols,
+            ],
+            [names[row_axis], names[col_axis]],
+            render_mode_hint=render_mode,
+            row_reversed=row_reversed,
+            col_reversed=col_reversed,
+        ).view_frame()
 
     def plan(
         self,

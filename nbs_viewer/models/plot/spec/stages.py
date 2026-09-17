@@ -2,7 +2,7 @@
 The pipeline stages, every one of them a labelled array in and one out.
 
 Normalize, transform, reduce to a plane, mask, profile: the order they run
-in is the pipeline, and it lives on ``RunFetch.get_plot_bundle``, not here.
+in is the pipeline, and it lives on ``PlotRequest.plot_bundle``, not here.
 Being uniformly ``DataArray -> DataArray`` is what makes them one concept
 and one file -- they were split across a reduce half and a normalize half
 until the labelled-array contract made the split stop being a boundary.

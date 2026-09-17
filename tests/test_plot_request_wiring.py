@@ -86,7 +86,7 @@ def test_run_model_get_plot_bundle_from_request():
         view=cube,
         dims=VPPEM_NAMES
 )
-    via_request = model.fetch.get_plot_bundle(req)
+    via_request = req.plot_bundle(model)
 
     assert via_request.render_mode == "image"
     expected = a[4] * np.outer(b, c)
@@ -107,7 +107,7 @@ def test_run_model_get_plot_bundle_request_with_crop():
         view=replace(cube, crop=crop),
         dims=VPPEM_NAMES
 )
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
     expected = (a[4] * np.outer(b, c))[2:10, 4:20]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
@@ -216,7 +216,7 @@ def _vppem_frame(model, req):
     """
     Return the display frame of the parent 2-D plane for an ROI request.
     """
-    return model.fetch.get_plot_bundle(req).view_frame()
+    return req.plot_bundle(model).view_frame()
 
 
 def test_get_plot_bundle_records_the_display_reversal():
@@ -234,7 +234,7 @@ def test_get_plot_bundle_records_the_display_reversal():
         dims=VPPEM_NAMES
 )
 
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
     frame = bundle.view_frame()
 
     assert bundle.row_reversed is True
@@ -267,7 +267,7 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
     profile_req = parent_req.with_roi_profile(roi, profile_axis=0)
-    bundle = model.fetch.get_plot_bundle(profile_req)
+    bundle = profile_req.plot_bundle(model)
 
     mask = roi.compile_masked(frame, "inside").mask
     plane = np.outer(b, c)[::-1, :]
@@ -296,14 +296,11 @@ def test_an_in_plane_roi_profile_masks_the_display_plane(along):
         view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
         dims=VPPEM_NAMES
 )
-    plane = model.fetch.get_plot_bundle(parent_req)
+    plane = parent_req.plot_bundle(model)
     assert plane.row_reversed
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
-    bundle = model.fetch.get_plot_bundle(
-        parent_req.with_roi_profile(roi, profile_axis=along),
-        cached_plane=plane
-)
+    bundle = parent_req.with_roi_profile(roi, profile_axis=along).plot_bundle(model, cached_plane=plane)
 
     mask = roi.compile_masked(plane.view_frame(), "inside").mask
     shown = np.where(mask, np.asarray(plane.y), np.nan)
@@ -337,7 +334,7 @@ def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
         view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
         dims=VPPEM_NAMES
 )
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
 
     expected = (a[4] * np.outer(b, c) / flat)[::-1, :]
     np.testing.assert_allclose(bundle.y, expected, rtol=1e-9)
@@ -393,7 +390,7 @@ def test_the_fetch_takes_the_names_from_the_request():
 )
 
     assert req.plan().dims == VPPEM_NAMES
-    model.fetch.get_plot_bundle(req)
+    req.plot_bundle(model)
     assert "PCOEdge_image" not in asked
 
 
@@ -416,4 +413,4 @@ def test_a_request_may_name_an_axis_only_after_its_x_key():
 )
 
     with pytest.raises(ValueError, match="neither its own name nor the X key"):
-        model.fetch.get_plot_bundle(req)
+        req.plot_bundle(model)

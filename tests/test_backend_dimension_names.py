@@ -336,9 +336,7 @@ def test_a_profile_against_the_second_detector_axis_has_its_values(qapp):
     names = model.plot_axis_names("cube", ["b"])
     view = ViewIntent(plot_ndim=1, xkey="b").project(3, (3, 4, 5), names)
 
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["b"], "cube", projection=view)
-    )
+    bundle = _plot_request(model, ["b"], "cube", projection=view).plot_bundle(model)
 
     np.testing.assert_allclose(bundle.x_line, run.getData("b"))
     np.testing.assert_allclose(bundle.y, run.getData("cube")[0, 0, :])
