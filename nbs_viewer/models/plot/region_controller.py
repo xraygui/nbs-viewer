@@ -28,11 +28,12 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from qtpy.QtCore import QObject, Signal
 
 
-from .spec.request import PlotRequest, TraceKey
+from .spec.request import PlotRequest
+from .trace.key import TraceKey
 from .plane.frame import PlotViewFrame
 from .spec.region import RectRegion, RegionDefinition
 from .roi import RoiEntry, RoiSetModel
-from .trace import Trace
+from .trace.trace import Trace
 from .plane.roles import ViewCrop
 from .spec.projection import Projection
 

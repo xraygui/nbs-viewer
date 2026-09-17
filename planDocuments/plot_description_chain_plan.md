@@ -25,7 +25,7 @@ hash again.
 | 4 | Reverse the chain, free functions onto their types | **done** | `ee92307` |
 | 5a | Extract the block cache, composed over the reader | **done** | `9da2cb7` |
 | 5b | Move the sequencer onto the request | **done** | `67ac592` |
-| 6a | Give `Trace` its key | **open** | |
+| 6a | Give `Trace` its key | **done** | |
 | 6b | Make `Trace.fetch` say that it fetches | **open** | |
 
 Gating decisions are listed under *Still to decide* below; all of them are
@@ -480,7 +480,10 @@ this plan, is a `Trace` concern, and has ~30 call sites. It belongs to step
 
 ### 6a. Give `Trace` its key
 
-**Open.** Independent of steps 3–5b, and cheaper if taken first.
+**Done.** `trace/` holds `key.py`, `trace.py` and `set.py`; `TraceKey` and
+`PlotRequest.trace_key` left `spec/request.py` for `TraceKey.of`, so `spec/`
+names nothing above it. `spec/request.py` is now the top of the chain and
+says so.
 
 Create `trace/`: `key.py` holding `TraceKey` moved out of `spec/request.py`,
 `trace.py` and `set.py` moved from top level.

@@ -13,10 +13,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from nbs_viewer.models.plot.spec.request import TraceKey
+from nbs_viewer.models.plot.trace.key import TraceKey
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.run.source import RunSource
-from nbs_viewer.models.plot.trace import Trace
+from nbs_viewer.models.plot.trace.trace import Trace
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
@@ -153,8 +153,8 @@ def test_trace_module_imports_without_matplotlib():
     root = Path(__file__).resolve().parents[1]
     code = (
         "import sys\n"
-        "import nbs_viewer.models.plot.trace\n"
-        "import nbs_viewer.models.plot.trace_set\n"
+        "import nbs_viewer.models.plot.trace.trace\n"
+        "import nbs_viewer.models.plot.trace.set\n"
         "assert 'matplotlib' not in sys.modules, "
         "sorted(m for m in sys.modules if m.startswith('matplotlib'))\n"
     )

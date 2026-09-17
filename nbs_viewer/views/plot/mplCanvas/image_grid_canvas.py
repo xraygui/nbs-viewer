@@ -9,8 +9,9 @@ from qtpy.QtCore import QTimer, Signal
 from qtpy.QtWidgets import QSizePolicy
 
 from nbs_viewer.models.data.array_contract import index_placeholders
-from nbs_viewer.models.plot.trace import Trace
-from nbs_viewer.models.plot.spec.request import PlotRequest, TraceKey
+from nbs_viewer.models.plot.trace.trace import Trace
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.trace.key import TraceKey
 from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.utils import print_debug
 from .plot_worker import PlotWorker, retire_plot_worker

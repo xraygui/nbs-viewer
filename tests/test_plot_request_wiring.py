@@ -114,8 +114,9 @@ def test_run_model_get_plot_bundle_request_with_crop():
 
 def test_plot_data_model_holds_request_and_fetches():
     from nbs_viewer.models.plot.spec.projection import Projection
-    from nbs_viewer.models.plot.trace import Trace
-    from nbs_viewer.models.plot.spec.request import PlotRequest, TraceKey
+    from nbs_viewer.models.plot.trace.trace import Trace
+    from nbs_viewer.models.plot.spec.request import PlotRequest
+    from nbs_viewer.models.plot.trace.key import TraceKey
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -144,7 +145,7 @@ def test_plot_data_model_holds_request_and_fetches():
 
 
 def test_set_request_keeps_trace_key():
-    from nbs_viewer.models.plot.trace import Trace
+    from nbs_viewer.models.plot.trace.trace import Trace
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -186,7 +187,7 @@ def test_set_request_keeps_trace_key():
 
 
 def test_ensure_trace_assembles_request(qapp):
-    from nbs_viewer.models.plot.spec.request import TraceKey
+    from nbs_viewer.models.plot.trace.key import TraceKey
     from tests.fixtures.plot_session import make_plot_session
 
     run = make_vppem_run()

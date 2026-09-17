@@ -17,11 +17,12 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
-from .spec.projection import Projection
-from .run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX
-from .plane.orientation import RenderMode
-from .spec.bundle import PlotBundle
-from .spec.request import PlotRequest, TraceKey
+from ..spec.projection import Projection
+from ..run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX
+from ..plane.orientation import RenderMode
+from ..spec.bundle import PlotBundle
+from ..spec.request import PlotRequest
+from .key import TraceKey
 
 
 class Trace(QObject):
@@ -67,12 +68,12 @@ class Trace(QObject):
         parent : QObject, optional
             Parent QObject.
         trace_key : TraceKey, optional
-            Object identity. Defaults to ``request.trace_key()``.
+            Object identity. Defaults to ``TraceKey.of(request)``.
         """
         super().__init__(parent=parent)
         self._run = run
         self._request = request
-        self._trace_key = trace_key or request.trace_key()
+        self._trace_key = trace_key or TraceKey.of(request)
         self._fetched_request: Optional[PlotRequest] = None
         self._label = label
         self.last_bundle: Optional[PlotBundle] = None
@@ -156,7 +157,7 @@ class Trace(QObject):
         ValueError
             If the request names a different trace.
         """
-        incoming = request.trace_key(self._trace_key.fan_out_index)
+        incoming = TraceKey.of(request, self._trace_key.fan_out_index)
         if (
             incoming.uid != self._trace_key.uid
             or incoming.xkey != self._trace_key.xkey

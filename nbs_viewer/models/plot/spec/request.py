@@ -1,11 +1,14 @@
 """
 Immutable description of one plottable trace.
 
-The upper of the view pipeline's two fixed layers. A :class:`PlotRequest` is
-frozen and hashable so it can serve as the fingerprint of a fetch; what to
-*read* for one is :mod:`plan` next door. Long-lived traces are identified by
-:class:`TraceKey`, a subset of the request, so view / crop / transform
-changes reuse the artist.
+The top of the chain, and the only module that knows the whole of it. A
+:class:`PlotRequest` is frozen and hashable so it can serve as the
+fingerprint of a fetch; what to *read* for one is :mod:`plan` next door, and
+:meth:`PlotRequest.plot_bundle` runs the stages that turn one into a bundle.
+
+Long-lived traces are identified by a subset of the request, but that subset
+is ``trace.key.TraceKey`` and not something here: the arrow runs from trace
+to request, so naming a trace is the trace package's business.
 """
 
 from __future__ import annotations
@@ -34,46 +37,6 @@ from .stages import (
     reduce_to_plane,
 )
 from nbs_viewer.utils import print_debug
-
-
-@dataclass(frozen=True)
-class TraceKey:
-    """
-    Object identity for a :class:`Trace` and its artist.
-
-    A :class:`PlotRequest` is the fingerprint of *what is plotted*. This key
-    is the subset that names a long-lived object so crop, transform, and
-    slice changes reuse the artist.
-
-    Parameters
-    ----------
-    uid : str
-        Run uid.
-    xkey : str
-        Primary X key.
-    ykey : str
-        Y data key.
-    fan_out_index : int, optional
-        Distinct cell when several slices of the same keys are shown at once
-        (image grid). ``None`` for the main display.
-    """
-
-    uid: str
-    xkey: str
-    ykey: str
-    fan_out_index: Optional[int] = None
-
-    def as_tuple(self) -> Tuple[str, str, str]:
-        """
-        Return the legacy ``(xkey, ykey, uid)`` map key.
-
-        Returns
-        -------
-        tuple of str
-            Compatibility triple used by crop ``source_key`` and canvas
-            connection tracking.
-        """
-        return (self.xkey, self.ykey, self.uid)
 
 
 @dataclass(frozen=True)
@@ -328,28 +291,6 @@ class PlotRequest:
             mask_mode=mask_mode,
             profile_axis=int(profile_axis),
             spatial_reduce=spatial_reduce
-)
-
-    def trace_key(self, fan_out_index: Optional[int] = None) -> TraceKey:
-        """
-        Return the object-identity subset of this request.
-
-        Parameters
-        ----------
-        fan_out_index : int, optional
-            Image-grid cell index. Defaults to no fan-out.
-
-        Returns
-        -------
-        TraceKey
-            Key for the long-lived trace.
-        """
-        xkey = self.xkeys[0] if self.xkeys else ""
-        return TraceKey(
-            uid=self.uid,
-            xkey=xkey,
-            ykey=self.ykey,
-            fan_out_index=fan_out_index
 )
 
     def plot_bundle(
