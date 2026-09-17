@@ -8,8 +8,10 @@ import xarray as xr
 from ...data.base import CatalogRun
 from ...data.key_info import KeyInfo
 from ...data.key_source import CatalogKey
+from .cache import BlockCache
 from .frozen_spectrum import FrozenSpectrum
 from .pipeline import RunFetch
+from ..spec.plan import FetchPlan
 from nbs_viewer.utils import print_debug
 
 
@@ -95,7 +97,8 @@ class RunSource(QObject):
         self._frozen_spectra: Dict[str, FrozenSpectrum] = {}
         self._dynamic = False
         self._key_table: Optional[Dict[str, KeyInfo]] = None
-        # Before the keys load, because loading them clears its cache.
+        # Before the keys load, because loading them clears the cache.
+        self._cache = BlockCache(self)
         self._fetch = RunFetch(self)
         self._update_available_keys()
         self._connect_run()
@@ -181,7 +184,7 @@ class RunSource(QObject):
     def _invalidate_key_table(self) -> None:
         """Drop the cached key table so the next access rebuilds it."""
         self._key_table = None
-        self._fetch.clear()
+        self._cache.clear()
 
     def _build_key_table(self) -> Dict[str, KeyInfo]:
         """
@@ -596,6 +599,29 @@ class RunSource(QObject):
             )
         return np.atleast_1d(full[item])
 
+    def block(
+        self, plan: FetchPlan
+    ) -> Tuple[xr.DataArray, List[xr.DataArray]]:
+        """
+        Return the block a plan asks for and its norms, cached.
+
+        The sixth read method, and the only one that remembers anything. The
+        cache is a collaborator this run owns and hands its own reads to, not
+        a layer wrapped around it: there is no non-caching reader to wrap,
+        because the reader is this class.
+
+        Parameters
+        ----------
+        plan : FetchPlan
+            What to read and which indices of it.
+
+        Returns
+        -------
+        tuple
+            ``(data, norms)``, one norm array per ``plan.norm_keys`` in order.
+        """
+        return self._cache.block(plan)
+
     def get_shape(self, key: str) -> Tuple[int, ...]:
         """
         Return storage shape for a catalog or frozen key.
@@ -707,7 +733,7 @@ class RunSource(QObject):
         """Handle data changes from RunData service."""
         print_debug("RunSource._on_data_changed", f"Data changed for {self.uid}", "run")
         # Directly, and before the signal: traces refetch on it.
-        self._fetch.clear()
+        self._cache.clear()
         self._update_available_keys()
         self.data_changed.emit()
 
