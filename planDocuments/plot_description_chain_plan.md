@@ -24,7 +24,7 @@ hash again.
 | 3 | Cut the two machinery-to-request edges | **done** | `020cf9d` |
 | 4 | Reverse the chain, free functions onto their types | **done** | `ee92307` |
 | 5a | Extract the block cache, composed over the reader | **done** | `9da2cb7` |
-| 5b | Move the sequencer onto the request | **open** | |
+| 5b | Move the sequencer onto the request | **done** | `67ac592` |
 | 6 | Give `Trace` its key | **open** | |
 
 Gating decisions are listed under *Still to decide* below; all of them are
@@ -441,7 +441,15 @@ this plan.
 
 ### 5b. Move the sequencer onto the request
 
-**Open.**
+**Done.** `PlotRequest.plot_bundle(reader)` and a private `_plane_frame`
+carry the sequencer; `RunFetch`, `run/pipeline.py` and `RunSource.fetch` are
+gone, and with them the last mutual pair in the package,
+`run.pipeline <-> run.source`. Nothing in `run/` describes a plot any more.
+`_render_hint` did not need inlining twice: the sequencer already called
+`describe(ykey)` for the synthetic check, so the hint comes off that same
+`info` and one of the two calls disappears. 75 call sites moved, all but two
+in tests, rewritten by AST so the receiver and the request could swap places.
+`Trace.get_plot_bundle` was examined and kept -- see the note below.
 
 `PlotRequest.plot_bundle(reader, *, cached_plane=None, label="")` in
 `spec/request.py` — the 101-line sequencer plus `_plane_frame` as a private
@@ -458,12 +466,14 @@ its two uses. `RunSource` does **not** drop to the 250 method lines item 5 of
 the post-refactor review named: 5a leaves the key access on it deliberately,
 and that target is declined rather than missed.
 
-`Trace.get_plot_bundle` (`trace.py:213`) **survives** — it is called from
-`plot_worker.py:96` and `single_canvas.py:398` — and its body becomes
-`self._request.plot_bundle(self._run.reader, ...)`. Two similar names then
-exist at different altitudes: `Trace.get_plot_bundle` (model state) and
-`PlotRequest.plot_bundle` (the chain). Rename the Trace one if that reads
-badly; do not leave it unexamined.
+`Trace.get_plot_bundle` (`trace.py:213`) **survives**, its body now
+`request.plot_bundle(self._run)`. Examined and **not** renamed. The clash the
+step feared did not arrive: the names differ (`get_plot_bundle` against
+`plot_bundle`), the signatures differ, and the altitudes read clearly at the
+call site. The real defect is the `get_` prefix on a method that mutates
+`last_bundle`, `_fetched_request` and the render mode — but that predates
+this plan, is a `Trace` concern, and has ~30 call sites. It belongs to step
+6, which is the `trace/` step, not here.
 
 **Not in this step:** the cache's key, capacity and location are unchanged.
 
@@ -525,6 +535,7 @@ property, which is untouched.
 | 2026-09-16 | Progress markers added: a table near the top, a status line on each step, and a settled marker on gating decisions as they are taken. The document had no way to say which steps had landed, which matters more here than usual because step 6 is independent of 3-5b and may be taken out of order. |
 | 2026-09-16 | Asked whether every link pulls its weight, before any work started. `ViewIntent` is reclassified as the chain's editor rather than a link: it works in names where `Projection` works in indices, and `set_reduce_from` flows state back up. `FetchPlan` is recorded as the weakest genuine rung — five of eight fields are request pass-throughs and its unique behaviour is the cache key — so its survival is tied to the deferred cache decision and listed with it. The `PlotViewFrame` / `PlotBundle` eight-field overlap is recorded as a non-goal: a real duplication, larger than anything on the chain, and out of scope here. |
 | 2026-09-15 | Decision 7 reversed after the maintainer noted that recorded decisions are advisory during a reorganization, not binding. On the merits `MaskMode` is plane vocabulary — four consumers, and its only use in `region.py` is a parameter that step 4 turns into a method — so it moves to `plane/roles.py`. Measuring it also turned up `ReduceOp` and `SpatialReduce` as the same `Literal["sum", "mean"]` under two names in two packages, which the note in `view/spec.py` claims to have cleaned up. Step 1's framing of the two boundary tests is relaxed: they may be xfailed for the length of the step, green by the end of it. |
+| 2026-09-17 | Step 5b landed. Two notes. `_render_hint` was to be inlined at two uses and only needed one: the sequencer already held the `KeyInfo` from the synthetic check, so `info.render_hint` serves, and a second `describe` call goes away. And `Trace.get_plot_bundle` was examined as the step required and deliberately kept: the two names read distinctly enough at their call sites, and its real defect — a `get_` prefix on a state-mutating method — is older than this plan and belongs to step 6 with the rest of `Trace`. |
 | 2026-09-17 | Step 5a landed as specified. The one deletion beyond the plan: `get_plot_bundle`'s debug line reported `cached={self._block is not None}`, evaluated after `_load_block` had already populated the cache on a miss, so it was always `True` and told the reader nothing. Dropped rather than reimplemented -- hit/miss telemetry is the cache's business, and it can grow a counter if anyone wants one. |
 | 2026-09-17 | Step 5a's gating decision settled, and the step rewritten. The maintainer objected that a non-caching reader reaching back to its parent `RunSource` for every load and key operation is artificial, which is the no-forwarding-models rule. Measuring `RunFetch` per method settled it: it reaches into exactly five `RunSource` methods, the cache half needs only four of them, and 170 of the cache's 289 lines reach for none. So `RunSource` is the reader, `KeyReader` is dropped, and only `BlockCache` is extracted — composed, not inherited. The inheritance in the old shape was the real obstacle to the testability the split was for: `CachingReader(KeyReader)` cannot be built without a real `CatalogRun`, whereas a cache holding its reader can be handed a stub, as `ChunkCache` already is in `tests/test_chunk_cache_l2.py`. The cost is accepted explicitly: `RunSource` does not shrink, and the post-refactor review's 250-method-line target for it is declined rather than missed. |
 | 2026-09-16 | Step 4 landed with two departures. `_storage_axes_from_bundle` became `PlotBundle.storage_axes`, public rather than the private method the step called for, because its only caller is `FrozenSpectrum.load_coords` in another module and a leading underscore there would be a private name crossing a boundary — the same objection that shaped step 3. It sits beside `axis_arrays` and the docstring says why the two are different questions rather than one written twice: storage order against display order, edges against centres, and 1-D as well as 2-D. Second, `PlotBundle.copy()` now preserves `row_reversed` and `col_reversed`; `copy_plot_bundle` omitted them, so every copied bundle claimed no axis had been reversed. No test covered it because a frozen bundle is re-read through `storage_axes` and `get_data`, neither of which reads the flags. Also cleaned up in passing: `plane/roles.py` carried a duplicate block of three type aliases and an orphaned half-sentence comment, left by step 1's extraction. |
