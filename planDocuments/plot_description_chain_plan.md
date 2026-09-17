@@ -25,7 +25,7 @@ hash again.
 | 4 | Reverse the chain, free functions onto their types | **done** | `ee92307` |
 | 5a | Extract the block cache, composed over the reader | **done** | `9da2cb7` |
 | 5b | Move the sequencer onto the request | **done** | `67ac592` |
-| 6a | Give `Trace` its key | **done** | |
+| 6a | Give `Trace` its key | **done** | `93a4b5b` |
 | 6b | Make `Trace.fetch` say that it fetches | **open** | |
 
 Gating decisions are listed under *Still to decide* below; all of them are
