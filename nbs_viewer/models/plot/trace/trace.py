@@ -4,7 +4,7 @@ One trace: request identity plus the bundle last fetched for it.
 A :class:`Trace` is model state only. It knows *what* should be drawn and
 *whether* it should be drawn, never *how*: the matplotlib artist lives in a
 canvas-side map keyed by :class:`TraceKey`, so a headless frontend can run a
-full ``ensure_trace`` -> ``get_plot_bundle`` -> ``set_visible`` cycle with no
+full ``ensure_trace`` -> ``fetch`` -> ``set_visible`` cycle with no
 matplotlib import.
 """
 
@@ -211,15 +211,20 @@ class Trace(QObject):
     def render_mode(self) -> Optional[RenderMode]:
         return self._render_mode
 
-    def get_plot_bundle(
-        self, plot_request: Optional[PlotRequest] = None
-    ) -> PlotBundle:
+    def fetch(self, request: Optional[PlotRequest] = None) -> PlotBundle:
         """
-        Fetch and prepare plot data as a PlotBundle.
+        Fetch this trace's bundle, and hold it.
+
+        The action :meth:`needs_fetch` is the predicate for. Together with
+        :attr:`last_bundle` and :meth:`invalidate_bundle` they are a cache of
+        one, which is why this is not an accessor and is not named like one:
+        it writes ``last_bundle``, the fetched-request fingerprint and the
+        render mode. :meth:`preview_roi_profile` is the version that does
+        not.
 
         Parameters
         ----------
-        plot_request : PlotRequest, optional
+        request : PlotRequest, optional
             Override for this fetch. Defaults to the held request.
 
         Returns
@@ -227,7 +232,7 @@ class Trace(QObject):
         PlotBundle
             Prepared plot payload.
         """
-        request = plot_request if plot_request is not None else self._request
+        request = request if request is not None else self._request
         bundle = request.plot_bundle(self._run)
         self._fetched_request = request
         self._update_render_mode(bundle)
@@ -246,7 +251,7 @@ class Trace(QObject):
 
         A preview is a different request against the same run, so it must not
         overwrite ``last_bundle`` or the fetched-request fingerprint the way
-        :meth:`get_plot_bundle` does.
+        :meth:`fetch` does.
 
         Parameters
         ----------

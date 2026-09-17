@@ -39,7 +39,7 @@ def test_headless_session_line_scan_fetch(headless_session):
     assert bundle.y.shape == (100,)
 
 
-def test_image_scan_get_plot_bundle_without_injected_bundle(app_model):
+def test_image_scan_fetch_without_injected_bundle(app_model):
     session = HeadlessSession(app_model)
     session.load_catalog(recipe="image_scan", runs=1)
     run_model = session.select_run(0)
@@ -100,7 +100,7 @@ def test_normalization_follows_the_axis_a_key_actually_names(qapp):
         trace = session.ensure_trace(
             run, "en_energy", "detector_image", norm_keys=norm_keys
         )
-        return trace.get_plot_bundle().y
+        return trace.fetch().y
 
     def constants_along(divisor, axis):
         """Return the per-slice divisor, asserting it is constant on ``axis``."""

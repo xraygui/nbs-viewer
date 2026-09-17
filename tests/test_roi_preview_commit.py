@@ -36,7 +36,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     plot_data = plot_model.ensure_trace(
         run_model, "en_energy", "detector_image",
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
 
     frame = bundle.view_frame()
     x0, _ = frame.cell_x_bounds(5, 0)
@@ -184,7 +184,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
     frame = bundle.view_frame()
     assert frame.row_reversed
 

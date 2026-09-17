@@ -26,7 +26,7 @@ hash again.
 | 5a | Extract the block cache, composed over the reader | **done** | `9da2cb7` |
 | 5b | Move the sequencer onto the request | **done** | `67ac592` |
 | 6a | Give `Trace` its key | **done** | `93a4b5b` |
-| 6b | Make `Trace.fetch` say that it fetches | **open** | |
+| 6b | Make `Trace.fetch` say that it fetches | **done** | |
 
 Gating decisions are listed under *Still to decide* below; all of them are
 now settled, so no step is blocked. Step 6 is independent of 3–5b and may be
@@ -499,7 +499,12 @@ property, which is untouched.
 
 ### 6b. Make `Trace.fetch` say that it fetches
 
-**Open.** Follows 6a, and is a rename only — no file moves, nothing deleted.
+**Done.** The rename turned up eight *test* names that 5b had left stale:
+`test_get_plot_bundle_*` in `test_run_source.py` and
+`test_plot_request_wiring.py` named the old `RunSource.fetch.get_plot_bundle`
+but now exercise `PlotRequest.plot_bundle`, so a blanket rename would have
+pointed them at `Trace.fetch` — the wrong method at the wrong altitude. They
+are `test_plot_bundle_*` now.
 
 `Trace.get_plot_bundle(plot_request=None)` → `Trace.fetch(request=None)`.
 
@@ -578,6 +583,7 @@ needless churn this plan is meant to avoid.
 | 2026-09-16 | Progress markers added: a table near the top, a status line on each step, and a settled marker on gating decisions as they are taken. The document had no way to say which steps had landed, which matters more here than usual because step 6 is independent of 3-5b and may be taken out of order. |
 | 2026-09-16 | Asked whether every link pulls its weight, before any work started. `ViewIntent` is reclassified as the chain's editor rather than a link: it works in names where `Projection` works in indices, and `set_reduce_from` flows state back up. `FetchPlan` is recorded as the weakest genuine rung — five of eight fields are request pass-throughs and its unique behaviour is the cache key — so its survival is tied to the deferred cache decision and listed with it. The `PlotViewFrame` / `PlotBundle` eight-field overlap is recorded as a non-goal: a real duplication, larger than anything on the chain, and out of scope here. |
 | 2026-09-15 | Decision 7 reversed after the maintainer noted that recorded decisions are advisory during a reorganization, not binding. On the merits `MaskMode` is plane vocabulary — four consumers, and its only use in `region.py` is a parameter that step 4 turns into a method — so it moves to `plane/roles.py`. Measuring it also turned up `ReduceOp` and `SpatialReduce` as the same `Literal["sum", "mean"]` under two names in two packages, which the note in `view/spec.py` claims to have cleaned up. Step 1's framing of the two boundary tests is relaxed: they may be xfailed for the length of the step, green by the end of it. |
+| 2026-09-17 | Steps 6a and 6b landed. 6b's one surprise was that renaming the method exposed stale *test* names rather than production ones: eight tests carried `get_plot_bundle` in their names from before 5b, when that was `RunSource.fetch.get_plot_bundle`, and now exercise `PlotRequest.plot_bundle` instead. A blanket rename would have pointed all eight at `Trace.fetch`, one altitude off. Test names are documentation of what is under test and go stale the same way a docstring does; a rename pass should check what each named test actually calls. |
 | 2026-09-17 | Step 6 split into 6a and 6b after the maintainer asked whether `Trace.get_plot_bundle` should be dealt with there. It should, but not inside the structural move: 6a is three file moves and a classmethod, 6b is a 31-site rename, and bundling them makes neither reviewable. The rename is justified on its own terms — `get_` promises an accessor and the method writes three fields — and the replacement name is not invented for the occasion: `needs_fetch()` is already the predicate for it, and 5b freed the word `fetch` by deleting `RunSource.fetch` and `RunFetch`. |
 | 2026-09-17 | Step 5b landed. Two notes. `_render_hint` was to be inlined at two uses and only needed one: the sequencer already held the `KeyInfo` from the synthetic check, so `info.render_hint` serves, and a second `describe` call goes away. And `Trace.get_plot_bundle` was examined as the step required and deliberately kept: the two names read distinctly enough at their call sites, and its real defect — a `get_` prefix on a state-mutating method — is older than this plan and belongs to step 6 with the rest of `Trace`. |
 | 2026-09-17 | Step 5a landed as specified. The one deletion beyond the plan: `get_plot_bundle`'s debug line reported `cached={self._block is not None}`, evaluated after `_load_block` had already populated the cache on a miss, so it was always `True` and told the reader nothing. Dropped rather than reimplemented -- hit/miss telemetry is the cache's business, and it can grow a counter if anyone wants one. |

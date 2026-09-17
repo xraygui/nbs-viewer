@@ -50,7 +50,7 @@ def _session(ykey, *, depth_on_slider=False):
             (2, 0, 1), run.plot_axis_names(ykey, ["en_energy"])
         )
     trace = session.ensure_trace(run, "en_energy", ykey)
-    trace.get_plot_bundle()
+    trace.fetch()
     return session, run, trace
 
 
@@ -214,7 +214,7 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
 )
 
     session.set_transform({"enabled": True, "text": "y * 2"})
-    trace.get_plot_bundle()
+    trace.fetch()
     doubled = session.region.preview_roi_profile(
         entry_id,
         parent_trace=trace,

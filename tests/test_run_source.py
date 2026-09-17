@@ -254,7 +254,7 @@ def test_an_x_key_on_a_detector_axis_names_that_axis(qapp):
     np.testing.assert_allclose(bundle.y, run.getData("detector_image")[0])
 
 
-def test_get_plot_bundle_1d_closed_form(qapp):
+def test_plot_bundle_1d_closed_form(qapp):
     model = RunSource(make_vppem_run())
     a, b, c = vppem_factors()
     expected = a * b.mean() * c.mean()
@@ -266,7 +266,7 @@ def test_get_plot_bundle_1d_closed_form(qapp):
     )
 
 
-def test_get_plot_bundle_index_slice_closed_form(qapp):
+def test_plot_bundle_index_slice_closed_form(qapp):
     model = RunSource(make_vppem_run())
     spec = Projection(
         ndim=3,
@@ -285,7 +285,7 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
 
-def test_get_plot_bundle_mean_mean_matches_stats(qapp):
+def test_plot_bundle_mean_mean_matches_stats(qapp):
     model = RunSource(make_vppem_run())
     spec = Projection(
         ndim=3,
@@ -305,7 +305,7 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
     np.testing.assert_allclose(cube_bundle.y, stats_bundle.y)
 
 
-def test_get_plot_bundle_frozen_uses_read(qapp):
+def test_plot_bundle_frozen_uses_read(qapp):
     model = RunSource(make_vppem_run())
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)

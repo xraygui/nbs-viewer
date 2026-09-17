@@ -395,7 +395,7 @@ class MplCanvas(FigureCanvasQTAgg):
             return None
         if model.last_bundle is not None:
             return model.last_bundle
-        return model.get_plot_bundle()
+        return model.fetch()
 
     def get_view_frame(self) -> PlotViewFrame:
         """

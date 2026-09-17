@@ -93,9 +93,7 @@ class PlotWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t1 = ttime.time()
-            bundle = self.trace.get_plot_bundle(
-                plot_request=self.plot_request
-            )
+            bundle = self.trace.fetch(self.plot_request)
             if self.isInterruptionRequested():
                 print_debug(
                     "PlotWorker",

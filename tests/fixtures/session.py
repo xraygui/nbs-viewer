@@ -188,7 +188,7 @@ class HeadlessSession:
             y_list[0],
             norm_keys=norm_list,
         )
-        return plot_data.get_plot_bundle()
+        return plot_data.fetch()
 
     def _first_run_model(self) -> RunSource:
         models = self.session.collection.available_models

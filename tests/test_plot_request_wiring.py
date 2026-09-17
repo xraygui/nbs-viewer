@@ -71,7 +71,7 @@ def test_the_plan_narrows_the_load_with_the_request_crop():
     assert req.plan().slice_info == (4, slice(2, 10), slice(4, 20))
 
 
-def test_run_model_get_plot_bundle_from_request():
+def test_run_model_plot_bundle_from_request():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
@@ -93,7 +93,7 @@ def test_run_model_get_plot_bundle_from_request():
     np.testing.assert_allclose(via_request.y, expected[::-1, :])
 
 
-def test_run_model_get_plot_bundle_request_with_crop():
+def test_run_model_plot_bundle_request_with_crop():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
@@ -139,7 +139,7 @@ def test_plot_data_model_holds_request_and_fetches():
     assert plot_data.trace_key == TraceKey(
         run.uid, "sampleVoltage_VSource", "PCOEdge_image"
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
     np.testing.assert_allclose(bundle.y, run.getData("PCOEdge_stats"))
     assert plot_data.last_fetched_request == request
 
@@ -220,7 +220,7 @@ def _vppem_frame(model, req):
     return req.plot_bundle(model).view_frame()
 
 
-def test_get_plot_bundle_records_the_display_reversal():
+def test_plot_bundle_records_the_display_reversal():
     """
     The bundle has to say how it was oriented. Nothing downstream can work it
     out afterwards: ``extent`` is normalised so bottom < top either way.
@@ -244,7 +244,7 @@ def test_get_plot_bundle_records_the_display_reversal():
     assert frame.storage_bbox((0, 3, 0, 4)) == (VPPEM_SHAPE[1] - 3, VPPEM_SHAPE[1], 0, 4)
 
 
-def test_get_plot_bundle_roi_profile_masks_the_display_plane():
+def test_plot_bundle_roi_profile_masks_the_display_plane():
     """
     End-to-end ROI profile against the plane the user actually drew on.
 

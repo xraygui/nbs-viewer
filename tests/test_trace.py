@@ -3,7 +3,7 @@ Headless tests for :class:`Trace` and :class:`TraceSet` (session plan step B).
 
 A trace is model state: request identity plus the bundle that request last
 produced. The matplotlib artist is a canvas concern, so the whole
-``ensure_trace`` -> ``get_plot_bundle`` -> ``set_visible`` cycle has to run
+``ensure_trace`` -> ``fetch`` -> ``set_visible`` cycle has to run
 with no canvas and without matplotlib being imported at all.
 """
 
@@ -62,7 +62,7 @@ def test_full_cycle_runs_without_a_canvas():
     assert trace.trace_key == TraceKey(run.uid, xkey, ykey)
     assert trace.needs_fetch()
 
-    bundle = trace.get_plot_bundle()
+    bundle = trace.fetch()
     assert bundle.y is not None
     assert trace.last_bundle is bundle
     assert not trace.needs_fetch()
@@ -78,7 +78,7 @@ def test_full_cycle_runs_without_a_canvas():
 def test_hide_then_show_does_not_refetch():
     plot, run, xkey, ykey = _session_with_run()
     trace = plot.ensure_trace(run, xkey, ykey)
-    bundle = trace.get_plot_bundle()
+    bundle = trace.fetch()
 
     trace.set_visible(False)
     trace.set_visible(True)
@@ -97,7 +97,7 @@ def test_new_run_data_invalidates_the_cached_bundle():
     """
     plot, run, xkey, ykey = _session_with_run()
     trace = plot.ensure_trace(run, xkey, ykey)
-    trace.get_plot_bundle()
+    trace.fetch()
     assert not trace.needs_fetch()
 
     run.data_changed.emit()

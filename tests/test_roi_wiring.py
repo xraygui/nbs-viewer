@@ -53,7 +53,7 @@ def _wired_image_scan_with_roi(
     plot_data = session.session.ensure_trace(
         run_model, "en_energy", "detector_image",
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
 
     frame = bundle.view_frame()
     x0, _ = frame.cell_x_bounds(5, 0)
