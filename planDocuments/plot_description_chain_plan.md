@@ -26,7 +26,7 @@ hash again.
 | 5a | Extract the block cache, composed over the reader | **done** | `9da2cb7` |
 | 5b | Move the sequencer onto the request | **done** | `67ac592` |
 | 6a | Give `Trace` its key | **done** | `93a4b5b` |
-| 6b | Make `Trace.fetch` say that it fetches | **done** | |
+| 6b | Make `Trace.fetch` say that it fetches | **done** | `072e270` |
 
 Gating decisions are listed under *Still to decide* below; all of them are
 now settled, so no step is blocked. Step 6 is independent of 3–5b and may be
