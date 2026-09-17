@@ -526,6 +526,14 @@ named `fetch`, and it is passed by keyword at exactly one site
 **Not in this step:** `Trace`'s other methods. This is the one name that
 misdescribes what it does.
 
+**`FetchPlan` keeps its name.** It is the last thing in the package carrying
+the word, and it stays: it is internal, never appearing on a surface a caller
+meets — `PlotRequest.plan()` returns it and `RunSource.block()` consumes it,
+both inside the chain. The defect the problem statement recorded was *two
+exposed things* called fetch one directory apart. One exposed verb plus an
+internal type sharing a root is not that, and renaming it would be the
+needless churn this plan is meant to avoid.
+
 ---
 
 ## Explicitly not in this plan
