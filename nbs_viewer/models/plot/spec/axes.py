@@ -106,7 +106,7 @@ class PlotAxes:
     @property
     def roles(self) -> Mapping[str, DimRole]:
         """Role of each dimension, by name."""
-        return MappingProxyType(dict(zip(self.names, self.spec.roles)))
+        return MappingProxyType(dict(zip(self.names, self.spec.roles, strict=True)))
 
     @property
     def order(self) -> Tuple[str, ...]:
@@ -169,7 +169,7 @@ class PlotAxes:
         """
         return tuple(
             name
-            for name, role in zip(self.names, self.spec.roles)
+            for name, role in zip(self.names, self.spec.roles, strict=True)
             if role in roles
         )
 

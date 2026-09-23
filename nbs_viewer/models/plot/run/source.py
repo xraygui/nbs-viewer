@@ -453,13 +453,13 @@ class RunSource(QObject):
                 f"dimensions {info.dims}"
             )
         xkey = xkeys[0] if len(xkeys) else None
-        for dim, name in zip(info.dims, dims):
+        for dim, name in zip(info.dims, dims, strict=True):
             if name != dim and name != xkey:
                 raise ValueError(
                     f"{key!r} axis {dim!r} is named {name!r}, which is "
                     f"neither its own name nor the X key {xkey!r}"
                 )
-        return dict(zip(info.dims, dims))
+        return dict(zip(info.dims, dims, strict=True))
 
     def load_coords(
         self,
@@ -514,7 +514,7 @@ class RunSource(QObject):
         items += [slice(None)] * (info.ndim - len(items))
         kept = {
             dim: item
-            for dim, item in zip(info.dims, items)
+            for dim, item in zip(info.dims, items, strict=True)
             if not isinstance(item, (int, np.integer))
         }
         found = source.load_coords(slice_info)

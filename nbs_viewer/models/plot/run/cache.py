@@ -168,7 +168,7 @@ class BlockCache:
         if len(cached) != len(wanted):
             return None
         windows: List[Optional[Tuple[int, Optional[int]]]] = []
-        for have, want in zip(cached, wanted):
+        for have, want in zip(cached, wanted, strict=True):
             if isinstance(have, int) or isinstance(want, int):
                 if have != want:
                     return None

@@ -211,7 +211,7 @@ class FrozenSpectrum:
         items = _normalize_slice_info(slice_info, info.ndim)
         coords: Dict[str, np.ndarray] = {}
         for axis, ((name, length), item) in enumerate(
-            zip(info.axes.items(), items)
+            zip(info.axes.items(), items, strict=True)
         ):
             if isinstance(item, (int, np.integer)) or axis >= len(axis_arrays):
                 continue

@@ -88,7 +88,7 @@ def create_runs(runs=10, include_nd=False):
     """
     metadata = create_metadata(runs=runs)
     data = create_data(runs=runs)
-    generated = [MemoryRun(m, d) for m, d in zip(metadata, data)]
+    generated = [MemoryRun(m, d) for m, d in zip(metadata, data, strict=True)]
     if include_nd:
         generated.extend(make_fixture_runs())
     return generated

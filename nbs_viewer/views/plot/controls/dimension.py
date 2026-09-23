@@ -86,10 +86,13 @@ class _SliceReduceRow(QWidget):
         slider_row.addWidget(self.value_label)
 
         self._assoc_labels = []
+        # Not strict: both sides default to an empty list when the key is
+        # absent, so an associated array with no names yields no labels
+        # rather than raising while a slider is being built.
         for arr, name in zip(
             self._associated_data.get("arrays", []),
             self._associated_data.get("names", []),
-        ):
+         strict=False):
             assoc_label = QLabel()
             slider_row.addWidget(assoc_label)
             self._assoc_labels.append((assoc_label, arr, name))
@@ -542,7 +545,7 @@ class DimensionControl(QWidget):
             return list(placeholders), {}
 
         aligned = []
-        for i, (name, size) in enumerate(zip(names, shape)):
+        for i, (name, size) in enumerate(zip(names, shape, strict=True)):
             arr = (
                 np.asarray(coords[name].values, dtype=float).ravel()
                 if name in coords
@@ -611,7 +614,7 @@ class DimensionControl(QWidget):
                             or len(shape) > len(max_shape)
                             or (
                                 len(shape) == len(max_shape)
-                                and any(s > m for s, m in zip(shape, max_shape))
+                                and any(s > m for s, m in zip(shape, max_shape, strict=True))
                             )
                         ):
                             max_shape = shape

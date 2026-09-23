@@ -167,7 +167,7 @@ def test_one_run_normalizes_a_set_of_others(qapp):
     session.selection.set_selected_keys(["motor"], ["det"])
 
     # det is (scan_id + 1); the shared reference is 4.0 everywhere.
-    for run, scan_id in zip(normalized, (0, 1, 3)):
+    for run, scan_id in zip(normalized, (0, 1, 3), strict=True):
         assert np.allclose(_plot(session, run), (scan_id + 1) / 4.0)
 
 

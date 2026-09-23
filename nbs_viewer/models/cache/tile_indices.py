@@ -57,7 +57,7 @@ def chunk_grid(shape: Sequence[int], tile_chunks: Sequence[int]) -> Tuple[Tuple[
         raise ValueError("shape and tile_chunks must have the same length")
     return tuple(
         chunk_sizes_per_dim(int(dim_size), int(chunk_size))
-        for dim_size, chunk_size in zip(shape, tile_chunks)
+        for dim_size, chunk_size in zip(shape, tile_chunks, strict=True)
     )
 
 
@@ -125,7 +125,7 @@ def tiles_intersecting(
     base_chunk_indices: List[List[int]] = []
 
     for _dim, (s, dim_size, dim_chunk_sizes) in enumerate(
-        zip(slice_info, shape, chunks)
+        zip(slice_info, shape, chunks, strict=True)
     ):
         positions = [0]
         for size in dim_chunk_sizes:
@@ -136,7 +136,7 @@ def tiles_intersecting(
             start = s.start if s.start is not None else 0
             stop = s.stop if s.stop is not None else dim_size
             for tile_idx, (tile_start, tile_end) in enumerate(
-                zip(positions[:-1], positions[1:])
+                zip(positions[:-1], positions[1:], strict=True)
             ):
                 if tile_start < stop and tile_end > start:
                     dim_tiles.append(tile_idx)
@@ -156,7 +156,7 @@ def tiles_intersecting(
         internal_slices: List[SliceItem] = []
 
         for dim, (tile_idx, s, dim_size) in enumerate(
-            zip(tile_indices, slice_info, shape)
+            zip(tile_indices, slice_info, shape, strict=True)
         ):
             tile_size = chunks[dim][tile_idx]
             tile_shape.append(tile_size)
@@ -324,7 +324,7 @@ def tile_fully_in_fetch_slice(
         return False
 
     tile_slice = tile_global_slice(tile_indices, shape, tile_chunks)
-    for dim, (tile_item, fetch_item) in enumerate(zip(tile_slice, fetch_slice)):
+    for dim, (tile_item, fetch_item) in enumerate(zip(tile_slice, fetch_slice, strict=True)):
         tile_start, tile_stop = request_dim_bounds(tile_item, shape[dim])
         fetch_start, fetch_stop = request_dim_bounds(fetch_item, shape[dim])
         if tile_start < fetch_start or tile_stop > fetch_stop:
@@ -424,7 +424,7 @@ def plan_hyperslab_batches(
 
     spans: List[Tuple[int, int, bool]] = []
     element_count = 1
-    for dim_size, item in zip(shape, slice_info):
+    for dim_size, item in zip(shape, slice_info, strict=True):
         start, stop = request_dim_bounds(item, dim_size)
         length = stop - start
         if length <= 0:
@@ -483,6 +483,6 @@ def total_tile_count(shape: Sequence[int], tile_chunks: Sequence[int]) -> int:
         Product of tile counts along each dimension.
     """
     count = 1
-    for dim_size, chunk_size in zip(shape, tile_chunks):
+    for dim_size, chunk_size in zip(shape, tile_chunks, strict=True):
         count *= len(chunk_sizes_per_dim(int(dim_size), int(chunk_size)))
     return count

@@ -420,7 +420,7 @@ def test_roi_profile_along_dim1_matches_plane_means():
         np.arange(count, dtype=float)[item]
         for count, item in zip(
             (e_count, d0_count, y_count, x_count), fetch_slice
-        )
+        , strict=True)
     ]
     y_roi = y_full[fetch_slice]
     profile, _, names = roi_profile_from_block(

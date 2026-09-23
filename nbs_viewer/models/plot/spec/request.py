@@ -614,7 +614,7 @@ class PlotRequest:
         data = xr.DataArray(
             values,
             dims=list(names),
-            coords={name: array for name, array in zip(names, arrays)},
+            coords={name: array for name, array in zip(names, arrays, strict=True)},
         )
         axes = PlotAxes.of(plane_view, names).to_profile(
             bundle_profile_axis, self.spatial_reduce

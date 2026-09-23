@@ -321,7 +321,7 @@ class PlotSession(QObject):
                 current = best[2].shape
                 if len(shape) > len(current) or (
                     len(shape) == len(current)
-                    and any(s > c for s, c in zip(shape, current))
+                    and any(s > c for s, c in zip(shape, current, strict=True))
                 ):
                     best = (run_model, ykey, layout, names)
         if best is None or len(best[2].shape) <= 1:

@@ -170,7 +170,11 @@ def apply_transform(
     # An expression may rewrite x as well as y -- rescaling an energy axis, for
     # instance -- so the coordinates are read back rather than assumed.
     updated = interp.symtable.get("x", coords)
-    for dim, original, after in zip(display, before, updated):
+    # Not strict: ``updated`` comes back from a user-written expression and
+    # may be any length, or not a sequence of arrays at all. The body checks
+    # each entry's shape before using it, so a short one is ignored rather
+    # than fatal -- a typo in a transform should not raise from zip.
+    for dim, original, after in zip(display, before, updated, strict=False):
         after = np.asarray(after)
         if after.shape == original.shape and not np.array_equal(after, original):
             out = out.assign_coords({dim: after})

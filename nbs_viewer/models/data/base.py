@@ -265,7 +265,11 @@ class CatalogRun(QObject):
         detector_dims = [dim for dim in dims if dim != "time"]
         hints = list(self.getAxisHints().get(key, []))
         sources: Dict[str, Tuple[str, ...]] = {}
-        for dim, length in zip(dims, shape):
+        # Not strict: a source that reports the wrong number of dimension
+        # names is a real failure, but KeyInfo.of is where it is diagnosed,
+        # and it says which key and which rank. Raising here would replace
+        # that with zip's own message and lose the key's name.
+        for dim, length in zip(dims, shape, strict=False):
             if dim in detector_dims:
                 position = detector_dims.index(dim)
                 path = (

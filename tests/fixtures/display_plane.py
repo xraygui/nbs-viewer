@@ -238,7 +238,7 @@ def labelled_block(y, axis_arrays, axis_names):
         dims=names,
         coords={
             name: np.asarray(array)
-            for name, array in zip(names, axis_arrays)
+            for name, array in zip(names, axis_arrays, strict=True)
         }
 )
 

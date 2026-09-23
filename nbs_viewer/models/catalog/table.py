@@ -41,7 +41,10 @@ def _load_chunk(get_chunk, indexes):
             rows = get_chunk(start, end)
             fetched_ranges.append((start, end))
 
-            for row, i in zip(rows, range(start, end + 1)):
+            # Not strict: a chunk near the end of the catalog returns
+            # fewer rows than the range asked for, and stopping at the
+            # shorter one is the intent.
+            for row, i in zip(rows, range(start, end + 1), strict=False):
                 yield i, row
 
         except Exception as ex:

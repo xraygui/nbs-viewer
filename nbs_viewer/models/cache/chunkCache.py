@@ -301,7 +301,7 @@ class ChunkCache:
         Return the array shape for a slice request before index squeezing.
         """
         out: List[int] = []
-        for dim_size, item in zip(shape, slice_info):
+        for dim_size, item in zip(shape, slice_info, strict=True):
             if isinstance(item, slice):
                 start, stop = request_dim_bounds(item, dim_size)
                 out.append(stop - start)
@@ -335,7 +335,7 @@ class ChunkCache:
             return
         clamped_dest: List[slice] = []
         clamped_src: List[slice] = []
-        for axis, (dest_sl, src_sl) in enumerate(zip(dest_slices, src_slices)):
+        for axis, (dest_sl, src_sl) in enumerate(zip(dest_slices, src_slices, strict=True)):
             d_len = dest_sl.stop - dest_sl.start
             s_len = src_sl.stop - src_sl.start
             avail = source.shape[axis] - src_sl.start
@@ -1534,7 +1534,7 @@ class ChunkCache:
         repeat materializations with the same ``slice_info`` avoid Tiled.
         Full-axis exploration slabs continue to rely on L1/L2 tiles only.
         """
-        for dim_size, item in zip(shape, slice_info):
+        for dim_size, item in zip(shape, slice_info, strict=True):
             if isinstance(item, slice):
                 start = 0 if item.start is None else int(item.start)
                 stop = dim_size if item.stop is None else int(item.stop)
@@ -1607,7 +1607,7 @@ class ChunkCache:
                 return chunks_list[0]
 
             groups = {}
-            for chunk, coord in zip(chunks_list, coords_list):
+            for chunk, coord in zip(chunks_list, coords_list, strict=True):
                 key = coord[depth]
                 if key not in groups:
                     groups[key] = ([], [])

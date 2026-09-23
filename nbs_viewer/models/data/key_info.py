@@ -138,7 +138,7 @@ class KeyInfo:
         return cls(
             name=name,
             label=name if label is None else label,
-            axes=MappingProxyType(dict(zip(dims, shape))),
+            axes=MappingProxyType(dict(zip(dims, shape, strict=True))),
             synthetic=synthetic,
             hinted=hinted,
             render_hint=render_hint,

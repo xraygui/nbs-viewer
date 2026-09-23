@@ -74,7 +74,7 @@ def surviving_dims(
         items.append(slice(None))
     return tuple(
         name
-        for name, item in zip(dims, items)
+        for name, item in zip(dims, items, strict=True)
         if not isinstance(item, (int, np.integer))
     )
 
