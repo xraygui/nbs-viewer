@@ -1,9 +1,12 @@
-# Run the test suite on every push, and on pull requests from forks.
+# Run the test suite and the linter on every push, and on pull requests
+# from forks.
 #
 # The environment comes from pixi, the same one used locally, so a green run
-# here means the same command passed against the same solved dependencies.
+# here means the same commands passed against the same solved dependencies.
+# The two are separate jobs so that a lint finding and a failing test are
+# separate signals on the pull request, rather than one hiding the other.
 
-name: Tests
+name: Checks
 
 on:
   push:
@@ -51,3 +54,27 @@ jobs:
       # QT_QPA_PLATFORM is set by the task, not here, so the command is the
       # same one a developer runs.
       - run: pixi run test
+
+  lint:
+    # Same condition as above: see the comment there.
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          cache: true
+
+      # Ruff's selection is Pyflakes, the real-error part of pycodestyle, and
+      # bugbear -- see the comment on [tool.ruff.lint] in pyproject.toml for
+      # what is left out and why. The tree is at zero findings, so anything
+      # this reports is new.
+      - run: pixi run lint

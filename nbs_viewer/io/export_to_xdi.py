@@ -10,11 +10,11 @@ def get_config(config, keys, default=None):
         if item is None:
             return default
         return item.read()
-    except:
+    except Exception:
         return default
 
 
-def get_xdi_run_header(run, header_updates={}):
+def get_xdi_run_header(run, header_updates=None):
     """
     Generate an XDI header dictionary from a run.
 
@@ -81,7 +81,7 @@ def get_xdi_run_header(run, header_updates={}):
     metadata["Motors.manipz"] = float(get_with_fallbacks(baseline, "manip_z", "Manipulator_z", default=[0])[0])
     metadata["Motors.manipr"] = float(get_with_fallbacks(baseline, "manip_r", "Manipulator_r", default=[0])[0])
     metadata["Motors.tesz"] = float(get_with_fallbacks(baseline, "tesz", default=[0])[0])
-    metadata.update(header_updates)
+    metadata.update(header_updates or {})
     return metadata
 
 
@@ -238,7 +238,7 @@ def get_xdi_normalized_data(run, metadata, omit_array_keys=True):
 def exportToXDI(
     folder,
     run,
-    headerUpdates={}
+    headerUpdates=None
 ):
     """
     Export data to the XAS-Data-Interchange (XDI) ASCII format.
@@ -261,7 +261,7 @@ def exportToXDI(
     if "primary" not in run:
         print(f"XDI Export does not support streams other than Primary, skipping {run.start['scan_id']}")
         return False
-    metadata = get_xdi_run_header(run, headerUpdates)
+    metadata = get_xdi_run_header(run, headerUpdates or {})
     print("Got XDI Metadata")
     filename = make_filename(folder, metadata)
 
@@ -317,7 +317,7 @@ def generate_format_string(data):
                 else:
                     width = len(str(int(max_value))) + 5  # Add 5 for decimal point, 3 decimals, and sign
                     formats.append(f"%{width}.3f")
-        except:
+        except Exception:
             formats.append("%11.4e")
 
     return " ".join(formats)
