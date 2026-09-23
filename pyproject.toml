@@ -82,6 +82,14 @@ nbs-viewer = "nbs-viewer"
 lint = "ruff check nbs_viewer tests"
 lint-fix = "ruff check --fix nbs_viewer tests"
 
+# The suite needs a Qt platform plugin and there is no display in CI, nor
+# usually a reason to open one locally. Setting it on the task rather than
+# leaving it to whoever types the command means the run is the same
+# everywhere, and nobody has to remember the variable.
+[tool.pixi.tasks.test]
+cmd = "pytest tests -q --timeout=120"
+env = { QT_QPA_PLATFORM = "offscreen" }
+
 [tool.pixi.dependencies]
 pytest-timeout = ">=2.4.0,<3"
 nslsii = ">=0.11.2,<0.12"
