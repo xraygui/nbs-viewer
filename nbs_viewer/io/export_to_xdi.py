@@ -1,5 +1,5 @@
 import numpy as np
-from os.path import exists, join
+from os.path import join
 from export_tools import get_with_fallbacks, get_run_data, add_comment_to_lines, sanitize_filename
 from datetime import datetime
 

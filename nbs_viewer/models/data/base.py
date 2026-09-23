@@ -6,8 +6,6 @@ import xarray as xr
 
 from .array_contract import labelled_array, surviving_dims
 from .key_info import KeyInfo
-from asteval import Interpreter
-import time
 from nbs_viewer.utils import print_debug
 
 

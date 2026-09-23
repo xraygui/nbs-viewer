@@ -7,7 +7,6 @@ from __future__ import annotations
 from itertools import product
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
 
 SliceItem = Union[int, slice]
 

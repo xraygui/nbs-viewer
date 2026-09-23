@@ -3,12 +3,9 @@
 from qtpy.QtWidgets import (
     QWidget,
     QHBoxLayout,
-    QVBoxLayout,
     QPushButton,
     QMenu,
     QAction,
-    QComboBox,
-    QLabel,
 )
 
 from nbs_viewer.views.display.frontendRegistry import get_frontend_registry

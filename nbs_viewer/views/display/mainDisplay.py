@@ -1,5 +1,5 @@
 from .plotDisplay import PlotDisplay
-from qtpy.QtWidgets import QWidget, QSplitter, QVBoxLayout
+from qtpy.QtWidgets import QSplitter, QVBoxLayout
 from qtpy.QtCore import Qt
 
 from nbs_viewer.views.dataSource.catalogSwitcher import CatalogSwitcher

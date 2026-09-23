@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 import logging
 from .base import CatalogRun
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple
 import numpy as np
 from nbs_viewer.utils import print_debug, time_function
 

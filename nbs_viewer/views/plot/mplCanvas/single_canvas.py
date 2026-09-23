@@ -19,9 +19,7 @@ from qtpy.QtCore import QSize, QTimer, Qt, Signal
 from qtpy.QtWidgets import QMessageBox, QSizePolicy
 
 from nbs_viewer.models.plot.plane.roles import ViewCrop
-from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.plane.frame import PlotViewFrame
-from nbs_viewer.models.plot.plane.orientation import RenderMode
 from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,

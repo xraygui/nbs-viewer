@@ -1,7 +1,7 @@
 """Kafka catalog implementation."""
 
 from typing import Any, List, Optional, Generator, Tuple
-from qtpy.QtCore import QObject, Signal
+from qtpy.QtCore import QObject
 
 from .base import CatalogBase
 from ..data import KafkaRun

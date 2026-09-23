@@ -1,9 +1,5 @@
 from qtpy.QtWidgets import (
-    QHeaderView,
-    QMenu,
-    QAction,
     QTableView,
-    QWidget,
     QVBoxLayout,
     QPushButton,
     QLineEdit,

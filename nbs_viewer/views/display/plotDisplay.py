@@ -2,14 +2,9 @@ from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QSplitter,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
-    QFrame,
     QSizePolicy,
 )
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QIcon
 from ..dataSource.runListView import RunListView
 from ..plot.plotWidget import PlotWidget
 from ..plot.image_grid_plot_widget import ImageGridPlotWidget

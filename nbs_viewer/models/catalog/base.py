@@ -1,7 +1,6 @@
 """Base interfaces for catalog models."""
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 import collections
 from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points

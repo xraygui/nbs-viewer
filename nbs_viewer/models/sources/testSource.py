@@ -1,4 +1,4 @@
-from .base import SourceModel, CatalogLoadError
+from .base import SourceModel
 from .fixtures import make_fixture_runs
 from ..catalog.memory import MemoryCatalog
 from ..data.memory import MemoryRun

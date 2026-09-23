@@ -13,7 +13,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
 )
 
 from matplotlib.colors import to_rgba
