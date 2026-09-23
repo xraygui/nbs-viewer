@@ -49,7 +49,9 @@ def _validated_reduce(
             raise ValueError(
                 f"reduce roles must be INDEX/SUM/MEAN, got {role}"
             )
-    return roles, indices
+    # The dimension rows edit this policy, and a QComboBox hands back the bare
+    # string rather than the DimRole member.
+    return tuple(DimRole(role) for role in roles), indices
 
 
 def _validated_plot_ndim(plot_ndim: int) -> int:

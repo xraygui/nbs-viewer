@@ -163,3 +163,121 @@ def test_the_roi_window_opens_and_offers_profile_axes(
     ]
     assert axes, "a rank-3 key offered no profile axis"
     assert set(axes) <= {0, 1, 2}
+
+
+@pytest.mark.parametrize(
+    "role_name, reduce_name", [("SUM", "sum"), ("MEAN", "mean")]
+)
+def test_the_reduce_combo_actually_reduces_the_slider_axis(
+    plot_widgets, role_name, reduce_name
+):
+    """
+    Bug: picking Sum or Mean on a slider axis produced no plot at all.
+
+    ``DimRole`` subclasses ``str`` and the combo stores its roles as item
+    data, which Qt round-trips through a ``QVariant`` and hands back as a
+    plain ``str``. Every check between the combo and the reduce stage
+    compares with ``==`` or ``in`` and so accepted it; the reduce stage
+    matches with ``is`` and so skipped the axis, leaving a rank-3 array for
+    a pack that only takes planes -- "Unsupported plot dimensionality: 3".
+
+    Only a widget can reach this: the model layer is handed a real
+    ``DimRole`` by every caller that is not a ``QComboBox``.
+    """
+    import numpy as np
+
+    from nbs_viewer.models.plot.plane.roles import DimRole
+    from nbs_viewer.views.plot.controls.dimension import DimensionControl
+
+    presenter, session, canvas = plot_widgets
+    session.selection.set_selected_keys(["en_energy"], ["detector_cube"], [])
+    session.view_intent.set_plot_ndim(2)
+    dimension_control = DimensionControl(presenter, canvas)
+    _pump()
+    dimension_control.create_sliders()
+
+    assert dimension_control._slice_rows, "no slider axis to reduce"
+    row = dimension_control._slice_rows[0]
+    reduced_axis = row.storage_axis
+    trace = next(iter(session.traces.values()))
+    block = trace.run.load(
+        "detector_cube", dims=trace.request.dims, xkeys=("en_energy",)
+    )
+
+    role = getattr(DimRole, role_name)
+    row.role_combo.setCurrentIndex(row.role_combo.findData(role))
+    _pump()
+
+    assert trace.request.view.roles[reduced_axis] is role
+    bundle = trace.fetch()
+    assert bundle.ndim == 2
+    expected = getattr(block, reduce_name)(
+        dim=trace.request.dims[reduced_axis]
+    )
+    np.testing.assert_allclose(
+        np.sort(bundle.y, axis=None), np.sort(expected.values, axis=None)
+    )
+
+
+def test_a_re_created_image_rescales_the_axes(qapp):
+    """
+    Bug: swapping the plot axes left the image drawn against stale limits.
+
+    ``imshow`` sets the axis limits only while the axes still autoscale, and
+    ``set_xlim`` / ``set_ylim`` turn that off for good. The update path calls
+    both, so the *next* image created on those axes -- which is what an
+    orientation change produces, since it tears the 2-D axes down first --
+    inherited the limits of the orientation before it, and the plane was
+    drawn cut off until the next slider step took the update path again.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from nbs_viewer.models.plot.spec.bundle import PlotBundle
+    from nbs_viewer.views.plot.mplCanvas.renderers import ImageRenderer
+
+    tall = PlotBundle.from_2d(
+        np.zeros((32, 4)), [np.arange(32.0), np.arange(4.0)], ["row", "col"]
+    )
+    wide = PlotBundle.from_2d(
+        np.zeros((4, 32)), [np.arange(4.0), np.arange(32.0)], ["col", "row"]
+    )
+    fig = Figure()
+    axes = fig.add_subplot(111)
+    state = {}
+
+    artist, _cbar = ImageRenderer.create(axes, fig, tall, "y", state)
+    ImageRenderer.update(artist, tall, True, state)
+    artist.remove()
+    ImageRenderer.create(axes, fig, wide, "y", state)
+
+    left, right, bottom, top = wide.extent
+    assert axes.get_xlim() == (left, right)
+    assert axes.get_ylim() == (bottom, top)
+
+
+def test_swapping_the_plot_axes_rescales_the_drawn_plane(plot_widgets):
+    """
+    The gesture the stale limits were reported from, end to end.
+
+    Stepping the index slider first is what makes this fail: it renders
+    through the update path, which is what turns the axes' autoscaling off.
+    """
+    from nbs_viewer.views.plot.controls.dimension import DimensionControl
+
+    presenter, session, canvas = plot_widgets
+    session.selection.set_selected_keys(["en_energy"], ["detector_cube"], [])
+    session.view_intent.set_plot_ndim(2)
+    dimension_control = DimensionControl(presenter, canvas)
+    _pump()
+    dimension_control.create_sliders()
+
+    dimension_control._slice_rows[0].slider.setValue(1)
+    _pump()
+    dimension_control._plot_rows[0].move_down_requested.emit()
+    _pump()
+
+    trace = next(iter(session.traces.values()))
+    left, right, bottom, top = trace.last_bundle.extent
+    assert canvas.axes.get_xlim() == (left, right)
+    assert canvas.axes.get_ylim() == (bottom, top)

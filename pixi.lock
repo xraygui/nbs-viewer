@@ -5601,8 +5601,8 @@ packages:
   timestamp: 1757782706200
 - pypi: ./
   name: nbs-viewer
-  version: 0.3.5.dev189+gb1e33b802.d20260916
-  sha256: 714decd9f8e8009e007a9951f3fbe01c5160567bb0d71e223439e370f9942757
+  version: 0.3.5.dev221+g4eb713de6
+  sha256: 0d100993c98b868cd973e51f54c6c73c8314f433a002fa16e85ec210effc0ca4
   requires_dist:
   - asteval
   - bluesky-kafka
