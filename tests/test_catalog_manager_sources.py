@@ -1,5 +1,7 @@
 """Tests for CatalogManagerModel source factories (Step 5b)."""
 
+import pytest
+
 from nbs_viewer.models.app_model import CatalogManagerModel, ConfigModel
 from nbs_viewer.models.sources import testSource as test_source_mod
 from nbs_viewer.models.sources.uriSource import URISourceModel
@@ -72,11 +74,8 @@ def test_create_from_config_uri_dispatch(qapp):
 
 def test_create_from_config_unknown_type(qapp):
     manager = _manager()
-    try:
+    with pytest.raises(ValueError, match="Unknown source type"):
         manager.create_from_config({"source_type": "nope"})
-        assert False, "expected ValueError"
-    except ValueError as exc:
-        assert "Unknown source type" in str(exc)
 
 
 def test_register_is_sole_registry(qapp):

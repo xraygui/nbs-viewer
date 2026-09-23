@@ -202,7 +202,7 @@ class ExpressionBuilder(QWidget):
             ("COUNT", "COUNT()"),
         ]
 
-        for name, template in function_buttons:
+        for name, _template in function_buttons:
             btn = QPushButton(name)
             btn.clicked.connect(lambda checked, n=name: self.insert_function(n))
             functions_layout.addWidget(btn)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.plot.session import PlotSession
-from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
@@ -12,7 +11,6 @@ from nbs_viewer.models.sources.testSource import create_test_catalog
 def _test_session():
     run = RunSource(create_test_catalog(1).get_runs()[0])
     plot = PlotSession()
-    run_list = RunListItemModel(plot.collection)
     plot.collection.add_runs([run])
     x_keys, y_keys, norm_keys = run.run.get_default_selection()
     return run, plot, x_keys, y_keys, norm_keys

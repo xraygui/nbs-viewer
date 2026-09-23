@@ -499,14 +499,14 @@ class ChunkCache:
                 shape,
                 l2_chunks,
             )
-        print_debug("assemble_partial_l2", f"read tiled hyperslab", category="cache")
+        print_debug("assemble_partial_l2", "read tiled hyperslab", category="cache")
 
         gap_data = self._read_tiled_hyperslab(run, key, gap_slice)
-        print_debug("assemble_partial_l2", f"squeezing gap dims", category="cache")
+        print_debug("assemble_partial_l2", "squeezing gap dims", category="cache")
 
         gap_data = self._squeeze_indexed_dims(gap_data, gap_slice)
 
-        print_debug("assemble_partial_l2", f"pasting gap into slab", category="cache")
+        print_debug("assemble_partial_l2", "pasting gap into slab", category="cache")
         self._paste_gap_into_slab(slab, gap_data, slice_info, gap_slice, shape)
 
         if not np.isfinite(slab).any():
@@ -549,7 +549,7 @@ class ChunkCache:
             self.fetch_batch_target_bytes,
         )
         if len(batches) == 1:
-            print_debug("read_tiled_hyperslab", f"reading one tiled hyperslab batch", category="cache")
+            print_debug("read_tiled_hyperslab", "reading one tiled hyperslab batch", category="cache")
             return self._read_tiled_hyperslab_batch(
                 run,
                 key,
@@ -603,7 +603,7 @@ class ChunkCache:
         print_debug("read_tiled_hyperslab", f"concatenating parts: {len(parts)}, parts shape: {parts[0].shape}, batch axis: {batch_axis}", category="cache")
         result = np.concatenate(parts, axis=batch_axis)
         if store_assembled_slab:
-            print_debug("read_tiled_hyperslab", f"storing assembled slab", category="cache")
+            print_debug("read_tiled_hyperslab", "storing assembled slab", category="cache")
             self._store_assembled_slab(run_uid, key, slice_info, result, shape)
         print_debug(
             "read_tiled_hyperslab",

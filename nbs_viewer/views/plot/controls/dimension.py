@@ -369,7 +369,7 @@ class DimensionControl(QWidget):
         )
         self.sliders_layout.addWidget(plot_header)
 
-        for offset, pos in enumerate(range(n_slice, len(order))):
+        for _offset, pos in enumerate(range(n_slice, len(order))):
             storage_axis = order[pos]
             if y_shape[storage_axis] <= 1:
                 continue

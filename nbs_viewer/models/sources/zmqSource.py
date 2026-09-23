@@ -24,4 +24,4 @@ class ZMQSourceModel(SourceModel):
             catalog = KafkaCatalog(zmq_dispatcher)
             return catalog, label
         except Exception as e:
-            raise CatalogLoadError(f"ZMQ source model failed to load: {e}")
+            raise CatalogLoadError(f"ZMQ source model failed to load: {e}") from e

@@ -124,7 +124,7 @@ def tiles_intersecting(
     chunks = chunk_grid(shape, tile_chunks)
     base_chunk_indices: List[List[int]] = []
 
-    for dim, (s, dim_size, dim_chunk_sizes) in enumerate(
+    for _dim, (s, dim_size, dim_chunk_sizes) in enumerate(
         zip(slice_info, shape, chunks)
     ):
         positions = [0]

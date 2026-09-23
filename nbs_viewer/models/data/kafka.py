@@ -362,7 +362,7 @@ class KafkaRun(CatalogRun):
             print(f"Could not get object_keys from descriptors: {e}")
 
         # Process dimension hints and add related motor signals
-        for fields, stream in dimensions:
+        for fields, _stream in dimensions:
             if fields:
                 main_key = fields[0]
                 xkeys[1].append(main_key)

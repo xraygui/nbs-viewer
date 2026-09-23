@@ -278,7 +278,7 @@ class RunDisplayWidget(QWidget):
             )
             self._grid.addWidget(separator, row_index, 0, 1, 5)
 
-            for entry_index, (run_model, key, label_text) in enumerate(
+            for _entry_index, (run_model, key, label_text) in enumerate(
                 synthetic_entries
             ):
                 row_index += 1

@@ -273,7 +273,7 @@ class ImageGridCanvas(FigureCanvasQTAgg):
         slice_indices[0] = image_idx
 
         slice_info = []
-        for j, dim_size in enumerate(shape):
+        for j, _dim_size in enumerate(shape):
             if j < len(slice_indices):
                 if j >= len(shape) - 2:
                     slice_info.append(slice(None, None, None))

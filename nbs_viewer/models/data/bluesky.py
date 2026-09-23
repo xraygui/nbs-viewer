@@ -482,7 +482,7 @@ class BlueskyRun(CatalogRun):
 
         print_debug(
             "BlueskyRun.getRunKeys",
-            f"Getting dimension hints from descriptors took: {time.time() - t1:.3f}s",
+            f"Getting dimension hints from descriptors took: {time.time() - t2:.3f}s",
             category="catalog"
 )
 

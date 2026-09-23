@@ -73,4 +73,4 @@ class KafkaSourceModel(SourceModel):
             catalog = KafkaCatalog(kafka_dispatcher)
             return catalog, label
         except Exception as e:
-            raise CatalogLoadError(f"Kafka source model failed to load: {e}")
+            raise CatalogLoadError(f"Kafka source model failed to load: {e}") from e
