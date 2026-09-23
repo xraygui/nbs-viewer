@@ -83,7 +83,7 @@ class _SliceReduceRow(QWidget):
         slider_row.addWidget(self.slider, 1)
 
         self.value_label = QLabel()
-        slider_row.addWidget(self.value_label)
+        header_row.addWidget(self.value_label)
 
         self._assoc_labels = []
         # Not strict: both sides default to an empty list when the key is

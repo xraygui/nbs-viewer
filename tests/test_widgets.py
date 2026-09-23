@@ -281,3 +281,99 @@ def test_swapping_the_plot_axes_rescales_the_drawn_plane(plot_widgets):
     left, right, bottom, top = trace.last_bundle.extent
     assert canvas.axes.get_xlim() == (left, right)
     assert canvas.axes.get_ylim() == (bottom, top)
+
+
+def _panel_bounds(panel):
+    """
+    Return the height limits a panel is currently pinned between.
+    """
+    return panel.minimumHeight(), panel.maximumHeight()
+
+
+def _toggled_bounds(panel):
+    """
+    Return the bounds a collapse-and-re-expand cycle settles the panel at.
+
+    Toggling twice is the workaround this bug was reported with, and it is
+    the only statement of "the right height" that does not re-implement the
+    panel's own arithmetic in the test.
+    """
+    panel.toggle()
+    _pump()
+    panel.toggle()
+    _pump()
+    return _panel_bounds(panel)
+
+
+def test_an_expanded_panel_follows_its_content_growing_and_shrinking(qapp):
+    """
+    Bug: an open panel kept the height its content had when it was opened.
+
+    ``refresh_expanded_size`` measured the inner widget the moment it was
+    called, which is before Qt has laid the new content out: freshly built
+    rows are still hidden, a box layout skips hidden widgets, and the
+    ``maximumHeight`` cap computed from that total squashed the content that
+    appeared a moment later. The same staleness in reverse left a panel at
+    full height around content that had gone away.
+    """
+    from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+    from nbs_viewer.views.common.panel import CollapsiblePanel
+
+    content = QWidget()
+    content_layout = QVBoxLayout(content)
+    panel = CollapsiblePanel("Content", content, initially_expanded=True)
+    panel.show()
+    _pump()
+    empty_bounds = _panel_bounds(panel)
+
+    rows = [QLabel(f"row {i}") for i in range(4)]
+    for row in rows:
+        content_layout.addWidget(row)
+    panel.refresh_expanded_size()
+    _pump()
+
+    grown_bounds = _panel_bounds(panel)
+    assert grown_bounds[1] > empty_bounds[1]
+    assert grown_bounds == _toggled_bounds(panel)
+
+    for row in rows:
+        content_layout.removeWidget(row)
+        row.deleteLater()
+    panel.refresh_expanded_size()
+    _pump()
+
+    assert _panel_bounds(panel) == empty_bounds
+    panel.deleteLater()
+
+
+def test_the_dimension_panel_resizes_when_a_key_is_selected(plot_widgets):
+    """
+    The reported gesture: the dimension rows appear under an open panel.
+    """
+    from nbs_viewer.views.plot.controls.control_panel import ControlPanel
+
+    presenter, session, canvas = plot_widgets
+    controls = ControlPanel(presenter, canvas, enable_spatial_controls=True)
+    controls.show()
+    panel = controls.dimension_control_panel
+    if panel.is_collapsed:
+        panel.toggle()
+    _pump()
+
+    session.selection.set_selected_keys(["en_energy"], [], [])
+    _pump()
+    empty_bounds = _panel_bounds(panel)
+
+    session.selection.set_selected_keys(["en_energy"], ["detector_image"], [])
+    _pump()
+
+    grown_bounds = _panel_bounds(panel)
+    assert grown_bounds[1] > empty_bounds[1]
+    assert grown_bounds == _toggled_bounds(panel)
+
+    session.selection.set_selected_keys(["en_energy"], [], [])
+    _pump()
+
+    assert _panel_bounds(panel) == empty_bounds
+    controls.deleteLater()
