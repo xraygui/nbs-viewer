@@ -1,5 +1,3 @@
-print("In KafkaViewerTab.py")
-
 import nslsii
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 import uuid
