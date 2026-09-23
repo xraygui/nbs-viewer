@@ -57,7 +57,12 @@ class CustomHeaderView(QHeaderView):
             col_name = self.getColumnName(col)
             action = QAction(f"Show {col_name}", self)
 
-            def _showCol():
+            # ``col`` is bound here rather than closed over: a closure reads
+            # the loop variable when it runs, by which time the loop has
+            # finished, so every entry in this menu used to show whichever
+            # column happened to be hidden last. Keyword-only, because
+            # ``triggered`` passes a ``checked`` bool positionally.
+            def _showCol(*_triggered, col=col):
                 self.showColumn(col)
 
             action.triggered.connect(_showCol)
