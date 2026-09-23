@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.geometry.region import RectRegion, compile_with_mask_mode
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
@@ -50,7 +50,7 @@ def _session(ykey, *, depth_on_slider=False):
             (2, 0, 1), run.plot_axis_names(ykey, ["en_energy"])
         )
     trace = session.ensure_trace(run, "en_energy", ykey)
-    trace.get_plot_bundle()
+    trace.fetch()
     return session, run, trace
 
 
@@ -203,7 +203,7 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
 
     entry_id, frame = _add_roi(session, trace, profile_storage_axis)
     region = session.region.roi_set.get(entry_id).region
-    mask = compile_with_mask_mode(frame, region, "inside").mask
+    mask = region.compile_masked(frame, "inside").mask
     assert mask.any()
 
     plain = session.region.preview_roi_profile(
@@ -214,7 +214,7 @@ def test_one_roi_is_transformed_the_same_way_along_every_axis(
 )
 
     session.set_transform({"enabled": True, "text": "y * 2"})
-    trace.get_plot_bundle()
+    trace.fetch()
     doubled = session.region.preview_roi_profile(
         entry_id,
         parent_trace=trace,

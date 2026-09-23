@@ -1,7 +1,7 @@
 """Build display-ordered 2D planes the way the fetch path does.
 
-``prepare_2d_bundle`` packs a plane; it does not reorder one. Orientation is
-a separate step -- ``build_plot_bundle`` turns the finished plane the right
+``PlotBundle.from_2d`` packs a plane; it does not reorder one. Orientation is
+a separate step -- ``PlotBundle.pack`` turns the finished plane the right
 way up at the pack -- so a test that wants a frame matching what the user sees
 has to run it too.
 """
@@ -12,9 +12,9 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
-from nbs_viewer.models.plot.geometry.bundle import PlotBundle, prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.orientation import display_flips
-from nbs_viewer.models.plot.geometry.frame import PlotViewFrame
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.plane.orientation import display_flips
+from nbs_viewer.models.plot.plane.frame import PlotViewFrame
 
 
 def orient_block(
@@ -99,7 +99,7 @@ def display_bundle(
     y, row_axis, col_axis, (row_reversed, col_reversed) = oriented_plane(
         y, row_axis, col_axis, render_mode
     )
-    return prepare_2d_bundle(
+    return PlotBundle.from_2d(
         y,
         [row_axis, col_axis],
         list(axis_names),
@@ -134,7 +134,7 @@ def roi_profile_from_block(
     """
     Reduce an oriented block to an ROI profile, with no transform.
 
-    What ``RunFetch.get_plot_bundle`` runs between the load and the pack for
+    What ``PlotRequest.plot_bundle`` runs between the load and the pack for
     a request that carries a region. The production path calls the two halves
     itself so it can transform in between; with an empty transform the
     composition ``materialize_view`` performs is the same answer, so a test
@@ -160,12 +160,12 @@ def roi_profile_from_block(
     """
     import xarray as xr
 
-    from nbs_viewer.models.plot.view.axes import PlotAxes
-    from nbs_viewer.models.plot.fetch.stages import materialize_view
+    from nbs_viewer.models.plot.spec.axes import PlotAxes
+    from nbs_viewer.models.plot.spec.stages import materialize_view
 
     axis_names = list(axis_names)
     # The block is what the plan loaded, so an axis the slice indexed away is
-    # not one of its dimensions -- the same rule ``RunFetch._read_block``
+    # not one of its dimensions -- the same rule ``BlockCache._read_block``
     # applies. ``axis_names`` and ``axis_arrays`` stay per *storage* axis.
     surviving = [
         axis
@@ -211,7 +211,7 @@ def labelled_block(y, axis_arrays, axis_names):
     """
     Build the labelled array the load boundary produces.
 
-    ``RunFetch._read_block`` names the loaded array's dimensions and attaches
+    ``BlockCache._read_block`` names the loaded array's dimensions and attaches
     the coordinates it read, and everything downstream addresses it by name. A
     test that builds a block by hand has to do the same, so it is doing it
     once here rather than in every test body.
@@ -271,7 +271,7 @@ def profile_axes(
     PlotAxes
         Named profile view.
     """
-    from nbs_viewer.models.plot.view.axes import PlotAxes
+    from nbs_viewer.models.plot.spec.axes import PlotAxes
 
     names = list(axis_names)
     plane = (

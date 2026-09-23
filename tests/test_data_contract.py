@@ -282,7 +282,7 @@ def test_a_plot_hint_supplies_the_coordinate_of_the_axis_it_names(
     run = mca_scan_run(hint_path=hint_path)
     model = RunSource(run)
 
-    bundle = model.fetch.get_plot_bundle(_plot_request(model, xkeys, "mca"))
+    bundle = _plot_request(model, xkeys, "mca").plot_bundle(model)
 
     np.testing.assert_allclose(bundle.x_line, run.getData("mca_energies"))
     np.testing.assert_allclose(bundle.y, run.getData("mca")[0])

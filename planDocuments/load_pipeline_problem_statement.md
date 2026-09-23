@@ -135,8 +135,8 @@ the two existing names are usually both describing the wrong carving.
 
 These are settled and are inputs, not open questions.
 
-- **The block cache stays on the run, and stays single-entry.** Moving it
-  onto `Trace` was rejected, and reworking it was declined.
+- ~~**The block cache stays on the run, and stays single-entry.**~~
+  **Re-opened 2026-09-15** at the maintainer's direction. See below.
 - **No forwarding models.** A model that mostly re-exposes its children's
   methods is not a worthwhile extraction. `RunSource` handing out `.fetch`
   rather than forwarding to it was a deliberate application of this, and any
@@ -148,6 +148,67 @@ These are settled and are inputs, not open questions.
   question on the list below that was not there before.
 - **No runtime import cycles inside `models/plot`, and no function-local
   import used to dodge one.** Enforced by `tests/test_module_boundaries.py`.
+
+---
+
+## The block cache, re-opened
+
+It was a fixed input and is now a question. What it actually is:
+
+**It is a third cache tier, and the only one not named as one.** Below it,
+`models/cache/chunkCache.py` holds a byte-bounded LRU slice cache
+(`l1_max_bytes`, 128 MB) over a zarr-backed tier. A miss in the block cache
+therefore does not usually reach the network — it reaches those.
+
+**So its job is not to avoid I/O.** What it avoids is redoing the labelling
+and assembly around a read: the dimension rename, the coordinate attach via
+`load_coords`, the array construction. And it holds the norm arrays beside
+the block, so toggling a normalization costs one read of the norm key and
+nothing thereafter — that was its stated reason for holding the block *as
+read* rather than normalized.
+
+**Its key is coarse and its capacity is one.** `FetchPlan.reads_the_same`
+compares ykey, xkeys and dims, deliberately ignoring norm keys and which two
+axes are drawn; the window is then tested for containment rather than
+equality. One entry is held.
+
+### What that buys, and what it costs
+
+Keeping it exactly as it is:
+
+- Invalidation is trivially correct. One owner, one entry, cleared
+  synchronously by `RunSource` before it emits `data_changed`. The `clear`
+  docstring records why it does not listen for that signal instead: it would
+  depend on being connected first.
+- Memory is bounded by construction — one block per run, and the norms
+  cannot outgrow those toggled while it is held.
+
+Against it:
+
+- **Two traces on one run evict each other.** Different ykeys fail
+  `reads_the_same`, so each fetch replaces the other's block, every refresh.
+  The fall-through is to the chunk cache rather than to storage, so the cost
+  is relabelling and assembly rather than network — but it is paid per
+  refresh, per trace, for the whole time both are shown.
+- It is **62% of a class named for something else**, which is what started
+  this document.
+- Three tiers exist and only the lower two are described as tiers anywhere.
+
+### What re-opening it could mean
+
+Not proposals — the shapes the question can take:
+
+1. **Key it per ykey** instead of holding one entry, bounded by count. Fixes
+   the eviction pair-wise thrash; costs a bound to choose and an eviction
+   rule, which is the thing a single entry exists to avoid needing.
+2. **Move it down beside `ChunkCache`**, where the other tiers already live
+   and where the byte accounting already exists. Costs the ordering guarantee
+   above: the data layer would have to invalidate before the plot layer's
+   signal, or the plot layer would keep a `clear()` call reaching down.
+3. **Delete it and measure.** If the chunk cache plus relabelling is fast
+   enough, tier 0 is not earning its keep, and the norms-beside-the-block
+   trick could move to whoever wants it. This is the only option that makes
+   something smaller, and it is measurable before it is decided.
 
 ---
 
@@ -183,9 +244,10 @@ Options 1 and 2 are not exclusive: 1 moves B, 2 splits C from D.
 1. **Is the cache handed out or private?** If a pipeline function needs a
    block, it needs the cache; whether that is on the public surface or
    reached some other way changes what every option looks like.
-2. **Do the request and plan descriptions keep a package?** They fetch
-   nothing, so whatever holds them is not called `fetch`. Flat at the top
-   level and a package named for descriptions are both open.
+2. **Do the request and plan descriptions keep a package, and does it also
+   hold `Projection`?** They fetch nothing, so whatever holds them is not
+   called `fetch`. See the section below: `Projection` is a *field* of
+   `PlotRequest`, and putting them together is blocked by one edge.
 3. **Does `.fetch` survive as a name?** 75 tests and two production lines use
    it. It is cheap to change and the cost is not the reason to keep it.
 4. **Whose method is `get_plot_bundle`?** New, and raised by the standing
@@ -201,6 +263,61 @@ Options 1 and 2 are not exclusive: 1 moves B, 2 splits C from D.
    `single_canvas.py` uses at eight sites. So `TraceKey` sits in
    `fetch/request.py` beside the constructor that is not the main one, while
    `Trace` and `TraceSet` are elsewhere. Same confusion one layer up.
+
+---
+
+## `Projection` is a field of `PlotRequest`, and they are packages apart
+
+`PlotRequest.view` is a `Projection`. The two are one directory apart because
+of when they were written, not because of what they are.
+
+The whole chain is descriptions of one plot at increasing concreteness, each
+derived from the one above it by a pure function:
+
+| | what it adds | frozen? | lives in |
+|---|---|---|---|
+| `ViewIntent` | rank-agnostic session state; a `QObject` with signals | no | top level |
+| `Projection` | bound to one key's rank: roles, order, indices, crop | yes | `view/spec.py` |
+| `PlotRequest` | the keys, the ROI, the transform | yes | `fetch/request.py` |
+| `FetchPlan` | the window to read, and the frames it lands in | yes | `fetch/plan.py` |
+
+`ViewIntent.project()` makes the second, `PlotSession._build_plot_request` the
+third, `plan_fetch` the fourth. `PlotAxes` is the same projection spoken in
+dimension names. Six of the eight frozen types in `models/plot` are on this
+chain or wrap it.
+
+### One edge blocks combining them
+
+Any package holding both `Projection` and `PlotRequest` would import
+`geometry`, because `PlotRequest.region` is a `RegionDefinition` and
+`mask_mode` is a `MaskMode`. But **`geometry` imports the view vocabulary
+back**: `geometry/region.py` takes `PlotAxisName` and `ViewCrop` from
+`view`. That is a runtime cycle, and
+`tests/test_module_boundaries.py` refuses it.
+
+That edge got stronger at `3468650`, not weaker: `RectRegion.to_view_crop`
+means a region now *constructs* a view type as well as naming two.
+
+So combining them is a decision about **where the shared vocabulary lives**,
+not about the two packages. The shapes it can take:
+
+1. **`PlotAxisName` and `ViewCrop` move to `geometry`.** Then descriptions →
+   geometry one way, and the merge is free. Against: `ViewCrop` is a field of
+   `Projection`, so the type a projection carries would live in the package
+   the projection does not import.
+2. **The vocabulary moves below both** — a third place both import, which is
+   a new module holding four aliases and a small dataclass. That is the
+   "adds a file, deletes nothing" shape this project distrusts.
+3. **`RegionDefinition` stops being a field of `PlotRequest`** — the request
+   names a region some other way, and the edge into geometry disappears.
+   Largest change, and it touches the ROI path rather than the packaging.
+4. **Leave them apart** and accept that the containment crosses a package
+   boundary, as it does today.
+
+The `view/` package currently imports nothing else in `models/plot`, and a
+test asserts it. Any merge ends that property, which is the thing that made
+`view/` safe to depend on from everywhere. Whether the chain being in one
+place is worth more than the sink being a sink is the actual question.
 
 ---
 

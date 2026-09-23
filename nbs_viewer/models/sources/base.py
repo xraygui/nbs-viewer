@@ -4,8 +4,7 @@ from typing import Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal
 
-from ..catalog.base import CatalogBase
-from ..catalog.base import load_catalog_models
+from ..catalog.base import CatalogBase, load_catalog_models
 
 
 class CatalogLoadError(RuntimeError):

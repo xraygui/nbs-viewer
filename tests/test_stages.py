@@ -8,14 +8,15 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection, ViewCrop
-from nbs_viewer.models.plot.fetch.stages import (
+from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.stages import (
     apply_normalization,
     apply_transform,
     slice_info_for_key,
 )
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.data.memory import MemoryRun
 from nbs_viewer.models.sources.fixtures import (
@@ -28,7 +29,7 @@ from nbs_viewer.models.sources.fixtures import (
 )
 import xarray as xr
 
-from nbs_viewer.models.plot.view.axes import PlotAxes
+from nbs_viewer.models.plot.spec.axes import PlotAxes
 from tests.fixtures.catalog_recipes import image_scan_run
 from tests.fixtures.display_plane import labelled_block
 from tests.test_run_source import _frozen_entry
@@ -154,9 +155,7 @@ def test_1d_stats_line(qapp):
     run = model.run
     a, b, c = vppem_factors()
     view = ViewIntent(plot_ndim=1).project(1)
-    bundle = model.fetch.get_plot_bundle(
-        _request(run, "PCOEdge_stats", ["sampleVoltage_VSource"], view)
-    )
+    bundle = _request(run, "PCOEdge_stats", ["sampleVoltage_VSource"], view).plot_bundle(model)
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean())
     np.testing.assert_allclose(bundle.x_line, voltage_axis(len(a)))
@@ -174,14 +173,12 @@ def test_rank1_projection_needs_no_frozen_short_circuit(qapp):
     assert view.ndim == 1
     assert view.roles == (DimRole.PLOT_X,
 )
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     assert bundle.y.ndim == 1
 
 
@@ -195,14 +192,12 @@ def test_2d_image_index_slice(qapp):
         reduce_indices=(4,
 )
 ).project(3, (11, 24, 32), VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     expected = a[4] * b[:, None] * c[None, :]
     assert bundle.render_mode == "image"
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
@@ -217,14 +212,12 @@ def test_3d_mean_detectors_line_vs_voltage(qapp):
         reduce_indices=(0, 0),
         dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
 ).project(3, dim_names=VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean())
     np.testing.assert_allclose(bundle.x_line, voltage_axis(len(a)))
     assert bundle.axis_names == ["sampleVoltage_VSource"]
@@ -245,14 +238,12 @@ def test_2d_crop_on_view_spec(qapp):
         reduce_indices=(4,
 )
 ).project(3, (11, 24, 32), VPPEM_NAMES, crop=crop)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     expected = a[4] * b[2:8, None] * c[None, 3:10]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
@@ -274,14 +265,12 @@ def test_mesh_when_plot_y_is_nonuniform_voltage(qapp):
 ),
         dim_order=("dim_1", "sampleVoltage_VSource", "dim_2")
 ).project(3, dim_names=VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     assert bundle.render_mode == "mesh"
     assert bundle.y.ndim == 2
 
@@ -291,16 +280,14 @@ def test_normalize_stats_by_i0(qapp):
     a, b, c = vppem_factors()
     i0 = np.linspace(2.0, 3.0, len(a))
     view = ViewIntent(plot_ndim=1).project(1)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view,
             norm_keys=("i0",
 )
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean() / i0)
 
 
@@ -315,16 +302,14 @@ def test_normalize_cube_by_i0_index_slice(qapp):
         reduce_indices=(4,
 )
 ).project(3, (11, 24, 32), VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view,
             norm_keys=("i0",
 )
-)
-    )
+).plot_bundle(model)
     expected = (a[4] * b[:, None] * c[None, :]) / i0[4]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
@@ -339,16 +324,14 @@ def test_normalize_cube_by_i0_mean_detectors(qapp):
         reduce_indices=(0, 0),
         dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
 ).project(3, dim_names=VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view,
             norm_keys=("i0",
 )
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean() / i0)
 
 
@@ -356,15 +339,13 @@ def test_transform_from_request(qapp):
     model = _model()
     a, b, c = vppem_factors()
     view = ViewIntent(plot_ndim=1).project(1)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view,
             transform="y = y * 2"
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, 2.0 * a * b.mean() * c.mean())
 
 
@@ -372,14 +353,12 @@ def test_empty_request_transform_leaves_data_unscaled(qapp):
     model = _model()
     a, b, c = vppem_factors()
     view = ViewIntent(plot_ndim=1).project(1)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_stats",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, a * b.mean() * c.mean())
 
 
@@ -392,14 +371,12 @@ def test_sum_role_matches_closed_form(qapp):
         reduce_indices=(0, 0),
         dim_order=("dim_1", "dim_2", "sampleVoltage_VSource")
 ).project(3, dim_names=VPPEM_NAMES)
-    bundle = model.fetch.get_plot_bundle(
-        _request(
+    bundle = _request(
             model.run,
             "PCOEdge_image",
             ["sampleVoltage_VSource"],
             view
-)
-    )
+).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, a * b.sum() * c.sum())
 
 
@@ -466,10 +443,10 @@ def test_a_transform_change_reads_nothing_and_still_changes_the_values():
     """
     run = RunSource(image_scan_run(1, n_y=12, n_x=16))
     request = _image_request(run)
-    plain = run.fetch.get_plot_bundle(request).y.copy()
+    plain = request.plot_bundle(run).y.copy()
 
     calls = _count_reads(run)
-    doubled = run.fetch.get_plot_bundle(replace(request, transform="y * 2"))
+    doubled = replace(request, transform="y * 2").plot_bundle(run)
 
     assert calls == []
     np.testing.assert_allclose(doubled.y, 2.0 * plain)
@@ -485,20 +462,20 @@ def test_a_crop_inside_an_already_loaded_box_reads_nothing():
     before it can be taken out of it.
     """
     run = RunSource(image_scan_run(1, n_y=12, n_x=16))
-    run.fetch.get_plot_bundle(_image_request(run))
+    _image_request(run).plot_bundle(run)
 
     cropped = _image_request(
         run,
         crop=ViewCrop(storage_bbox=(2, 8, 3, 11), plot_y_axis=0, plot_x_axis=1)
 )
     calls = _count_reads(run)
-    from_cache = run.fetch.get_plot_bundle(cropped)
+    from_cache = cropped.plot_bundle(run)
     assert calls == []
     assert from_cache.y.shape == (6, 8)
 
     fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
     np.testing.assert_allclose(
-        from_cache.y, fresh.fetch.get_plot_bundle(cropped).y
+        from_cache.y, cropped.plot_bundle(fresh).y
     )
 
 
@@ -551,13 +528,13 @@ def test_an_roi_moved_inside_a_loaded_box_reads_nothing():
 )
 )
 
-    run.fetch.get_plot_bundle(wide)
+    wide.plot_bundle(run)
     calls = _count_reads(run)
-    from_cache = run.fetch.get_plot_bundle(inner)
+    from_cache = inner.plot_bundle(run)
     assert calls == []
 
     fresh = RunSource(image_scan_run(1, n_y=12, n_x=16, n_z=3))
-    np.testing.assert_allclose(from_cache.y, fresh.fetch.get_plot_bundle(inner).y)
+    np.testing.assert_allclose(from_cache.y, inner.plot_bundle(fresh).y)
 
 
 def test_toggling_a_norm_reads_the_norm_and_never_the_block():
@@ -580,21 +557,21 @@ def test_toggling_a_norm_reads_the_norm_and_never_the_block():
     plain = _request(run, "PCOEdge_image", ["sampleVoltage_VSource"], view)
     normed = replace(plain, norm_keys=("i0",
 ))
-    run.fetch.get_plot_bundle(plain)
+    plain.plot_bundle(run)
 
     calls = _count_reads(run)
-    on = run.fetch.get_plot_bundle(normed)
+    on = normed.plot_bundle(run)
     # The norm, and the X key its event axis is plotted against -- read for
     # it exactly as for the block. Never the block.
     assert [key for key, _slice in calls] == ["i0", "sampleVoltage_VSource"]
 
     del calls[:]
-    off = run.fetch.get_plot_bundle(plain)
-    again = run.fetch.get_plot_bundle(normed)
+    off = plain.plot_bundle(run)
+    again = normed.plot_bundle(run)
     assert calls == []
 
-    np.testing.assert_allclose(on.y, _model().fetch.get_plot_bundle(normed).y)
-    np.testing.assert_allclose(off.y, _model().fetch.get_plot_bundle(plain).y)
+    np.testing.assert_allclose(on.y, normed.plot_bundle(_model()).y)
+    np.testing.assert_allclose(off.y, plain.plot_bundle(_model()).y)
     np.testing.assert_allclose(again.y, on.y)
     assert not np.allclose(on.y, off.y)
 
@@ -624,16 +601,16 @@ def test_a_crop_inside_a_loaded_box_narrows_the_norms_with_the_block():
         norm_keys=("PCOEdge_flat",
 )
 )
-    run.fetch.get_plot_bundle(full)
+    full.plot_bundle(run)
 
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     cropped = replace(full, view=replace(cube, crop=crop))
     calls = _count_reads(run)
-    from_cache = run.fetch.get_plot_bundle(cropped)
+    from_cache = cropped.plot_bundle(run)
 
     assert calls == []
     np.testing.assert_allclose(
-        from_cache.y, flat_model().fetch.get_plot_bundle(cropped).y
+        from_cache.y, cropped.plot_bundle(flat_model()).y
     )
 
 
@@ -646,16 +623,16 @@ def test_swapping_the_plot_axes_reads_nothing():
     """
     run = RunSource(image_scan_run(1, n_y=12, n_x=16))
     request = _image_request(run)
-    plain = run.fetch.get_plot_bundle(request)
+    plain = request.plot_bundle(run)
 
     swapped = replace(request, view=request.view.swap_rows(1))
     calls = _count_reads(run)
-    from_cache = run.fetch.get_plot_bundle(swapped)
+    from_cache = swapped.plot_bundle(run)
 
     assert calls == []
     assert from_cache.y.shape == plain.y.shape[::-1]
     fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
-    np.testing.assert_allclose(from_cache.y, fresh.fetch.get_plot_bundle(swapped).y)
+    np.testing.assert_allclose(from_cache.y, swapped.plot_bundle(fresh).y)
 
 
 def test_a_transform_that_assigns_in_place_leaves_the_held_block_alone():
@@ -674,15 +651,15 @@ def test_a_transform_that_assigns_in_place_leaves_the_held_block_alone():
         ["sampleVoltage_VSource"],
         ViewIntent(plot_ndim=1).project(1)
 )
-    plain = run.fetch.get_plot_bundle(line)
+    plain = line.plot_bundle(run)
     y_before, x_before = plain.y.copy(), plain.x_line.copy()
 
-    clipped = run.fetch.get_plot_bundle(replace(line, transform="y[0] = -99"))
-    moved = run.fetch.get_plot_bundle(replace(line, transform="x[0][0] = -99"))
+    clipped = replace(line, transform="y[0] = -99").plot_bundle(run)
+    moved = replace(line, transform="x[0][0] = -99").plot_bundle(run)
     assert clipped.y[0] == -99
     assert moved.x_line[0] == -99
 
-    after = run.fetch.get_plot_bundle(line)
+    after = line.plot_bundle(run)
     np.testing.assert_array_equal(after.y, y_before)
     np.testing.assert_array_equal(after.x_line, x_before)
 
@@ -702,12 +679,12 @@ def test_a_data_change_clears_the_block_before_traces_refetch(qapp):
         ["sampleVoltage_VSource"],
         ViewIntent(plot_ndim=1).project(1)
 )
-    before = run.fetch.get_plot_bundle(line).y.copy()
+    before = line.plot_bundle(run).y.copy()
 
     data["PCOEdge_stats"] = 2.0 * np.asarray(data["PCOEdge_stats"])
     seen = []
     run.data_changed.connect(
-        lambda: seen.append(run.fetch.get_plot_bundle(line).y.copy())
+        lambda: seen.append(line.plot_bundle(run).y.copy())
     )
     run.run.data_changed.emit()
 
@@ -743,7 +720,7 @@ def test_a_norm_key_varying_along_a_reduced_axis_divides_before_the_reduce():
 )
 )
 
-    bundle = run.fetch.get_plot_bundle(request)
+    bundle = request.plot_bundle(run)
 
     per_element = float(np.sum(a / i0)) * b[2] * c
     after_reduce = float(np.sum(a)) / float(np.sum(i0)) * b[2] * c
@@ -761,7 +738,7 @@ def test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached():
     """
     run = RunSource(image_scan_run(1, n_y=12, n_x=16))
     parent = replace(_image_request(run), transform="y * 2")
-    plane = run.fetch.get_plot_bundle(parent)
+    plane = parent.plot_bundle(run)
 
     roi = replace(
         parent,
@@ -773,10 +750,10 @@ def test_an_in_plane_roi_is_the_same_whether_or_not_the_plane_is_cached():
 ),
         profile_axis=1
 )
-    from_cache = run.fetch.get_plot_bundle(roi, cached_plane=plane)
+    from_cache = roi.plot_bundle(run, cached_plane=plane)
 
     fresh = RunSource(image_scan_run(1, n_y=12, n_x=16))
-    from_load = fresh.fetch.get_plot_bundle(roi)
+    from_load = roi.plot_bundle(fresh)
 
     np.testing.assert_allclose(from_load.y, from_cache.y)
     np.testing.assert_allclose(from_load.x_line, from_cache.x_line)
@@ -810,7 +787,7 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
 )),
         transform="y * len(x)"
 )
-    assert run.fetch.get_plot_bundle(parent).ndim == 2
+    assert parent.plot_bundle(run).ndim == 2
 
     roi = replace(
         parent,
@@ -823,8 +800,8 @@ def test_the_off_plane_transform_sees_the_planes_own_coordinates():
 ),
         profile_axis=2
 )
-    scaled = run.fetch.get_plot_bundle(roi)
-    plain = run.fetch.get_plot_bundle(replace(roi, transform=""))
+    scaled = roi.plot_bundle(run)
+    plain = replace(roi, transform="").plot_bundle(run)
 
     np.testing.assert_allclose(scaled.y, 2.0 * plain.y)
 
@@ -840,7 +817,7 @@ def _image_scan_model():
 
 def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
     """Run the load boundary and return ``(request, block, norm arrays)``."""
-    from nbs_viewer.models.plot.fetch.request import PlotRequest
+    from nbs_viewer.models.plot.spec.request import PlotRequest
     from nbs_viewer.models.plot.view_intent import ViewIntent
 
     shape = model.get_shape(ykey)
@@ -855,7 +832,9 @@ def _norms_for(model, ykey, xkeys, norm_keys, plot_ndim=2):
         view=view,
         dims=tuple(model.plot_axis_names(ykey, xkeys))
 )
-    block, norms, _plan = model.fetch._load_block(request)
+    # No region, so the plan needs no plane frame: the two public calls
+    # the sequencer makes are all this needs.
+    block, norms = model.block(request.plan())
     return request, block, norms
 
 
@@ -925,7 +904,7 @@ def test_a_norm_read_from_the_wrong_window_raises_instead_of_dividing():
         model, "detector_image", ["en_energy"], ["row"]
     )
     with pytest.raises(xr.AlignmentError):
-        model.fetch.get_plot_bundle(request)
+        request.plot_bundle(model)
 
 
 def test_a_frozen_norm_has_no_coordinates_and_aligns_by_position(qapp):

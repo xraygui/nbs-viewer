@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 from nbs_viewer.models.app_model import AppModel
 from nbs_viewer.models.catalog.memory import MemoryCatalog
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.geometry.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.displays.presenter import PlotPresenter
 from nbs_viewer.models.plot.run.source import RunSource
@@ -188,7 +188,7 @@ class HeadlessSession:
             y_list[0],
             norm_keys=norm_list,
         )
-        return plot_data.get_plot_bundle()
+        return plot_data.fetch()
 
     def _first_run_model(self) -> RunSource:
         models = self.session.collection.available_models

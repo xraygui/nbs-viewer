@@ -3,12 +3,13 @@
 import numpy as np
 import pytest
 
-from nbs_viewer.models.plot.fetch.stages import materialize_view
+from nbs_viewer.models.plot.spec.stages import materialize_view
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.bundle import prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.region import RectRegion
-from nbs_viewer.models.plot.view.axes import PlotAxes
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.region import RectRegion
+from nbs_viewer.models.plot.spec.axes import PlotAxes
 from tests.fixtures.display_plane import labelled_block, profile_axes
 
 
@@ -77,7 +78,7 @@ def test_profile_view_spec_in_plane_roles():
 
 def test_materialize_in_plane_profile_image():
     y = np.arange(100, dtype=float).reshape(10, 10)
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y,
         [np.linspace(0.0, 9.0, 10), np.linspace(0.0, 9.0, 10)],
         ["y", "x"],
@@ -120,7 +121,7 @@ def test_materialize_in_plane_profile_mesh():
     y = np.arange(30 * 400, dtype=float).reshape(30, 400)
     col_axis = np.cumsum(np.linspace(0.1, 0.3, 400))
     row_axis = np.linspace(200.0, 1000.0, 30)
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y, [row_axis, col_axis], ["en_energy", "tes_mca_energies"]
     )
     frame = bundle.view_frame()
@@ -217,7 +218,7 @@ def test_materialize_stack_profile_4d():
         indices=(1, 0, 0, 0)
 )
     y_parent = y.sum(axis=1)[1]
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y_parent,
         [np.arange(y_count), np.arange(x_count)],
         ["y", "x"],
@@ -254,7 +255,7 @@ def test_materialize_stack_profile_4d():
 
 def test_materialize_in_plane_profile_outside_roi():
     y = np.ones((6, 8))
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y,
         [np.arange(6), np.arange(8)],
         ["y", "x"],
@@ -359,7 +360,7 @@ def test_the_roi_mask_aligns_by_name_not_by_position():
     cube = np.arange(n_stack * n_row * n_col, dtype=float).reshape(
         n_stack, n_row, n_col
     )
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         cube[0],
         [np.arange(n_row, dtype=float), np.arange(n_col, dtype=float)],
         ["row", "col"],

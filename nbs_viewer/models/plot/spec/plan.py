@@ -2,23 +2,21 @@
 What to read out of storage for one request, and which indices of it.
 
 The lower of the view pipeline's two fixed layers. A PlotRequest next
-door says what ends up on the plot; :func:`plan_fetch` is the one pure
-function that turns it into the array indices to read, returning a
-:class:`FetchPlan`. It is also the only place a load is narrowed, so the
-display-to-storage mapping has one owner.
+door says what ends up on the plot; ``PlotRequest.plan`` turns it into the
+array indices to read, returning a :class:`FetchPlan`. The planning lives
+up there, with the description it reads, so this module can sit below the
+request rather than importing it. What stays here is the plan itself and
+:func:`narrow`, the one place a load is narrowed, so the display-to-storage
+mapping has one owner.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
-from ..geometry import (
-    PlotViewFrame,
-    compile_with_mask_mode,
-)
-from ..view import SliceItem
-from .request import PlotRequest
+from ..plane.frame import PlotViewFrame
+from ..plane.roles import SliceItem
 
 
 @dataclass(frozen=True)
@@ -27,7 +25,7 @@ class FetchPlan:
     What to read, which indices of it, and the frame the loaded plane lands in.
 
     The bottom of the two fixed layers: a :class:`PlotRequest` says what ends
-    up on the plot, ``plan_fetch`` says what to read. Equality covers the load
+    up on the plot, ``PlotRequest.plan`` says what to read. Equality covers the
     identity only -- the frames are derived and carry numpy arrays, so they
     are excluded from comparison.
 
@@ -111,103 +109,6 @@ class FetchPlan:
             other.xkeys,
             other.dims,
         )
-
-def plan_fetch(
-    request: PlotRequest,
-    *,
-    plane_frame: Optional[PlotViewFrame] = None,
-) -> FetchPlan:
-    """
-    Turn a plot description into the array indices that produce it.
-
-    The one planner. Crop and ROI both narrow the load, through :func:`narrow`
-    and the same display-to-storage mapping, so the three narrowing paths this
-    replaced cannot disagree about orientation again. A profile axis the
-    projection holds at a single index widens the other way: it must be read
-    in full, or the profile is one point long.
-
-    Parameters
-    ----------
-    request : PlotRequest
-        What ends up on the plot.
-    plane_frame : PlotViewFrame, optional
-        Display frame of the full parent plot plane. Required when
-        ``request.region`` is set, because the region is in data coordinates
-        and has to be compiled against a frame.
-
-    Returns
-    -------
-    FetchPlan
-        Load slices plus the frames the loaded block lands in.
-
-    Raises
-    ------
-    ValueError
-        If a region is requested without a frame, covers no cells, or does
-        not intersect the crop.
-    """
-    view = request.view
-    items: List[SliceItem] = list(view.base_slice())
-    plane_axes = request.plane_axes
-
-    if request.region is not None and request.profile_axis not in plane_axes:
-        items[request.profile_axis] = slice(None)
-
-    crop = view.crop
-    if crop is not None:
-        r0, r1, c0, c1 = crop.storage_bbox
-        items[crop.plot_y_axis] = narrow(items[crop.plot_y_axis], r0, r1)
-        items[crop.plot_x_axis] = narrow(items[crop.plot_x_axis], c0, c1)
-
-    if request.region is None:
-        return FetchPlan(
-            ykey=request.ykey,
-            xkeys=request.xkeys,
-            norm_keys=request.norm_keys,
-            slice_info=tuple(items),
-            dims=request.dims,
-            plane_axes=plane_axes,
-            plane_frame=plane_frame,
-        )
-
-    if plane_frame is None:
-        raise ValueError("plan_fetch needs plane_frame when request.region is set")
-
-    compiled = compile_with_mask_mode(
-        plane_frame, request.region, request.mask_mode
-    )
-    if compiled.pixel_count == 0:
-        raise ValueError("ROI does not cover any cells")
-    r0, r1, c0, c1 = plane_frame.storage_bbox(compiled.bbox)
-    if r1 <= r0 or c1 <= c0:
-        raise ValueError("ROI bounding box is empty")
-
-    row_axis, col_axis = plane_axes
-    items[row_axis] = narrow(items[row_axis], r0, r1)
-    items[col_axis] = narrow(items[col_axis], c0, c1)
-
-    # The block actually loaded is the ROI box intersected with the crop, so
-    # derive the region frame from the narrowed slices rather than from the
-    # ROI box, or the mask would not match the array it is applied to.
-    loaded = (
-        items[row_axis].start,
-        items[row_axis].stop,
-        items[col_axis].start,
-        items[col_axis].stop,
-    )
-    region_frame = plane_frame.region_for_bbox(
-        plane_frame.storage_bbox(loaded)
-    )
-    return FetchPlan(
-        ykey=request.ykey,
-        xkeys=request.xkeys,
-        norm_keys=request.norm_keys,
-        slice_info=tuple(items),
-        dims=request.dims,
-        plane_axes=plane_axes,
-        plane_frame=plane_frame,
-        region_frame=region_frame,
-    )
 
 def narrow(item: SliceItem, start: int, stop: int) -> slice:
     """

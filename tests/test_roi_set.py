@@ -1,6 +1,6 @@
 """Tests for RoiSetModel ownership and stale marking."""
 
-from nbs_viewer.models.plot.geometry.region import (
+from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
     PolygonRegion,
     RectRegion,

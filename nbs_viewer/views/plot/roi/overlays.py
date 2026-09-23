@@ -9,7 +9,7 @@ from typing import Sequence, Tuple
 from matplotlib.colors import to_rgba
 from matplotlib.patches import Ellipse, Polygon, Rectangle
 
-from nbs_viewer.models.plot.geometry import (
+from nbs_viewer.models.plot.spec.region import (
     EllipseRegion,
     PolygonRegion,
     RectRegion,

@@ -3,7 +3,7 @@ from typing import Optional, Set
 
 from qtpy.QtCore import QThread, Signal
 
-from nbs_viewer.models.plot.fetch.request import PlotRequest
+from nbs_viewer.models.plot.spec.request import PlotRequest
 from nbs_viewer.utils import print_debug
 
 
@@ -93,9 +93,7 @@ class PlotWorker(QThread):
             if self.isInterruptionRequested():
                 return
             t1 = ttime.time()
-            bundle = self.trace.get_plot_bundle(
-                plot_request=self.plot_request
-            )
+            bundle = self.trace.fetch(self.plot_request)
             if self.isInterruptionRequested():
                 print_debug(
                     "PlotWorker",

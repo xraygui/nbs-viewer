@@ -7,11 +7,10 @@ import pytest
 
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, ViewCrop
+from nbs_viewer.models.plot.plane.roles import DimRole, ViewCrop
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.geometry.region import PolygonRegion, compile_with_mask_mode
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.fetch.plan import plan_fetch
+from nbs_viewer.models.plot.spec.region import PolygonRegion
+from nbs_viewer.models.plot.spec.request import PlotRequest
 from nbs_viewer.models.plot.run.source import RunSource
 from nbs_viewer.models.sources.fixtures import (
     VPPEM_SHAPE,
@@ -57,7 +56,7 @@ def test_a_low_rank_key_projects_on_its_own_terms():
 )
 
 
-def test_plan_fetch_narrows_the_load_with_the_request_crop():
+def test_the_plan_narrows_the_load_with_the_request_crop():
     cube = ViewIntent(plot_ndim=2).project(3).with_index(0, 4)
     crop = ViewCrop(storage_bbox=(2, 10, 4, 20), plot_y_axis=1, plot_x_axis=2)
     req = PlotRequest(
@@ -69,10 +68,10 @@ def test_plan_fetch_narrows_the_load_with_the_request_crop():
         dims=VPPEM_NAMES
 )
     assert req.view.base_slice() == (4, slice(None), slice(None))
-    assert plan_fetch(req).slice_info == (4, slice(2, 10), slice(4, 20))
+    assert req.plan().slice_info == (4, slice(2, 10), slice(4, 20))
 
 
-def test_run_model_get_plot_bundle_from_request():
+def test_run_model_plot_bundle_from_request():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
@@ -87,14 +86,14 @@ def test_run_model_get_plot_bundle_from_request():
         view=cube,
         dims=VPPEM_NAMES
 )
-    via_request = model.fetch.get_plot_bundle(req)
+    via_request = req.plot_bundle(model)
 
     assert via_request.render_mode == "image"
     expected = a[4] * np.outer(b, c)
     np.testing.assert_allclose(via_request.y, expected[::-1, :])
 
 
-def test_run_model_get_plot_bundle_request_with_crop():
+def test_run_model_plot_bundle_request_with_crop():
     run = make_vppem_run()
     model = RunSource(run)
     a, b, c = vppem_factors()
@@ -108,15 +107,16 @@ def test_run_model_get_plot_bundle_request_with_crop():
         view=replace(cube, crop=crop),
         dims=VPPEM_NAMES
 )
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
     expected = (a[4] * np.outer(b, c))[2:10, 4:20]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
 
 def test_plot_data_model_holds_request_and_fetches():
-    from nbs_viewer.models.plot.view.spec import Projection
-    from nbs_viewer.models.plot.trace import Trace
-    from nbs_viewer.models.plot.fetch.request import TraceKey, PlotRequest
+    from nbs_viewer.models.plot.spec.projection import Projection
+    from nbs_viewer.models.plot.trace.trace import Trace
+    from nbs_viewer.models.plot.spec.request import PlotRequest
+    from nbs_viewer.models.plot.trace.key import TraceKey
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -139,13 +139,13 @@ def test_plot_data_model_holds_request_and_fetches():
     assert plot_data.trace_key == TraceKey(
         run.uid, "sampleVoltage_VSource", "PCOEdge_image"
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
     np.testing.assert_allclose(bundle.y, run.getData("PCOEdge_stats"))
     assert plot_data.last_fetched_request == request
 
 
 def test_set_request_keeps_trace_key():
-    from nbs_viewer.models.plot.trace import Trace
+    from nbs_viewer.models.plot.trace.trace import Trace
 
     run = make_vppem_run()
     model = RunSource(run)
@@ -187,7 +187,7 @@ def test_set_request_keeps_trace_key():
 
 
 def test_ensure_trace_assembles_request(qapp):
-    from nbs_viewer.models.plot.fetch.request import TraceKey
+    from nbs_viewer.models.plot.trace.key import TraceKey
     from tests.fixtures.plot_session import make_plot_session
 
     run = make_vppem_run()
@@ -217,10 +217,10 @@ def _vppem_frame(model, req):
     """
     Return the display frame of the parent 2-D plane for an ROI request.
     """
-    return model.fetch.get_plot_bundle(req).view_frame()
+    return req.plot_bundle(model).view_frame()
 
 
-def test_get_plot_bundle_records_the_display_reversal():
+def test_plot_bundle_records_the_display_reversal():
     """
     The bundle has to say how it was oriented. Nothing downstream can work it
     out afterwards: ``extent`` is normalised so bottom < top either way.
@@ -235,7 +235,7 @@ def test_get_plot_bundle_records_the_display_reversal():
         dims=VPPEM_NAMES
 )
 
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
     frame = bundle.view_frame()
 
     assert bundle.row_reversed is True
@@ -244,7 +244,7 @@ def test_get_plot_bundle_records_the_display_reversal():
     assert frame.storage_bbox((0, 3, 0, 4)) == (VPPEM_SHAPE[1] - 3, VPPEM_SHAPE[1], 0, 4)
 
 
-def test_get_plot_bundle_roi_profile_masks_the_display_plane():
+def test_plot_bundle_roi_profile_masks_the_display_plane():
     """
     End-to-end ROI profile against the plane the user actually drew on.
 
@@ -268,9 +268,9 @@ def test_get_plot_bundle_roi_profile_masks_the_display_plane():
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
     profile_req = parent_req.with_roi_profile(roi, profile_axis=0)
-    bundle = model.fetch.get_plot_bundle(profile_req)
+    bundle = profile_req.plot_bundle(model)
 
-    mask = compile_with_mask_mode(frame, roi, "inside").mask
+    mask = roi.compile_masked(frame, "inside").mask
     plane = np.outer(b, c)[::-1, :]
     expected = a * float(plane[mask].sum())
 
@@ -297,16 +297,13 @@ def test_an_in_plane_roi_profile_masks_the_display_plane(along):
         view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
         dims=VPPEM_NAMES
 )
-    plane = model.fetch.get_plot_bundle(parent_req)
+    plane = parent_req.plot_bundle(model)
     assert plane.row_reversed
     roi = PolygonRegion(vertices=((1.0, 1.0), (20.0, 1.0), (1.0, 16.0)))
 
-    bundle = model.fetch.get_plot_bundle(
-        parent_req.with_roi_profile(roi, profile_axis=along),
-        cached_plane=plane
-)
+    bundle = parent_req.with_roi_profile(roi, profile_axis=along).plot_bundle(model, cached_plane=plane)
 
-    mask = compile_with_mask_mode(plane.view_frame(), roi, "inside").mask
+    mask = roi.compile_masked(plane.view_frame(), "inside").mask
     shown = np.where(mask, np.asarray(plane.y), np.nan)
     across = 0 if along == "plot_x" else 1
     expected = np.nansum(shown, axis=across)[mask.any(axis=across)]
@@ -338,7 +335,7 @@ def test_normalizing_by_a_plane_shaped_key_follows_the_display_reversal():
         view=ViewIntent(plot_ndim=2).project(3).with_index(0, 4),
         dims=VPPEM_NAMES
 )
-    bundle = model.fetch.get_plot_bundle(req)
+    bundle = req.plot_bundle(model)
 
     expected = (a[4] * np.outer(b, c) / flat)[::-1, :]
     np.testing.assert_allclose(bundle.y, expected, rtol=1e-9)
@@ -393,8 +390,8 @@ def test_the_fetch_takes_the_names_from_the_request():
         dims=VPPEM_NAMES
 )
 
-    assert plan_fetch(req).dims == VPPEM_NAMES
-    model.fetch.get_plot_bundle(req)
+    assert req.plan().dims == VPPEM_NAMES
+    req.plot_bundle(model)
     assert "PCOEdge_image" not in asked
 
 
@@ -417,4 +414,4 @@ def test_a_request_may_name_an_axis_only_after_its_x_key():
 )
 
     with pytest.raises(ValueError, match="neither its own name nor the X key"):
-        model.fetch.get_plot_bundle(req)
+        req.plot_bundle(model)

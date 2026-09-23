@@ -20,7 +20,8 @@ mutators production does.
 from __future__ import annotations
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection, SLICE_ROLES
+from nbs_viewer.models.plot.plane.roles import DimRole, SLICE_ROLES
+from nbs_viewer.models.plot.spec.projection import Projection
 
 
 def intent_from_projection(projection: Projection) -> ViewIntent:

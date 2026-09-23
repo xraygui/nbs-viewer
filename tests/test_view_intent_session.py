@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.models.plot.run.source import RunSource
-from nbs_viewer.models.plot.view.spec import DimRole
+from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.sources.testSource import create_test_catalog
 
 
@@ -178,7 +178,7 @@ def test_gestures_reach_a_rank_three_key():
 
     trace = session.traces.get(next(iter(session.traces)))
     assert trace.request.view.indices[slice_axis] == 3
-    bundle = trace.get_plot_bundle()
+    bundle = trace.fetch()
     assert bundle.render_mode in ("image", "mesh")
     assert bundle.y.ndim == 2
 

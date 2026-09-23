@@ -4,7 +4,7 @@ One trace: request identity plus the bundle last fetched for it.
 A :class:`Trace` is model state only. It knows *what* should be drawn and
 *whether* it should be drawn, never *how*: the matplotlib artist lives in a
 canvas-side map keyed by :class:`TraceKey`, so a headless frontend can run a
-full ``ensure_trace`` -> ``get_plot_bundle`` -> ``set_visible`` cycle with no
+full ``ensure_trace`` -> ``fetch`` -> ``set_visible`` cycle with no
 matplotlib import.
 """
 
@@ -17,10 +17,12 @@ from qtpy.QtCore import QObject, Signal
 
 from nbs_viewer.utils import print_debug
 
-from .view import Projection
-from .run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX, copy_plot_bundle
-from .geometry import PlotBundle, RenderMode
-from .fetch.request import PlotRequest, TraceKey
+from ..spec.projection import Projection
+from ..run.frozen_spectrum import FrozenSpectrum, SYNTHETIC_KEY_PREFIX
+from ..plane.orientation import RenderMode
+from ..spec.bundle import PlotBundle
+from ..spec.request import PlotRequest
+from .key import TraceKey
 
 
 class Trace(QObject):
@@ -66,12 +68,12 @@ class Trace(QObject):
         parent : QObject, optional
             Parent QObject.
         trace_key : TraceKey, optional
-            Object identity. Defaults to ``request.trace_key()``.
+            Object identity. Defaults to ``TraceKey.of(request)``.
         """
         super().__init__(parent=parent)
         self._run = run
         self._request = request
-        self._trace_key = trace_key or request.trace_key()
+        self._trace_key = trace_key or TraceKey.of(request)
         self._fetched_request: Optional[PlotRequest] = None
         self._label = label
         self.last_bundle: Optional[PlotBundle] = None
@@ -155,7 +157,7 @@ class Trace(QObject):
         ValueError
             If the request names a different trace.
         """
-        incoming = request.trace_key(self._trace_key.fan_out_index)
+        incoming = TraceKey.of(request, self._trace_key.fan_out_index)
         if (
             incoming.uid != self._trace_key.uid
             or incoming.xkey != self._trace_key.xkey
@@ -209,15 +211,20 @@ class Trace(QObject):
     def render_mode(self) -> Optional[RenderMode]:
         return self._render_mode
 
-    def get_plot_bundle(
-        self, plot_request: Optional[PlotRequest] = None
-    ) -> PlotBundle:
+    def fetch(self, request: Optional[PlotRequest] = None) -> PlotBundle:
         """
-        Fetch and prepare plot data as a PlotBundle.
+        Fetch this trace's bundle, and hold it.
+
+        The action :meth:`needs_fetch` is the predicate for. Together with
+        :attr:`last_bundle` and :meth:`invalidate_bundle` they are a cache of
+        one, which is why this is not an accessor and is not named like one:
+        it writes ``last_bundle``, the fetched-request fingerprint and the
+        render mode. :meth:`preview_roi_profile` is the version that does
+        not.
 
         Parameters
         ----------
-        plot_request : PlotRequest, optional
+        request : PlotRequest, optional
             Override for this fetch. Defaults to the held request.
 
         Returns
@@ -225,8 +232,8 @@ class Trace(QObject):
         PlotBundle
             Prepared plot payload.
         """
-        request = plot_request if plot_request is not None else self._request
-        bundle = self._run.fetch.get_plot_bundle(request)
+        request = request if request is not None else self._request
+        bundle = request.plot_bundle(self._run)
         self._fetched_request = request
         self._update_render_mode(bundle)
         self.last_bundle = bundle
@@ -244,7 +251,7 @@ class Trace(QObject):
 
         A preview is a different request against the same run, so it must not
         overwrite ``last_bundle`` or the fetched-request fingerprint the way
-        :meth:`get_plot_bundle` does.
+        :meth:`fetch` does.
 
         Parameters
         ----------
@@ -263,8 +270,8 @@ class Trace(QObject):
         PlotBundle
             1D ROI profile payload.
         """
-        return self._run.fetch.get_plot_bundle(
-            request, cached_plane=cached_plane, label=label
+        return request.plot_bundle(
+            self._run, cached_plane=cached_plane, label=label
         )
 
     def build_roi_frozen_spectrum(
@@ -319,7 +326,7 @@ class Trace(QObject):
         return FrozenSpectrum(
             key=f"{SYNTHETIC_KEY_PREFIX}{uuid4()}",
             label=label,
-            bundle=copy_plot_bundle(bundle),
+            bundle=bundle.copy(),
             kind=kind,
             source_ykey=self.ykey,
             committed_xkey=committed_xkey or "",

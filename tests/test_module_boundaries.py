@@ -93,12 +93,12 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
     """
     The rule is about siblings, not about every deferred import.
 
-    ``geometry.mask.mask_from_vertices`` imports ``matplotlib.path`` in its
+    ``plane.mask.mask_from_vertices`` imports ``matplotlib.path`` in its
     body to keep a heavy optional dependency off the module's import path.
     That is a cost decision about a third-party package, not a cycle being
     concealed, so it must not be reported.
     """
-    source = facts["geometry.mask"].path.read_text()
+    source = facts["plane.mask"].path.read_text()
     assert "    from matplotlib.path import Path" in source, (
         "this test is only meaningful while region_mesh still defers a "
         "third-party import into a function body"
@@ -106,14 +106,14 @@ def test_a_non_sibling_import_in_a_function_is_not_a_dodge(facts):
     bodies = [
         imp
         for imp in function_local_imports(facts)
-        if imp.module == "geometry.mask"
+        if imp.module == "plane.mask"
     ]
     assert bodies == []
 
 
-def test_the_view_vocabulary_depends_on_nothing_in_the_package(facts):
+def test_the_plane_vocabulary_depends_on_nothing_in_the_package(facts):
     """
-    ``view/`` is a sink: everything may import it, it imports nothing back.
+    ``plane/`` is a sink: everything may import it, it imports nothing back.
 
     This is the property that makes it vocabulary rather than a layer. Every
     other package here describes data, fetches it or draws it, and all of
@@ -124,14 +124,22 @@ def test_the_view_vocabulary_depends_on_nothing_in_the_package(facts):
     turned out to want a frame or a region, the thing that wanted it was not
     vocabulary: ``storage_axis_to_plot_axis`` was taking a frame it should
     never have had, and ``default_profile_label`` was ROI text.
+
+    The assertion used to name ``view/``, which was only ever half a sink: it
+    held ``Projection`` alongside the words, and it owned ``ViewCrop`` while
+    the sole thing that builds one, ``RectRegion.to_view_crop``, lived in
+    ``geometry``. Those two facts were one cycle -- ``region`` imported the
+    view vocabulary, and anything holding both ends imported back. Splitting
+    the words from the descriptions moved the property here, where it is
+    true of a package that cannot want a frame because it *is* the frame.
     """
     outward = {
         (imp.module, imp.target)
         for imp in (i for m in facts.values() for i in m.imports)
-        if imp.module.split(".")[0] == "view"
-        and imp.target.split(".")[0] != "view"
+        if imp.module.split(".")[0] == "plane"
+        and imp.target.split(".")[0] != "plane"
     }
-    assert outward == set(), f"view/ reaches outside itself: {sorted(outward)}"
+    assert outward == set(), f"plane/ reaches outside itself: {sorted(outward)}"
 
 
 # ---------------------------------------------------------------------------

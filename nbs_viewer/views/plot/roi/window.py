@@ -28,8 +28,9 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nbs_viewer.models.plot.view import Projection
-from nbs_viewer.models.plot.geometry import PlotViewFrame, RegionDefinition
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.plane.frame import PlotViewFrame
+from nbs_viewer.models.plot.spec.region import RegionDefinition
 from nbs_viewer.models.plot.roi import RoiEntry, RoiOperation
 
 from .preview_canvas import RoiPreviewCanvas, RoiPreviewWorker

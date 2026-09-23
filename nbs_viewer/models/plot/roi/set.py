@@ -13,14 +13,8 @@ from uuid import uuid4
 
 from qtpy.QtCore import QObject, Signal
 
-from ..geometry import (
-    EllipseRegion,
-    MaskMode,
-    PolygonRegion,
-    RectRegion,
-    RegionDefinition,
-)
-from ..view import SpatialReduce
+from ..plane.roles import MaskMode, SpatialReduce
+from ..spec.region import EllipseRegion, PolygonRegion, RectRegion, RegionDefinition
 
 PLACEHOLDER_RECT = RectRegion(x0=0.0, x1=0.0, y0=0.0, y1=0.0)
 PLACEHOLDER_ELLIPSE = EllipseRegion(cx=0.0, cy=0.0, rx=0.0, ry=0.0, angle=0.0)

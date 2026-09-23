@@ -10,8 +10,9 @@ import pytest
 
 from tests.fixtures.view import apply_projection
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 from nbs_viewer.models.plot.run.source import RunSource
 from tests.fixtures.catalog_recipes import image_scan_run
@@ -35,7 +36,7 @@ def _setup_plot_with_roi(*, profile_storage_axis=0, stale=False):
     plot_data = plot_model.ensure_trace(
         run_model, "en_energy", "detector_image",
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
 
     frame = bundle.view_frame()
     x0, _ = frame.cell_x_bounds(5, 0)
@@ -170,10 +171,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     The ROI is a triangle on purpose: a rectangle fills its own bounding box,
     so its mask is unchanged by the row reversal and cannot detect this.
     """
-    from nbs_viewer.models.plot.geometry.region import (
-        PolygonRegion,
-        compile_with_mask_mode
-)
+    from nbs_viewer.models.plot.spec.region import PolygonRegion
     from nbs_viewer.models.sources.fixtures import make_vppem_run, vppem_factors
 
     plot_model, _ = make_plot_session()
@@ -186,7 +184,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     plot_data = plot_model.ensure_trace(
         run_model, "sampleVoltage_VSource", "PCOEdge_image"
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
     frame = bundle.view_frame()
     assert frame.row_reversed
 
@@ -203,7 +201,7 @@ def test_nd_roi_preview_masks_the_display_plane(qapp):
     profile = plot_model.region.preview_roi_profile(entry_id)
 
     a, b, c = vppem_factors()
-    mask = compile_with_mask_mode(frame, roi, "inside").mask
+    mask = roi.compile_masked(frame, "inside").mask
     expected = a * float(np.outer(b, c)[::-1, :][mask].sum())
 
     assert profile.ndim == 1

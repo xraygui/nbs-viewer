@@ -7,7 +7,7 @@ uses cell-intersects, so the extracted plane still covers the drawn
 rectangle.
 
 Where a cell *is* belongs to the frame, not to this module: the bounds come
-from :mod:`plot_view_frame`, and what is rasterized here is a shape against
+from :mod:`frame`, and what is rasterized here is a shape against
 them.
 """
 
@@ -344,7 +344,7 @@ def mask_covering_data_rect(
     """
     Build a boolean mask for cells intersecting a data-coordinate rectangle.
 
-    This is the viewport rule used by :mod:`view_crop`: every cell the
+    This is the viewport rule used by :class:`~..plane.roles.ViewCrop`: every cell the
     rectangle touches is kept, so the cropped plane covers what was drawn.
     ROI reduction uses :func:`mask_from_data_rect` instead, which tests cell
     centers so edge cells are not partially counted.

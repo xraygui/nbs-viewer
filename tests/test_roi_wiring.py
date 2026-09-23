@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from tests.fixtures.view import apply_projection
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.roi import RoiOperation
 
 from tests.fixtures.session import HeadlessSession
@@ -52,7 +53,7 @@ def _wired_image_scan_with_roi(
     plot_data = session.session.ensure_trace(
         run_model, "en_energy", "detector_image",
     )
-    bundle = plot_data.get_plot_bundle()
+    bundle = plot_data.fetch()
 
     frame = bundle.view_frame()
     x0, _ = frame.cell_x_bounds(5, 0)

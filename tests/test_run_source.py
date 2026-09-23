@@ -8,16 +8,17 @@ import numpy as np
 import pytest
 
 from nbs_viewer.models.plot.view_intent import ViewIntent
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.plot.run.frozen_spectrum import (
     FrozenSpectrum,
     SYNTHETIC_KEY_PREFIX,
 )
 from nbs_viewer.models.data.key_info import KeyInfo
 from nbs_viewer.models.data.memory import MemoryRun
-from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.region import RectRegion
 from nbs_viewer.models.plot.run.source import RunSource, x_dimension
 from tests.fixtures.catalog_recipes import image_scan_run
 from nbs_viewer.models.sources.fixtures import (
@@ -30,7 +31,7 @@ from nbs_viewer.models.sources.fixtures import (
 def _line_bundle(values, x=None, name="profile"):
     x = np.asarray(values if x is None else x, dtype=float)
     y = np.asarray(values, dtype=float)
-    return prepare_1d_bundle(y, [x], [name])
+    return PlotBundle.from_1d(y, [x], [name])
 
 
 def _frozen_entry(model, key_suffix="abc", y=None, label=None):
@@ -248,20 +249,16 @@ def test_an_x_key_on_a_detector_axis_names_that_axis(qapp):
         "time",
         "en_energy"
 )
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["en_energy"], "detector_image")
-    )
+    bundle = _plot_request(model, ["en_energy"], "detector_image").plot_bundle(model)
     np.testing.assert_allclose(bundle.x_line, run.getData("en_energy"))
     np.testing.assert_allclose(bundle.y, run.getData("detector_image")[0])
 
 
-def test_get_plot_bundle_1d_closed_form(qapp):
+def test_plot_bundle_1d_closed_form(qapp):
     model = RunSource(make_vppem_run())
     a, b, c = vppem_factors()
     expected = a * b.mean() * c.mean()
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats")
-    )
+    bundle = _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats").plot_bundle(model)
     assert bundle.render_mode == "line"
     np.testing.assert_allclose(bundle.y, expected)
     np.testing.assert_allclose(
@@ -269,7 +266,7 @@ def test_get_plot_bundle_1d_closed_form(qapp):
     )
 
 
-def test_get_plot_bundle_index_slice_closed_form(qapp):
+def test_plot_bundle_index_slice_closed_form(qapp):
     model = RunSource(make_vppem_run())
     spec = Projection(
         ndim=3,
@@ -277,20 +274,18 @@ def test_get_plot_bundle_index_slice_closed_form(qapp):
         roles=(DimRole.INDEX, DimRole.PLOT_Y, DimRole.PLOT_X),
         indices=(4, 0, 0)
 )
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(
+    bundle = _plot_request(
             model,
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=2,
             projection=spec
-)
-    )
+).plot_bundle(model)
     expected = vppem_image()[4]
     np.testing.assert_allclose(bundle.y, expected[::-1, :])
 
 
-def test_get_plot_bundle_mean_mean_matches_stats(qapp):
+def test_plot_bundle_mean_mean_matches_stats(qapp):
     model = RunSource(make_vppem_run())
     spec = Projection(
         ndim=3,
@@ -299,31 +294,25 @@ def test_get_plot_bundle_mean_mean_matches_stats(qapp):
         indices=(0, 0, 0),
         axis_order=(1, 2, 0)
 )
-    cube_bundle = model.fetch.get_plot_bundle(
-        _plot_request(
+    cube_bundle = _plot_request(
             model,
             ["sampleVoltage_VSource"],
             "PCOEdge_image",
             plot_ndim=1,
             projection=spec
-)
-    )
-    stats_bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats")
-    )
+).plot_bundle(model)
+    stats_bundle = _plot_request(model, ["sampleVoltage_VSource"], "PCOEdge_stats").plot_bundle(model)
     np.testing.assert_allclose(cube_bundle.y, stats_bundle.y)
 
 
-def test_get_plot_bundle_frozen_uses_read(qapp):
+def test_plot_bundle_frozen_uses_read(qapp):
     model = RunSource(make_vppem_run())
     entry = _frozen_entry(model, y=[10.0, 20.0, 30.0])
     model.register_frozen_spectrum(entry)
     get_data = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
     model._run.getData = get_data
 
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["sampleVoltage_VSource"], entry.key)
-    )
+    bundle = _plot_request(model, ["sampleVoltage_VSource"], entry.key).plot_bundle(model)
     np.testing.assert_allclose(bundle.y, [10.0, 20.0, 30.0])
     # ``load`` always passes the slice through, so the catalog sees an
     # explicit ``None`` where ``read`` used to omit the argument.
@@ -369,9 +358,7 @@ def test_a_declared_render_mode_reaches_the_bundle(qapp):
 
     def _mode(run):
         source = RunSource(run)
-        return source.fetch.get_plot_bundle(
-            _plot_request(source, ["en_energy"], "detector_image", plot_ndim=2)
-        ).render_mode
+        return _plot_request(source, ["en_energy"], "detector_image", plot_ndim=2).plot_bundle(source).render_mode
 
     assert _mode(plain) == "image"
     assert _mode(declared) == "mesh"
@@ -390,9 +377,7 @@ def test_a_one_dimensional_frozen_result_is_labelled_with_its_label(qapp):
     model.register_frozen_spectrum(entry)
     model._run.getData = MagicMock(return_value=np.array([0.0, 1.0, 2.0]))
 
-    bundle = model.fetch.get_plot_bundle(
-        _plot_request(model, ["sampleVoltage_VSource"], entry.key)
-    )
+    bundle = _plot_request(model, ["sampleVoltage_VSource"], entry.key).plot_bundle(model)
 
     assert bundle.axis_names == [entry.label]
 
@@ -419,8 +404,7 @@ def test_a_frozen_norm_follows_the_event_axis_index(qapp):
     projection = ViewIntent(plot_ndim=1).project(len(shape), shape)
     assert projection.base_slice() == (0, 0, slice(None))
 
-    bundle = model.fetch.get_plot_bundle(
-        PlotRequest(
+    bundle = PlotRequest(
             uid=model.uid,
             xkeys=("pixel",
 ),
@@ -429,8 +413,7 @@ def test_a_frozen_norm_follows_the_event_axis_index(qapp):
 ),
             view=projection,
             dims=tuple(model.plot_axis_names("detector_cube", ["pixel"]))
-)
-    )
+).plot_bundle(model)
 
     # cube[0, 0, :] is [0, 30, 60]; the frozen norm at event 0 is 2.0.
     np.testing.assert_allclose(bundle.y, [0.0, 15.0, 30.0])

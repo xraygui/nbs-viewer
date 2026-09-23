@@ -8,15 +8,16 @@ from nbs_viewer.models.data.combined import (
     CombinationMethod,
     CombinedRun,
 )
-from nbs_viewer.models.plot.view.spec import DimRole, Projection
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
 from nbs_viewer.models.data.frozen import FrozenRun
 from nbs_viewer.models.plot.run.frozen_spectrum import (
     FrozenSpectrum,
     SYNTHETIC_KEY_PREFIX,
 )
-from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle
-from nbs_viewer.models.plot.fetch.request import PlotRequest
-from nbs_viewer.models.plot.geometry.region import RectRegion
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.request import PlotRequest
+from nbs_viewer.models.plot.spec.region import RectRegion
 
 from tests.fixtures.session import HeadlessSession
 
@@ -44,7 +45,7 @@ def _select_catalog_runs(session: HeadlessSession, indices: tuple[int, ...]):
 
 
 def _frozen_stack_entry(run_model, *, key_suffix: str = "wired") -> FrozenSpectrum:
-    bundle = prepare_1d_bundle(
+    bundle = PlotBundle.from_1d(
         np.array([1.0, 2.0, 3.0], dtype=float),
         [np.array([0.0, 1.0, 2.0], dtype=float)],
         ["profile"]

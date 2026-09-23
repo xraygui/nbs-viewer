@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from tests.fixtures.display_plane import orient_block
-from nbs_viewer.models.plot.geometry.bundle import prepare_1d_bundle, prepare_2d_bundle
-from nbs_viewer.models.plot.geometry.orientation import (
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.plane.orientation import (
     classify_render_mode,
     display_flips,
     is_uniform_1d,
@@ -16,7 +16,7 @@ def _packed_for_display(y, row_axis, col_axis, axis_names, render_mode):
     """
     Orient a storage plane and pack it, the way the fetch path does.
 
-    ``prepare_2d_bundle`` no longer reorders anything; orientation is a
+    ``PlotBundle.from_2d`` no longer reorders anything; orientation is a
     separate step that runs immediately after the load.
     """
     row_reversed, col_reversed = display_flips(row_axis, col_axis, render_mode)
@@ -28,7 +28,7 @@ def _packed_for_display(y, row_axis, col_axis, axis_names, render_mode):
     y, (row_axis, col_axis) = orient_block(
         y, [row_axis, col_axis], reversed_axes
     )
-    return prepare_2d_bundle(
+    return PlotBundle.from_2d(
         y,
         [row_axis, col_axis],
         axis_names,
@@ -78,7 +78,7 @@ def test_classify_length_mismatch():
 
 def test_prepare_2d_image_extent():
     y = np.zeros((2160, 2560))
-    bundle = prepare_2d_bundle(y, [], [])
+    bundle = PlotBundle.from_2d(y, [], [])
     assert bundle.render_mode == "image"
     assert bundle.extent is not None
     left, right, bottom, top = bundle.extent
@@ -89,7 +89,7 @@ def test_prepare_2d_image_extent():
 def test_prepare_2d_image_uniform_extent():
     y = np.zeros((100, 200))
     x_axes = [np.arange(100.0), np.linspace(0, 199, 200)]
-    bundle = prepare_2d_bundle(y, x_axes, ["row", "col"])
+    bundle = PlotBundle.from_2d(y, x_axes, ["row", "col"])
     assert bundle.render_mode == "image"
     left, right, bottom, top = bundle.extent
     assert left == pytest.approx(-0.5)
@@ -102,7 +102,7 @@ def test_prepare_2d_mesh_has_grids():
     y = np.random.rand(30, 400)
     energy = np.cumsum(np.linspace(0.1, 0.3, 400))
     motor = np.linspace(0, 10, 30)
-    bundle = prepare_2d_bundle(y, [motor, energy], ["motor", "energy"])
+    bundle = PlotBundle.from_2d(y, [motor, energy], ["motor", "energy"])
     assert bundle.render_mode == "mesh"
     assert bundle.mesh_x is not None
     assert bundle.mesh_y is not None
@@ -118,7 +118,7 @@ def test_prepare_2d_mesh_mca_like_shape():
     y = np.zeros((202, 800))
     row_axis = np.linspace(0, 10, 202)
     col_axis = np.cumsum(np.linspace(0.1, 0.3, 800))
-    bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["energy", "channel"])
+    bundle = PlotBundle.from_2d(y, [row_axis, col_axis], ["energy", "channel"])
     assert bundle.render_mode == "mesh"
     assert bundle.y.shape == (202, 800)
     assert bundle.axis_names == ["energy", "channel"]
@@ -126,10 +126,10 @@ def test_prepare_2d_mesh_mca_like_shape():
     assert bundle.mesh_x.shape[1] - 1 == bundle.y.shape[1]
 
 
-def test_prepare_1d_bundle():
+def test_from_1d():
     y = np.sin(np.linspace(0, 1, 50))
     x = np.linspace(0, 10, 50)
-    bundle = prepare_1d_bundle(y, [x], ["time"])
+    bundle = PlotBundle.from_1d(y, [x], ["time"])
     assert bundle.render_mode == "line"
     assert bundle.ndim == 1
     np.testing.assert_array_equal(bundle.x_line, x)
@@ -139,7 +139,7 @@ def test_hint_forces_image_on_non_uniform():
     y = np.zeros((10, 20))
     energy = np.cumsum(np.linspace(0.1, 0.3, 20))
     motor = np.linspace(0, 10, 10)
-    bundle = prepare_2d_bundle(
+    bundle = PlotBundle.from_2d(
         y, [motor, energy], ["m", "e"], render_mode_hint="image"
     )
     assert bundle.render_mode == "image"
@@ -152,7 +152,7 @@ def test_image_extent_decreasing_row_axis_is_not_inverted():
     row_axis = np.linspace(645.0, 361.0, 8)
     col_axis = np.linspace(353.0, 605.0, 10)
     y = np.arange(80, dtype=float).reshape(8, 10)
-    bundle = prepare_2d_bundle(y, [row_axis, col_axis], ["dim_1", "dim_2"])
+    bundle = PlotBundle.from_2d(y, [row_axis, col_axis], ["dim_1", "dim_2"])
     left, right, bottom, top = bundle.extent
     assert bottom < top
     dy = (top - bottom) / 8
@@ -214,27 +214,11 @@ def test_image_and_mesh_agree_on_axis_placement():
 # ---------------------------------------------------------------------------
 
 
-def _plain_2d_request():
-    """A 2-D request with no region, for the packing step."""
-    from nbs_viewer.models.plot.fetch.request import PlotRequest
-    from nbs_viewer.models.plot.view_intent import ViewIntent
-
-    return PlotRequest(
-        uid="uid",
-        xkeys=("x",
-),
-        ykey="det",
-        norm_keys=(),
-        view=ViewIntent(plot_ndim=2).project(2, (4, 5)),
-        dims=("dim_0", "dim_1")
-)
-
-
 @pytest.mark.parametrize("row_descending", [False, True], ids=["row asc", "row desc"])
 @pytest.mark.parametrize("col_descending", [False, True], ids=["col asc", "col desc"])
 def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descending):
     """
-    ``build_plot_bundle`` is the only place data is ever reordered.
+    ``PlotBundle.pack`` is the only place data is ever reordered.
 
     It used to happen immediately after the load, on the whole N-D block,
     which made a matplotlib convention -- ``origin="upper"`` puts storage row
@@ -246,15 +230,14 @@ def test_the_pack_turns_the_plane_the_right_way_up(row_descending, col_descendin
     All four orientations are checked because three of them are flips, and a
     reversal applied to the wrong axis is a silently plausible image.
     """
-    from nbs_viewer.models.plot.geometry.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)
     rows = np.arange(4.0)[::-1] if row_descending else np.arange(4.0)
     cols = np.arange(5.0)[::-1] if col_descending else np.arange(5.0)
 
-    bundle = build_plot_bundle(
-        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+    bundle = PlotBundle.pack(
+        labelled_block(y, [rows, cols], ["row", "col"])
     )
 
     # Display order is the order in which the coordinates ascend upward and
@@ -275,15 +258,14 @@ def test_the_pack_leaves_a_mesh_alone():
     """
     A mesh carries its own coordinate grids, so nothing is ever reordered.
     """
-    from nbs_viewer.models.plot.geometry.bundle import build_plot_bundle
     from tests.fixtures.display_plane import labelled_block
 
     y = np.arange(20.0).reshape(4, 5)
     rows = np.arange(4.0)
     cols = np.cumsum(np.linspace(0.1, 0.9, 5))
 
-    bundle = build_plot_bundle(
-        labelled_block(y, [rows, cols], ["row", "col"]), _plain_2d_request()
+    bundle = PlotBundle.pack(
+        labelled_block(y, [rows, cols], ["row", "col"])
     )
 
     assert bundle.render_mode == "mesh"

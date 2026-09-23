@@ -82,7 +82,7 @@ class _UnfinishedRun(MemoryRun):
 def _plot(session, run) -> np.ndarray:
     """Return the y array the session would draw for ``run``."""
     key = next(k for k in session.traces if k.uid == run.uid)
-    return session.traces.get(key).get_plot_bundle().y
+    return session.traces.get(key).fetch().y
 
 
 # ----------------------------------------------------------------------
@@ -133,7 +133,7 @@ def test_axis_coordinates_come_from_the_primary_source(qapp):
     # The drawn x axis follows, since axes reach the bundle through getData.
     key = next(k for k in session.traces if k.uid == combined.uid)
     assert np.allclose(
-        session.traces.get(key).get_plot_bundle().x_line,
+        session.traces.get(key).fetch().x_line,
         first.run.getData("motor"),
     )
 

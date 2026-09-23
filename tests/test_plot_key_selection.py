@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nbs_viewer.models.plot.view.spec import DimRole
+from nbs_viewer.models.plot.plane.roles import DimRole
 from nbs_viewer.models.plot.session import PlotSession
 from nbs_viewer.views.dataSource.run_list_item_model import RunListItemModel
 from nbs_viewer.models.plot.run.source import RunSource
@@ -31,7 +31,7 @@ def test_a_stale_two_dimensional_view_cannot_poison_a_one_dimensional_key():
     assert plot.view_intent.plot_ndim == 2
 
     plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
-    bundle = plot.ensure_trace(run, x_keys[0], "y", norm_keys).get_plot_bundle()
+    bundle = plot.ensure_trace(run, x_keys[0], "y", norm_keys).fetch()
     assert bundle.render_mode == "line"
     assert bundle.y.shape == (100,)
 
@@ -47,19 +47,19 @@ def test_y_image_y_selection_sequence():
     xkey = x_keys[0]
 
     plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
-    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).fetch()
     assert bundle_y.render_mode == "line"
 
     plot.selection.set_selected_keys(x_keys, ["image"], norm_keys)
     plot.view_intent.set_plot_ndim(2)
     bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
-    ).get_plot_bundle()
+    ).fetch()
     assert bundle_image.render_mode == "image"
 
     plot.selection.set_selected_keys(x_keys, ["y"], norm_keys)
     plot.view_intent.set_plot_ndim(1)
-    bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_y_again = plot.ensure_trace(run, xkey, "y", norm_keys).fetch()
     assert bundle_y_again.render_mode == "line"
     assert "dim_1" not in bundle_y_again.axis_names
 
@@ -77,10 +77,10 @@ def test_1d_y_ignored_stale_cube_view_spec_when_both_y_keys_selected():
     plot.selection.set_selected_keys(x_keys, ["y", "image"], norm_keys)
     plot.view_intent.set_plot_ndim(2)
 
-    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).get_plot_bundle()
+    bundle_y = plot.ensure_trace(run, xkey, "y", norm_keys).fetch()
     bundle_image = plot.ensure_trace(
         run, xkey, "image", norm_keys
-    ).get_plot_bundle()
+    ).fetch()
 
     assert bundle_y.render_mode == "line"
     assert bundle_y.y.ndim == 1

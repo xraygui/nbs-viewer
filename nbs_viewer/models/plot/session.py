@@ -30,15 +30,16 @@ from nbs_viewer.models.cache.chunk_cache_progress import (
     aggregate_tiled_fetch_label,
 )
 
-from .fetch.request import TraceKey, PlotRequest
+from .spec.request import PlotRequest
+from .trace.key import TraceKey
 from .region_controller import RegionController
 from .run.collection import RunCollection
 from .run.source import RunSource
 from .run.selection import Selection
-from .trace import Trace
-from .trace_set import TraceSet
+from .trace.set import TraceSet
+from .trace.trace import Trace
 from .view_intent import ViewIntent
-from .view import Projection
+from .spec.projection import Projection
 
 
 class PlotSession(QObject):
