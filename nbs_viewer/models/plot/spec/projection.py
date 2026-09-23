@@ -95,6 +95,12 @@ class Projection:
             )
         if len(self.roles) != self.ndim:
             raise ValueError("roles length must match ndim")
+        # A bare "sum" compares equal to DimRole.SUM but is not it, and the
+        # reduce stage matches roles with ``is``. Every projection passes
+        # through here, so this is where roles become DimRole.
+        object.__setattr__(
+            self, "roles", tuple(DimRole(role) for role in self.roles)
+        )
         if len(self.indices) != self.ndim:
             raise ValueError("indices length must match ndim")
         if not self.axis_order:

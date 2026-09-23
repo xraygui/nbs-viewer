@@ -163,3 +163,57 @@ def test_the_roi_window_opens_and_offers_profile_axes(
     ]
     assert axes, "a rank-3 key offered no profile axis"
     assert set(axes) <= {0, 1, 2}
+
+
+@pytest.mark.parametrize(
+    "role_name, reduce_name", [("SUM", "sum"), ("MEAN", "mean")]
+)
+def test_the_reduce_combo_actually_reduces_the_slider_axis(
+    plot_widgets, role_name, reduce_name
+):
+    """
+    Bug: picking Sum or Mean on a slider axis produced no plot at all.
+
+    ``DimRole`` subclasses ``str`` and the combo stores its roles as item
+    data, which Qt round-trips through a ``QVariant`` and hands back as a
+    plain ``str``. Every check between the combo and the reduce stage
+    compares with ``==`` or ``in`` and so accepted it; the reduce stage
+    matches with ``is`` and so skipped the axis, leaving a rank-3 array for
+    a pack that only takes planes -- "Unsupported plot dimensionality: 3".
+
+    Only a widget can reach this: the model layer is handed a real
+    ``DimRole`` by every caller that is not a ``QComboBox``.
+    """
+    import numpy as np
+
+    from nbs_viewer.models.plot.plane.roles import DimRole
+    from nbs_viewer.views.plot.controls.dimension import DimensionControl
+
+    presenter, session, canvas = plot_widgets
+    session.selection.set_selected_keys(["en_energy"], ["detector_cube"], [])
+    session.view_intent.set_plot_ndim(2)
+    dimension_control = DimensionControl(presenter, canvas)
+    _pump()
+    dimension_control.create_sliders()
+
+    assert dimension_control._slice_rows, "no slider axis to reduce"
+    row = dimension_control._slice_rows[0]
+    reduced_axis = row.storage_axis
+    trace = next(iter(session.traces.values()))
+    block = trace.run.load(
+        "detector_cube", dims=trace.request.dims, xkeys=("en_energy",)
+    )
+
+    role = getattr(DimRole, role_name)
+    row.role_combo.setCurrentIndex(row.role_combo.findData(role))
+    _pump()
+
+    assert trace.request.view.roles[reduced_axis] is role
+    bundle = trace.fetch()
+    assert bundle.ndim == 2
+    expected = getattr(block, reduce_name)(
+        dim=trace.request.dims[reduced_axis]
+    )
+    np.testing.assert_allclose(
+        np.sort(bundle.y, axis=None), np.sort(expected.values, axis=None)
+    )

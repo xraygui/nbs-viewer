@@ -479,3 +479,51 @@ def test_construction_fixes_duplicate_plot_x():
         indices=(0, 0),
     )
     assert sum(1 for r in spec.roles if r == DimRole.PLOT_X) == 1
+
+
+def test_a_role_given_as_a_plain_string_becomes_a_DimRole():
+    """
+    Bug: a reduce axis set from the UI never reduced.
+
+    ``DimRole`` subclasses ``str``, and ``QComboBox.currentData`` round-trips
+    its items through a ``QVariant``, which hands back a plain ``str``. That
+    value passes every ``==`` and ``in`` check on the way down -- validation,
+    role resolution, the load slice -- and fails only at ``reduce_to_plane``,
+    which matches roles with ``is``. The axis was then neither indexed away
+    nor collapsed, and the pack rejected the 3-D result.
+
+    Normalising here rather than loosening that comparison is what makes
+    "roles on a Projection are ``DimRole``" an invariant instead of a habit:
+    every projection is built or ``replace``d through this constructor.
+    """
+    view = Projection(
+        ndim=3,
+        plot_ndim=2,
+        roles=("sum", "plot_y", "plot_x"),
+        indices=(0, 0, 0),
+    )
+
+    assert view.roles == (DimRole.SUM, DimRole.PLOT_Y, DimRole.PLOT_X)
+    assert all(role is DimRole(role) for role in view.roles)
+
+
+def test_with_slice_role_normalises_a_plain_string():
+    """
+    The edit the dimension rows make is the one that carried the bare string.
+    """
+    view = ViewIntent(plot_ndim=2).project(3)
+
+    edited = view.with_slice_role(0, "mean")
+
+    assert edited.roles[0] is DimRole.MEAN
+
+
+def test_view_intent_keeps_reduce_roles_as_DimRole():
+    """
+    The intent holds the policy the rows edited, so it normalises it too.
+    """
+    intent = ViewIntent(plot_ndim=2)
+
+    assert intent.set_reduce(("sum",), (3,))
+    assert intent.reduce_roles == (DimRole.SUM,)
+    assert intent.reduce_roles[0] is DimRole.SUM
