@@ -98,6 +98,7 @@ class ImageRenderer:
         cbar.set_label(label)
         colorbar_state["colorbar"] = cbar
         ImageRenderer.set_labels(axes, bundle)
+        ImageRenderer._set_limits(axes, bundle)
         print_debug(
             "ImageRenderer.create",
             f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
@@ -116,11 +117,8 @@ class ImageRenderer:
         artist.set_data(bundle.y)
         if bundle.extent is not None:
             artist.set_extent(bundle.extent)
-            axes = artist.axes
-            if axes is not None:
-                left, right, bottom, top = bundle.extent
-                axes.set_xlim(left, right)
-                axes.set_ylim(bottom, top)
+            if artist.axes is not None:
+                ImageRenderer._set_limits(artist.axes, bundle)
         if autoscale:
             finite = bundle.y[np.isfinite(bundle.y)]
             if finite.size > 0:
@@ -133,6 +131,17 @@ class ImageRenderer:
             f"shape={bundle.y.shape} {ttime.time() - t0:.4f}s",
             category="plots",
         )
+
+    @staticmethod
+    def _set_limits(axes: Axes, bundle: PlotBundle) -> None:
+        # Both paths, as for a mesh. ``imshow`` scales the axes itself, but
+        # only while they still autoscale, and the first ``set_xlim`` here
+        # ends that -- after which a newly created image would keep the
+        # previous one's limits.
+        if bundle.extent is not None:
+            left, right, bottom, top = bundle.extent
+            axes.set_xlim(left, right)
+            axes.set_ylim(bottom, top)
 
     @staticmethod
     def set_labels(axes: Axes, bundle: PlotBundle) -> None:
