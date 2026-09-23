@@ -21,10 +21,10 @@ from qtpy.QtCore import (
     Signal,
 )
 
-from ...models.catalog.table import CatalogTableModel
 from ...search import DateSearchWidget
 from ..plot.metadataView import FullMetadataBrowser
 from nbs_viewer.utils import print_debug, get_top_level_model
+from nbs_viewer.views.display.frontendRegistry import get_frontend_registry
 
 
 class CustomHeaderView(QHeaderView):
@@ -57,7 +57,12 @@ class CustomHeaderView(QHeaderView):
             col_name = self.getColumnName(col)
             action = QAction(f"Show {col_name}", self)
 
-            def _showCol():
+            # ``col`` is bound here rather than closed over: a closure reads
+            # the loop variable when it runs, by which time the loop has
+            # finished, so every entry in this menu used to show whichever
+            # column happened to be hidden last. Keyword-only, because
+            # ``triggered`` passes a ``checked`` bool positionally.
+            def _showCol(*_triggered, col=col):
                 self.showColumn(col)
 
             action.triggered.connect(_showCol)
@@ -186,18 +191,19 @@ class FilterModel(QSortFilterProxyModel):
         self._filter_chunk_size = 50
 
     def filterAcceptsRow(self, source_row, source_parent):
+        regex = self.filterRegularExpression()
+        if not regex.pattern() or not regex.isValid():
+            return True
+
         model = self.sourceModel()
         source_index = model.index(source_row, self.filterKeyColumn(), source_parent)
 
-        # Get data directly from source model - don't map through proxy
         data = model.data(source_index, Qt.DisplayRole)
         if data is None:
             return False
 
         data_str = str(data)
-        regex = self.filterRegularExpression()
-        match = regex.match(data_str)
-        return match.hasMatch()
+        return regex.match(data_str).hasMatch()
 
     def set_visible_rows(self, start_row, end_row):
         """
@@ -210,20 +216,9 @@ class FilterModel(QSortFilterProxyModel):
         # The view needs to display rows start_row to end_row
         # So we need at least (end_row + 1) total filtered matches
         self._filter_target_rows = end_row + 1
-        # print(
-        #    f"Updated filter target to {self._filter_target_rows} rows (view needs {start_row}-{end_row})"
-        # )
 
-        # Always forward to the source model
-        source_model = self.sourceModel()
-        if hasattr(source_model, "set_visible_rows"):
-            source_model.set_visible_rows(start_row, end_row)
-
-        # If we don't have enough matches yet, continue loading
         current_matches = self.rowCount()
         if current_matches < self._filter_target_rows:
-            # print(f"Need more data: {current_matches} < {self._filter_target_rows}")
-            # Get the source model and continue loading
             source_model = self.sourceModel()
             while hasattr(source_model, "sourceModel") and source_model.sourceModel():
                 source_model = source_model.sourceModel()
@@ -274,17 +269,24 @@ class FilterModel(QSortFilterProxyModel):
         if total_rows == 0:
             return
 
-        # Calculate the next chunk to load
         start_row = self._filter_loaded_end
+        if start_row >= total_rows:
+            return
+
         end_row = min(start_row + self._filter_chunk_size - 1, total_rows - 1)
 
-        # print(f"Loading filter chunk: rows {start_row} to {end_row}")
+        if hasattr(source_model, "request_chunk_load"):
+            source_model.request_chunk_load(start_row, end_row)
+        elif hasattr(source_model, "set_visible_rows"):
+            source_model.set_visible_rows(start_row, end_row)
 
-        # Load this chunk
-        source_model.set_visible_rows(start_row, end_row)
-
-        # Update our tracking
         self._filter_loaded_end = end_row + 1
+        print_debug(
+            "FilterModel._load_next_filter_chunk",
+            f"Loaded chunk {start_row}-{end_row}, "
+            f"proxy rowCount={self.rowCount()} target={self._filter_target_rows}",
+            category="runlist",
+        )
 
         # Schedule a check after the chunk loads
 
@@ -299,13 +301,15 @@ class FilterModel(QSortFilterProxyModel):
         # Count current visible rows in the filtered model
         visible_count = self.rowCount()
         self._filter_loaded_end = max(self._filter_loaded_end, visible_count)
-        # print(
-        #     f"Current filtered rows: {visible_count} (target: {self._filter_target_rows})"
-        # )
+        pattern = self.filterRegularExpression().pattern()
+        print_debug(
+            "FilterModel._check_filter_sufficiency",
+            f"proxy rowCount={visible_count} target={self._filter_target_rows} "
+            f"loaded_end={self._filter_loaded_end} pattern={pattern!r}",
+            category="runlist",
+        )
 
-        # If we have enough matches, we're done
         if visible_count >= self._filter_target_rows:
-            # print(f"Filtering complete: {visible_count} rows found")
             return
 
         # Get the source model
@@ -316,13 +320,8 @@ class FilterModel(QSortFilterProxyModel):
         total_rows = source_model.rowCount()
         # Check if we've loaded all available data
         if self._filter_loaded_end >= total_rows:
-            # print(
-            #    f"Filtering complete: loaded all {total_rows} rows, found {visible_count} matches"
-            # )
             return
 
-        # Load the next chunk
-        # print(f"Need more data, loading next chunk from row {self._filter_loaded_end}")
         self._load_next_filter_chunk(source_model)
 
 
@@ -418,14 +417,46 @@ class LazyLoadingTableView(QTableView):
             else:
                 last_visible = 0
 
-        # Add a buffer of rows above and below for smoother scrolling
         first_visible = max(0, first_visible - self._buffer_size)
         last_visible = last_visible + self._buffer_size
 
-        # Call set_visible_rows on the current model (FilterModel)
-        # This will forward the call through the proxy chain to the source model
-        if hasattr(self.model(), "set_visible_rows"):
-            self.model().set_visible_rows(first_visible, last_visible)
+        model = self.model()
+        if not hasattr(model, "set_visible_rows"):
+            return
+
+        proxy_row_count = model.rowCount()
+        if proxy_row_count > 0:
+            last_visible = min(last_visible, proxy_row_count - 1)
+
+        source_first = first_visible
+        source_last = last_visible
+        top_index = model.index(first_visible, 0)
+        bottom_index = model.index(last_visible, 0)
+        if top_index.isValid():
+            source_top = top_index
+            while hasattr(source_top.model(), "mapToSource"):
+                source_top = source_top.model().mapToSource(source_top)
+            source_first = source_top.row()
+        if bottom_index.isValid():
+            source_bottom = bottom_index
+            while hasattr(source_bottom.model(), "mapToSource"):
+                source_bottom = source_bottom.model().mapToSource(source_bottom)
+            source_last = source_bottom.row()
+
+        print_debug(
+            "LazyLoadingTableView._update_visible_rows",
+            f"proxy {first_visible}-{last_visible} -> source {source_first}-{source_last} "
+            f"proxy rowCount={proxy_row_count}",
+            category="runlist",
+        )
+
+        model.set_visible_rows(first_visible, last_visible)
+
+        source_model = model
+        while hasattr(source_model, "sourceModel") and source_model.sourceModel():
+            source_model = source_model.sourceModel()
+        if source_model is not model:
+            source_model.set_visible_rows(source_first, source_last)
 
 
 class CatalogTableView(QWidget):
@@ -568,8 +599,6 @@ class CatalogTableView(QWidget):
 
     def _handle_invert(self):
         """Handle inversion by clearing selection and toggling order."""
-        # print("_handle_invert in CatalogTableView")
-        # Clear any existing selection
         selection_model = self.data_view.selectionModel()
         if selection_model:
             selection_model.clearSelection()
@@ -601,7 +630,7 @@ class CatalogTableView(QWidget):
         catalog = self._catalog
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
-        table_model = CatalogTableModel(catalog)
+        table_model = catalog.refresh_table_model()
         reverse_model = ReverseModel(parent=self.data_view)
         filter_model = FilterModel(parent=self.data_view)
         filter_model2 = FilterModel(parent=self.data_view)
@@ -680,16 +709,11 @@ class CatalogTableView(QWidget):
         for f in self.filter_list:
             catalog = f.filter_catalog(catalog)
 
-        # self.setupModelAndView(catalog)
-        table_model = CatalogTableModel(catalog)
-        self.lowest_model.setSourceModel(table_model)
+        table_model = catalog.refresh_table_model()
+        if self.lowest_model.sourceModel() is not table_model:
+            self.lowest_model.setSourceModel(table_model)
 
         self.data_view._update_visible_rows()
-
-        # Reconnect the selection model's signal after setting up the new model
-        # self.data_view.selectionModel().selectionChanged.connect(
-        #    self.on_selection_changed
-        # )
 
     def get_selected_runs(self):
         """
@@ -865,12 +889,13 @@ class CatalogTableView(QWidget):
 
         menu = QMenu(self)
         app_model = get_top_level_model()
+        registry = get_frontend_registry()
         # Add to new display
         if self.display_id != "main":
             new_canvas_menu = QMenu("Move to New Display", self)
-            display_types = app_model.display_manager.get_available_display_types()
+            display_types = registry.get_available_displays()
             for display_type in display_types:
-                metadata = app_model.display_manager.get_display_metadata(display_type)
+                metadata = registry.get_display_metadata(display_type)
                 display_name = metadata.get("name", display_type)
                 action = QAction(display_name, self)
                 action.setToolTip(
@@ -885,10 +910,9 @@ class CatalogTableView(QWidget):
             menu.addMenu(new_canvas_menu)
 
         new_canvas_copy_menu = QMenu("Copy to New Display", self)
-        display_types = app_model.display_manager.get_available_display_types()
-        # Remove the current display from the list
+        display_types = registry.get_available_displays()
         for display_type in display_types:
-            metadata = app_model.display_manager.get_display_metadata(display_type)
+            metadata = registry.get_display_metadata(display_type)
             display_name = metadata.get("name", display_type)
             action = QAction(display_name, self)
             action.setToolTip(
@@ -996,7 +1020,12 @@ class CatalogTableView(QWidget):
     def copy_selected_runs_to_new_display(self, display_type: str):
         top_level_model = get_top_level_model()
         runs = self.get_selected_runs()
-        top_level_model.display_manager.create_display_with_runs(runs, display_type)
+        single_selection_mode = get_frontend_registry().single_selection_mode_for_type(
+            display_type
+        )
+        top_level_model.display_manager.create_display_with_runs(
+            runs, display_type, single_selection_mode=single_selection_mode
+        )
 
     def move_selected_runs_to_display(self, display_id: str):
         self.copy_selected_runs_to_display(display_id)

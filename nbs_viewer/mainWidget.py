@@ -1,5 +1,9 @@
 from .models.app_model import AppModel
 from .views.display.mainDisplay import MainDisplay
+from .views.display.frontendRegistry import (
+    FrontendRegistry,
+    set_frontend_registry,
+)
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -116,6 +120,8 @@ class MainWidget(QWidget):
         super().__init__(parent)
         self.config_file = config_file
         self.app_model = app_model
+        self.frontend_registry = FrontendRegistry()
+        set_frontend_registry(self.frontend_registry)
 
         # Setup models before UI/signals
         self._setup_models()
@@ -165,20 +171,25 @@ class MainWidget(QWidget):
         self.tab_widget.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
     # Controller methods for menu actions
-    def create_display(self, widget_type=None):
+    def create_display(self, widget_type=None, single_selection_mode=False):
         """Create a new display with optional widget type."""
         current_display = self.get_current_display()
-        # Auto-add selected runs from current catalog view
         runs = current_display.get_selected_runs()
-        self.display_manager.create_display_with_runs(runs, widget_type)
+        if widget_type is None:
+            widget_type = self.frontend_registry.get_default_display()
+        self.display_manager.create_display_with_runs(
+            runs,
+            widget_type,
+            single_selection_mode=single_selection_mode,
+        )
 
     def create_matplotlib_display(self):
         """Create a new matplotlib display."""
-        return self.create_display("matplotlib")
+        return self.create_display("matplotlib", single_selection_mode=False)
 
     def create_image_grid_display(self):
         """Create a new image grid display."""
-        return self.create_display("image_grid")
+        return self.create_display("image_grid", single_selection_mode=True)
 
     def close_current_display(self):
         """Close the currently active display."""
@@ -188,33 +199,16 @@ class MainWidget(QWidget):
         else:
             QMessageBox.warning(self, "Cannot Close", "Cannot close the main display")
 
-    def duplicate_current_display(self):
-        """Duplicate the currently active display."""
-        current_tab = self.tab_widget.currentWidget()
-        if hasattr(current_tab, "plot_model"):
-            # TODO: Implement display duplication logic
-            print("Display duplication not implemented yet")
-
     def get_current_display(self):
         """Get the currently active display widget."""
         return self.tab_widget.currentWidget()
-
-    def save_display_layout(self, filename):
-        """Save the current display layout to a file."""
-        # TODO: Implement layout saving
-        print(f"Save display layout to {filename} - not implemented yet")
-
-    def apply_display_settings(self, settings):
-        """Apply settings to the current display."""
-        # TODO: Implement settings application
-        print("Apply display settings - not implemented yet")
 
     # Signal handlers
     def _on_display_added(self, display_id):
         """Handle new display creation."""
         if display_id != "main":
             widget_type = self.display_manager.get_display_type(display_id)
-            DisplayClass = self.app_model.display_registry.get_display(widget_type)
+            DisplayClass = self.frontend_registry.get_display(widget_type)
             tab = DisplayClass(self.app_model, display_id)
             self.tab_widget.addTab(tab, f"{display_id}")
             # Close button will be automatically created since setTabsClosable(True) is set

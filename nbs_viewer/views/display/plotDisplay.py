@@ -2,16 +2,12 @@ from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QSplitter,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
-    QFrame,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QIcon
 from ..dataSource.runListView import RunListView
 from ..plot.plotWidget import PlotWidget
-from ..plot.imageGridWidget import ImageGridWidget
+from ..plot.image_grid_plot_widget import ImageGridPlotWidget
 from ..common.panel import CollapsiblePanel
 
 
@@ -54,10 +50,11 @@ class PlotDisplay(QWidget):
         self.data_source.display_id = new_name
 
     def setup_models(self):
-        # Create widgets
-        self.run_list_model = self.display_manager.get_run_list_model(self.display_id)
+        """Resolve presenter-owned models for this display."""
+        self.presenter = self.display_manager.get_presenter(self.display_id)
+        self.plot_model = self.presenter.session
         self.data_source = RunListView(
-            self.run_list_model, self.display_manager, self.display_id
+            self.presenter, self.display_manager, self.display_id
         )
 
         # Create plot widget based on display widget type
@@ -69,7 +66,11 @@ class PlotDisplay(QWidget):
         # Create plot controls panel if available
         if hasattr(self.plot_widget, "plot_controls"):
             self.plot_controls_panel = CollapsiblePanel(
-                "Plot Controls", self.plot_widget.plot_controls
+                "Plot Controls",
+                self.plot_widget.plot_controls,
+                can_expand=True,
+                resizable=False,
+                initially_expanded=True,
             )
         else:
             self.plot_controls_panel = None
@@ -83,17 +84,18 @@ class PlotDisplay(QWidget):
     def setup_ui(self):
         # Create sidebar with stacked panels
         sidebar_widget = QWidget()
+        sidebar_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(2)
 
-        # Add panels in order
-        sidebar_layout.addWidget(self.run_panel)
+        sidebar_layout.addWidget(self.run_panel, 0)
         if self.plot_controls_panel:
-            sidebar_layout.addWidget(self.plot_controls_panel)
+            sidebar_layout.addWidget(self.plot_controls_panel, 1)
         if self.debug_panel:
-            sidebar_layout.addWidget(self.debug_panel)
-        sidebar_layout.addStretch()  # Push panels to top
+            sidebar_layout.addWidget(self.debug_panel, 0)
 
         # Create splitter for resizable panels
         self.splitter = QSplitter(Qt.Horizontal)
@@ -119,7 +121,7 @@ class PlotDisplay(QWidget):
 
         Parameters
         ----------
-        run_list_model : RunListModel
+        presenter : PlotPresenter
             The plot model for this display
         display_manager : DisplayManager
             The display manager
@@ -131,7 +133,7 @@ class PlotDisplay(QWidget):
         QWidget
             The created plot widget
         """
-        return PlotWidget(self.run_list_model)
+        return PlotWidget(self.presenter)
 
 
 class ImageGridDisplay(PlotDisplay):
@@ -140,12 +142,7 @@ class ImageGridDisplay(PlotDisplay):
     __widget_capabilities__ = ["2d", "3d", "4d"]
     __widget_version__ = "1.0.0"
     __widget_author__ = "NBS Viewer Team"
-
-    def setup_models(self):
-        super().setup_models()
-
-        # Enable single-selection mode for image grid displays
-        self.run_list_model._single_selection_mode = True
+    __single_selection_mode__ = True
 
     def _create_plot_widget(self):
-        return ImageGridWidget(self.run_list_model)
+        return ImageGridPlotWidget(self.presenter)

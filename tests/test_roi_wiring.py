@@ -1,0 +1,160 @@
+"""Integration tests for ROI APIs on catalog-wired 2D sessions."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from tests.fixtures.view import apply_projection
+from nbs_viewer.models.plot.plane.roles import DimRole
+from nbs_viewer.models.plot.spec.projection import Projection
+from nbs_viewer.models.plot.spec.region import RectRegion
+from nbs_viewer.models.plot.roi import RoiOperation
+
+from tests.fixtures.session import HeadlessSession
+
+
+def _wired_image_scan_with_roi(
+    app_model,
+    *,
+    profile_storage_axis: int = 0,
+    stale: bool = False,
+):
+    """
+    Build a catalog-wired 2D image session with one ROI entry.
+
+    Parameters
+    ----------
+    app_model : AppModel
+        Application root model.
+    profile_storage_axis : int, optional
+        Storage axis used for the ROI profile operation.
+    stale : bool, optional
+        When True, mark the ROI entry stale before returning.
+
+    Returns
+    -------
+    tuple
+        ``(session, run_model, plot_data, parent_spec, entry_id, frame, region)``
+    """
+    session = HeadlessSession(app_model)
+    session.load_catalog(recipe="image_scan", runs=1)
+    run_model = session.select_run(0)
+
+    parent_spec = Projection(
+        ndim=2,
+        plot_ndim=2,
+        roles=(DimRole.PLOT_Y, DimRole.PLOT_X),
+        indices=(0, 0)
+)
+    apply_projection(session.session.view_intent, parent_spec)
+    session.session.selection.set_selected_keys(["en_energy"], ["detector_image"])
+
+    plot_data = session.session.ensure_trace(
+        run_model, "en_energy", "detector_image",
+    )
+    bundle = plot_data.fetch()
+
+    frame = bundle.view_frame()
+    x0, _ = frame.cell_x_bounds(5, 0)
+    _, x1 = frame.cell_x_bounds(35, 0)
+    y0, _ = frame.cell_y_bounds(2, 0)
+    _, y1 = frame.cell_y_bounds(28, 0)
+    region = RectRegion(x0=x0, x1=x1, y0=y0, y1=y1)
+    entry_id = session.session.region.roi_set.add(
+        region,
+        operation=RoiOperation(
+            profile_storage_axis=profile_storage_axis,
+            spatial_reduce="sum",
+            span_full_profile_axis=True,
+            label="test roi"
+)
+)
+    if stale:
+        session.session.region.roi_set.set_stale(entry_id, True)
+
+    return session, run_model, plot_data, parent_spec, entry_id, frame, region
+
+
+def test_preview_roi_profile_on_catalog_selected_run(qapp, app_model):
+    session, _run_model, plot_data, parent_spec, entry_id, frame, _region = (
+        _wired_image_scan_with_roi(app_model)
+    )
+
+    bundle = session.session.region.preview_roi_profile(
+        entry_id,
+        parent_trace=plot_data,
+        parent_frame=frame,
+        cached_plane=plot_data.last_bundle
+)
+
+    assert bundle.ndim == 1
+    assert bundle.render_mode == "line"
+    assert np.isfinite(bundle.y).any()
+
+
+def test_commit_roi_profile_registers_frozen_spectrum(qapp, app_model):
+    session, run_model, plot_data, parent_spec, entry_id, frame, _region = (
+        _wired_image_scan_with_roi(app_model)
+    )
+
+    frozen = session.session.region.commit_roi_profile(
+        entry_id,
+        parent_trace=plot_data,
+        parent_frame=frame,
+        cached_plane=plot_data.last_bundle,
+        axis_names=("en_energy", "pixel")
+)
+
+    assert run_model.is_synthetic_key(frozen.key)
+    assert frozen.key in run_model.available_keys
+    assert frozen.label == "test roi"
+
+
+def test_committed_synthetic_key_fetchable_via_fetch_bundle(qapp, app_model):
+    session, run_model, plot_data, parent_spec, entry_id, frame, _region = (
+        _wired_image_scan_with_roi(app_model)
+    )
+
+    frozen = session.session.region.commit_roi_profile(
+        entry_id,
+        parent_trace=plot_data,
+        parent_frame=frame,
+        cached_plane=plot_data.last_bundle,
+        axis_names=("en_energy", "pixel")
+)
+
+    bundle = session.fetch_bundle(["row"], [frozen.key], run=run_model)
+
+    assert bundle.ndim == 1
+    assert bundle.render_mode == "line"
+    assert np.isfinite(bundle.y).any()
+
+
+def test_preview_rejects_stale_roi_on_wired_session(qapp, app_model):
+    session, _run_model, plot_data, parent_spec, entry_id, frame, _region = (
+        _wired_image_scan_with_roi(app_model, stale=True)
+    )
+
+    with pytest.raises(ValueError, match="stale"):
+        session.session.region.preview_roi_profile(
+            entry_id,
+            parent_trace=plot_data,
+                parent_frame=frame,
+            cached_plane=plot_data.last_bundle
+)
+
+
+def test_commit_rejects_local_profile_on_wired_session(qapp, app_model):
+    session, _run_model, plot_data, parent_spec, entry_id, frame, _region = (
+        _wired_image_scan_with_roi(app_model, profile_storage_axis=1)
+    )
+
+    with pytest.raises(ValueError, match="Select a profile along"):
+        session.session.region.commit_roi_profile(
+            entry_id,
+            parent_trace=plot_data,
+                parent_frame=frame,
+            cached_plane=plot_data.last_bundle,
+            axis_names=("en_energy", "pixel")
+)

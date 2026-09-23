@@ -12,16 +12,17 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, Signal
 from ..display.displayControl import DisplayControlWidget
-from ...models.plot.combinedRunModel import CombinedRunModel, CombinationMethod
-from ...models.plot.runModel import RunModel
-from ...models.plot.frozenRunModel import FrozenRunModel
+from ...models.data.combined import CombinationMethod, CombineError
+from ...models.plot.run.source import RunSource
+from .run_list_item_model import RunListItemModel
 from ..plot.metadataView import FullMetadataBrowser
 from typing import List
 from nbs_viewer.utils import get_top_level_model
+from nbs_viewer.views.display.frontendRegistry import get_frontend_registry
 from .expressionBuilder import ExpressionBuilderDialog
 
 
-# TODO: Should move closer to DataSourceSwitcher (which also needs cleanup)
+# TODO: Should move closer to CatalogSwitcher (which also needs cleanup)
 class RunListView(QWidget):
     """
     Widget for managing run selection for a display.
@@ -37,24 +38,26 @@ class RunListView(QWidget):
 
     selectionChanged = Signal(list, str)  # (List[CatalogRun], display_id)
 
-    def __init__(self, run_list_model, display_manager, display_id: str, parent=None):
+    def __init__(self, presenter, display_manager, display_id: str, parent=None):
         """
-            Initialize the RunListView
-        .
+        Initialize the RunListView.
 
-            Parameters
-            ----------
-            run_list_model : RunListModel
-                Model to display and manage runs for
-            display_manager : DisplayManager
-                Model managing available displays
-            display_id : str
-                Identifier for the display this list manages
-            parent : QWidget, optional
-                Parent widget, by default None
+        Parameters
+        ----------
+        presenter : PlotPresenter
+            Presenter owning the session these rows are drawn from.
+        display_manager : DisplayManager
+            Model managing available displays
+        display_id : str
+            Identifier for the display this list manages
+        parent : QWidget, optional
+            Parent widget, by default None
         """
         super().__init__(parent)
-        self.run_list_model = run_list_model
+        self.presenter = presenter
+        self.session = presenter.session
+        self.collection = self.session.collection
+        self.run_list_model = RunListItemModel(self.collection)
         self.display_id = display_id
         self._handling_selection = False
         self._metadata_browser_dialog = None
@@ -67,7 +70,7 @@ class RunListView(QWidget):
         self.list_view.setSelectionMode(QListView.ExtendedSelection)
 
         self.display_controls = DisplayControlWidget(
-            display_manager, run_list_model, self
+            display_manager, presenter, self
         )
         button_layout = QHBoxLayout()
         self.remove_button = QPushButton("Remove Selected Runs")
@@ -109,9 +112,9 @@ class RunListView(QWidget):
         uids_to_remove = [run.uid for run in selected_runs]
 
         # Remove from plot model
-        self.run_list_model.remove_uids(uids_to_remove)
+        self.collection.remove_uids(uids_to_remove)
 
-    def get_selected_runs(self) -> List[RunModel]:
+    def get_selected_runs(self) -> List[RunSource]:
         """Get the currently selected runs."""
         selected_indexes = self.list_view.selectedIndexes()
         selected_runs = []
@@ -123,86 +126,6 @@ class RunListView(QWidget):
                     selected_runs.append(run)
 
         return selected_runs
-
-    def _check_run_compatibility(self, runs: List[RunModel]):
-        """
-        Check if runs are compatible for combination.
-
-        Parameters
-        ----------
-        runs : List[RunModel]
-            List of runs to check for compatibility
-
-        Returns
-        -------
-        bool
-            True if runs are compatible, False otherwise
-        """
-        if len(runs) < 2:
-            return True
-
-        try:
-            # Get common keys across all runs
-            common_keys = set(runs[0].available_keys)
-            for run in runs[1:]:
-                common_keys &= set(run.available_keys)
-
-            if not common_keys:
-                QMessageBox.warning(
-                    self,
-                    "Incompatible Runs",
-                    "Selected runs have no common data keys. Cannot combine runs with completely"
-                    "different data structures.",
-                )
-                return False
-
-            # Try to find a suitable key for shape comparison
-            test_key = None
-            preferred_keys = ["time"]
-
-            # Look for preferred keys first
-            for key in preferred_keys:
-                if key in common_keys:
-                    test_key = key
-                    break
-
-            # If no preferred key found, use the first common key
-            if test_key is None:
-                test_key = list(common_keys)[0]
-
-            # Check if all runs have the same shape for the test key
-            shapes = []
-            for run in runs:
-                try:
-                    shape = run._run.getShape(test_key)
-                    shapes.append(shape)
-                except Exception:
-                    QMessageBox.warning(
-                        self,
-                        "Data Access Error",
-                        f"Could not access data for key '{test_key}' in one or more runs.",
-                    )
-                    return False
-
-            # Check if all shapes are the same
-            if len(set(shapes)) > 1:
-                QMessageBox.warning(
-                    self,
-                    "Incompatible Data Shapes",
-                    f"Selected runs have different data shapes for key '{test_key}': {shapes}. "
-                    "All runs must have the same data dimensions to be combined.",
-                )
-                return False
-
-            return True
-
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Compatibility Check Failed",
-                f"Error checking run compatibility: {str(e)}",
-            )
-            return False
 
     def deselect_all(self):
         """Deselect all items in the list widget."""
@@ -224,9 +147,7 @@ class RunListView(QWidget):
             self._addSinglePlotItem(plotItem)
 
     def _addSinglePlotItem(self, plotItem):
-        # print("Adding bluesky plot item")
-        self.run_list_model.add_run(plotItem)
-        # print("Done adding bluesky plot item")
+        self.collection.add_runs([plotItem])
 
     def removePlotItem(self, plotItem):
         """
@@ -237,92 +158,78 @@ class RunListView(QWidget):
         plotItem : PlotItem
             The plot item to be removed from the list widget.
         """
-        # print("Removing Plot Item from BlueskyList")
         plotItem.clear()
-        self.run_list_model.remove_run(plotItem)
+        self.collection.remove_uids([plotItem.uid])
 
     def _combine_selected_runs(self):
         """Create a combined run from selected runs."""
-        # Get selected items from list view
         selected_runs = self.get_selected_runs()
-        if len(selected_runs) < 2:
-            QMessageBox.warning(
-                self, "Cannot Combine", "Please select at least 2 runs to combine"
-            )
+        try:
+            self.collection.validate_combine(selected_runs)
+        except CombineError as e:
+            QMessageBox.warning(self, "Cannot Combine", str(e))
             return
 
-        # Check run compatibility
-        if not self._check_run_compatibility(selected_runs):
-            return
-
-        # Get selected combination method from dropdown
         method_text = self.combine_method_combo.currentText()
 
         if method_text == "Custom Expression":
-            # Show expression builder dialog
             dialog = ExpressionBuilderDialog(selected_runs, self)
-            if dialog.exec_() == QDialog.Accepted:
-                # For now, create a simple combined run with the expression
-                # TODO: Implement actual expression parsing and evaluation
-                combined_run = CombinedRunModel(
-                    runs=selected_runs,
-                    method=CombinationMethod.EXPRESSION,
-                    expression=dialog.expression,  # Placeholder
-                )
-
-                # Add to plot model
-                self.run_list_model.add_run(combined_run)
-
-                # Clear selection
-                self.list_view.clearSelection()
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            method = CombinationMethod.EXPRESSION
+            expression = dialog.expression
         else:
-            # Handle simple methods (Sum, Average)
             method_mapping = {
                 "Sum": CombinationMethod.SUM,
                 "Average": CombinationMethod.AVERAGE,
             }
-            selected_method = method_mapping[method_text]
+            method = method_mapping[method_text]
+            expression = None
 
-            # Create combined run
-            combined_run = CombinedRunModel(runs=selected_runs, method=selected_method)
+        try:
+            self.collection.combine(
+                selected_runs, method=method, expression=expression
+            )
+        except CombineError as e:
+            QMessageBox.warning(self, "Cannot Combine", str(e))
+            return
 
-            # Add to plot model
-            self.run_list_model.add_run(combined_run)
-
-            # Clear selection
-            self.list_view.clearSelection()
+        self.list_view.clearSelection()
 
     def _freeze_selected_runs(self):
         """Freeze selected runs."""
-        runs = self.get_selected_runs()
-        for model in runs:
-            # uid = model.uid
-            run = model.run
-            for key in model._selected_y:
-                frozen_run = FrozenRunModel(run, key)
-                print(f"Adding frozen run: {frozen_run.display_name}")
-                self.run_list_model.add_run(frozen_run)
+        self.session.freeze_runs(self.get_selected_runs())
 
     def uncheck_selected_runs(self):
         """Uncheck all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.run_list_model.set_uids_visible(uids, False)
+        self.collection.set_uids_visible(uids, False)
 
     def check_selected_runs(self):
         """Check all selected runs."""
         uids = [run.uid for run in self.get_selected_runs()]
-        self.run_list_model.set_uids_visible(uids, True)
+        self.collection.set_uids_visible(uids, True)
 
     def move_selected_runs_to_new_display(self, display_type: str):
         runs = self.get_selected_runs()
         self._remove_selected()
         top_level_model = get_top_level_model()
-        top_level_model.display_manager.create_display_with_runs(runs, display_type)
+        single_selection_mode = get_frontend_registry().single_selection_mode_for_type(
+            display_type
+        )
+        top_level_model.display_manager.create_display_with_runs(
+            runs, display_type, single_selection_mode=single_selection_mode
+        )
 
     def copy_selected_runs_to_new_display(self, display_type: str):
         top_level_model = get_top_level_model()
         runs = self.get_selected_runs()
-        top_level_model.display_manager.create_display_with_runs(runs, display_type)
+        single_selection_mode = get_frontend_registry().single_selection_mode_for_type(
+            display_type
+        )
+        top_level_model.display_manager.create_display_with_runs(
+            runs, display_type, single_selection_mode=single_selection_mode
+        )
 
     def move_selected_runs_to_display(self, display_id: str):
         runs = self.get_selected_runs()
@@ -359,6 +266,7 @@ class RunListView(QWidget):
 
         menu = QMenu(self)
         app_model = get_top_level_model()
+        registry = get_frontend_registry()
         # Add to new display
         uncheck_action = QAction("Uncheck Selected Runs", self)
         uncheck_action.triggered.connect(self.uncheck_selected_runs)
@@ -380,9 +288,9 @@ class RunListView(QWidget):
         menu.addSeparator()
 
         new_canvas_menu = QMenu("Move to New Display", self)
-        display_types = app_model.display_manager.get_available_display_types()
+        display_types = registry.get_available_displays()
         for display_type in display_types:
-            metadata = app_model.display_manager.get_display_metadata(display_type)
+            metadata = registry.get_display_metadata(display_type)
             display_name = metadata.get("name", display_type)
             action = QAction(display_name, self)
             action.setToolTip(
@@ -397,9 +305,8 @@ class RunListView(QWidget):
         menu.addMenu(new_canvas_menu)
 
         new_canvas_copy_menu = QMenu("Copy to New Display", self)
-        display_types = app_model.display_manager.get_available_display_types()
         for display_type in display_types:
-            metadata = app_model.display_manager.get_display_metadata(display_type)
+            metadata = registry.get_display_metadata(display_type)
             display_name = metadata.get("name", display_type)
             action = QAction(display_name, self)
             action.setToolTip(
@@ -455,7 +362,7 @@ class RunListView(QWidget):
         menu.exec_(self.list_view.mapToGlobal(pos))
 
     def _browse_metadata_for_run(self, run):
-        runs = self.run_list_model.available_models
+        runs = self.collection.available_models
         if not runs:
             return
         self._metadata_browser_dialog = FullMetadataBrowser(

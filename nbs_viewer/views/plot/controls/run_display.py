@@ -33,8 +33,8 @@ class RunDisplayWidget(QWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The run list model to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : Optional[QWidget], optional
         Parent widget, by default None
 
@@ -46,11 +46,13 @@ class RunDisplayWidget(QWidget):
 
     selection_changed = Signal(list, list, list)
 
-    def __init__(self, run_list_model, parent: Optional[QWidget] = None):
+    def __init__(self, presenter, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        # Allow full expansion within the panel
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.run_list_model = run_list_model
+        self.presenter = presenter
+        self.plot_model = presenter.session
+        self.collection = self.plot_model.collection
+        self.selection = self.plot_model.selection
         self._show_all = False
         self._linked_mode = True
         self._current_run = None
@@ -59,9 +61,10 @@ class RunDisplayWidget(QWidget):
         self._setup_ui()
 
         # Connect signals
-        self.run_list_model.available_keys_changed.connect(self._update_display)
-        self.run_list_model.visible_runs_changed.connect(self._build_header)
-        self.run_list_model.selected_keys_changed.connect(self._update_checkboxes)
+        self.collection.available_keys_changed.connect(self._update_display)
+        self.plot_model.frozen_spectra_changed.connect(self._update_display)
+        self.collection.visible_runs_changed.connect(self._build_header)
+        self.selection.selected_keys_changed.connect(self._update_checkboxes)
 
         # Initial update
         self._update_display()
@@ -74,33 +77,37 @@ class RunDisplayWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header layout with run selection controls
-        header_layout = QHBoxLayout()
+        header_layout = QVBoxLayout()
 
+        row_1_layout = QHBoxLayout()
+        row_2_layout = QHBoxLayout()
         # Link runs checkbox
-        self._link_runs_box = QCheckBox("Link Runs")
-        self._link_runs_box.setChecked(True)
-        self._link_runs_box.clicked.connect(self._on_link_mode_changed)
-        header_layout.addWidget(self._link_runs_box)
 
         # Run selector dropdown
         self._run_selector = QComboBox()
         self._run_selector.setEnabled(False)  # Disabled in linked mode
         self._run_selector.currentIndexChanged.connect(self._on_run_selected)
-        header_layout.addWidget(self._run_selector)
+        row_1_layout.addWidget(self._run_selector)
 
-        header_layout.addStretch()
+        self._link_runs_box = QCheckBox("Link Runs")
+        self._link_runs_box.setChecked(True)
+        self._link_runs_box.clicked.connect(self._on_link_mode_changed)
+        row_1_layout.addWidget(self._link_runs_box)
+
+        header_layout.addLayout(row_1_layout)
 
         # Run count label
         self._header_label = QLabel("No Runs Selected")
-        header_layout.addWidget(self._header_label)
+        row_2_layout.addWidget(self._header_label)
 
-        layout.addLayout(header_layout)
 
         # Show all checkbox
-        self._show_all_box = QCheckBox("Show All")
+        self._show_all_box = QCheckBox("Show All Keys")
         self._show_all_box.setChecked(False)
         self._show_all_box.clicked.connect(self._on_show_all_changed)
-        header_layout.addWidget(self._show_all_box)
+        row_2_layout.addWidget(self._show_all_box)
+        header_layout.addLayout(row_2_layout)
+        layout.addLayout(header_layout)
 
         # Grid for key selection
         self._grid = QGridLayout()
@@ -135,24 +142,13 @@ class RunDisplayWidget(QWidget):
         self._clear_button.clicked.connect(self._on_clear_clicked)
         self._clear_button.setEnabled(False)
         button_layout.addWidget(self._clear_button)
-        layout.addStretch(0)  # 0 means minimum stretch
-
-        # Add button layout with some spacing
-        layout.addSpacing(10)  # Add some space above buttons
         layout.addLayout(button_layout)
-        layout.addSpacing(10)  # Add some space below buttons
-
-        # Add vertical spacer with lower stretch factor
 
         self.setLayout(layout)
 
     def _build_header(self) -> None:
         """Update the header label and run selector."""
-        run_models = self.run_list_model.visible_models
-        # print(f"Building header for {len(run_models)} runs")
-        # print(f"{len(self.run_list_model._visible_runs)} are visible")
-        # print(f"{len(self.run_list_model._run_models)} are in run_models")
-        # Block signals during update
+        run_models = self.collection.visible_models
         self._run_selector.blockSignals(True)
         self._run_selector.clear()
         for run in run_models:
@@ -160,10 +156,27 @@ class RunDisplayWidget(QWidget):
         self._run_selector.blockSignals(False)
         self._update_header()
 
+    def _header_label_text(self) -> str:
+        """
+        Format the linked-mode header from visible runs.
+
+        Returns
+        -------
+        str
+            Header text for the run display.
+        """
+        models = self.collection.visible_models
+        if len(models) == 0:
+            return "No Runs Selected"
+        if len(models) == 1:
+            run = models[0]
+            return f"Run: {run.plan_name} ({run.scan_id})"
+        return f"Multiple Runs Selected ({len(models)})"
+
     def _update_header(self, run_uids: Optional[int] = None) -> None:
         # Update header label
         if self._linked_mode:
-            self._header_label.setText(self.run_list_model.getHeaderLabel())
+            self._header_label.setText(self._header_label_text())
         elif self._current_run:
             self._header_label.setText(f"Run {self._current_run.scan_id}")
         else:
@@ -174,15 +187,14 @@ class RunDisplayWidget(QWidget):
         self._clear_grid()
         # Get keys based on mode
         if self._linked_mode:
-            available_keys = self.run_list_model.available_keys
+            available_keys = self.collection.available_keys
             selected_x, selected_y, selected_norm = (
-                self.run_list_model.get_selected_keys()
+                self.selection.get_selected_keys()
             )
         elif self._current_run:
             available_keys = self._current_run.available_keys
-            selected_x, selected_y, selected_norm = (
-                self._current_run.get_selected_keys()
-            )
+            sel = self.selection.selection_for(self._current_run.uid)
+            selected_x, selected_y, selected_norm = sel.as_lists()
         else:
             available_keys = []
             selected_x = []
@@ -194,7 +206,7 @@ class RunDisplayWidget(QWidget):
             available_keys = ["time"] + [k for k in available_keys if k != "time"]
 
         # Add column headers with alignment
-        for i, label in enumerate(["", "X", "Y", "", "Norm"]):
+        for i, label in enumerate(["", "X", "Y", "", "Norm", ""]):
             header = QLabel(label)
             header.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             if i in [1, 2, 4]:  # X, Y, and Norm columns
@@ -209,8 +221,11 @@ class RunDisplayWidget(QWidget):
         self._norm_group.setExclusive(False)  # Allow multiple norm selections
         self._button_key_map = {}
 
-        # Add key rows
+        row_index = 0
+
+        # Add catalog key rows
         for i, key in enumerate(available_keys):
+            row_index = i + 1
             # Key label with elided text if too long
             label = QLabel(key)
             label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -248,9 +263,64 @@ class RunDisplayWidget(QWidget):
             self._norm_group.addButton(norm_box)
             self._button_key_map[norm_box] = key
 
-            # Connect signals
             for box in [x_box, y_box, norm_box]:
                 box.clicked.connect(self._on_checkbox_changed)
+
+        synthetic_entries = self._synthetic_entries()
+        if synthetic_entries:
+            row_index += 1
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setFrameShadow(QFrame.Plain)
+            separator.setFixedHeight(1)
+            separator.setStyleSheet(
+                "QFrame { color: #505050; background-color: #505050; }"
+            )
+            self._grid.addWidget(separator, row_index, 0, 1, 5)
+
+            for _entry_index, (run_model, key, label_text) in enumerate(
+                synthetic_entries
+            ):
+                row_index += 1
+                label = QLabel(label_text)
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                label.setMinimumWidth(100)
+                label.setMaximumWidth(200)
+                label.setStyleSheet("QLabel { font-style: italic; }")
+                self._grid.addWidget(label, row_index, 0)
+
+                x_spacer = QLabel("")
+                self._grid.addWidget(x_spacer, row_index, 1)
+
+                y_box = QCheckBox()
+                y_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
+                y_box.setChecked(key in selected_y)
+                self._grid.addWidget(y_box, row_index, 2)
+                self._y_group.addButton(y_box)
+                self._button_key_map[y_box] = key
+
+                line = QFrame()
+                line.setFrameShape(QFrame.VLine)
+                line.setFixedWidth(10)
+                self._grid.addWidget(line, row_index, 3)
+
+                norm_box = QCheckBox()
+                norm_box.setStyleSheet("QCheckBox { margin-left: 5px; }")
+                norm_box.setChecked(key in selected_norm)
+                self._grid.addWidget(norm_box, row_index, 4)
+                self._norm_group.addButton(norm_box)
+                self._button_key_map[norm_box] = key
+
+                delete_button = QPushButton("Delete")
+                delete_button.clicked.connect(
+                    lambda _checked=False, rm=run_model, k=key: (
+                        self._on_delete_synthetic(rm, k)
+                    )
+                )
+                self._grid.addWidget(delete_button, row_index, 5)
+
+                for box in [y_box, norm_box]:
+                    box.clicked.connect(self._on_checkbox_changed)
 
         # Set grid properties for compact layout
         self._grid.setVerticalSpacing(0)  # Remove vertical spacing
@@ -263,10 +333,46 @@ class RunDisplayWidget(QWidget):
         self._grid.setColumnStretch(2, 0)
         self._grid.setColumnStretch(3, 0)  # Separator stays small
         self._grid.setColumnStretch(4, 0)
+        self._grid.setColumnStretch(5, 0)
 
         # Enable buttons
         self._update_button.setEnabled(True)
         self._clear_button.setEnabled(True)
+
+    def _synthetic_entries(self):
+        """
+        Return synthetic spectrum rows for the current display mode.
+
+        Returns
+        -------
+        list of tuple
+            ``(run_model, key, label)`` entries.
+        """
+        if self._linked_mode:
+            return self.collection.synthetic_display_entries()
+        if self._current_run:
+            return [
+                (self._current_run, entry.key, entry.label)
+                for entry in self._current_run.frozen_spectra()
+                if entry.kind == "stack_spectrum"
+            ]
+        return []
+
+    def _on_delete_synthetic(self, run_model, key: str) -> None:
+        """
+        Remove a frozen synthetic spectrum from a run.
+
+        Parameters
+        ----------
+        run_model : RunSource
+            Run owning the synthetic key.
+        key : str
+            Synthetic key to delete.
+        """
+        if not run_model.remove_frozen_spectrum(key):
+            return
+        self.plot_model.request_plot_update.emit()
+        self._update_display()
 
     def _clear_grid(self) -> None:
         """Clear all widgets from the grid."""
@@ -311,19 +417,14 @@ class RunDisplayWidget(QWidget):
         ]
 
         if self._linked_mode:
-            self.run_list_model.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=False
-            )
+            self.selection.set_selected_keys(x_keys, y_keys, norm_keys)
         elif self._current_run:
-            # print(f"Setting selection for current run: {x_keys}, {y_keys}, {norm_keys}")
-            self._current_run.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=True
+            self.selection.set_selection_for(
+                self._current_run.uid, x_keys, y_keys, norm_keys
             )
 
     def _on_update_clicked(self) -> None:
         """Handle Update Selection button clicks by forcing plot update."""
-        # Get selected keys using the button-key mapping
-        # print("RunDisplayWidget _on_update_clicked")
         x_keys = [
             self._button_key_map[button]
             for button in self._x_group.buttons()
@@ -342,11 +443,11 @@ class RunDisplayWidget(QWidget):
             if button.isChecked()
         ]
 
-        # Force update the plot with current selection
-        if hasattr(self.run_list_model, "set_selected_keys"):
-            self.run_list_model.set_selected_keys(
-                x_keys, y_keys, norm_keys, force_update=True
-            )
+        # "Update" means repaint even when the selection is unchanged, so
+        # ask for the repaint directly: the selection guards on real change.
+        if self.plot_model is not None:
+            self.selection.set_selected_keys(x_keys, y_keys, norm_keys)
+            self.plot_model.request_plot_update.emit()
         else:
             self.selection_changed.emit(x_keys, y_keys, norm_keys)
 
@@ -356,7 +457,7 @@ class RunDisplayWidget(QWidget):
         self._run_selector.setEnabled(not self._linked_mode)
 
         if self._linked_mode:
-            self._synchronize_selections()
+            self.selection.clear_overrides()
             self._update_display()
             self._update_header()
         else:
@@ -366,48 +467,16 @@ class RunDisplayWidget(QWidget):
 
     def _on_run_selected(self) -> None:
         """Handle run selection in unlinked mode."""
-        # print("RunDisplayWidget _on_run_selected")
         if self._linked_mode:
-            # print("_linked_mode is True, how did we get here?")
             return
 
         self._current_run = self._run_selector.currentData()
-        # print(f"self._current_run: {self._current_run.run.scan_id}")
         self._update_display()
         self._update_header()
 
     def _synchronize_selections(self) -> None:
-        """Find common selections across all runs and apply them."""
-        run_models = self.run_list_model.visible_models
-        if not run_models:
-            return
-
-        # Get selections from all runs
-        x_selections = set()
-        y_selections = set()
-        norm_selections = set()
-        first = True
-
-        for run in run_models:
-            if first:
-                x_selections, y_selections, norm_selections = run.get_selected_keys()
-                x_selections = set(x_selections)
-                y_selections = set(y_selections)
-                norm_selections = set(norm_selections)
-                first = False
-            else:
-                new_x, new_y, new_norm = run.get_selected_keys()
-                x_selections &= set(new_x)
-                y_selections &= set(new_y)
-                norm_selections &= set(new_norm)
-
-        # Apply common selections
-        self.run_list_model.set_selected_keys(
-            list(x_selections),
-            list(y_selections),
-            list(norm_selections),
-            force_update=True,
-        )
+        """Clear per-run overrides when re-linking (Link Runs)."""
+        self.selection.clear_overrides()
 
     def _update_checkboxes(self, x_keys, y_keys, norm_keys):
         """Update checkbox states from model."""

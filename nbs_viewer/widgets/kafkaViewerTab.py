@@ -1,5 +1,3 @@
-print("In KafkaViewerTab.py")
-
 import nslsii
 from bluesky_widgets.qt.kafka_dispatcher import QtRemoteDispatcher
 import uuid
@@ -7,12 +5,12 @@ import uuid
 from ..views.catalog.kafka import KafkaView
 from ..models.catalog.kafka import KafkaCatalog
 
-from ..models.plot.runListModel import RunListModel
+from ..views.dataSource.run_list_item_model import RunListItemModel
+from ..models.plot.session import PlotSession
 from ..views.plot.plotWidget import PlotWidget
 
-from qtpy.QtCore import Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import QWidget, QHBoxLayout, QSplitter
-from qtpy.QtCore import Qt
 
 
 def make_kafka_source(
@@ -60,10 +58,16 @@ class KafkaViewerTab(QWidget):
         self.kafkaSource = kafkaSource
         self.catalog = catalog
 
-        self.run_list_model = RunListModel()
-        self.catalog.item_selected.connect(self.run_list_model.add_run)
-        self.catalog.item_deselected.connect(self.run_list_model.remove_run)
-        self.plotWidget = PlotWidget(self.run_list_model)
+        self.plot_model = PlotSession()
+        self.collection = self.plot_model.collection
+        self.run_list_model = RunListItemModel(self.collection)
+        self.catalog.item_selected.connect(
+            lambda run: self.collection.add_runs([run])
+        )
+        self.catalog.item_deselected.connect(
+            lambda run: self.collection.remove_uids([run.uid])
+        )
+        self.plotWidget = PlotWidget(self.run_list_model, self.plot_model)
 
         self.layout = QHBoxLayout(self)
         self.splitter = QSplitter(Qt.Horizontal)

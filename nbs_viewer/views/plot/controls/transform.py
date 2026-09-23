@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
 )
 
-from .base import PlotControlWidget
+from .base import PlotControlWidget, apply_minimum_control_heights
 
 
 class TransformControl(PlotControlWidget):
@@ -23,8 +23,8 @@ class TransformControl(PlotControlWidget):
 
     Parameters
     ----------
-    run_list_model : RunListModel
-        The plot model to control
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
     """
@@ -43,23 +43,22 @@ class TransformControl(PlotControlWidget):
         "Log(1/y)": "log(1/y)",
     }
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, presenter, parent=None):
         """
         Initialize the widget.
 
         Parameters
         ----------
-        run_list_model : RunListModel
-            The run list model to control
+        presenter : PlotPresenter
+            Plot session presenter.
         parent : QWidget, optional
             Parent widget, by default None
         """
         self._transforms = self.DEFAULT_TRANSFORMS.copy()
-        super().__init__(run_list_model, parent)
-        # Set size policy for compact layout
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        super().__init__(presenter, parent)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         # Set initial state from model
-        transform_state = self.run_list_model.transform
+        transform_state = self.plot_model.transform
         self._transform_box.setChecked(transform_state["enabled"])
         if transform_state["text"]:
             self._transform_text_edit.setText(transform_state["text"])
@@ -106,6 +105,11 @@ class TransformControl(PlotControlWidget):
         row.addWidget(save_transform_btn)
 
         layout.addLayout(row)
+        apply_minimum_control_heights(
+            self._transform_combo,
+            self._transform_text_edit,
+            save_transform_btn,
+        )
 
     def _on_transform_state_changed(self) -> None:
         """Handle transform checkbox state change."""
@@ -194,4 +198,4 @@ class TransformControl(PlotControlWidget):
     def state_changed(self) -> None:
         """Handle state changes."""
         state = self.get_state()
-        self.run_list_model.set_transform(state)
+        self.plot_model.set_transform(state)

@@ -1,9 +1,5 @@
 from qtpy.QtWidgets import (
-    QHeaderView,
-    QMenu,
-    QAction,
     QTableView,
-    QWidget,
     QVBoxLayout,
     QPushButton,
     QLineEdit,
@@ -128,7 +124,6 @@ class KafkaView(CatalogTableView):
 
         # Connect to catalog's new run signal
         if hasattr(self._catalog, "new_run_available"):
-            # print("Connecting to new_run_available signal")
             self._catalog.new_run_available.connect(self._handle_new_run)
 
         # Connect to catalog's data updated signal to manage button states
@@ -218,7 +213,6 @@ class KafkaView(CatalogTableView):
             return False
 
         if check_for_key():
-            # print(f"Auto-selected new run: {run_uid}")
             return
 
         # Create a timer to check for the key periodically
@@ -283,7 +277,6 @@ class KafkaView(CatalogTableView):
             # Get the run from the catalog using the row index
             selected_uids.append(key)
 
-        # print(f"Removing runs with UIDs: {selected_uids}")  # Debug print
         self.data_view.selectionModel().clearSelection()
 
         # Remove from catalog

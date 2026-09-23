@@ -1,13 +1,11 @@
 """Base interfaces for catalog models."""
 
-from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Dict, Generator, Tuple
+from typing import Any, Dict, List, Optional, Set
 import collections
 from qtpy.QtCore import Signal, QObject
 from importlib.metadata import entry_points
 from ..data.base import CatalogRun
 from nbs_viewer.utils import print_debug
-from typing import Set
 
 
 def load_catalog_models():
@@ -21,7 +19,6 @@ def load_catalog_models():
     """
     catalog_models = {}
     for ep in entry_points(group="nbs_viewer.catalog_models"):
-        # print("Loading catalog model: ", ep.name)
         catalog_models[ep.name] = ep.load()
     return catalog_models
 
@@ -79,6 +76,46 @@ class CatalogBase(QObject):
         self._selection = []  # Set of selected UIDs
         self._filters = []
         self._runs = []
+        self._table_model = None
+
+    def ensure_table_model(self, chunk_size: int = 50):
+        """
+        Return the catalog-owned table model, creating it if needed.
+
+        Parameters
+        ----------
+        chunk_size : int, optional
+            Rows per lazy-load chunk when creating the model. Ignored if the
+            table model already exists.
+
+        Returns
+        -------
+        CatalogTableModel
+            Table model bound to this catalog.
+        """
+        if self._table_model is None:
+            from .table import CatalogTableModel
+
+            self._table_model = CatalogTableModel(
+                self, chunk_size=chunk_size, parent=self
+            )
+        return self._table_model
+
+    def refresh_table_model(self):
+        """
+        Reset the owned table model after catalog contents change.
+
+        Call after in-place search/filter that replaces the visible run set.
+        Creates the table model if it does not exist yet.
+
+        Returns
+        -------
+        CatalogTableModel
+            The owned table model after reset.
+        """
+        table = self.ensure_table_model()
+        table.reset_from_catalog()
+        return table
 
     @property
     def columns(self) -> List[str]:

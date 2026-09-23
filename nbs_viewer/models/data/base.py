@@ -2,10 +2,48 @@ from typing import Dict, List, Tuple, Any, Optional
 from qtpy.QtCore import QObject, Signal, Slot
 import logging
 import numpy as np
-from asteval import Interpreter
-from nbs_viewer.utils import time_function
-import time
+import xarray as xr
+
+from .array_contract import labelled_array, surviving_dims
+from .key_info import KeyInfo
 from nbs_viewer.utils import print_debug
+
+
+def render_mode_hint_for(plot_hints: dict, ykey: str) -> Optional[str]:
+    """
+    Read an explicit render_mode override from Bluesky plot hints.
+
+    Lives in the data layer because it reads run metadata and nothing
+    else; it sat in the plot layer's geometry module only because its one
+    caller was there, which made the key table's render hint a plot-layer
+    fact about a run-level record.
+
+    Parameters
+    ----------
+    plot_hints : dict
+        Plot hints dictionary from run metadata.
+    ykey : str
+        Y data key to match.
+
+    Returns
+    -------
+    str or None
+        ``image``, ``mesh``, or None if no override.
+    """
+    for field_list in plot_hints.values():
+        if not isinstance(field_list, list):
+            continue
+        for field in field_list:
+            if not isinstance(field, dict):
+                continue
+            signal = field.get("signal")
+            if isinstance(signal, list):
+                signal = signal[-1] if signal else None
+            if signal == ykey:
+                mode = field.get("render_mode")
+                if mode in ("image", "mesh"):
+                    return mode
+    return None
 
 
 class CatalogRun(QObject):
@@ -39,9 +77,6 @@ class CatalogRun(QObject):
         self._key = key
         self._catalog = catalog
         self.metadata = {}
-        # Caching
-        self._plot_data_cache = {}
-        self._dimensions_cache = {}
 
         # Dynamic updates
         self._dynamic = False
@@ -137,6 +172,273 @@ class CatalogRun(QObject):
         """
         return {}
 
+    # ------------------------------------------------------------------
+    # The data contract: one static description, one labelled array.
+    # ------------------------------------------------------------------
+
+    def describe(self, key: str) -> KeyInfo:
+        """
+        Return static facts about one key, reading no data.
+
+        This is the single way to ask what a key is. ``getShape``,
+        ``getPlotHints`` and the key table each used to answer part of it, and
+        a fourth call answered a *selection-dependent* version -- which is why
+        the answers could disagree. The description here depends on the key
+        alone, so it can be cached for the life of the run.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        KeyInfo
+            Name, label, ``{axis name: length}``, the render-mode hint, and
+            which key supplies each axis's coordinate.
+
+        Raises
+        ------
+        ValueError
+            If this source disagrees with its own arrays about their rank or
+            names its axes ambiguously. Enforced here rather than patched
+            downstream: a consumer that pads a short name list cannot tell a
+            missing name from a wrong one.
+        """
+        dims, _ = self.get_dims(key, [])
+        shape = tuple(self.getShape(key))
+        return KeyInfo.from_dims(
+            key,
+            dims,
+            shape,
+            hinted=True,
+            render_hint=self.render_mode_hint(key),
+            coords=self._coordinate_sources(key, tuple(dims), shape),
+        )
+
+    def _coordinate_sources(
+        self, key: str, dims: Tuple[str, ...], shape: Tuple[int, ...]
+    ) -> Dict[str, Tuple[str, ...]]:
+        """
+        Decide which key path supplies each dimension's coordinate.
+
+        Two sources, both metadata. A plot hint's ``axes`` name the key's
+        axes in order, skipping the event axis -- which is how a detector
+        publishes its bin energies beside its spectrum. Failing that, a 1-D
+        key of the dimension's own name and length is its coordinate, which is
+        how a labelled Bluesky run spells ``time``. The hint wins where both
+        exist, because it is a statement about this key and not about the run.
+
+        A one-element path names a data key and is checked here: one that is
+        missing, not 1-D, or of another length would only fail at load. A
+        longer path is walked by :meth:`getAxis` -- config data, typically --
+        and can only be checked when read.
+
+        Parameters
+        ----------
+        key : str
+            Data key being described.
+        dims : tuple of str
+            Its dimension names.
+        shape : tuple of int
+            Its shape.
+
+        Returns
+        -------
+        dict of str to tuple of str
+            Coordinate key path by dimension, for those that have one.
+        """
+        available = set(self.available_keys or [])
+
+        def names_a_coordinate(name: str, length: int, dim: Optional[str]) -> bool:
+            if name not in available:
+                return False
+            try:
+                coord_dims, _ = self.get_dims(name, [])
+                coord_shape = tuple(self.getShape(name))
+            except Exception:
+                return False
+            if coord_shape != (length,):
+                return False
+            return dim is None or tuple(coord_dims) == (dim,)
+
+        detector_dims = [dim for dim in dims if dim != "time"]
+        hints = list(self.getAxisHints().get(key, []))
+        sources: Dict[str, Tuple[str, ...]] = {}
+        # Not strict: a source that reports the wrong number of dimension
+        # names is a real failure, but KeyInfo.of is where it is diagnosed,
+        # and it says which key and which rank. Raising here would replace
+        # that with zip's own message and lose the key's name.
+        for dim, length in zip(dims, shape, strict=False):
+            if dim in detector_dims:
+                position = detector_dims.index(dim)
+                path = (
+                    tuple(hints[position]) if position < len(hints) else ()
+                )
+                if len(path) > 1 or (
+                    len(path) == 1 and names_a_coordinate(path[0], length, None)
+                ):
+                    sources[dim] = path
+                    continue
+            if names_a_coordinate(dim, length, dim):
+                sources[dim] = (dim,)
+        return sources
+
+    def load(
+        self,
+        key: str,
+        slice_info: Optional[tuple] = None,
+        *,
+        coords: bool = True,
+    ) -> xr.DataArray:
+        """
+        Return the key's array with its dimensions named and coordinates on it.
+
+        Names alone were nearly enough -- the pipeline matches a normalization
+        array to its detector by axis name -- but not quite. With fly-scanned
+        data every detector is its own timestream, so two keys whose axis is
+        named ``time`` no longer share that axis, and two equal-length streams
+        sampled out of phase would divide silently at mismatched times. A
+        coordinate makes that an ``AlignmentError`` under
+        ``arithmetic_join="exact"``.
+
+        A dimension gets the coordinate :meth:`describe` says supplies it: a
+        1-D key of its own name and length -- which is how a labelled Bluesky
+        run spells ``time`` and a detector-internal axis like
+        ``tes_mca_energies`` -- or the key a plot hint points at. An axis with
+        neither keeps its bare name, where the join degrades to the shape
+        check it was before.
+
+        What is plotted *against* is not decided here. The X selection is a
+        coordinate choice the plot layer makes on this array, so the load is
+        the same whatever is selected.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        slice_info : tuple, optional
+            Per-axis slice tuple. Integer items index an axis away; the
+            coordinates are sliced with the data.
+        coords : bool, optional
+            Attach coordinates. Each one costs a read of its own key, so a
+            caller that drops the labels immediately -- everything upstream of
+            step 4 -- asks for none and still gets the dimension names and the
+            checks that come with them.
+
+        Returns
+        -------
+        xarray.DataArray
+            Labelled array for the (possibly sliced) key.
+        """
+        info = self.describe(key)
+        values = np.asarray(self.getData(key, slice_info))
+        dims = surviving_dims(info.dims, slice_info)
+        if len(dims) != values.ndim:
+            raise ValueError(
+                f"key {key!r} sliced with {slice_info!r} returned rank "
+                f"{values.ndim} against {len(dims)} surviving names {dims}"
+            )
+        return labelled_array(
+            values,
+            dims,
+            coords=self._coords_for(info, slice_info) if coords else {},
+            name=key,
+        )
+
+    def load_coords(
+        self, key: str, slice_info: Optional[tuple] = None
+    ) -> Dict[str, np.ndarray]:
+        """
+        Return the coordinates :meth:`load` would attach, without the values.
+
+        What a consumer needs to label an axis -- a slider readout, the frame
+        an ROI is compiled against -- is a 1-D read of the key that supplies
+        its coordinate, and reading a camera stack to get one would be
+        absurd. It is a call of its own rather than a ``load`` of the
+        coordinate key because a plot hint can point outside the data keys:
+        ``getAxis`` walks config paths.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        slice_info : tuple, optional
+            Per-axis slice tuple, as for :meth:`load`. An axis it indexes away
+            has no coordinate to return.
+
+        Returns
+        -------
+        dict of str to ndarray
+            Coordinate values by dimension name, for the surviving dimensions
+            that have one.
+        """
+        return self._coords_for(self.describe(key), slice_info)
+
+    def _coords_for(
+        self, info: KeyInfo, slice_info: Optional[tuple]
+    ) -> Dict[str, np.ndarray]:
+        """
+        Read the coordinates a description names, sliced like the data.
+
+        Parameters
+        ----------
+        info : KeyInfo
+            Description of the key, naming each coordinate's source.
+        slice_info : tuple, optional
+            The slice applied to the data, so coordinates are sliced to match.
+
+        Returns
+        -------
+        dict
+            Coordinate arrays by dimension name, for those that resolve.
+        """
+        items = list(slice_info or ())
+        coords: Dict[str, np.ndarray] = {}
+        for axis, (dim, length) in enumerate(info.axes.items()):
+            item = items[axis] if axis < len(items) else slice(None)
+            path = info.coords.get(dim)
+            if path is None or isinstance(item, (int, np.integer)):
+                continue
+            try:
+                if len(path) == 1:
+                    values = np.asarray(self.getData(path[0], (item,)))
+                else:
+                    # Read whole and sliced here: an axis-hint read is
+                    # cached by path alone, whatever slice came with it.
+                    values = np.asarray(self.getAxis(list(path)))[item]
+            except Exception as ex:
+                print_debug(
+                    "CatalogRun._coords_for",
+                    f"No coordinate for dimension {dim!r} from {path}: {ex}",
+                    category="catalog",
+                )
+                continue
+            # A source may clip an axis relative to its coordinate key --
+            # CombinedRun does, to the shortest of its sources -- and a hint
+            # path can only be checked once read. Attaching a mismatched
+            # coordinate would raise, so the axis keeps its bare name and the
+            # join falls back to a shape check.
+            if values.ndim == 1 and values.shape[0] == len(range(length)[item]):
+                coords[dim] = values
+        return coords
+
+    def render_mode_hint(self, key: str) -> Optional[str]:
+        """
+        Return a declared ``image`` / ``mesh`` override for one key.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        str or None
+            The declared render mode, or None when the run declares none.
+        """
+        return render_mode_hint_for(self.getPlotHints(), key)
+
     def to_header(self) -> Dict[str, Any]:
         """
         Get a dictionary of metadata suitable for display in a header.
@@ -202,21 +504,23 @@ class CatalogRun(QObject):
         # print("Getting Default Selection")
         return ([], [], [])
 
-    def getDimensions(self, key: str) -> int:
+    def scanFinished(self) -> bool:
         """
-        Get number of dimensions for a key.
+        Return whether this run has stopped acquiring.
 
-        Parameters
-        ----------
-        key : str
-            The key to get dimensions for
+        Default True: a run with no notion of progress -- a stored catalog
+        run, an in-memory run, a synthetic one -- is finished by definition.
+        Sources that stream (``BlueskyRun``, ``KafkaRun``) override this.
+
+        Freezing reads this: a snapshot of a run that is still growing would
+        not be a stable reference, which is the whole point of a frozen run.
 
         Returns
         -------
-        int
-            Number of dimensions
+        bool
+            True when no more data is expected.
         """
-        return len(self.getShape(key))
+        return True
 
     def getAvailableKeys(self):
         """
@@ -350,13 +654,10 @@ class CatalogRun(QObject):
 
     def _on_data_changed(self):
         """Clear caches when data changes without re-emitting signal."""
-        self._plot_data_cache.clear()
-        self._dimensions_cache.clear()
+        pass
 
     def clear_caches(self):
         """Clear all data caches and notify of change."""
-        self._plot_data_cache.clear()
-        self._dimensions_cache.clear()
         self.data_changed.emit()
 
     def _compute_available_keys(self) -> list:
@@ -405,345 +706,3 @@ class CatalogRun(QObject):
     def display_name(self) -> str:
         """Get the display name of the run."""
         return str(self)
-
-    def analyze_slice_request(
-        self, keys: List[str], slice_info: Optional[tuple] = None
-    ) -> Dict[str, Any]:
-        """
-        Analyze shapes and determine appropriate slicing for each key.
-
-        Parameters
-        ----------
-        keys : List[str]
-            List of keys to analyze
-        slice_info : tuple
-            The requested slice information, e.g. (slice(None), 0, slice(None))
-
-        Returns
-        -------
-        Dict[str, Any]
-            {
-                'plot_dims': int,  # Number of non-integer slice dimensions
-                'keys': {
-                    key_name: {
-                        'shape': tuple,  # Original shape of the data
-                        'getData_slice': tuple,  # Slice to pass to getData
-                        'effective_shape': tuple,  # Shape with broadcasting
-                        'output_shape': tuple  # Final shape after slicing
-                    }
-                    for key_name in keys
-                }
-            }
-        """
-        # Calculate plot dimensions from slice_info
-        if slice_info is not None:
-            plot_dims = sum(1 for s in slice_info if isinstance(s, slice))
-        else:
-            plot_dims = max(len(self.getShape(key)) for key in keys)
-
-        result = {"plot_dims": plot_dims, "keys": {}}
-
-        # Process each key
-        for key in keys:
-            shape = self.getShape(key)
-            key_info = {"shape": shape}
-
-            if slice_info is not None:
-                # Generate getData slice - only include indices up to the data's dimensionality
-                getData_slice = tuple(
-                    s for i, s in enumerate(slice_info) if i < len(shape)
-                )
-                key_info["effective_slice"] = getData_slice
-
-                # Calculate effective shape (with broadcasting)
-                """
-                if len(shape) == 1:
-                    effective_shape = shape + (1,) * (max(0, plot_dims - 1))
-                else:
-                    effective_shape = shape
-                key_info["effective_shape"] = effective_shape
-                """
-
-                # Calculate output shape
-                # First get shape after getData slice
-                sliced_shape = tuple(
-                    1 if isinstance(s, int) else dim
-                    for s, dim in zip(getData_slice, shape)
-                )
-                # Then add broadcasting dimensions if needed
-                if len(shape) == 1 and plot_dims > 1:
-                    output_shape = sliced_shape + (1,) * (plot_dims - 1)
-                else:
-                    output_shape = sliced_shape
-                key_info["output_shape"] = output_shape
-
-            else:
-                # No slicing
-                key_info.update(
-                    {
-                        "effective_slice": None,
-                        "output_shape": shape,
-                    }
-                )
-
-            result["keys"][key] = key_info
-
-        return result
-
-    # @time_function(function_name="CatalogRun.analyze_dimensions")
-    def analyze_dimensions(self, ykey: str, xkeys: List[str] = []) -> Dict[str, Any]:
-        """
-        Analyze dimensions for a given y-key and set of x-keys, synthesizing information
-        from both data shapes and metadata.
-
-        This function handles complex cases where dimensions in the data may be:
-        1. Direct dimensions in the data array (e.g. dim_0, dim_1)
-        2. Associated motor positions for each time point
-        3. Described in metadata (e.g. hints about gridding and dimensions)
-        4. Defined by axis hints (e.g. tes_mca_energies)
-
-        Parameters
-        ----------
-        ykey : str
-            The key for the y-data to analyze
-        xkeys : List[str]
-            List of keys for x-axes
-
-        Returns
-        -------
-        Dict[str, Any]
-            Dictionary containing:
-            - ordered_dims: List[str] - Properly ordered dimension names
-            - effective_shape: Tuple[int] - Shape after considering metadata
-            - dim_metadata: Dict - Additional metadata about each dimension
-            - original_dims: Dict - Original dimension info from the data
-            - grid_mapping: Dict - How original dims map to effective dims
-            - axis_hints: Dict - Mapping of dimensions to axis hint paths
-            - associated_axes: Dict - Motors or other axes associated with dimensions
-        """
-        result = {
-            "ordered_dims": [],
-            "effective_shape": None,
-            "dim_metadata": {},
-            "original_dims": {},
-            "grid_mapping": {},
-            "axis_hints": {},
-            "associated_axes": {},
-        }
-
-        # Get shapes and dimension info for all keys
-        yshape = list(self.getShape(ykey))  # Convert to list for mutability
-
-        y_dims, x_dims = self.get_dims(ykey, xkeys)
-        result["original_dims"][ykey] = y_dims
-        result["original_dims"].update(x_dims)
-
-        axis_hints = self.getAxisHints()
-        y_axis_hints = axis_hints.get(ykey, [])
-        # Check metadata for dimension hints
-        try:
-            start_doc = self.start
-            hints = start_doc.get("hints", {})
-            dimensions = hints.get("dimensions", [])
-        except Exception as e:
-            print(f"Error accessing metadata: {e}")
-            start_doc = {}
-            dimensions = []
-
-        if not xkeys:
-            xkeys = start_doc.get("motors", [])
-
-        # Initialize dimension tracking
-        ordered_dims = []
-        dim_metadata = {}
-
-        # Process time dimension
-        if "time" in y_dims:
-            ordered_dims.append("time")
-            dim_metadata["time"] = {
-                "type": "independent",
-                "original_dim": "time",
-            }
-
-            # Collect any motors associated with time
-            time_motors = []
-
-            # First check dimensions metadata
-            if dimensions:
-                for dim_info in dimensions:
-                    if len(dim_info) >= 2:
-                        motor_list = dim_info[0]
-                        if isinstance(motor_list, list):
-                            for motor in motor_list:
-                                if motor in xkeys:
-                                    time_motors.append(motor)
-
-            # Then check x_dims for any keys that share the time dimension
-            for key in xkeys:
-                if key in x_dims and x_dims[key] == ("time",):
-                    if key not in time_motors:
-                        time_motors.append(key)
-
-            # Add motors as associated axes if we have any
-            if time_motors:
-                result["associated_axes"]["time"] = time_motors
-
-        # Add remaining x dimensions
-        for key in xkeys:
-            if (
-                key not in ordered_dims
-                and key != "time"
-                and not any(key in axes for axes in result["associated_axes"].values())
-            ):
-                ordered_dims.append(key)
-                dim_metadata[key] = {
-                    "type": "independent",
-                    "original_dim": result["original_dims"].get(key, (key,))[0],
-                }
-
-        # Add remaining y dimensions, checking axis hints
-        y_dims_list = list(y_dims)
-        if "time" in y_dims_list:
-            y_dims_list.remove("time")
-
-        # Process remaining dimensions with axis hints
-        for i, dim in enumerate(y_dims_list):
-            if dim not in ordered_dims:
-                ordered_dims.append(dim)
-                # Check if we have an axis hint for this dimension
-                if i < len(y_axis_hints):
-                    hint_path = y_axis_hints[i]
-                    result["axis_hints"][dim] = hint_path
-                    dim_metadata[dim] = {
-                        "type": "dependent_with_axis",
-                        "original_dim": dim,
-                        "axis_hint": hint_path,
-                    }
-                else:
-                    dim_metadata[dim] = {"type": "dependent", "original_dim": dim}
-
-        # Update result and handle dimension replacement
-        result["ordered_dims"] = ordered_dims
-        result["effective_shape"] = tuple(yshape)
-        result["dim_metadata"] = dim_metadata
-
-        # Final step: Replace dimensions with their single associated axis when appropriate
-        dims_to_replace = []
-        for dim, associated in result["associated_axes"].items():
-            if len(associated) == 1:
-                motor = associated[0]
-                dims_to_replace.append((dim, motor))
-
-        for old_dim, new_dim in dims_to_replace:
-            if old_dim == new_dim:
-                del result["associated_axes"][new_dim]
-                continue
-            idx = result["ordered_dims"].index(old_dim)
-            result["ordered_dims"][idx] = new_dim
-
-            # Transfer metadata
-            result["dim_metadata"][new_dim] = result["dim_metadata"][old_dim].copy()
-            result["dim_metadata"][new_dim]["original_dim"] = old_dim
-            del result["dim_metadata"][old_dim]
-        return result
-
-    def get_dimension_axes(
-        self, ykey: str, xkeys: List[str], slice_info: Optional[tuple] = None
-    ) -> Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]:
-        """
-        Get axis data for each dimension of the data.
-
-        This function uses analyze_dimensions to determine the dimensions and their
-        types, then generates appropriate axis data for each:
-        - For motor dimensions: uses the motor position data
-        - For dimensions with axis hints: uses the specified axis data
-        - For other dimensions: generates index arrays using np.arange
-        - For dummy dimensions (length 1): returns empty array
-
-        Parameters
-        ----------
-        ykey : str
-            The key for the y-data to analyze
-        xkeys : List[str]
-            List of keys for x-axes
-
-        Returns
-        -------
-        Tuple[List[np.ndarray], List[str], Dict[str, Dict[str, Any]]]
-            Tuple of:
-            - axis_arrays: list of numpy arrays for each dimension
-            - axis_names: list of strings naming each dimension
-            - associated_data: dict mapping dimension names to dict containing:
-                - arrays: List[np.ndarray] - associated data arrays
-                - names: List[str] - names of the associated axes
-        """
-        # First get dimension analysis
-        dim_info = self.analyze_dimensions(ykey, xkeys)
-
-        # Initialize output lists
-        axis_arrays = []
-        axis_names = []
-        associated_data = {}
-
-        # Get the shape for reference
-        effective_shape = dim_info["effective_shape"]
-        if slice_info is None:
-            slice_info = tuple([slice(None)] * len(dim_info["ordered_dims"]))
-
-        # Process each dimension in order
-        for i, dim_name in enumerate(dim_info["ordered_dims"]):
-            dim_meta = dim_info["dim_metadata"][dim_name]
-            dim_type = dim_meta["type"]
-
-            # Get dimension size - default to 1 if beyond effective_shape
-            dim_size = effective_shape[i] if i < len(effective_shape) else 1
-            effective_slice = slice_info[: i + 1]
-
-            if dim_type == "motor":
-                # For motor dimensions in a grid, use the motor position data
-                axis_data = self.getData(dim_name, effective_slice)
-                if dim_meta["original_dim"] == "time":
-                    # Reshape motor data according to grid mapping
-                    if "time" in dim_info["grid_mapping"]:
-                        grid_info = dim_info["grid_mapping"]["time"][dim_name]
-                        axis_data = axis_data[: grid_info["shape"]]
-
-            elif dim_type == "independent":
-                # For independent dimensions (like time), use the data directly
-                axis_data = self.getData(dim_name, effective_slice)
-
-                # Check for associated axes
-                if dim_name in dim_info["associated_axes"]:
-                    associated = []
-                    motor_names = dim_info["associated_axes"][dim_name]
-                    for motor in motor_names:
-                        motor_data = self.getData(motor, effective_slice)
-                        associated.append(motor_data)
-                    associated_data[dim_name] = {
-                        "arrays": associated,
-                        "names": motor_names,
-                    }
-
-            elif dim_type == "dependent_with_axis":
-                # Use the axis hint path to get the axis data
-                try:
-                    hint_path = dim_info["axis_hints"][dim_name]
-                    axis_data = self.getAxis(hint_path, effective_slice)
-                except Exception as e:
-                    print(f"Error getting axis data from hint: {e}")
-                    # Fall back to index array
-                    axis_data = np.arange(dim_size)[effective_slice[-1]]
-
-            else:
-                # For dimensions without hints, use index arrays
-                if dim_size == 1:
-                    # Dummy dimension
-                    axis_data = np.array([])
-                else:
-                    # Regular index array
-                    axis_data = np.arange(dim_size)[effective_slice[-1]]
-
-            axis_arrays.append(axis_data)
-            axis_names.append(dim_name)
-
-        return axis_arrays, axis_names, associated_data

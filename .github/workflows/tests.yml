@@ -1,0 +1,80 @@
+# Run the test suite and the linter on every push, and on pull requests
+# from forks.
+#
+# The environment comes from pixi, the same one used locally, so a green run
+# here means the same commands passed against the same solved dependencies.
+# The two are separate jobs so that a lint finding and a failing test are
+# separate signals on the pull request, rather than one hiding the other.
+
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+# A new push to a branch makes the run already in flight for it irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # A pull request from this repository is already covered by the push
+    # event on its branch, so the pull_request event only needs to run for
+    # forks, whose pushes we never see. Without this every commit on an open
+    # PR runs the suite twice.
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # setuptools-scm reads the version off the tags, and pixi installs
+          # this checkout as an editable dependency, so a shallow clone gives
+          # the package no version to build.
+          fetch-depth: 0
+
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          # Keyed on pixi.lock, which only moves when it is committed.
+          cache: true
+          # Deliberately not `locked: true`. The lock records the editable
+          # local package with a setuptools-scm version derived from `git
+          # describe`, so it is stale one commit after it is written and the
+          # check would fail on every run. It is a property of installing
+          # ourselves editable, not a lock that needs tightening.
+
+      # QT_QPA_PLATFORM is set by the task, not here, so the command is the
+      # same one a developer runs.
+      - run: pixi run test
+
+  lint:
+    # Same condition as above: see the comment there.
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          cache: true
+
+      # Ruff's selection is Pyflakes, the real-error part of pycodestyle, and
+      # bugbear -- see the comment on [tool.ruff.lint] in pyproject.toml for
+      # what is left out and why. The tree is at zero findings, so anything
+      # this reports is new.
+      - run: pixi run lint

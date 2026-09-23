@@ -1,8 +1,8 @@
 from .plotDisplay import PlotDisplay
-from qtpy.QtWidgets import QWidget, QSplitter, QVBoxLayout
+from qtpy.QtWidgets import QSplitter, QVBoxLayout
 from qtpy.QtCore import Qt
 
-from nbs_viewer.views.dataSource.dataSourceSwitcher import DataSourceSwitcher
+from nbs_viewer.views.dataSource.catalogSwitcher import CatalogSwitcher
 from nbs_viewer.views.plot.plotWidget import PlotWidget
 
 
@@ -13,11 +13,12 @@ class MainDisplay(PlotDisplay):
         # Create main tab widgets
 
     def setup_models(self):
-        run_list_model = self.display_manager.get_run_list_model("main")
-        self.data_source = DataSourceSwitcher(
-            self.app_model, run_list_model, self.display_id
+        self.presenter = self.display_manager.get_presenter(self.display_id)
+        self.plot_model = self.presenter.session
+        self.catalog_switcher = CatalogSwitcher(
+            self.app_model, self.display_id
         )
-        self.plot_widget = PlotWidget(run_list_model)
+        self.plot_widget = PlotWidget(self.presenter)
 
         # Create main tab layout with three panels
 
@@ -26,8 +27,8 @@ class MainDisplay(PlotDisplay):
         # Create horizontal splitter for the three panels
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left panel: Data source
-        splitter.addWidget(self.data_source)
+        # Left panel: Catalog switcher
+        splitter.addWidget(self.catalog_switcher)
 
         # Center panel: Plot widget
         splitter.addWidget(self.plot_widget)
@@ -45,4 +46,4 @@ class MainDisplay(PlotDisplay):
 
     def get_selected_runs(self):
         """Get the currently selected runs."""
-        return self.data_source.get_selected_runs()
+        return self.catalog_switcher.get_selected_runs()

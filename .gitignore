@@ -101,3 +101,7 @@ Thumbs.db
 !requirements*.txt # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Local working files, not part of the project
+catalog_config.toml
+test/

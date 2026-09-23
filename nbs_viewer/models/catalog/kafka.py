@@ -1,7 +1,7 @@
 """Kafka catalog implementation."""
 
 from typing import Any, List, Optional, Generator, Tuple
-from qtpy.QtCore import QObject, Signal
+from qtpy.QtCore import QObject
 
 from .base import CatalogBase
 from ..data import KafkaRun
@@ -117,7 +117,6 @@ class KafkaCatalog(CatalogBase):
         doc : dict
             Document content.
         """
-        # print(f"KafkaCatalog _handle_document {name}")
         if name == "start":
             run = KafkaRun(doc, doc.get("uid"))
             self._runs.append(run)
@@ -131,7 +130,6 @@ class KafkaCatalog(CatalogBase):
                 self._run_map[uid].process_stop(doc)
                 self.data_updated.emit()
             else:
-                # print(f"KafkaCatalog _handle_document unknown uid from stop doc: {uid}")
                 pass
         elif name == "descriptor":
             uid = doc.get("run_start")
@@ -151,7 +149,6 @@ class KafkaCatalog(CatalogBase):
             if run:
                 run.process_event(doc)
             else:
-                # print(f"KafkaCatalog _handle_document start_uid not found")
                 pass
         elif name == "event_page":
             run = self.get_run_from_descriptor(doc)
@@ -159,7 +156,6 @@ class KafkaCatalog(CatalogBase):
                 run.process_event_page(doc)
             else:
                 pass
-                # print(f"KafkaCatalog _handle_document start_uid not found")
 
         else:
             print(f"KafkaCatalog _handle_document unknown name: {name}")

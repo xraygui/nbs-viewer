@@ -1,0 +1,1677 @@
+import matplotlib
+
+matplotlib.use("qtagg")
+
+from typing import Optional
+
+import time as ttime
+import traceback
+
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.colors import to_rgba
+from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+from matplotlib.widgets import RectangleSelector
+from qtpy.QtCore import QSize, QTimer, Qt, Signal
+from qtpy.QtWidgets import QMessageBox, QSizePolicy
+
+from nbs_viewer.models.plot.plane.roles import ViewCrop
+from nbs_viewer.models.plot.plane.frame import PlotViewFrame
+from nbs_viewer.models.plot.spec.bundle import PlotBundle
+from nbs_viewer.models.plot.spec.region import (
+    EllipseRegion,
+    RectRegion,
+    RegionDefinition,
+)
+from nbs_viewer.models.plot.roi import RoiSetModel
+from nbs_viewer.utils import print_debug, time_function
+from .renderers import ImageRenderer, LineRenderer, MeshRenderer, remove_2d_artists
+from .plot_worker import PlotWorker, retire_plot_worker
+from ..roi.overlays import _ROI_EDGE_WIDTH
+from ..roi.types import (
+    get_roi_type,
+    roi_type_for_region,
+    set_ellipse_selector_circle_lock,
+    _region_from_ellipse_selector
+)
+
+_CROP_SELECTOR_PROPS = dict(
+    facecolor=to_rgba("#ff7f0e", 0.12),
+    edgecolor="#ff7f0e",
+    fill=True,
+    linewidth=_ROI_EDGE_WIDTH,
+    linestyle="--",
+)
+_CROP_OVERLAY_PROPS = dict(
+    linewidth=_ROI_EDGE_WIDTH,
+    edgecolor="#ff7f0e",
+    facecolor=to_rgba("#ff7f0e", 0.10),
+    fill=True,
+    linestyle="--",
+)
+
+
+def _draw_caller_summary(skip=2, limit=6):
+    """
+    Return a compact caller chain for temporary draw instrumentation.
+
+    Parameters
+    ----------
+    skip : int, optional
+        Number of leading frames to omit (this helper and its caller).
+    limit : int, optional
+        Maximum number of frames to include.
+
+    Returns
+    -------
+    str
+        Compact ``file:line:func`` frames joined by `` <- ``.
+    """
+    frames = traceback.extract_stack(limit=skip + limit)[:-skip]
+    parts = []
+    for frame in frames[-limit:]:
+        filename = frame.filename.rsplit("/", 1)[-1]
+        parts.append(f"{filename}:{frame.lineno}:{frame.name}")
+    return " <- ".join(parts) if parts else "?"
+
+
+class NavigationToolbar(NavigationToolbar2QT):
+    def __init__(self, canvas, parent=None):
+        super().__init__(canvas, parent)
+        self.addAction("Autoscale", self.autoscale)
+        self.addAction("Autolegend", self.autolegend)
+
+    def autoscale(self):
+        self.canvas.autoscale()
+        self.canvas.draw()
+
+    def autolegend(self):
+        legend = self.canvas.axes.get_legend()
+        if legend is None or not legend.get_visible():
+            self.canvas.updateLegend()
+            self.canvas._legend_visible = True
+            self.canvas.draw()
+        else:
+            legend.set_visible(False)
+            self.canvas._legend_visible = False
+            self.canvas.draw()
+
+
+"""
+MplCanvas needs to be a view of a presenter (which is really a single-plot presenter
+at the moment). Everything should hook up to the presenter. Why do we have so many properties?
+
+
+"""
+class MplCanvas(FigureCanvasQTAgg):
+    """
+    Matplotlib canvas for run list plots.
+
+    ``autoscale`` and ``updateLegend`` mutate axes state only; callers that
+    need a paint must call :meth:`draw` (coalesced) themselves.
+
+    Signals
+    -------
+    roi_region_changed : object
+        Emitted with the selected ROI geometry or ``None``.
+    crop_region_changed : object
+        Emitted with the draft crop :class:`RectRegion` or ``None``.
+    view_crop_changed : object
+        Emitted with a :class:`ViewCrop` or ``None`` when the view crop changes.
+    plot_view_updated : Signal
+        Emitted after the visible plot view is updated.
+    """
+
+    roi_region_changed = Signal(object)
+    crop_region_changed = Signal(object)
+    view_crop_changed = Signal(object)
+    plot_view_updated = Signal()
+
+    def __init__(self, presenter, parent=None, width=5, height=4, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi, constrained_layout=True)
+        self.axes = self.fig.add_subplot(111)
+        super().__init__(self.fig)
+        self.setParent(parent)
+        self.presenter = presenter
+        self.plot_model = presenter.session
+        self._connected_traces = set()
+        self._artists = {}
+        self._needs_axes_reset = False
+        self._worker_generations = {}
+        self._active_workers = {}
+        self._pending_workers = set()
+        self._last_2d_plot_key = None
+        self._last_view_frame: Optional[PlotViewFrame] = None
+
+        self._artist_count = 0
+        self._autoscale = True
+        self._lock_aspect = True
+        self._nbs_draw_pending = False
+        self._nbs_draw_coalesce_count = 0
+        self._nbs_in_do_draw = False
+        self._legend_visible = True
+        self._active_render_mode = None
+        self._colorbar_state = {}
+        self.currentDim = 1
+        self._roi_selector = None
+        self._roi_selector_type: Optional[str] = None
+        self._roi_overlays = {}
+        self._roi_draw_enabled = False
+        self._ellipse_circle_locked = False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._crop_draft_region = None
+        self._crop_selector = None
+        self._crop_overlay = None
+        self._crop_draw_enabled = False
+
+        self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+        self.aspect_ratio = width / height
+
+        self.plot_model.traces.trace_added.connect(self._on_trace_added)
+        self.plot_model.traces.trace_removed.connect(self._on_trace_removed)
+        for trace in self.plot_model.traces.values():
+            self._connect_trace(trace)
+        intent = self.plot_model.view_intent
+        intent.plot_ndim_changed.connect(self._on_plot_ndim_changed)
+        intent.orientation_changed.connect(self._on_orientation_changed)
+        self.plot_model.collection.run_removed.connect(self._on_run_removed)
+        self.plot_model.request_plot_update.connect(self.updatePlot)
+        self.plot_model.region.view_crop_changed.connect(
+            self._on_plot_view_crop_changed
+        )
+        self.plot_model.region.view_crop_changed.connect(
+            self._on_crop_needs_axes_reset
+        )
+        self.plot_model.region.region_invalidation_requested.connect(
+            self._on_region_invalidation_requested
+        )
+        self.plot_model.region.roi_draw_enabled_changed.connect(
+            self._apply_roi_draw_enabled
+        )
+        self.plot_model.region.ellipse_circle_locked_changed.connect(
+            self.set_ellipse_circle_locked
+        )
+        self.plot_model.region.roi_live_region_sync_requested.connect(
+            self._sync_live_roi_region
+        )
+        roi_set = self.plot_model.region.roi_set
+        roi_set.entries_changed.connect(self._on_roi_set_changed)
+        roi_set.entry_changed.connect(self._on_roi_entry_changed)
+        roi_set.selection_changed.connect(self._on_roi_selection_changed)
+
+    @property
+    def traces(self):
+        """
+        Trace set owned by the plot session.
+        """
+        return self.plot_model.traces
+
+    def artist_for(self, trace_key):
+        """
+        Return the artist drawn for one trace, if the canvas has made it.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace identity.
+
+        Returns
+        -------
+        Artist or None
+        """
+        return self._artists.get(trace_key)
+
+    def _set_artist(self, trace, artist):
+        """
+        File an artist under a trace key and apply the trace's visibility.
+
+        Parameters
+        ----------
+        trace : Trace
+            Trace the artist draws.
+        artist : Artist or None
+            Artist to file, or None to forget the entry.
+        """
+        if artist is None:
+            self._artists.pop(trace.trace_key, None)
+            return
+        self._artists[trace.trace_key] = artist
+        artist.set_visible(trace.visible)
+
+    def _destroy_artist(self, trace_key):
+        """
+        Remove one trace's artist from the axes and forget it.
+
+        Parameters
+        ----------
+        trace_key : TraceKey
+            Trace whose artist should go.
+        """
+        artist = self._artists.pop(trace_key, None)
+        if artist is None:
+            return
+        try:
+            if artist.axes is not None:
+                artist.remove()
+            if isinstance(artist, AxesImage):
+                artist.set_data([[]])
+            elif hasattr(artist, "set_data"):
+                artist.set_data([], [])
+            elif hasattr(artist, "set_array"):
+                artist.set_array([])
+        except Exception as e:
+            print(f"[MplCanvas._destroy_artist] Error cleaning up artist: {e}")
+
+    def _connect_trace(self, trace):
+        """
+        Subscribe to one trace's signals, once.
+
+        Parameters
+        ----------
+        trace : Trace
+            Trace the session has added to its set.
+        """
+        key = trace.trace_key
+        if key in self._connected_traces:
+            return
+        trace.data_changed.connect(self.plot_data)
+        trace.visibility_changed.connect(self._on_trace_visibility_changed)
+        trace.render_mode_changed.connect(self._on_render_mode_changed)
+        self._connected_traces.add(key)
+
+    def _on_trace_added(self, trace):
+        """
+        Adopt a trace the session created.
+
+        Membership is the session's, so the canvas learns of a new trace
+        rather than asking for one. Painting is left to the scheduled
+        update, which the session also triggers.
+        """
+        self._connect_trace(trace)
+
+    def _on_trace_removed(self, trace_key):
+        """
+        Drop the artist for a trace the session no longer retains.
+
+        The session owns membership and cannot touch artists, so this is the
+        only place a dropped trace's drawing is undone.
+        """
+        self._worker_generations.pop(trace_key, None)
+        retire_plot_worker(
+            self._active_workers.pop(trace_key, None), self._pending_workers
+        )
+        self._connected_traces.discard(trace_key)
+        self._destroy_artist(trace_key)
+        self.draw()
+
+    @property
+    def _view_crop(self):
+        return self.plot_model.region.view_crop
+
+    def _canvas_is_2d(self):
+        """
+        Return whether the canvas is currently showing 2D image or mesh data.
+
+        Returns
+        -------
+        bool
+            True if active render mode or dimension indicates 2D plotting.
+        """
+        return (
+            self._active_render_mode in ("image", "mesh") or self.currentDim == 2
+        )
+
+    def _mode_is_2d(self, mode):
+        """
+        Return whether a render mode string describes 2D plotting.
+
+        Parameters
+        ----------
+        mode : str
+            Render mode name from :class:`PlotBundle`.
+
+        Returns
+        -------
+        bool
+            True for image or mesh modes.
+        """
+        return mode in ("image", "mesh")
+
+    @property
+    def lock_aspect(self) -> bool:
+        """
+        Whether image plots should use equal data aspect.
+
+        Returns
+        -------
+        bool
+            True when image aspect should be locked.
+        """
+        return self._lock_aspect
+
+
+    def get_roi_set_model(self) -> Optional[RoiSetModel]:
+        """
+        Return the attached ROI set model, if any.
+        """
+        return self.plot_model.region.roi_set
+
+    def get_single_visible_2d_model(self):
+        """
+        Return the sole visible 2D plot model, if exactly one exists.
+
+        Returns
+        -------
+        Trace or None
+        """
+        matches = []
+        for key, trace in self.traces.items():
+            if not trace.visible:
+                continue
+            artist = self.artist_for(key)
+            if artist is None or not artist.get_visible():
+                continue
+            if trace.render_mode in ("image", "mesh"):
+                matches.append(trace)
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def get_active_plot_bundle(self):
+        """
+        Return the plot bundle for the single visible 2D trace.
+
+        Returns
+        -------
+        PlotBundle or None
+        """
+        model = self.get_single_visible_2d_model()
+        if model is None:
+            return None
+        if model.last_bundle is not None:
+            return model.last_bundle
+        return model.fetch()
+
+    def get_view_frame(self) -> PlotViewFrame:
+        """
+        Return the view frame for the current 2D plot.
+
+        Returns
+        -------
+        PlotViewFrame
+
+        Raises
+        ------
+        ValueError
+            If no 2D bundle is available.
+        """
+        bundle = self.get_active_plot_bundle()
+        if bundle is None:
+            raise ValueError("No active 2D plot bundle for ROI")
+        return bundle.view_frame()
+
+    def region_controls_enabled(self):
+        """
+        Return whether ROI controls should be enabled.
+
+        Returns
+        -------
+        bool
+        """
+        return self._canvas_is_2d() and self.get_single_visible_2d_model() is not None
+
+    def is_roi_draw_enabled(self):
+        """
+        Return whether interactive ROI drawing is active.
+        """
+        return self.plot_model.region.is_roi_draw_enabled()
+
+    def is_crop_draw_enabled(self):
+        """
+        Return whether interactive crop drawing is active.
+        """
+        return self._crop_draw_enabled
+
+    def get_roi_region(self):
+        """
+        Return the selected ROI geometry, if any.
+
+        Returns
+        -------
+        RegionDefinition or None
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_region()
+
+    def get_selected_roi_entry(self):
+        """
+        Return the selected :class:`RoiEntry`, if any.
+        """
+        if self._roi_set is None:
+            return None
+        return self._roi_set.selected_entry()
+
+    def is_selected_roi_stale(self) -> bool:
+        """
+        Return whether the selected ROI is marked stale.
+        """
+        entry = self.get_selected_roi_entry()
+        return entry is not None and entry.stale
+
+    def get_crop_region(self):
+        """
+        Return the draft crop rectangle, if any.
+
+        Returns
+        -------
+        RectRegion or None
+        """
+        return self._crop_draft_region
+
+    def get_view_crop(self) -> Optional[ViewCrop]:
+        """
+        Return the active persistent view crop, if any.
+
+        Returns
+        -------
+        ViewCrop or None
+        """
+        return self.plot_model.region.view_crop
+
+    def _on_plot_view_crop_changed(self, crop):
+        self.view_crop_changed.emit(crop)
+        model = self.get_single_visible_2d_model()
+        if model is not None and (
+            crop is None or self.plot_model.region.crop_applies_to(model.trace_key)
+        ):
+            self.plot_data(model)
+        else:
+            self.updatePlot()
+
+    @property
+    def _roi_set(self) -> RoiSetModel:
+        """
+        ROI set owned by the plot session model.
+        """
+        return self.plot_model.region.roi_set
+
+    def _sync_live_roi_region(self):
+        if not self._roi_draw_enabled:
+            return
+        region = self._roi_region_from_active_selector()
+        if region is None or not region.has_area():
+            return
+        self._commit_roi_region(region)
+
+    def sizeHint(self):
+        width = self.width()
+        height = int(width / self.aspect_ratio)
+        return QSize(width, height)
+
+    def heightForWidth(self, width):
+        return int(width / self.aspect_ratio)
+
+    def accepts_plot_ndim(self, plot_ndim):
+        """
+        Return whether the canvas can switch to this plot dimensionality.
+
+        The one rule the canvas owns: a 2-D plot shows one dataset, and only
+        the canvas knows how many are actually drawn. Says no by warning the
+        user, because refusing silently looks like a broken control.
+
+        Parameters
+        ----------
+        plot_ndim : int
+            Requested plot dimensionality.
+
+        Returns
+        -------
+        bool
+            True when the switch may proceed.
+        """
+        if plot_ndim != 2:
+            return True
+        visible_count = sum(
+            1
+            for key in self.traces
+            if (artist := self.artist_for(key)) is not None
+            and artist.get_visible()
+        )
+        if visible_count <= 1:
+            return True
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText("Cannot switch to 2D mode with multiple datasets")
+        msg.setInformativeText(
+            "Please select only one dataset for 2D plotting."
+        )
+        msg.setWindowTitle("Invalid Plot Configuration")
+        msg.exec_()
+        return False
+
+    def _on_crop_needs_axes_reset(self, _crop):
+        """
+        Note that a crop change must tear the 2-D axes down before the paint.
+
+        A crop really does move the plane's extent, so unlike a slider step
+        this always warrants the reset. It replaces `_last_2d_view_crop` and
+        its diff: the controller owns the crop and announces it, so the
+        canvas no longer keeps a copy to compare against.
+        """
+        self._needs_axes_reset = True
+
+    def _on_plot_ndim_changed(self, plot_ndim):
+        """
+        Rebuild the axes when the session view changes dimensionality.
+
+        The session owns the view; the canvas reacts.
+        """
+        if self.currentDim != plot_ndim:
+            self.clear()
+            self.currentDim = plot_ndim
+
+    def _on_orientation_changed(self):
+        """
+        Note that the 2-D axes must be torn down before the next paint.
+
+        The plot plane's coordinate frame moved, so extents and the colorbar
+        no longer describe what is drawn. Deferred to the scheduled update
+        rather than done here, because the session emits before the traces
+        have been refetched.
+
+        A reduce change deliberately does not reach this: slicing to another
+        index leaves the frame where it was. Diffing the whole intent instead
+        is what made every slider tick destroy the image and its colorbar.
+        """
+        self._needs_axes_reset = True
+
+    def set_lock_aspect(self, locked: bool) -> None:
+        """
+        Set whether image plots use equal data aspect.
+
+        Mesh and line plots always use automatic aspect. Changing this
+        preference redraws when an image is currently shown.
+
+        Parameters
+        ----------
+        locked : bool
+            If True, image plots use ``aspect="equal"``.
+        """
+        locked = bool(locked)
+        if locked == self._lock_aspect:
+            return
+        self._lock_aspect = locked
+        self._apply_aspect()
+        if self._active_render_mode == "image":
+            self.draw()
+
+    def _image_aspect(self) -> str:
+        """
+        Return the matplotlib aspect string for the current image preference.
+
+        Returns
+        -------
+        str
+            ``"equal"`` when locked, otherwise ``"auto"``.
+        """
+        return "equal" if self._lock_aspect else "auto"
+
+    def _apply_aspect(self) -> None:
+        """
+        Apply axis aspect for the active render mode.
+
+        Image mode respects :attr:`lock_aspect`. Mesh and line modes always
+        use ``aspect="auto"``.
+        """
+        if self._active_render_mode == "image":
+            self.axes.set_aspect(self._image_aspect())
+        else:
+            self.axes.set_aspect("auto")
+
+    def _on_render_mode_changed(self, trace, mode):
+        """
+        Prepare axes when switching between 1D and 2D render modes.
+
+        Does not schedule ``updatePlot``; the in-flight worker applies data via
+        ``_handle_plot_data``.
+        """
+        print_debug(
+            "MplCanvas",
+            f"Render mode changed to {mode} for {trace.label}",
+            category="plots",
+        )
+        was_2d = self._canvas_is_2d()
+        will_be_2d = self._mode_is_2d(mode)
+        if was_2d == will_be_2d:
+            return
+
+        self._destroy_artist(trace.trace_key)
+        self._reset_plot_axes()
+        self.plot_view_updated.emit()
+
+    def _on_trace_visibility_changed(self, trace, visible):
+        """
+        Apply a trace's visibility intent to its artist.
+
+        The trace records intent and keeps its bundle; hiding therefore costs
+        an artist flag rather than a refetch, and showing again needs no
+        round trip.
+        """
+        artist = self.artist_for(trace.trace_key)
+        if artist is None:
+            return
+        if artist.get_visible() != visible:
+            artist.set_visible(visible)
+        self.updateLegend()
+        if self._autoscale:
+            self.autoscale()
+        self.draw()
+
+    def _on_run_removed(self, run):
+        """
+        Reset the axes once the session has finished dropping the run.
+
+        The session emits ``run_removed`` before it rebuilds, so the run's
+        traces still exist here. ``trace_removed`` destroys each artist; all
+        this owes is the axes reset, deferred to the scheduled update so it
+        runs after the disposals.
+        """
+        self._needs_axes_reset = True
+
+    def updatePlot(self):
+        self._update_timer = getattr(self, "_update_timer", None)
+        rescheduled = (
+            self._update_timer is not None and self._update_timer.isActive()
+        )
+        if self._update_timer is not None:
+            self._update_timer.stop()
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._do_update_plot)
+        self._update_timer.start(100)
+        print_debug(
+            "MplCanvas.updatePlot",
+            f"{'rescheduled' if rescheduled else 'scheduled'} (100ms)",
+            category="plots",
+        )
+
+    def _do_update_plot(self):
+        t0 = ttime.time()
+        try:
+            if self._needs_axes_reset:
+                self._needs_axes_reset = False
+                self._reset_plot_axes()
+
+            # Membership is the session's: it holds a trace for every
+            # run x selection pair already, so the canvas reads that set
+            # rather than recomputing the product and calling ensure_trace
+            # a second time. Visibility is the only thing decided here.
+            visible_uids = self.plot_model.collection.visible_uids
+            visible_keys = set()
+            for key, trace in self.traces.items():
+                if key.uid not in visible_uids:
+                    trace.set_visible(False)
+                    continue
+                visible_keys.add(key)
+                trace.set_visible(True)
+                artist = self.artist_for(key)
+                needs_artist = artist is None or (
+                    isinstance(artist, Line2D)
+                    and not self._line_artist_on_axes(artist)
+                )
+                if (
+                    needs_artist or trace.needs_fetch()
+                ) and key not in self._active_workers:
+                    self.plot_data(trace)
+
+            workers_pending = len(self._active_workers) > 0
+            if workers_pending:
+                print_debug(
+                    "MplCanvas._do_update_plot",
+                    f"visible={len(visible_keys)} artists={len(self._artists)} "
+                    f"active_workers={len(self._active_workers)} "
+                    f"skip_paint (workers pending) {ttime.time() - t0:.4f}s",
+                    category="plots",
+                )
+                return
+
+            if self._autoscale:
+                self.autoscale()
+            # Traces dropped from the session are disposed there, so the
+            # removal branch above never sees them and only the add path
+            # would refresh the legend. Rebuild before painting so labels
+            # for gone traces do not survive.
+            self.updateLegend()
+            self.draw()
+            print_debug(
+                "MplCanvas._do_update_plot",
+                f"visible={len(visible_keys)} artists={len(self._artists)} "
+                f"active_workers=0 {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
+        except Exception as e:
+            print_debug("MplCanvas._do_update_plot", str(e), category="plots")
+
+    def plot_data(self, plotData):
+        model_key = plotData.trace_key
+        generation = self._worker_generations.get(model_key, 0) + 1
+        self._worker_generations[model_key] = generation
+
+        old_worker = self._active_workers.pop(model_key, None)
+        retired = old_worker is not None
+        retire_plot_worker(old_worker, self._pending_workers)
+
+        worker = PlotWorker(
+            plotData,
+            plotData.request,
+            generation,
+            self.artist_for(model_key),
+        )
+        worker.data_ready.connect(self._handle_plot_data)
+        worker.error_occurred.connect(self._handle_plot_error)
+        worker.finished.connect(
+            lambda mk=model_key, w=worker: self._on_plot_worker_finished(mk, w)
+        )
+        self._active_workers[model_key] = worker
+        print_debug(
+            "MplCanvas.plot_data",
+            f"start gen={generation} label={plotData.label} "
+            f"retired_prior={retired} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
+        )
+        worker.start()
+
+    def _on_plot_worker_finished(self, model_key, worker):
+        if self._active_workers.get(model_key) is worker:
+            self._active_workers.pop(model_key, None)
+
+    @time_function(function_name="MplCanvas._handle_plot_data", category="plots")
+    def _handle_plot_data(self, bundle, plotData, artist, generation):
+        model_key = plotData.trace_key
+        if generation != self._worker_generations.get(model_key):
+            print_debug(
+                "MplCanvas._handle_plot_data",
+                f"Stale worker gen={generation}, skipping",
+                category="plots",
+            )
+            return
+
+        if artist is None:
+            artist = self.artist_for(model_key)
+
+        print_debug(
+            "MplCanvas._handle_plot_data",
+            f"apply {plotData.label} mode={bundle.render_mode} "
+            f"y.shape={getattr(bundle.y, 'shape', None)} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
+        )
+
+        try:
+            if bundle.render_mode == "line":
+                self._last_2d_plot_key = None
+                self._last_view_frame = None
+                artist = self._render_line(bundle, plotData, artist)
+                self.currentDim = 1
+                self._active_render_mode = "line"
+                self._apply_aspect()
+            elif bundle.render_mode == "image":
+                self._prepare_2d_axes(model_key)
+                artist = self._render_image(bundle, plotData, artist)
+                self.currentDim = 2
+                self._active_render_mode = "image"
+                self._last_view_frame = bundle.view_frame()
+                self._apply_aspect()
+            elif bundle.render_mode == "mesh":
+                self._prepare_2d_axes(model_key)
+                artist = self._render_mesh(bundle, plotData, artist)
+                self.currentDim = 2
+                self._active_render_mode = "mesh"
+                self._last_view_frame = bundle.view_frame()
+                self._apply_aspect()
+        except Exception as e:
+            print(f"[MplCanvas._handle_plot_data] Error: {e}")
+            artist = None
+
+        self._set_artist(plotData, artist)
+        if bundle.render_mode == "line":
+            self._ensure_sibling_lines_on_axes(except_key=model_key)
+        self._sync_roi_display()
+        self.plot_model.region.sync_region_state_with_view()
+        self.plot_view_updated.emit()
+        self.draw()
+
+    def _on_region_invalidation_requested(self, _reason: str):
+        self.plot_model.region.set_roi_draw_enabled(False)
+        self.clear_crop_draft(paint=False)
+        self.set_crop_draw_enabled(False)
+
+    def _ensure_sibling_lines_on_axes(self, except_key=None):
+        """
+        Re-queue plot workers for visible line series not on the axes.
+
+        Covers races where another handler cleared lines but left plot models.
+        """
+        for key, model in self.traces.items():
+            if key == except_key or not model.visible:
+                continue
+            if model.render_mode != "line":
+                continue
+            artist = self.artist_for(key)
+            if artist is None or (
+                isinstance(artist, Line2D) and not self._line_artist_on_axes(artist)
+            ):
+                print_debug(
+                    "MplCanvas._ensure_sibling_lines_on_axes",
+                    f"Re-plotting {model.label}",
+                    category="plots",
+                )
+                self.plot_data(model)
+
+    def _line_artist_on_axes(self, artist):
+        """
+        Return whether a line artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib line artist.
+
+        Returns
+        -------
+        bool
+            True if artist is a Line2D on ``self.axes``.
+        """
+        return isinstance(artist, Line2D) and artist.axes is self.axes
+
+    def _render_line(self, bundle: PlotBundle, plotData, artist):
+        label = plotData.label
+        if self._line_artist_on_axes(artist):
+            LineRenderer.update(artist, bundle)
+            artist.set_label(label)
+        else:
+            if isinstance(artist, Line2D):
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            artist = LineRenderer.create(self.axes, bundle, label)
+            self._artist_count += 1
+        LineRenderer.set_labels(self.axes, bundle)
+        if self._autoscale:
+            self.autoscale()
+        self.updateLegend()
+        return artist
+
+    def _image_artist_on_axes(self, artist):
+        """
+        Return whether an image artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib image artist.
+
+        Returns
+        -------
+        bool
+            True if artist is an AxesImage on ``self.axes``.
+        """
+        return isinstance(artist, AxesImage) and artist.axes is self.axes
+
+    def _mesh_artist_on_axes(self, artist):
+        """
+        Return whether a mesh artist is attached to this canvas's axes.
+
+        Parameters
+        ----------
+        artist : Artist or None
+            Candidate matplotlib collection artist.
+
+        Returns
+        -------
+        bool
+            True if artist is a collection on ``self.axes`` with mesh data.
+        """
+        return (
+            artist is not None
+            and artist.axes is self.axes
+            and hasattr(artist, "set_array")
+            and not isinstance(artist, (Line2D, AxesImage))
+        )
+
+    def _remove_figure_colorbars(self):
+        """
+        Remove the tracked colorbar and any extra axes on the figure.
+
+        Matplotlib keeps colorbar axes on the figure even when the
+        colorbar object is dropped from application state.
+        """
+        remove_2d_artists(self.axes, self._colorbar_state, self.fig)
+
+    def _render_image(self, bundle: PlotBundle, plotData, artist):
+        if self._image_artist_on_axes(artist):
+            ImageRenderer.update(
+                artist, bundle, self._autoscale, self._colorbar_state
+            )
+        else:
+            if artist is not None:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self._remove_figure_colorbars()
+            artist, _cbar = ImageRenderer.create(
+                self.axes,
+                self.fig,
+                bundle,
+                plotData.label,
+                self._colorbar_state,
+                aspect=self._image_aspect(),
+            )
+        return artist
+
+    def _render_mesh(self, bundle: PlotBundle, plotData, artist):
+        if self._mesh_artist_on_axes(artist):
+            MeshRenderer.update(
+                artist, bundle, self._autoscale, self._colorbar_state
+            )
+        else:
+            if artist is not None:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self._remove_figure_colorbars()
+            artist, _cbar = MeshRenderer.create(
+                self.axes,
+                self.fig,
+                bundle,
+                plotData.label,
+                self._colorbar_state,
+            )
+        return artist
+
+    def _prepare_2d_axes(self, plot_key):
+        if (
+            self._last_2d_plot_key != plot_key
+            or self._active_render_mode not in ("image", "mesh")
+            or self.currentDim != 2
+        ):
+            self._reset_plot_axes()
+        self._last_2d_plot_key = plot_key
+
+    def _reset_plot_axes(self):
+        remove_2d_artists(self.axes, self._colorbar_state, self.fig)
+        while self.axes.lines:
+            try:
+                self.axes.lines[0].remove()
+            except Exception:
+                break
+        self._artists.clear()
+        self._destroy_roi_selector()
+        self._destroy_crop_selector()
+        self._remove_roi_overlays()
+        self._remove_crop_overlay()
+        self._active_render_mode = None
+        self.axes.set_aspect("auto")
+
+    def set_roi_set_model(self) -> None:
+        """
+        Refresh ROI overlays from the plot session ROI set.
+        """
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+
+
+    def apply_roi_from_region(self, region) -> None:
+        """
+        Set the selected ROI from a region in data coordinates.
+        """
+        if self._roi_set is None:
+            return
+        if hasattr(region, "normalized"):
+            region = region.normalized()
+        self._roi_set.set_or_replace_single(
+            region,
+            view_fingerprint=self.plot_model.region.resolve_current_view_fingerprint(),
+        )
+        if self._roi_selector is not None:
+            spec = roi_type_for_region(region)
+            if spec is not None:
+                spec.apply_region_to_selector(self._roi_selector, region)
+
+    def _handle_plot_error(self, error_msg):
+        print(f"[MplCanvas] Plot error: {error_msg}")
+
+    def get_roi_view_fingerprint(self):
+        """
+        Return the view fingerprint stored with the selected ROI.
+        """
+        entry = self.get_selected_roi_entry()
+        if entry is None:
+            return None
+        return entry.view_fingerprint
+
+    def set_ellipse_circle_locked(self, locked: bool):
+        """
+        Constrain interactive ellipse drawing/resizing to a circle.
+        """
+        locked = bool(locked)
+        self._ellipse_circle_locked = locked
+        if self._roi_selector_type == "ellipse" and self._roi_selector is not None:
+            set_ellipse_selector_circle_lock(self._roi_selector, locked)
+            if locked:
+                region = self._roi_region_from_active_selector()
+                if isinstance(region, EllipseRegion) and region.has_area():
+                    self._commit_roi_region(region)
+
+    def set_roi_draw_enabled(self, enabled: bool):
+        """
+        Enable or disable interactive ROI rectangle drawing.
+        """
+        self.plot_model.region.set_roi_draw_enabled(enabled)
+
+    def _apply_roi_draw_enabled(self, enabled: bool):
+        """
+        Apply ROI draw mode from :class:`PlotSession`.
+        """
+        enabled = bool(enabled)
+        if enabled and self._crop_draw_enabled:
+            self.set_crop_draw_enabled(False)
+        if enabled == self._roi_draw_enabled:
+            if enabled:
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
+            return
+        self._roi_draw_enabled = enabled
+        if self._roi_draw_enabled:
+            self._remove_roi_overlays()
+            self._attach_roi_selector()
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+        else:
+            if self._roi_selector is not None:
+                region = self._roi_region_from_active_selector()
+                if region is not None:
+                    self._commit_roi_region(region)
+            self._detach_roi_selector()
+            self._update_roi_overlays()
+
+    def set_crop_draw_enabled(self, enabled: bool):
+        """
+        Enable or disable interactive crop rectangle drawing.
+        """
+        enabled = bool(enabled)
+        if enabled and self._roi_draw_enabled:
+            self.plot_model.region.set_roi_draw_enabled(False)
+        if enabled == self._crop_draw_enabled:
+            return
+        self._crop_draw_enabled = enabled
+        if self._crop_draw_enabled:
+            self._remove_crop_overlay()
+            self._attach_crop_selector()
+        else:
+            if self._crop_selector is not None:
+                region = self._region_from_crop_selector(self._crop_selector)
+                if region is not None:
+                    self._set_crop_draft_region(region, update_overlay=True)
+            self._detach_crop_selector()
+            self._update_crop_overlay()
+
+    def clear_roi(self, paint=True):
+        """
+        Clear ROI set entries and detach ROI artists.
+
+        Parameters
+        ----------
+        paint : bool, optional
+            If True, schedule a coalesced redraw. Pass False when the caller
+            will paint later (for example during ``clear`` before a refetch).
+        """
+        if self._roi_set is not None:
+            self._roi_set.clear()
+        else:
+            self._destroy_roi_selector()
+            self._remove_roi_overlays()
+            self.roi_region_changed.emit(None)
+        if self._roi_draw_enabled:
+            self._attach_roi_selector()
+        if paint:
+            self.draw()
+
+    def clear_crop_draft(self, paint=True):
+        """
+        Clear the draft crop rectangle and detach its artists.
+        """
+        self._crop_draft_region = None
+        self._destroy_crop_selector()
+        self._remove_crop_overlay()
+        self.crop_region_changed.emit(None)
+        if self._crop_draw_enabled:
+            self._attach_crop_selector()
+        if paint:
+            self.draw()
+
+    def _region_from_crop_selector(self, selector):
+        """
+        Read a crop rectangle from selector extents.
+        """
+        if selector is None:
+            return None
+        x0, x1, y0, y1 = selector.extents
+        return RectRegion(x0=x0, x1=x1, y0=y0, y1=y1).normalized()
+
+    def _roi_region_from_active_selector(self) -> Optional[RegionDefinition]:
+        """
+        Read ROI geometry from the active type-specific selector.
+        """
+        if self._roi_selector is None:
+            return None
+        spec = get_roi_type(self._roi_selector_type or "")
+        if spec is None:
+            return None
+        if self._roi_selector_type == "ellipse":
+            return _region_from_ellipse_selector(
+                self._roi_selector,
+                lock_circle=self._ellipse_circle_locked,
+            )
+        return spec.region_from_selector(self._roi_selector)
+
+    def _commit_roi_region(self, region: RegionDefinition):
+        if self._roi_set is None:
+            return
+        if isinstance(region, EllipseRegion) and self._ellipse_circle_locked:
+            region = region.normalized()
+            radius = max(region.rx, region.ry)
+            region = EllipseRegion(
+                cx=region.cx,
+                cy=region.cy,
+                rx=radius,
+                ry=radius,
+                angle=region.angle,
+            )
+        elif hasattr(region, "normalized"):
+            region = region.normalized()
+        selected = self._roi_set.selected_entry()
+        if selected is not None and selected.region == region:
+            return
+        self._roi_set.set_or_replace_single(
+            region,
+            view_fingerprint=self.plot_model.region.resolve_current_view_fingerprint(),
+        )
+
+    def _set_crop_draft_region(self, region: RectRegion, update_overlay=None):
+        self._crop_draft_region = region.normalized()
+        if update_overlay is None:
+            update_overlay = not self._crop_draw_enabled
+        if update_overlay:
+            self._update_crop_overlay()
+        self.crop_region_changed.emit(self._crop_draft_region)
+
+    def _on_roi_region_drawn(self, region: RegionDefinition):
+        if not self._roi_draw_enabled:
+            return
+        self._commit_roi_region(region)
+
+    def _on_crop_selected(self, _eclick, _erelease):
+        if not self._crop_draw_enabled:
+            return
+        region = self._region_from_crop_selector(self._crop_selector)
+        if region is None:
+            return
+        self._set_crop_draft_region(region, update_overlay=False)
+
+    def _destroy_selector(self, selector):
+        """
+        Fully remove a RectangleSelector and its artists from the axes.
+        """
+        if selector is None:
+            return
+        try:
+            selector.disconnect_events()
+        except Exception:
+            pass
+        try:
+            selector.set_active(False)
+        except Exception:
+            pass
+        try:
+            selector.clear()
+        except Exception:
+            pass
+        try:
+            selector.set_visible(False)
+        except Exception:
+            pass
+        for artist in tuple(getattr(selector, "artists", ())):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        for handle_group in (
+            getattr(selector, "_corner_handles", None),
+            getattr(selector, "_edge_handles", None),
+            getattr(selector, "_center_handle", None),
+        ):
+            if handle_group is not None and hasattr(handle_group, "remove"):
+                try:
+                    handle_group.remove()
+                except Exception:
+                    pass
+        selection = getattr(selector, "_selection_artist", None)
+        if selection is not None:
+            try:
+                selection.remove()
+            except Exception:
+                pass
+
+    def _destroy_roi_selector(self):
+        selector = self._roi_selector
+        self._roi_selector = None
+        self._roi_selector_type = None
+        self._destroy_selector(selector)
+
+    def _destroy_crop_selector(self):
+        selector = self._crop_selector
+        self._crop_selector = None
+        self._destroy_selector(selector)
+
+    def _detach_roi_selector(self):
+        self._destroy_roi_selector()
+
+    def _detach_crop_selector(self):
+        self._destroy_crop_selector()
+
+    def _attach_roi_selector(self):
+        if not self._roi_draw_enabled:
+            return
+        self._destroy_roi_selector()
+        if not self.region_controls_enabled():
+            return
+
+        entry = self.get_selected_roi_entry()
+        color = entry.color if entry is not None else "#00ffff"
+        region = entry.region if entry is not None else None
+        type_id = (
+            getattr(region, "region_type", None) if region is not None else "rect"
+        )
+        spec = get_roi_type(type_id or "rect")
+        if spec is None:
+            return
+        placeholder = region if region is not None else spec.create_placeholder()
+        self._roi_selector_type = spec.type_id
+        create_kwargs = dict(color=color, region=placeholder)
+        if spec.type_id == "ellipse":
+            create_kwargs["lock_circle"] = self._ellipse_circle_locked
+        self._roi_selector = spec.create_selector(
+            self.axes,
+            self._on_roi_region_drawn,
+            **create_kwargs,
+        )
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _attach_crop_selector(self):
+        if not self._crop_draw_enabled:
+            return
+        self._destroy_crop_selector()
+        if not self.region_controls_enabled():
+            return
+
+        self._crop_selector = RectangleSelector(
+            self.axes,
+            self._on_crop_selected,
+            useblit=False,
+            button=[1],
+            minspanx=0,
+            minspany=0,
+            spancoords="data",
+            interactive=True,
+            props=dict(**_CROP_SELECTOR_PROPS),
+        )
+        if self._crop_draft_region is not None:
+            region = self._crop_draft_region.normalized()
+            self._crop_selector.extents = (
+                region.x0,
+                region.x1,
+                region.y0,
+                region.y1,
+            )
+
+    def _remove_roi_overlays(self):
+        for patches in self._roi_overlays.values():
+            for patch in patches:
+                try:
+                    patch.remove()
+                except Exception:
+                    pass
+        self._roi_overlays = {}
+
+    def _remove_crop_overlay(self):
+        if self._crop_overlay is not None:
+            try:
+                self._crop_overlay.remove()
+            except Exception:
+                pass
+            self._crop_overlay = None
+
+    def _update_roi_overlays(self):
+        self._remove_roi_overlays()
+        if self._roi_set is None or self._roi_draw_enabled:
+            return
+        for entry in self._roi_set.entries():
+            if not entry.visible:
+                continue
+            if not entry.region.has_area():
+                continue
+            spec = roi_type_for_region(entry.region)
+            if spec is None:
+                continue
+            patches = spec.overlay_artists(
+                entry.region,
+                color=entry.color,
+                stale=entry.stale,
+            )
+            for patch in patches:
+                self.axes.add_patch(patch)
+            self._roi_overlays[entry.id] = patches
+
+    def _update_crop_overlay(self):
+        self._remove_crop_overlay()
+        if self._crop_draft_region is None or self._crop_draw_enabled:
+            return
+        region = self._crop_draft_region.normalized()
+        self._crop_overlay = Rectangle(
+            (region.x0, region.y0),
+            region.x1 - region.x0,
+            region.y1 - region.y0,
+            **_CROP_OVERLAY_PROPS,
+        )
+        self.axes.add_patch(self._crop_overlay)
+
+    def _selector_is_live(self, selector) -> bool:
+        """
+        Return whether a selector is attached to the current axes.
+        """
+        if selector is None:
+            return False
+        ax = getattr(selector, "ax", None)
+        if ax is not self.axes:
+            return False
+        selection = getattr(selector, "_selection_artist", None)
+        return selection is not None and selection.axes is self.axes
+
+    def _on_roi_set_changed(self):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
+    def _on_roi_entry_changed(self, _entry_id: str):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
+    def _on_roi_selection_changed(self, _entry_id):
+        self._sync_roi_display()
+        self.roi_region_changed.emit(self.get_roi_region())
+        self.draw()
+
+    def _sync_roi_display(self):
+        if self._roi_draw_enabled:
+            self._remove_roi_overlays()
+            entry = self.get_selected_roi_entry()
+            selected_type = (
+                getattr(entry.region, "region_type", None)
+                if entry is not None
+                else None
+            )
+            type_changed = selected_type != self._roi_selector_type
+            if type_changed or not self._selector_is_live(self._roi_selector):
+                self._attach_roi_selector()
+            else:
+                region = self.get_roi_region()
+                spec = get_roi_type(self._roi_selector_type or "")
+                if region is not None and spec is not None and region.has_area():
+                    spec.apply_region_to_selector(self._roi_selector, region)
+        else:
+            self._update_roi_overlays()
+        if self._crop_draw_enabled:
+            self._remove_crop_overlay()
+            if not self._selector_is_live(self._crop_selector):
+                self._attach_crop_selector()
+            elif self._crop_draft_region is not None:
+                region = self._crop_draft_region.normalized()
+                self._crop_selector.extents = (
+                    region.x0,
+                    region.x1,
+                    region.y0,
+                    region.y1,
+                )
+        else:
+            self._update_crop_overlay()
+
+    def clear(self):
+        """
+        Reset axes and artists for a dimension change without painting.
+
+        The previous Agg frame stays on screen until the following refetch
+        paints via ``_handle_plot_data`` or ``_do_update_plot``. ROI set
+        geometry is kept and marked stale by the controller when the view
+        fingerprint changes.
+        """
+        print_debug("MplCanvas.clear", "Starting Clear", category="plots")
+        self._destroy_roi_selector()
+        self._destroy_crop_selector()
+        self._remove_roi_overlays()
+        self._remove_crop_overlay()
+
+        for model_key in list(self._active_workers.keys()):
+            worker = self._active_workers.pop(model_key, None)
+            retire_plot_worker(worker, self._pending_workers)
+        self._worker_generations.clear()
+
+        remove_2d_artists(self.axes, self._colorbar_state, self.fig)
+
+        old_axes = self.axes
+        self.axes = self.fig.add_subplot(111)
+        if old_axes in self.fig.axes:
+            try:
+                self.fig.delaxes(old_axes)
+            except Exception as e:
+                print(f"[MplCanvas.clear] Error removing old axes: {e}")
+
+        for ax in list(self.fig.axes):
+            if ax is not self.axes:
+                try:
+                    ax.remove()
+                except Exception:
+                    pass
+
+        self._colorbar_state.clear()
+        self._last_2d_plot_key = None
+        self.currentDim = 1
+        self._active_render_mode = None
+        self._artist_count = 0
+        self._artists.clear()
+
+    def updateLegend(self):
+        """
+        Rebuild the axes legend from visible labeled lines.
+
+        Does not paint; callers that need a refresh must call :meth:`draw`.
+        """
+        t0 = ttime.time()
+        legend = self.axes.get_legend()
+        if legend is None or not legend.get_visible():
+            if not self._legend_visible:
+                return
+
+        if self.axes.get_legend():
+            self.axes.get_legend().remove()
+
+        visible_lines = [
+            line
+            for line in self.axes.get_lines()
+            if line.get_visible()
+            and line.get_label()
+            and not line.get_label().startswith("_")
+        ]
+
+        if visible_lines:
+            labels = [line.get_label() for line in visible_lines]
+            self.axes.legend(visible_lines, labels)
+
+        print_debug(
+            "MplCanvas.updateLegend",
+            f"lines={len(visible_lines)} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
+
+    def autoscale(self):
+        """
+        Adjust clim or axis limits from currently visible artists.
+
+        Does not paint; callers that need a refresh must call :meth:`draw`.
+        """
+        t0 = ttime.time()
+        mode = self._active_render_mode
+        if mode == "image":
+            for image in self.axes.images:
+                if image.get_visible():
+                    data = image.get_array()
+                    if data is not None and data.size > 0:
+                        finite = data[np.isfinite(data)]
+                        if finite.size > 0:
+                            image.set_clim(
+                                float(np.min(finite)), float(np.max(finite))
+                            )
+            cbar = self._colorbar_state.get("colorbar")
+            if cbar is not None:
+                cbar.update_ticks()
+            print_debug(
+                "MplCanvas.autoscale",
+                f"mode=image {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
+            return
+
+        if mode == "mesh":
+            for collection in self.axes.collections:
+                if collection.get_visible() and hasattr(collection, "get_array"):
+                    arr = np.asarray(collection.get_array())
+                    if arr.size > 0:
+                        finite = arr[np.isfinite(arr)]
+                        if finite.size > 0:
+                            collection.set_clim(
+                                float(np.min(finite)), float(np.max(finite))
+                            )
+            print_debug(
+                "MplCanvas.autoscale",
+                f"mode=mesh {ttime.time() - t0:.4f}s",
+                category="plots",
+            )
+            return
+
+        visible_lines = [
+            line for line in self.axes.get_lines() if line.get_visible()
+        ]
+        if not visible_lines:
+            return
+
+        y_min, y_max, x_min, x_max = [], [], [], []
+        for line in visible_lines:
+            ydata = line.get_ydata()
+            xdata = line.get_xdata()
+            if len(ydata) > 0 and len(xdata) > 0:
+                valid_y = ydata[np.isfinite(ydata)]
+                valid_x = xdata[np.isfinite(xdata)]
+                if len(valid_y) > 0 and len(valid_x) > 0:
+                    y_min.append(np.min(valid_y))
+                    y_max.append(np.max(valid_y))
+                    x_min.append(np.min(valid_x))
+                    x_max.append(np.max(valid_x))
+
+        if not y_min:
+            return
+
+        y_min, y_max = min(y_min), max(y_max)
+        x_min, x_max = min(x_min), max(x_max)
+        yspan = y_max - y_min
+        if yspan > 0:
+            self.axes.set_ylim(y_min - 0.05 * yspan, y_max + 0.05 * yspan)
+        xspan = x_max - x_min
+        if xspan > 0:
+            self.axes.set_xlim(x_min - 0.05 * xspan, x_max + 0.05 * xspan)
+        print_debug(
+            "MplCanvas.autoscale",
+            f"mode=line lines={len(visible_lines)} {ttime.time() - t0:.4f}s",
+            category="plots",
+        )
+
+    def resizeEvent(self, event):
+        print_debug(
+            "MplCanvas.resizeEvent",
+            f"id={id(self)} size={event.size().width()}x{event.size().height()} "
+            f"nbs_pending={self._nbs_draw_pending} "
+            f"mpl_pending={getattr(self, '_draw_pending', False)} "
+            f"in_do_draw={self._nbs_in_do_draw}",
+            category="plots",
+        )
+        super().resizeEvent(event)
+
+    def draw_idle(self):
+        print_debug(
+            "MplCanvas.draw_idle",
+            f"id={id(self)} nbs_pending={self._nbs_draw_pending} "
+            f"mpl_pending={getattr(self, '_draw_pending', False)} "
+            f"is_drawing={getattr(self, '_is_drawing', False)} "
+            f"in_do_draw={self._nbs_in_do_draw} "
+            f"via={_draw_caller_summary()}",
+            category="plots",
+        )
+        super().draw_idle()
+
+    def draw(self):
+        caller = _draw_caller_summary()
+        if not self._nbs_draw_pending:
+            self._nbs_draw_pending = True
+            self._nbs_draw_coalesce_count = 0
+            print_debug(
+                "MplCanvas.draw",
+                f"scheduled (16ms) id={id(self)} "
+                f"mpl_pending={getattr(self, '_draw_pending', False)} "
+                f"is_drawing={getattr(self, '_is_drawing', False)} "
+                f"in_do_draw={self._nbs_in_do_draw} via={caller}",
+                category="plots",
+            )
+            QTimer.singleShot(16, self._do_draw)
+        else:
+            self._nbs_draw_coalesce_count += 1
+            print_debug(
+                "MplCanvas.draw",
+                f"coalesced=#{self._nbs_draw_coalesce_count} id={id(self)} "
+                f"in_do_draw={self._nbs_in_do_draw} via={caller}",
+                category="plots",
+            )
+
+    def _do_draw(self):
+        self._nbs_draw_pending = False
+        coalesced = self._nbs_draw_coalesce_count
+        self._nbs_draw_coalesce_count = 0
+        t0 = ttime.time()
+        self._nbs_in_do_draw = True
+        try:
+            super().draw()
+        finally:
+            self._nbs_in_do_draw = False
+        print_debug(
+            "MplCanvas._do_draw",
+            f"FigureCanvas.draw {ttime.time() - t0:.4f}s "
+            f"coalesced_calls={coalesced} "
+            f"id={id(self)} "
+            f"active_workers={len(self._active_workers)}",
+            category="plots",
+        )

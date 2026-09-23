@@ -1,16 +1,31 @@
 from qtpy.QtWidgets import QWidget, QSizePolicy
 from qtpy.QtCore import Signal
 
+MIN_CONTROL_HEIGHT = 24
+
+
+def apply_minimum_control_heights(*widgets):
+    """
+    Apply a consistent minimum height to input controls.
+
+    Parameters
+    ----------
+    *widgets : QWidget
+        Widgets such as combo boxes, line edits, and push buttons.
+    """
+    for widget in widgets:
+        if widget is not None:
+            widget.setMinimumHeight(MIN_CONTROL_HEIGHT)
+
 
 class PlotControlWidget(QWidget):
     """
     Base class for plot control widgets.
 
-    All plot control widgets should inherit from this class and emit
-    state_changed when their state changes.
-
     Parameters
     ----------
+    presenter : PlotPresenter
+        Plot session presenter.
     parent : QWidget, optional
         Parent widget, by default None
 
@@ -22,10 +37,10 @@ class PlotControlWidget(QWidget):
 
     state_changed = Signal()
 
-    def __init__(self, run_list_model, parent=None):
+    def __init__(self, presenter, parent=None):
         super().__init__(parent)
-        self.run_list_model = run_list_model
-        # Prefer to expand when the panel allows it; let layout manage height
+        self.presenter = presenter
+        self.plot_model = presenter.session
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._setup_ui()
 

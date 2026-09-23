@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 import logging
 from .base import CatalogRun
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple
 import numpy as np
 from nbs_viewer.utils import print_debug, time_function
 
@@ -46,7 +46,7 @@ class BlueskyRun(CatalogRun):
 
     METADATA_KEYS = ["scan_id", "plan_name", "num_points", "date", "exit_status", "uid"]
 
-    @time_function(function_name="BlueskyRun.__init__", category="DEBUG_CATALOG")
+    @time_function(function_name="BlueskyRun.__init__", category="catalog")
     def __init__(self, run, key, catalog, parent=None, chunk_cache=None):
         """
         Initialize the BlueskyRun.
@@ -82,20 +82,6 @@ class BlueskyRun(CatalogRun):
 
         # Defer keys initialization; emit loading/ready/error via background pool
         # Caller (catalog UI) should schedule async key init using AppModel's pool
-
-    @time_function(category="DEBUG_RUN")
-    def _check_data_access(self):
-        """Check if run has accessible data."""
-        try:
-            # Check if primary stream exists and has data
-            if "/".join(["primary", "data"]) in self._run:
-                self._has_data = True
-            else:
-                print(f"Warning: Run {self._key} has no primary data stream")
-                self._has_data = False
-        except Exception as e:
-            print(f"Error checking data access for run {self._key}: {e}")
-            self._has_data = False
 
     def refresh(self):
         """
@@ -318,11 +304,6 @@ class BlueskyRun(CatalogRun):
         array-like
             The data for the given key, potentially sliced
         """
-        print_debug(
-            "BlueskyRun.getData",
-            f"getting data for {key}, slice_info={slice_info}",
-            category="DEBUG_CATALOG",
-        )
         if not self._has_data:
             return np.array([])  # Return empty array if no data
 
@@ -366,15 +347,20 @@ class BlueskyRun(CatalogRun):
 
         # Use chunk-aware caching
         try:
+            t0 = time.time()
+            result = self._chunk_cache.get_data(self._run, key, slice_info)
             print_debug(
-                "BlueskyRun.getData", "Loading from chunk cache", category="cache"
-            )
-            return self._chunk_cache.get_data(self._run, key, slice_info)
+                "BlueskyRun.getData",
+                f"chunk_cache {key} slice={slice_info} "
+                f"{time.time() - t0:.4f}s",
+                category="cache"
+)
+            return result
         except Exception as e:
             print(f"Error reading chunked data for key {key}: {e}")
             return np.array([])
 
-    # @time_function(category="DEBUG_CATALOG")
+    # @time_function(category="catalog")
     def _manage_cache(self, cache, max_items):
         """
         Limit cache size by removing least recently used items.
@@ -445,8 +431,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             "Getting run['/'.join(['primary', 'data'])].keys()",
-            category="DEBUG_CATALOG",
-        )
+            category="catalog"
+)
         try:
             all_keys = list(self._run["/".join(["primary", "data"])].keys())
             self._has_data = True
@@ -460,8 +446,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Got {len(all_keys)} keys in {t0 - t_start:.3f}s",
-            category="DEBUG_CATALOG",
-        )
+            category="catalog"
+)
 
         # Initialize dictionaries
         xkeys = {}
@@ -479,8 +465,8 @@ class BlueskyRun(CatalogRun):
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Getting dimension hints took: {time.time() - t1:.3f}s",
-            category="DEBUG_CATALOG",
-        )
+            category="catalog"
+)
         t2 = time.time()
         # Try to get object keys from descriptors
         object_keys = {}
@@ -496,9 +482,9 @@ class BlueskyRun(CatalogRun):
 
         print_debug(
             "BlueskyRun.getRunKeys",
-            f"Getting dimension hints from descriptors took: {time.time() - t1:.3f}s",
-            category="DEBUG_CATALOG",
-        )
+            f"Getting dimension hints from descriptors took: {time.time() - t2:.3f}s",
+            category="catalog"
+)
 
         # Process dimension hints
         for i, dimension in enumerate(xkeyhints):
@@ -520,15 +506,30 @@ class BlueskyRun(CatalogRun):
             if len(xkeys[i + 1]) == 0:
                 xkeys.pop(i + 1)
 
-        # All remaining keys go to ykeys[1] initially
-        ykeys[1] = all_keys
+        # Remaining keys are grouped by their own rank, as ``MemoryRun`` does.
+        # Assigning all of them to ``ykeys[1]`` reported a rank-3 camera key as
+        # rank 1, and the model layer trusts this number. ``getShape`` is cached
+        # and the key table asks for every one of these shapes moments later, so
+        # the cost is paid once either way. A key whose shape cannot be read
+        # keeps the old answer rather than dropping out of the table.
+        for key in all_keys:
+            try:
+                ndim = len(self.getShape(key))
+            except Exception as e:
+                print_debug(
+                    "BlueskyRun.getRunKeys",
+                    f"Could not get shape for {key}, treating as rank 1: {e}",
+                    category="catalog"
+)
+                ndim = 1
+            ykeys.setdefault(max(ndim, 1), []).append(key)
         # print(f"xkeys: {xkeys}")
         # print(f"ykeys: {ykeys}")
         print_debug(
             "BlueskyRun.getRunKeys",
             f"Total getRunKeys took: {time.time() - t_start:.3f}s",
-            category="DEBUG_CATALOG",
-        )
+            category="catalog"
+)
         self._run_keys_cache = (xkeys, ykeys)
         return self._run_keys_cache
 
@@ -649,6 +650,113 @@ class BlueskyRun(CatalogRun):
 
         return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}
 
+    def _primary_data_path(self, key: str) -> str:
+        """
+        Build the canonical path for a key in the primary data group.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        str
+            Path into the run object.
+        """
+        return "/".join(["primary", "data", key])
+
+    def _infer_dims_from_shape(self, key: str, shape: Tuple[int, ...]) -> Tuple[str, ...]:
+        """
+        Infer dimension names when Tiled structure metadata has no dims.
+
+        Every array in a stream's ``data`` is stacked over events, so axis 0 is
+        the event axis and is named ``time``; the remaining axes are
+        detector-internal and can only be given placeholders. Inference runs
+        only when Tiled supplied no ``dims``, so its job is to reproduce what a
+        labelled run would have said. A UCAL run that labels its dims is the
+        ground truth: ``nexafs_sc`` (72,
+) is ``('time',
+)`` and
+        ``tes_mca_spectrum`` (72, 800) is ``('time', 'tes_mca_energies')``.
+        This produces ``('time',
+)`` and ``('time', 'dim_1')`` -- the same rank
+        with the same leading name, degrading to a placeholder only where the
+        name is genuinely unknowable without Tiled's metadata.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+        shape : tuple of int
+            Array shape for the key.
+
+        Returns
+        -------
+        tuple of str
+            Inferred dimension names.
+        """
+        ndim = len(shape)
+        if ndim == 0:
+            return ()
+
+        if key == "time":
+            return ("time",
+)
+
+        has_time_key = False
+        try:
+            has_time_key = "time" in list(
+                self._run["/".join(["primary", "data"])].keys()
+            )
+        except Exception:
+            has_time_key = False
+
+        if has_time_key:
+            if ndim == 1:
+                return ("time",
+)
+            return ("time",
+) + tuple(f"dim_{i}" for i in range(1, ndim))
+
+        return tuple(f"dim_{i}" for i in range(ndim))
+
+    def _resolve_dims(self, key: str) -> Tuple[str, ...]:
+        """
+        Resolve dimension names for a data key, with shape-based inference as fallback.
+
+        Parameters
+        ----------
+        key : str
+            Data key name.
+
+        Returns
+        -------
+        tuple of str
+            Dimension names for the key.
+        """
+        shape = tuple(self.getShape(key))
+        raw_dims = None
+        try:
+            raw_dims = self._run[self._primary_data_path(key)].dims
+        except Exception as ex:
+            print_debug(
+                "BlueskyRun._resolve_dims",
+                f"Could not read dims for {key}: {ex}",
+                category="catalog"
+)
+
+        if raw_dims:
+            return tuple(raw_dims)
+
+        inferred = self._infer_dims_from_shape(key, shape)
+        print_debug(
+            "BlueskyRun._resolve_dims",
+            f"Inferred dims for {key} shape {shape}: {inferred}",
+            category="catalog"
+)
+        return inferred
+
     def get_dims(
         self, ykey: str, xkeys: List[str]
     ) -> Tuple[Tuple[str, ...], Dict[str, Tuple[str, ...]]]:
@@ -669,33 +777,15 @@ class BlueskyRun(CatalogRun):
             - y_dims: Tuple of dimension names for y-data
             - x_dims: Dict mapping xkeys to their dimension names
         """
-        # Get y dimensions from cache or fetch
         if ykey not in self._dim_cache:
-            try:
-                self._dim_cache[ykey] = self._run[
-                    "/".join(["primary", "data", ykey])
-                ].dims
-            except Exception as e:
-                print(f"Could not get dimension names for {ykey}: {e}")
-                # Fallback to generating dimension names from shape
-                shape = self.getShape(ykey)
-                self._dim_cache[ykey] = tuple(f"dim_{i}" for i in range(len(shape)))
+            self._dim_cache[ykey] = self._resolve_dims(ykey)
 
         y_dims = self._dim_cache[ykey]
 
-        # Get x dimensions from cache or fetch
         x_dims = {}
         for key in xkeys:
             if key not in self._dim_cache:
-                try:
-                    self._dim_cache[key] = self._run[
-                        "/".join(["primary", "data", key])
-                    ].dims
-                except Exception as e:
-                    print(f"Could not get dimension names for {key}: {e}")
-                    # Fallback to generating dimension names from shape
-                    shape = self.getShape(key)
-                    self._dim_cache[key] = tuple(f"dim_{i}" for i in range(len(shape)))
+                self._dim_cache[key] = self._resolve_dims(key)
             x_dims[key] = self._dim_cache[key]
 
         return y_dims, x_dims

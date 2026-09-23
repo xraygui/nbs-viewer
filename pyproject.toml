@@ -11,17 +11,19 @@ readme = "README.md"
 keywords = ["tiled", "viewer"]
 dependencies = [
 "numpy",
+"xarray",
+"zarr >= 3",
 "qtpy",
 "matplotlib",
-"tiled >= 0.1.0b17",
+"tiled",
 "bluesky-widgets >= 0.0.15",
 "pyzmq",
 "bluesky-kafka",
 "nslsii",
-"databroker[client,server,back-compat] >= 2.0.0b57",
-"bluesky-tiled-plugins>=2.0.0b59",
+"databroker[client,server,back-compat]",
+"bluesky-tiled-plugins",
 "asteval",
-"tomli >= 2.0.0; python_version < '3.11'",
+"tomli >= 2.0.0; python_version < '3.11'", "pytest>=9.0.3,<10",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -43,6 +45,20 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["nbs_viewer"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# testpaths only covers a bare `pytest`. Any invocation that names a path --
+# `pytest .`, an editor's "run all tests" -- would otherwise collect
+# oldtests/, where test_expression_dialog calls dialog.exec_() and blocks
+# forever with no display to click it, and test/, which holds interactive
+# scripts that talk to the live facility catalog.
+norecursedirs = ["oldtests", "test", "build", "dist", ".pixi"]
+# A wedged run should name the test and dump stacks instead of going quiet.
+# "thread" reports from a watchdog thread, so it survives a deadlocked main
+# thread, unlike the signal-based method.
+timeout = 60
+timeout_method = "thread"
+
 [project.entry-points."nbs_viewer.catalog_models"]
 blueskycatalog = "nbs_viewer.models.catalog.bluesky:BlueskyCatalog"
 nbscatalog = "nbs_viewer.models.catalog.bluesky:NBSCatalog"
@@ -63,19 +79,52 @@ nbs-viewer = { path = ".", editable = true }
 
 [tool.pixi.tasks]
 nbs-viewer = "nbs-viewer"
+lint = "ruff check nbs_viewer tests"
+lint-fix = "ruff check --fix nbs_viewer tests"
+
+# The suite needs a Qt platform plugin and there is no display in CI, nor
+# usually a reason to open one locally. Setting it on the task rather than
+# leaving it to whoever types the command means the run is the same
+# everywhere, and nobody has to remember the variable.
+[tool.pixi.tasks.test]
+cmd = "pytest tests -q --timeout=120"
+env = { QT_QPA_PLATFORM = "offscreen" }
 
 [tool.pixi.dependencies]
+pytest-timeout = ">=2.4.0,<3"
 nslsii = ">=0.11.2,<0.12"
 numpy = ">=2.2.6,<3"
 qtpy = ">=2.4.3,<3"
 matplotlib = ">=3.10.6,<4"
-tiled = ">=0.1.0b17,<0.1.1"
+tiled = ">=0.2.9,<0.3"
 bluesky-widgets = ">=0.0.17,<0.0.18"
 bluesky-live = ">=0.0.8,<0.0.9"
 qt6-wayland = ">=6.9.2,<7"
 pyside6 = ">=6.9.2,<7"
 pyqtgraph = ">=0.13.7,<0.14"
 pyzmq = ">=27.1.0,<28"
-bluesky-tiled-plugins = ">=2.0.0b68,<3"
-databroker = ">=2.0.0b68,<3"
+bluesky-tiled-plugins = ">=2.0.3,<3"
+databroker = ">=2.0.0,<3"
 asteval = ">=1.0.6,<2"
+ruff = ">=0.16.7,<0.17"
+
+[tool.ruff]
+# 85 rather than 79, chosen from the tree rather than from habit: the code is
+# written to 79 but a long tail sits a few characters over, and 85 clears all
+# but five lines in models/plot while 79 would churn ninety files.
+line-length = 85
+
+[tool.ruff.lint]
+# Pyflakes plus the real-error subset of pycodestyle, plus bugbear.
+#
+# E501 (line-too-long) is deliberately absent. It is the reformatter's rule,
+# not a reviewer's, and turning it on today reports 176 lines that `ruff
+# format` would rewrite for free. It comes back when the formatting pass does
+# -- which is held until the models/plot refactor lands, so that a
+# whole-tree reformat is one isolated commit for .git-blame-ignore-revs
+# rather than noise spread through every step of a refactor whose whole
+# purpose is making `git blame` answer questions.
+#
+# E1/E2/E3 (whitespace, blank lines, indentation) are absent for the same
+# reason.
+select = ["E4", "E7", "E9", "F", "B"]

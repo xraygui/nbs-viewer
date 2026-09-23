@@ -6,7 +6,7 @@ from databroker.queries import TimeRange
 
 from .base import CatalogBase
 from ..data import BlueskyRun, NBSRun
-from .chunkCache import ChunkCache
+from nbs_viewer.models.cache import ChunkCache, ChunkCacheProgress
 from nbs_viewer.utils import print_debug
 from .worker_pool import CatalogWorkerPool
 
@@ -34,12 +34,23 @@ class BlueskyCatalog(CatalogBase):
         self._base_catalog = catalog.v2
         self._catalog = catalog.v2
         self._wrapped_runs = {}
-        self._chunk_cache = ChunkCache()
-        # Enable async key discovery by default for Bluesky-based catalogs
+        self._chunk_cache_progress = ChunkCacheProgress(self)
+        self._chunk_cache = ChunkCache(progress=self._chunk_cache_progress)
         try:
             self._worker_pool: CatalogWorkerPool | None = CatalogWorkerPool(self)
         except Exception:
             self._worker_pool = None
+
+    @property
+    def chunk_cache_progress(self) -> ChunkCacheProgress:
+        """
+        Progress notifier for in-flight Tiled chunk fetches.
+
+        Returns
+        -------
+        ChunkCacheProgress
+        """
+        return self._chunk_cache_progress
 
     def __len__(self):
         return len(self._catalog)
@@ -145,7 +156,7 @@ class BlueskyCatalog(CatalogBase):
         print_debug(
             "BlueskyCatalog.items_slice",
             f"Getting slice {slice_obj}",
-            category="DEBUG_RUNLIST",
+            category="runlist",
         )
         sliced_items = (
             self._catalog.items()[slice_obj] if slice_obj else self._catalog.items()
@@ -165,7 +176,7 @@ class BlueskyCatalog(CatalogBase):
                 print_debug(
                     "BlueskyCatalog.items_slice",
                     f"Error wrapping run {key}: {ex}",
-                    category="DEBUG_RUNLIST",
+                    category="runlist",
                 )
 
     def search(self, query: Dict) -> "BlueskyCatalog":
@@ -183,6 +194,7 @@ class BlueskyCatalog(CatalogBase):
             New catalog containing matching runs.
         """
         self._catalog = self._base_catalog.search(query)
+        self.data_updated.emit()
         return self
 
     def filter_by_time(

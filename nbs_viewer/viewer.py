@@ -11,7 +11,13 @@ from qtpy.QtWidgets import (
 
 from .mainWidget import MainWidget
 from .models.app_model import AppModel
-from .utils import turn_on_debugging, turn_off_debugging, set_top_level_model
+from .utils import (
+    KNOWN_TOPICS,
+    parse_debug_topics,
+    set_top_level_model,
+    turn_off_debugging,
+    turn_on_debugging,
+)
 from .logging_setup import setup_logging
 
 # import logging
@@ -36,7 +42,7 @@ class Viewer(QMainWindow):
             central_widget, config_file=config_file, app_model=self.app_model
         )
         self.main_display = self.mainWidget.main_display
-        self.data_source = self.main_display.data_source
+        self.catalog_switcher = self.main_display.catalog_switcher
         self.layout.addWidget(self.mainWidget)
         central_widget.setLayout(self.layout)
         self._create_menu_bar()
@@ -54,35 +60,6 @@ class Viewer(QMainWindow):
         open_config_action.setStatusTip("Open a catalog configuration file")
         open_config_action.triggered.connect(self._on_open_catalog_config)
         file_menu.addAction(open_config_action)
-
-        """
-        file_menu.addSeparator()
-
-        # Save Plot
-        save_plot_action = QAction("&Save Plot As...", self)
-        save_plot_action.setShortcut("Ctrl+S")
-        save_plot_action.setStatusTip("Save the current plot as an image")
-        save_plot_action.triggered.connect(self._on_save_plot)
-        file_menu.addAction(save_plot_action)
-
-        # Export Data
-        export_data_action = QAction("&Export Data...", self)
-        export_data_action.setShortcut("Ctrl+E")
-        export_data_action.setStatusTip("Export plot data to a file")
-        export_data_action.triggered.connect(self._on_export_data)
-        file_menu.addAction(export_data_action)
-
-        file_menu.addSeparator()
-
-        # Print
-        print_action = QAction("&Print...", self)
-        print_action.setShortcut("Ctrl+P")
-        print_action.setStatusTip("Print the current plot")
-        print_action.triggered.connect(self._on_print)
-        file_menu.addAction(print_action)
-
-        file_menu.addSeparator() 
-        """
 
         # Exit
         exit_action = QAction("E&xit", self)
@@ -117,37 +94,11 @@ class Viewer(QMainWindow):
 
         catalog_menu.addSeparator()
 
-        # Refresh All Catalogs
-        """
-        refresh_action = QAction("&Refresh Current Catalog", self)
-        refresh_action.setShortcut("F5")
-        refresh_action.setStatusTip("Refresh current catalog")
-        refresh_action.triggered.connect(self._on_refresh_catalogs)
-        catalog_menu.addAction(refresh_action)
-        """
-
         clear_selected_run_action = QAction("&Deselect Runs", self)
         clear_selected_run_action.setShortcut("Ctrl+Shift+D")
         clear_selected_run_action.setStatusTip("Deselect all runs")
         clear_selected_run_action.triggered.connect(self._on_clear_selected_run)
         catalog_menu.addAction(clear_selected_run_action)
-
-        """
-        # Clear Cache
-        clear_cache_action = QAction("&Clear Cache", self)
-        clear_cache_action.setShortcut("Ctrl+Shift+C")
-        clear_cache_action.setStatusTip("Clear catalog cache")
-        clear_cache_action.triggered.connect(self._on_clear_cache)
-        catalog_menu.addAction(clear_cache_action)
-
-        catalog_menu.addSeparator()
-
-        # Catalog Settings
-        catalog_settings_action = QAction("Catalog &Settings...", self)
-        catalog_settings_action.setShortcut("Ctrl+Shift+S")
-        catalog_settings_action.setStatusTip("Configure catalog settings")
-        catalog_settings_action.triggered.connect(self._on_catalog_settings)
-        catalog_menu.addAction(catalog_settings_action) """
 
         # Switch Catalog (submenu)
         self.switch_catalog_menu = catalog_menu.addMenu("&Switch Catalog")
@@ -197,14 +148,6 @@ class Viewer(QMainWindow):
         close_display_action.triggered.connect(self._on_close_display)
         display_menu.addAction(close_display_action)
 
-        # Keep duplicate for potential quick copy; no-op for now
-
-        display_menu.addSeparator()
-
-        # Remove unused display actions for now
-
-        # Remove unused display actions for now
-
     def _update_switch_catalog_menu(self):
         """Update the switch catalog submenu with available catalogs."""
         # Clear existing items
@@ -229,60 +172,29 @@ class Viewer(QMainWindow):
             "TOML files (*.toml);;All files (*)",
         )
         if path:
-            self.data_source.load_catalog_config(path)
+            self.catalog_switcher.load_catalog_config(path)
             self._update_switch_catalog_menu()
-
-    def _on_save_plot(self):
-        """Handle saving the current plot."""
-        # TODO: Implement plot saving
-        print("Save plot - not implemented yet")
-
-    def _on_export_data(self):
-        """Handle exporting data."""
-        # TODO: Implement data export
-        print("Export data - not implemented yet")
-
-    def _on_print(self):
-        """Handle printing."""
-        # TODO: Implement printing
-        print("Print - not implemented yet")
 
     # Catalog menu action handlers
     def _on_connect_tiled_uri(self):
         """Handle connecting to a Tiled URI."""
-        self.data_source.add_uri_source()
+        self.catalog_switcher.add_uri_source()
 
     def _on_add_catalog_source(self):
         """Handle adding a catalog source."""
-        self.data_source.add_new_source()
+        self.catalog_switcher.add_new_source()
 
     def _on_remove_catalog(self):
         """Handle removing a catalog source."""
-        self.data_source.remove_current_source()
-
-    '''
-    def _on_refresh_catalogs(self):
-        """Handle refreshing all catalogs."""
-        self.data_source.refresh_catalog()
-    '''
+        self.catalog_switcher.remove_current_source()
 
     def _on_clear_selected_run(self):
         """Handle clearing selected run."""
-        self.data_source.deselect_all()
-
-    def _on_clear_cache(self):
-        """Handle clearing cache."""
-        # TODO: Implement cache clearing
-        print("Clear cache - not implemented yet")
-
-    def _on_catalog_settings(self):
-        """Handle catalog settings."""
-        # TODO: Implement catalog settings dialog
-        print("Catalog settings - not implemented yet")
+        self.catalog_switcher.deselect_all()
 
     def _on_switch_catalog(self, label: str):
         """Switch active catalog by label from submenu."""
-        self.data_source.switch_to_label(label)
+        self.catalog_switcher.switch_to_label(label)
         if self.app_model is not None:
             self.app_model.catalogs.set_current_catalog(label)
 
@@ -306,21 +218,6 @@ class Viewer(QMainWindow):
         # TODO: Implement display closing
         self.mainWidget.close_current_display()
 
-    def _on_duplicate_display(self):
-        """Handle duplicating the current display."""
-        # TODO: Implement display duplication
-        self.mainWidget.duplicate_current_display()
-
-    def _on_display_settings(self):
-        """Handle display settings."""
-        # TODO: Implement display settings dialog
-        print("Display settings - not implemented yet")
-
-    def _on_save_display_layout(self):
-        """Handle saving display layout."""
-        # TODO: Implement display layout saving
-        print("Save display layout - not implemented yet")
-
     def _on_rename_display(self):
         """Handle renaming the current display."""
         current_display_id = self.mainWidget.get_current_display().display_id
@@ -342,7 +239,19 @@ def main():
         "-d",
         "--debug",
         action="store_true",
-        help="Enable debug mode (equivalent to --log-level DEBUG)",
+        help="Enable full debug logging (equivalent to --log-level DEBUG)",
+    )
+    parser.add_argument(
+        "-D",
+        "--debug-topic",
+        action="append",
+        default=[],
+        metavar="TOPIC",
+        help=(
+            "Enable DEBUG for selected topics only (repeatable or comma-separated). "
+            f"Known topics: {', '.join(KNOWN_TOPICS)}. "
+            "Ignored when full debug is on via -d / --log-level DEBUG."
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -357,8 +266,13 @@ def main():
         help="Set logging verbosity (overrides --debug if provided)",
     )
     args = parser.parse_args()
+    topics = parse_debug_topics(args.debug_topic)
     effective_level = args.log_level or ("DEBUG" if args.debug else "INFO")
-    setup_logging(level=effective_level, http_to_file="http_debug.log")
+    setup_logging(
+        level=effective_level,
+        http_to_file="http_debug.log",
+        debug_topics=topics if effective_level != "DEBUG" else None,
+    )
     if effective_level == "DEBUG":
         turn_on_debugging()
     else:
