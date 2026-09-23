@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QStyle,
     QSizePolicy,
 )
-from qtpy.QtCore import Qt, QSize, Signal
+from qtpy.QtCore import Qt, QSize, QTimer, Signal
 
 # Fallback for maximum Qt widget size (not exported by qtpy)
 QWIDGETSIZE_MAX = 16777215
@@ -92,6 +92,7 @@ class CollapsiblePanel(QWidget):
         self.widget = widget
         self.can_expand = can_expand
         self.resizable = resizable
+        self._size_refresh_pending = False
         self.is_collapsed = (
             not initially_expanded
         )  # Start collapsed or expanded based on parameter
@@ -407,8 +408,27 @@ class CollapsiblePanel(QWidget):
         """
         Recalculate height limits after the inner widget's content changes.
 
+        Deferred to the next pass of the event loop. Content rebuilt just
+        before this call has not been laid out yet: its new widgets are
+        still hidden, and a box layout skips hidden widgets, so measuring
+        now caps the panel at the height of whatever happened to be visible
+        already. Toggling the panel used to be the only way to get the right
+        answer, because a toggle measures a pass later.
+
         No-op when collapsed or when the panel is allowed to grow freely.
         """
+        if self.is_collapsed or self.can_expand:
+            return
+        if self._size_refresh_pending:
+            return
+        self._size_refresh_pending = True
+        QTimer.singleShot(0, self, self._apply_expanded_size)
+
+    def _apply_expanded_size(self):
+        """
+        Pin the panel to the height limits its content now asks for.
+        """
+        self._size_refresh_pending = False
         if self.is_collapsed or self.can_expand:
             return
         min_height = self._minimum_expanded_height()
