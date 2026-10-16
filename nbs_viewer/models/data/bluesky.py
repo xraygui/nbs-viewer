@@ -76,7 +76,8 @@ class BlueskyRun(CatalogRun):
         self._descriptors = None
         self._stream = "primary"
         self._max_1d_cache_items = 100
-
+        self._accessor = None
+        
         # Setup metadata first since it's always available
         self.setup()
 
@@ -94,9 +95,11 @@ class BlueskyRun(CatalogRun):
         self._shape_cache.clear()
         self._dim_cache.clear()
         self._run_keys_cache = None
+        self._has_data = None
         self._start_doc = None
         self._stop_doc = None
         self._descriptors = None
+        self._accessor = None
         super().refresh()
 
     def setup(self):
@@ -153,19 +156,10 @@ class BlueskyRun(CatalogRun):
         return value
 
     @property
-    def num_points(self):
-        """
-        Returns the number of points in the run.
-
-        Returns
-        -------
-        int
-            Number of points, or -1 if not defined in metadata
-        """
-        value = self.get_md_value(["stop", "num_events", "primary"], None)
-        if value is None:
-            value = self.get_md_value(["start", "num_points"], -1)
-        return value
+    def data_accessor(self):
+        if self._accessor is None:
+            self._accessor = self._run['primary/data']
+        return self._accessor
 
     @property
     def date(self):
@@ -223,7 +217,7 @@ class BlueskyRun(CatalogRun):
             logging.debug(f"Getting shape for key {key}")
             try:
                 # Try to get shape from metadata first
-                shape = self._run["/".join(["primary", "data", key])].shape
+                shape = self.data_accessor[key].shape
                 self._shape_cache[key] = shape
                 logging.debug("Got shape from metadata")
             except (KeyError, AttributeError):
@@ -320,7 +314,7 @@ class BlueskyRun(CatalogRun):
                 return self._data_cache[key]
 
             try:
-                data_accessor = self._run["/".join(["primary", "data", key])]
+                data_accessor = self.data_accessor[key]
                 data = data_accessor.read()
                 self._data_cache[key] = data
                 self._manage_cache(self._data_cache, self._max_1d_cache_items)
@@ -336,7 +330,7 @@ class BlueskyRun(CatalogRun):
         if self._chunk_cache is None:
             # Fallback to loading full data if no chunk cache available
             try:
-                data_accessor = self._run["/".join(["primary", "data", key])]
+                data_accessor = self.data_accessor[key]
                 data = data_accessor.read()
                 if slice_info is not None:
                     return data[slice_info]
@@ -434,7 +428,7 @@ class BlueskyRun(CatalogRun):
             category="catalog"
 )
         try:
-            all_keys = list(self._run["/".join(["primary", "data"])].keys())
+            all_keys = list(self.data_accessor.keys())
             self._has_data = True
         except Exception as e:
             print(
@@ -650,22 +644,6 @@ class BlueskyRun(CatalogRun):
 
         return {"1d_cache": size_1d, "nd_cache": size_nd, "total": size_1d + size_nd}
 
-    def _primary_data_path(self, key: str) -> str:
-        """
-        Build the canonical path for a key in the primary data group.
-
-        Parameters
-        ----------
-        key : str
-            Data key name.
-
-        Returns
-        -------
-        str
-            Path into the run object.
-        """
-        return "/".join(["primary", "data", key])
-
     def _infer_dims_from_shape(self, key: str, shape: Tuple[int, ...]) -> Tuple[str, ...]:
         """
         Infer dimension names when Tiled structure metadata has no dims.
@@ -707,7 +685,7 @@ class BlueskyRun(CatalogRun):
         has_time_key = False
         try:
             has_time_key = "time" in list(
-                self._run["/".join(["primary", "data"])].keys()
+                self.data_accessor.keys()
             )
         except Exception:
             has_time_key = False
@@ -738,7 +716,7 @@ class BlueskyRun(CatalogRun):
         shape = tuple(self.getShape(key))
         raw_dims = None
         try:
-            raw_dims = self._run[self._primary_data_path(key)].dims
+            raw_dims = self.data_accessor[key].dims
         except Exception as ex:
             print_debug(
                 "BlueskyRun._resolve_dims",
